@@ -19,12 +19,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::{Core, NodeId};
 use crate::tm::build::{REG, TAPES, WORK};
-use crate::tm::defunc::defunc_mapped;
 use crate::tm::encoding::{Encoding, Unary};
-use crate::tm::lower_rxm::{LowerError, lower_rxm_mapped};
+use crate::tm::lower_rxm::LowerError;
 use crate::tm::lower_tm::{SlotMap, lower_tm_mapped};
 use crate::tm::machine::{Machine, Symbol};
 use crate::tm::sim::{self, Status};
+use crate::tm::{Lowered, lower_program_mapped};
 
 /// Where a TM step's cost is charged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -140,30 +140,17 @@ struct Mapped {
     init: Vec<Vec<Symbol>>,
 }
 
-/// The mapped analogue of `run_tm`'s lowering (`tm.rs`), step for step: `lower_program`'s
-/// direct-then-`defunc` sequence with its exact error discrimination, `lower_tm`, the layout
-/// refusals, and the seeded REG tape. Mirroring it is the point — an attribution of a differently
-/// lowered machine would describe a program nobody executes.
+/// The mapped analogue of `run_tm`'s lowering (`tm.rs`), step for step: `lower_program_mapped`, the
+/// lowering `lower_program` returns the program of, then `lower_tm`, the layout refusals, and the seeded
+/// REG tape. Mirroring it is the point — an attribution of a differently lowered machine would describe
+/// a program nobody executes.
 ///
 /// `Ok(None)` is a program `lower_tm_mapped` refuses to lay out — any of its four conditions
 /// (`MAX_SLOTS`, `MAX_FRAME_LOC`, `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc), reported by its
 /// own `Option` rather than re-checked here: the machine halts before doing anything, so there is no
 /// run to attribute.
 fn lower_mapped(core: &Core, enc: &dyn Encoding) -> Result<Option<Mapped>, LowerError> {
-    // `lower_program`: try the program as first-order Core FIRST (a shape `defunc`'s top-level peel
-    // does not recognize would otherwise be wrongly rejected), and retry through `defunc` only on
-    // `Unsupported`. `TooDeep` is returned immediately, exactly as `lower_program` does — a looser
-    // `or_else` would swallow it and replay a deep Core through `defunc`'s own recursive passes. The
-    // match is exhaustive rather than wildcarded so a future `LowerError` variant must decide here too.
-    let (prog, origins, synthetic) = match lower_rxm_mapped(core) {
-        Ok((p, o)) => (p, o, BTreeSet::new()),
-        Err(LowerError::Unsupported { .. }) => {
-            let (defunced, synthetic) = defunc_mapped(core)?;
-            let (p, o) = lower_rxm_mapped(&defunced)?;
-            (p, o, synthetic)
-        }
-        Err(e @ LowerError::TooDeep { .. }) => return Err(e),
-    };
+    let Lowered { program: prog, origins, synthetic } = lower_program_mapped(core)?;
     // `lower_tm_mapped` reports EVERY layout refusal through this `Option` — all four conditions
     // (`MAX_SLOTS`, `frame_bank_unrepresentable`, `mul_count_unrepresentable`, and the state ceiling
     // `MAX_MACHINE_STATES`). Re-deriving the first three here by hand would leave the FOURTH
@@ -231,9 +218,9 @@ fn parse_core(src: &str) -> Result<Core, LowerError> {
 ///
 /// `Err(LowerError::Unsupported { node: 0, .. })` if `src` does not parse (`node: 0` because there is
 /// no tree to blame). Otherwise the error is whatever `defunc`/`lower_rxm` reported while lowering the
-/// desugared program — see `lower_mapped`'s doc for the exact sequence and `defunc_mapped`'s `# Errors`
-/// for what each variant means. A caller cannot recover an `Attribution` for a program that fails
-/// here; a program `lower_tm_mapped` refuses to lay out (over `MAX_SLOTS`/`MAX_FRAME_LOC`/
+/// desugared program — see `lower_program_mapped`'s doc for the exact sequence and `defunc_mapped`'s
+/// `# Errors` for what each variant means. A caller cannot recover an `Attribution` for a program that
+/// fails here; a program `lower_tm_mapped` refuses to lay out (over `MAX_SLOTS`/`MAX_FRAME_LOC`/
 /// `MAX_MUL_INSTRS`/`MAX_MACHINE_STATES`) is NOT an error — it returns `Ok` with
 /// `Attribution::unrepresentable()`.
 pub fn attribute(src: &str) -> Result<Attribution, LowerError> {
@@ -284,6 +271,7 @@ mod tests {
     use super::*;
     use crate::desugar::desugar;
     use crate::parser::parse;
+    use crate::tm::defunc::defunc_mapped;
 
     /// Attribution must describe THE MACHINE `run_tm` RUNS — under every encoding, not just the one
     /// whose scratch bank happens to be empty.

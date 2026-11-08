@@ -46,10 +46,10 @@ const BOTH_BACKENDS: &[&str] = &[
 
 /// Higher-order demos, from `examples/tm_demo.rs`'s `higher_order` array. EVERY ONE of these is
 /// rejected by `lower_rxm` and reaches the TM half only through `defunc` — which is the point: a
-/// corpus that is entirely first-order never runs `rxm_half`'s defunc branch, and an invariant that
-/// holds only on the direct path (such as "the root is always covered") looks true forever. The λ
-/// backend accepts all four, so the λ half is still exhaustive for them; the TM half is NOT, because
-/// `defunc` rewrites the tree and a node it dissolves has no lowering left to point at.
+/// corpus that is entirely first-order never runs `lower_program_mapped`'s defunc branch, and an
+/// invariant that holds only on the direct path (such as "the root is always covered") looks true
+/// forever. The λ backend accepts all four, so the λ half is still exhaustive for them; the TM half is
+/// NOT, because `defunc` rewrites the tree and a node it dissolves has no lowering left to point at.
 const HIGHER_ORDER: &[&str] = &[
     "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)",
     "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
@@ -231,9 +231,9 @@ fn transparent_nodes_map_to_none() {
     assert_eq!(seen_kinds, ["Lambda", "Let", "Seq", "callee Var"], "the corpus must exercise every transparent kind");
 }
 
-/// The defunc branch of `rxm_half`, which a first-order corpus never reaches, and the TM half
-/// built through it. The two halves are asserted SEPARATELY here — see `HIGHER_ORDER`'s doc for why the
-/// TM half cannot be exhaustive.
+/// The defunc branch of `lower_program_mapped`, which a first-order corpus never reaches, and the TM
+/// half built through it. The two halves are asserted SEPARATELY here — see `HIGHER_ORDER`'s doc for
+/// why the TM half cannot be exhaustive.
 #[test]
 fn higher_order_programs_exercise_the_defunc_branch() {
     for src in HIGHER_ORDER {
@@ -301,9 +301,9 @@ fn every_core_node_resolves_to_an_in_bounds_source_span() {
     }
 }
 
-/// `build_from_program` is the only way to get the source leg, and it owns both sides so they cannot
-/// disagree. `build` stays total and simply has no source leg — the same shape it already uses for a λ
-/// backend that declines.
+/// The source leg comes only from `build_from_program` and `build_prepared`, which own both sides so
+/// they cannot disagree. `build` stays total and simply has no source leg — the same shape it already
+/// uses for a λ backend that declines.
 #[test]
 fn build_from_program_populates_the_source_leg_and_build_does_not() {
     let src = "let x = 40; x + 2";

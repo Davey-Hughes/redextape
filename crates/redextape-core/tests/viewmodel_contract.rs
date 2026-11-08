@@ -462,16 +462,13 @@ fn tm_fixture_with_map(
     redextape_core::tm::Machine,
     Vec<Vec<redextape_core::tm::Symbol>>,
 ) {
-    use redextape_core::tm::{Encoding, REG, TAPES, Unary, WORK, defunc, lower_rxm, lower_tm, n_slots_of};
+    use redextape_core::tm::{Encoding, REG, TAPES, Unary, WORK, lower_program, lower_tm, n_slots_of};
     let (p, ds) = redextape_core::parser::parse(src);
     assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
     let program = p.expect("fixture parses");
     let enc = Unary::default();
     let (core, map) = SourceMap::build_from_program(&program, &enc);
-    let prog = match lower_rxm(&core) {
-        Ok(p) => p,
-        Err(_) => lower_rxm(&defunc(&core).expect("defunc")).expect("lower"),
-    };
+    let prog = lower_program(&core).expect("lower");
     let m = lower_tm(&prog, &enc);
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&prog));

@@ -58,7 +58,7 @@ describe('controlState', () => {
   })
 
   // THE TRAP. `LambdaCursor::raise_cap` refuses to clear `depth_capped` (its own doc in `trace.rs`,
-  // and `RunStatus::DepthRefused`'s in `session.rs`), so raising the cap provably cannot help. An
+  // and `RunStatus::DepthRefused`'s in `redextape-wire`), so raising the cap provably cannot help. An
   // affordance here would be a lie the UI tells on the backend's behalf — so there is no affordance
   // at all, not a disabled one.
   it('offers NO continue affordance for a depth refusal', () => {

@@ -144,7 +144,7 @@ fn the_rxm_grammar_agrees_with_the_headered_printer() {
 /// arrive through real programs, so this is a claim about text an editor would actually be handed.
 /// `rxm_roundtrip.rs`'s `the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants` asserts 13
 /// of 16 `Instr` variants, and that test's own doc records the missing three as structural to that
-/// file's `lower` helper. Lowering through `lower_program`'s template instead reaches all of them.
+/// file's `lower` helper. Lowering through `lower_program` instead reaches all of them.
 ///
 /// Counted from the printed TEXT rather than by matching on `Instr`, so this test needs nothing
 /// `pub(super)` out of `redextape-core` and stays a claim about what an editor would actually see.

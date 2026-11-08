@@ -1,5 +1,6 @@
 import { EditorView } from '@codemirror/view'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import type { Leg } from '../../src/protocol'
 import { leafEl, retype, SHELL, stateIdle, until } from './harness'
 
 /**
@@ -24,7 +25,7 @@ const taps: Tap[] = []
  * Every build the app posts, so a test can tell whether a newer one overtook the one it placed, and what
  * the last one carried.
  */
-const builds: { kind: string; gen: number; src: string | undefined }[] = []
+const builds: { kind: string; leg: string | undefined; gen: number; src: string | undefined }[] = []
 const post = Worker.prototype.postMessage
 /** A `postMessage` kept back until `after` settles, which is how one answer is made to come after another. */
 type Hold = { match: (m: unknown) => boolean; after: Promise<unknown> }
@@ -36,6 +37,8 @@ const editorIn = (leaf: string) =>
   EditorView.findFromDOM(leafEl(leaf).querySelector('.term-editor') as HTMLElement) as EditorView
 const markersIn = (leaf: string) => leafEl(leaf).querySelectorAll('.cm-editor .cm-lintRange-error').length
 const kindOf = (m: unknown) => (m as { kind?: string } | null)?.kind
+/** Whether `m` builds a copy on `leg`: copies on every leg are built by one request, which names its leg. */
+const isBuild = (m: unknown, leg: Leg) => kindOf(m) === 'scratch' && (m as { leg?: string }).leg === leg
 const isFormatting = (m: unknown) =>
   kindOf(m) === 'msg' && JSON.parse((m as { json: string }).json).method === 'textDocument/formatting'
 
@@ -60,10 +63,10 @@ function replyTo(worker: Worker, kind: string, gen: number): Promise<void> {
  * Type `text` into `leaf`'s copy, and wait until the build that carries exactly it has been answered —
  * a settled start, with no older build left in flight to land on the test that follows.
  */
-async function settle(leaf: string, text: string, build: string, reply: string): Promise<void> {
+async function settle(leaf: string, text: string, leg: Leg, reply: string): Promise<void> {
   const answered = new Promise<void>((resolve) =>
     tap(
-      (m) => kindOf(m) === build && (m as { src: string }).src === text,
+      (m) => isBuild(m, leg) && (m as { src: string }).src === text,
       (w, m) => void replyTo(w, reply, (m as { gen: number }).gen).then(resolve),
     ),
   )
@@ -76,15 +79,15 @@ async function settle(leaf: string, text: string, build: string, reply: string):
  * and wait for that build's reply. Answers whether a newer build was posted before the reply — the case
  * where the client drops the reply and this test would place nothing.
  */
-async function typeWhileBuilding(leaf: string, next: string, typed: string, build: string, reply: string) {
+async function typeWhileBuilding(leaf: string, next: string, typed: string, leg: Leg, reply: string) {
   const editor = editorIn(leaf)
   const answered = new Promise<boolean>((resolve) =>
     tap(
-      (m) => kindOf(m) === build && (m as { src: string }).src === next,
+      (m) => isBuild(m, leg) && (m as { src: string }).src === next,
       (w, m) => {
         const gen = (m as { gen: number }).gen
         retype(editor, typed)
-        void replyTo(w, reply, gen).then(() => resolve(builds.some((b) => b.kind === build && b.gen > gen)))
+        void replyTo(w, reply, gen).then(() => resolve(builds.some((b) => isBuild(b, leg) && b.gen > gen)))
       },
     ),
   )
@@ -137,12 +140,12 @@ async function formatWhileTyping(leaf: string, editor: EditorView, typed: string
  * posted before that reply, as `typeWhileBuilding` does, and the text of the last build posted by the end:
  * the edit the format owed its copy.
  */
-async function formatWhileBuilding(leaf: string, next: string, typed: string, build: string, reply: string) {
+async function formatWhileBuilding(leaf: string, next: string, typed: string, leg: Leg, reply: string) {
   const editor = editorIn(leaf)
   const formatted = new Promise<void>((resolve) => tap(isFormatting, (w, m) => void answerTo(w, m).then(resolve)))
   const landed = new Promise<{ atReply: string; overtaken: boolean }>((resolve) =>
     tap(
-      (m) => kindOf(m) === build && (m as { src: string }).src === next,
+      (m) => isBuild(m, leg) && (m as { src: string }).src === next,
       (w, m) => {
         const gen = (m as { gen: number }).gen
         const replied = replyTo(w, reply, gen)
@@ -152,7 +155,7 @@ async function formatWhileBuilding(leaf: string, next: string, typed: string, bu
         void replied.then(() =>
           resolve({
             atReply: editor.state.doc.toString(),
-            overtaken: builds.some((b) => b.kind === build && b.gen > gen),
+            overtaken: builds.some((b) => isBuild(b, leg) && b.gen > gen),
           }),
         )
       },
@@ -161,7 +164,7 @@ async function formatWhileBuilding(leaf: string, next: string, typed: string, bu
   retype(editor, next)
   const at = await landed
   await formatted
-  return { editor, ...at, sent: builds.findLast((b) => b.kind === build)?.src }
+  return { editor, ...at, sent: builds.findLast((b) => isBuild(b, leg))?.src }
 }
 
 async function fork(leaf: string): Promise<void> {
@@ -178,7 +181,10 @@ beforeAll(async () => {
     if (h === -1) send()
     else void holds.splice(h, 1)[0]?.after.then(send)
     const gen = (message as { gen?: number } | null)?.gen
-    if (gen !== undefined) builds.push({ kind: kindOf(message) ?? '', gen, src: (message as { src?: string }).src })
+    if (gen !== undefined) {
+      const { leg, src } = message as { leg?: string; src?: string }
+      builds.push({ kind: kindOf(message) ?? '', leg, gen, src })
+    }
     const i = taps.findIndex((t) => t.match(message))
     if (i === -1) return
     const [t] = taps.splice(i, 1)
@@ -205,13 +211,13 @@ afterEach(() => {
 
 describe("a copy's build reply", () => {
   it('keeps what was typed into a TM copy while its build was in flight', async () => {
-    await settle('tm-0', 'tapes 1\nstart s\nstate s: accept\n', 'tm-scratch', 'tm-scratch-compiled')
+    await settle('tm-0', 'tapes 1\nstart s\nstate s: accept\n', 'tm', 'tm-scratch-compiled')
     const broken = 'tapes 1\ntapes 2\nstart s\nstate s: accept\n'
     const { editor, overtaken } = await typeWhileBuilding(
       'tm-0',
       'tapes 1\nstart q\nstate q: accept\n',
       broken,
-      'tm-scratch',
+      'tm',
       'tm-scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the typing is still unsent').toBe(false)
@@ -222,12 +228,12 @@ describe("a copy's build reply", () => {
   })
 
   it('keeps what was typed into a λ copy while its build was in flight', async () => {
-    await settle('lambda-0', '\\x. x', 'lambda-scratch', 'scratch-compiled')
+    await settle('lambda-0', '\\x. x', 'lambda', 'scratch-compiled')
     const { editor, overtaken } = await typeWhileBuilding(
       'lambda-0',
       '\\z. z',
       '\\y. y y',
-      'lambda-scratch',
+      'lambda',
       'scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the typing is still unsent').toBe(false)
@@ -249,13 +255,13 @@ describe("a copy's build reply", () => {
  */
 describe("a copy's build reply, landing while a format is in flight", () => {
   it('keeps the edit the format took off the debounce, in a TM copy', async () => {
-    await settle('tm-0', 'tapes 1\nstart s\nstate s: accept\n', 'tm-scratch', 'tm-scratch-compiled')
+    await settle('tm-0', 'tapes 1\nstart s\nstate s: accept\n', 'tm', 'tm-scratch-compiled')
     const typed = 'tapes 1\nstart s\nstate s:\n  [*] -> write [*], move [S], goto t\nstate t:    accept\n'
     const { editor, atReply, overtaken, sent } = await formatWhileBuilding(
       'tm-0',
       'tapes 1\nstart s\n\nstate s: accept\n',
       typed,
-      'tm-scratch',
+      'tm',
       'tm-scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the format holds the edit').toBe(false)
@@ -267,13 +273,13 @@ describe("a copy's build reply, landing while a format is in flight", () => {
   })
 
   it('keeps the edit the format took off the debounce, in a λ copy', async () => {
-    await settle('lambda-0', '\\x. x', 'lambda-scratch', 'scratch-compiled')
+    await settle('lambda-0', '\\x. x', 'lambda', 'scratch-compiled')
     const typed = '\\y.   y   y'
     const { editor, atReply, overtaken, sent } = await formatWhileBuilding(
       'lambda-0',
       '\\z. z',
       typed,
-      'lambda-scratch',
+      'lambda',
       'scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the format holds the edit').toBe(false)
@@ -284,13 +290,13 @@ describe("a copy's build reply, landing while a format is in flight", () => {
   })
 
   it('keeps the edit the format took off the debounce, in an rxm copy', async () => {
-    await settle('rxm-0', 'result Nat\n\n    li\trr, #3\n    halt\n', 'rxm-scratch', 'rxm-scratch-compiled')
+    await settle('rxm-0', 'result Nat\n\n    li\trr, #3\n    halt\n', 'rxm', 'rxm-scratch-compiled')
     const typed = 'result Nat\nli rr,#5\nhalt\n'
     const { editor, atReply, overtaken, sent } = await formatWhileBuilding(
       'rxm-0',
       'result Nat\n\n    li\trr, #4\n    halt\n',
       typed,
-      'rxm-scratch',
+      'rxm',
       'rxm-scratch-compiled',
     )
     expect(overtaken, 'the reply has to land while the format holds the edit').toBe(false)
@@ -303,7 +309,7 @@ describe("a copy's build reply, landing while a format is in flight", () => {
 
 describe('a format answer', () => {
   it('is not applied over what was typed into a copy while it was in flight', async () => {
-    await settle('tm-0', 'tapes 1\nstart s\nstate s:    accept\n', 'tm-scratch', 'tm-scratch-compiled')
+    await settle('tm-0', 'tapes 1\nstart s\nstate s:    accept\n', 'tm', 'tm-scratch-compiled')
     const editor = editorIn('tm-0')
     const typed = 'tapes 1\nstart q\nstate q:    accept\n'
     await formatWhileTyping('tm-0', editor, typed)

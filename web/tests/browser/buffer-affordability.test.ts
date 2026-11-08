@@ -828,10 +828,10 @@ async function tmRound(n: number, collect: () => void, src: string): Promise<TmP
       `precondition: TM copy ${i}'s recording stopped on \`HISTORY_BYTES\`, so its ring is full`,
     ).toBeGreaterThanOrEqual(HISTORY_BYTES)
   }
-  // The copy's `SessionEntry` fields `replies.ts` sets: `tmProgram` (a `TmCompiled`) and `tmScratch`.
+  // The copy's `SessionEntry` fields `replies.ts` sets: `programs.tm` (a `TmCompiled`) and `readings.tm`.
   const entries = replies.map((r) => ({
-    tmProgram: { program: r.tmProgram, tapeNames: r.tapeNames, tmText: null, tmResultDecodable: true },
-    tmScratch: { status: r.tm, value: r.value },
+    programs: { rxm: null, tm: { program: r.tmProgram, tapeNames: r.tapeNames, text: null, tmResultDecodable: true } },
+    readings: { rxm: null, tm: { status: r.tm, value: r.value } },
   }))
   collect()
   collect()
@@ -840,7 +840,7 @@ async function tmRound(n: number, collect: () => void, src: string): Promise<TmP
   const ringRetained = rings.map((r) => r.length)
   // A worker that stopped answering the machine would price a copy without what the page keeps for it, and every
   // other figure here would still read as a copy's.
-  if (!entries.every((e) => ((e.tmProgram.program as TmProgram | null)?.states.length ?? 0) > 0)) {
+  if (!entries.every((e) => ((e.programs.tm.program as TmProgram | null)?.states.length ?? 0) > 0)) {
     throw new Error('BLOCKED: a TM probe worker answered no machine')
   }
   const wasm = replies.reduce((a, r) => a + r.wasmBytes, 0)

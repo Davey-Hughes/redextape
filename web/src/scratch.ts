@@ -1,11 +1,10 @@
 import type { PersistedBuffers } from './buffers-store'
-import { History } from './history'
-import { LEG_NAME, unhandled } from './legs'
+import { LEG_NAME } from './legs'
 import type { LeafId } from './panes'
-import type { Leg, RunReply } from './protocol'
+import type { Leg, LegFrame, RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
-import { resetLegs, type SessionLegs, type SessionRegistry } from './sessions'
-import type { Diagnostic, LambdaState, RxmState, TmState } from './types'
+import { freshLeg, type LegState, resetLegs, type SessionLegs, type SessionRegistry } from './sessions'
+import type { Diagnostic } from './types'
 
 /**
  * What retiring a buffer needs from a pane slot: which session it is on, and the ability to move it
@@ -225,10 +224,10 @@ export type ScratchBuffersConfig = {
  *
  * **EVERY LEG.** A `TmScratch` is built from `.tm` TEXT, and an rxm copy from rxm text, the same way a
  * `LambdaScratch` is built from λ text, and `#spawn` below reads `state.leg` — set once, at mint, and
- * never written again — to pick both the request kind it posts (`client.scratch`, `client.tmScratch`
- * or `client.rxmScratch`) and the one leg record it builds for the registry. One class with a field,
- * not a class per leg, because everything past that branch — the id, the cap, the retirement order,
- * the snapshot shape — is identical work for every leg.
+ * never written again — for both the leg its build request carries (`client.scratch`'s `leg`) and the
+ * one leg record it builds for the registry. One class with a field, not a class per leg, because
+ * everything past that field — the id, the cap, the retirement order, the snapshot shape — is
+ * identical work for every leg.
  *
  * **`fork`'S FOURTH PARAMETER AND `forkBlank` ARE THE TWO DOORS IN, AND THEY ARE NOT THE SAME DOOR
  * NARROWED TWICE.** `fork` seeds a new buffer from a source-derived VIEW; passing `'tm'` there answers
@@ -237,8 +236,8 @@ export type ScratchBuffersConfig = {
  * types or pastes into it once it exists, not a fork of anything already on screen.
  *
  * `options('tm')` OFFERS A TM BUFFER THE MOMENT ONE IS MINTED. `SessionRegistry.options` answers from
- * `entry.legs[leg] !== undefined`, and `#spawn`'s TM branch is what sets that leg on a TM buffer's
- * entry — so the selector needs no change of its own to offer one.
+ * `entry.legs[leg] !== undefined`, and `#spawn` sets the buffer's own leg on its entry (`#pendingLegs`)
+ * — so the selector needs no change of its own to offer one.
  */
 export class ScratchBuffers {
   #reg: SessionRegistry
@@ -619,7 +618,7 @@ export class ScratchBuffers {
    * record and the collapse flag, together. `null` for anything that is not a WARM buffer.
    *
    * **THIS EXISTS BECAUSE A PANE CAN ARRIVE AT A BUFFER LONG AFTER THE REPLY THAT WOULD HAVE SEEDED IT
-   * — the editor's half of the repair `pane-host.ts`'s `tmProgramOf` performs.** A copy's build reply in
+   * — the editor's half of the repair `pane-host.ts`'s `programOf` performs.** A copy's build reply in
    * `replies.ts` (`scratch-compiled`, `tm-scratch-compiled`, `rxm-scratch-compiled`) mounts its editor,
    * and it fires once per build; a pane that binds to the buffer afterwards has nothing to mount from,
    * because the reply has been and gone. A `cool` followed by a `warm` is the path that reaches that
@@ -700,20 +699,13 @@ export class ScratchBuffers {
       detached: true,
       client,
       legs: this.#pendingLegs(state.leg),
-      // **`null` AT CONSTRUCTION FOR EVERY LEG, AND THE REASON IS NOT THE SAME FOR EVERY ONE.** A λ buffer
-      // never gets a machine at all — its worker answers `scratch-compiled`, which carries no
-      // `TmProgram` (5d-i §3.3: no TM leg, no `SourceMap`), and no TM pane can ever bind to it either,
-      // so nothing will ever write here; nor does an rxm copy's `rxm-scratch-compiled` carry one. A TM
-      // buffer's worker DOES answer `tm-scratch-compiled`, which DOES carry a `TmProgram`, and
-      // `replies.ts`'s `onScratchReply` stores it here, with the file's status and value reading in
-      // `tmScratch`, once that reply arrives. What is shared between the legs is that none has either at
-      // the moment this entry is created, and for a λ or rxm buffer that is permanent.
-      tmProgram: null,
-      tmScratch: null,
-      // AN RXM COPY'S LISTING AND READING, written by `replies.ts`'s `rxm-scratch-compiled` arm as a TM copy's machine
-      // is; `null` for good on a λ or TM copy, which has no rxm leg.
-      rxmProgram: null,
-      rxmScratch: null,
+      // **`null` AT CONSTRUCTION FOR EVERY LEG, AND FOR GOOD FOR EVERY LEG BUT THE COPY'S OWN.** A λ buffer's
+      // worker answers `scratch-compiled`, which carries no program (5d-i §3.3: no TM leg, no `SourceMap`). A TM
+      // or rxm copy's build reply carries its own leg's program, and `replies.ts`'s `onScratchReply` stores it
+      // here with the copy's status and value reading once that reply arrives. None has either at the moment
+      // this entry is created.
+      programs: { rxm: null, tm: null },
+      readings: { rxm: null, tm: null },
     })
     state.warm = true
     // A NEW WORKER'S FIRST BUILD IS A GESTURE'S, SO ITS FAILURE IS SAID AGAIN (`noSessionReply`'s doc).
@@ -722,24 +714,10 @@ export class ScratchBuffers {
     // generation 0, which its reply filter matches to nothing (`SessionClient`'s constructor), so the
     // claim has to happen before the post or the client would drop the request's own replies.
     const gen = client.supersede()
-    switch (state.leg) {
-      case 'lambda':
-        client.scratch(gen, src, step)
-        break
-      case 'tm':
-        // NO STEP ON THE TM SIDE, FOR `SessionClient.tmScratch`'s OWN REASON: a machine has no step-k
-        // term to replay to, since its text IS the machine. `step` is still a parameter of this method —
-        // `warm` passes it as `0` for every leg, `#mint` forwards whatever `fork` was handed — and simply
-        // goes unread on the arm that has nothing to replay.
-        client.tmScratch(gen, src)
-        break
-      case 'rxm':
-        // NO STEP, FOR THE TM ARM'S REASON: an rxm copy's text is its program, run from its first instruction.
-        client.rxmScratch(gen, src)
-        break
-      default:
-        unhandled(state.leg)
-    }
+    // `step` IS SENT FOR EVERY LEG AND READ FOR λ ALONE: a TM or rxm copy's text is its program, with no step-k term
+    // to replay to (the `scratch` request, in `protocol.ts`'s `RunRequest`). `warm` passes 0 for every leg, and
+    // `#mint` forwards whatever `fork` was handed.
+    client.scratch(gen, state.leg, src, step)
   }
 
   /**
@@ -748,20 +726,11 @@ export class ScratchBuffers {
    * NOT AVAILABLE YET, WITH A REASON A PANE CAN READ. A session holds at most one leg per `Leg`, and
    * this is where that is decided for a buffer.
    */
-  #pendingLegs(leg: Leg): SessionLegs {
-    const status = { available: false, reason: 'building…' }
-    switch (leg) {
-      case 'lambda':
-        return {
-          lambda: { hist: new History<LambdaState>(this.#bytes), status, done: null, playing: false, epoch: 0, gen: 0 },
-        }
-      case 'tm':
-        return { tm: { hist: new History<TmState>(this.#bytes), status, done: null, playing: false, epoch: 0, gen: 0 } }
-      case 'rxm':
-        return {
-          rxm: { hist: new History<RxmState>(this.#bytes), status, done: null, playing: false, epoch: 0, gen: 0 },
-        }
-    }
+  #pendingLegs<K extends Leg>(leg: K): SessionLegs {
+    // OVER `K` ALONE: `tsc` takes `K`'s leg written into this, and refuses it written into a `SessionLegs`.
+    const legs: { [L in K]?: LegState<LegFrame[L]> } = {}
+    legs[leg] = freshLeg(leg, this.#bytes, { available: false, reason: 'building…' })
+    return legs
   }
 
   /**
@@ -888,9 +857,9 @@ export class ScratchBuffers {
    * Rebuild buffer `id` from `src` — 5d-iii design §4.3's edit path. Answers whether that buffer exists.
    *
    * **IT IS `fork` WITH `step: 0` AND NO CREATION, WHICH IS WHY THERE IS NO SECOND MESSAGE.** The text
-   * in the editor IS the term, so there is nothing to replay to; `lambda-scratch` already means "build
-   * a scratch from this text at this step" and 0 is its identity value. A `scratch-edit` variant would
-   * be a second name for one request.
+   * in the editor IS the term, so there is nothing to replay to; `scratch` already means "build a
+   * copy from this text at this step" and 0 is its identity value. A `scratch-edit` variant would be a
+   * second name for one request.
    *
    * **IT TAKES THE BUFFER IT REBUILDS.** Its caller is the sink `transport.ts`'s `editSink` builds for
    * each editor, which names the buffer the editor was built for — so passing it costs one argument and
@@ -928,24 +897,11 @@ export class ScratchBuffers {
     // from what was just written. See this method's doc for when an edit reaches a sleeping buffer.
     if (!state.warm) return true
     const client = this.#reg.entryOf(id).client
-    // BRANCHES ON `state.leg`, MIRRORING `#spawn`. `client.scratch` for every leg would post
-    // `lambda-scratch`, which for a TM buffer reaches `onLambdaScratch`, which parses `.tm` TEXT as a λ
-    // TERM and answers `no-session` with a λ syntax error every time. This is `#spawn`'s branch on the
-    // leg at the one other place this class posts a build to an EXISTING buffer.
+    // THE BUFFER'S OWN LEG, AS `#spawn` SENDS IT. A build sent on the λ leg for a TM buffer would parse its `.tm`
+    // TEXT as a λ TERM and answer `no-session` with a λ syntax error every time; this is the one other place this
+    // class posts a build, to an EXISTING buffer.
     const gen = client.supersede()
-    switch (state.leg) {
-      case 'lambda':
-        client.scratch(gen, src, 0)
-        break
-      case 'tm':
-        client.tmScratch(gen, src)
-        break
-      case 'rxm':
-        client.rxmScratch(gen, src)
-        break
-      default:
-        unhandled(state.leg)
-    }
+    client.scratch(gen, state.leg, src, 0)
     return true
   }
 
@@ -1064,7 +1020,7 @@ export class ScratchBuffers {
    * synchronously, before it returns. So a reply for a cooled buffer cannot be dispatched.
    *
    * The same switch's `scratch-compiled` arm resolves `sessions.entryOf(session).legs` and its
-   * `lambda-frames` arm resolves `sessions.legOf({ session, leg: 'lambda' })`, and both throw for a
+   * `frames` arm resolves `sessions.legOf({ session, leg: reply.leg })`, and both throw for a
    * session the registry no longer holds; neither needs a guard, for the same reason. `replies.ts`'s
    * own arms carry the same fact where a reader meets them.
    *

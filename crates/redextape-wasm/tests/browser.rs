@@ -1209,7 +1209,7 @@ fn untranslatable_tm_text_crosses_as_diagnostics_and_a_null_handle() {
 /// (the `#[wasm_bindgen]` method, not `session::Session::tm_text`) returns `JsValue` and matches its
 /// `Option<String>` explicitly rather than crossing the boundary as a bare `Option` — wasm-bindgen's
 /// native ABI marshals `None` as `undefined`, not `null`, and this method does not call `to_value`, so
-/// this crate's `serialize_missing_as_null(true)` setting does not reach it. Which one arrives is a
+/// `redextape-wire`'s `to_value`'s `serialize_missing_as_null(true)` setting does not reach it. Which one arrives is a
 /// property of the boundary and is asserted here — on the available leg in this case, and on a declined
 /// one in `declined_tm_text_crosses_as_null_not_undefined` below — because `protocol.ts` types the field
 /// `string | null`.

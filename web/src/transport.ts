@@ -7,10 +7,10 @@ import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_OF_PANE } from './lsp-protocol'
 import type { PaneEvents } from './pane-chrome'
 import { createPlayer } from './player'
-import type { Leg } from './protocol'
+import type { Leg, LegFrame } from './protocol'
 import { BufferCapReached, type ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import { type Binding, type LegFrame, type LegState, type PaneSlot, rewindLeg, type SessionRegistry } from './sessions'
+import { type Binding, type LegState, type PaneSlot, rewindLeg, type SessionRegistry } from './sessions'
 import { pairLabel } from './view-header'
 import type { Speed } from './workspace'
 
@@ -20,8 +20,8 @@ import type { Speed } from './workspace'
  */
 const NO_TEXT: Record<Leg, string> = {
   lambda: 'detach reached with no term text',
-  tm: 'detachMachine reached with no machine text',
-  rxm: 'detachRxm reached with no rxm text',
+  tm: 'detachProgram reached with no machine text',
+  rxm: 'detachProgram reached with no rxm text',
 }
 
 /**
@@ -160,8 +160,8 @@ export function createTransport(deps: {
   /**
    * Make a copy on `slot`'s leg from `text` at `step`, move `slot`'s view onto it, and say what happened — the one body
    * behind every *edit a copy*: `detach` on the λ leg, from the source's term at the step the view shows, and
-   * `detachMachine` and `detachRxm` on the TM and rxm legs, from the program's whole text at step 0. Each handler
-   * resolves its own text and hands it here, so the three cannot drift apart in what follows.
+   * `detachProgram` on the TM and rxm legs, from the program's whole text at step 0. Each handler resolves its own
+   * text and hands it here, so the two cannot drift apart in what follows.
    *
    * **`null` TEXT IS A WIRING BUG, NOT A USER ACTION — LOUD, NOT SWALLOWED.** Each view withdraws or disables its
    * control whenever its handler would pass none (`CopyEditor.#refreshDetach` for the machine views), so a click that
@@ -219,6 +219,26 @@ export function createTransport(deps: {
     const leg = slot.resolve(sessions)
     delete leg.pending
     return leg
+  }
+
+  /**
+   * `PaneEvents.detachProgram` on every leg that compiles a program, from that program's whole text at step 0, where
+   * λ's *edit a copy* is `detach`, at a step. The text is the one `replies.ts`'s `setLegProgram` keeps for the
+   * session the view is bound to when the click comes, read under the leg the view shows, so a TM view forks its
+   * machine and an rxm view its listing. `null` there only where the control is withdrawn or disabled
+   * (`CopyEditor.#refreshDetach`), which makes it the wiring bug `forkCopy` throws.
+   */
+  const programFork = (slot: PaneSlot<Leg>): Pick<PaneEvents, 'detachProgram'> => {
+    const leg = slot.binding.leg
+    switch (leg) {
+      case 'lambda':
+        return {}
+      case 'rxm':
+      case 'tm':
+        return {
+          detachProgram: () => forkCopy(slot, sessions.entryOf(slot.binding.session).programs[leg]?.text ?? null, 0),
+        }
+    }
   }
 
   /**
@@ -342,10 +362,10 @@ export function createTransport(deps: {
     //
     // **`detach` IS λ-ONLY BECAUSE** it forks a TERM at a step, replaying the source's step-0 text to
     // the frame the pane was showing (`forkCopy(slot, wiring.index.lambdaText, step)` below) — a shape
-    // with no TM equivalent, since a machine has no per-step text to replay. `detachMachine` is the TM
-    // leg's own handler for the same gesture, seeded from the whole `.tm` file instead of a step (its own
-    // doc, below, has the argument), which is why this is a second handler rather than one function gated
-    // by leg.
+    // with no TM equivalent, since a machine has no per-step text to replay. `detachProgram` is the TM and
+    // rxm legs' handler for the same gesture, seeded from the program's whole text instead of a step
+    // (`PaneEvents.detachProgram`'s doc has the argument), which is why this is a second handler rather
+    // than one function gated by leg.
     //
     // THE PANE SENDS A STEP, NOT TEXT, AND THIS HANDLER RESOLVES IT — see `PaneEvents.detach`'s doc for
     // why (5d-iii design §4.1).
@@ -356,7 +376,7 @@ export function createTransport(deps: {
     // already at the step on screen) would double-apply the reduction; passing `0` with step-0 text would
     // fork the wrong term.
     //
-    // `index.lambdaText`, WHICH THE `compiled` REPLY CARRIES INSIDE `linkIndex`, NOT IN ITS `lambda`. That
+    // `index.lambdaText`, WHICH THE `compiled` REPLY CARRIES INSIDE `linkIndex`, NOT IN `statuses.lambda`. That
     // field is `LambdaStatus` (`available`/`reason`/`node`/`run`), which carries no term text at
     // all; the leg shape that DOES carry one, `LambdaLeg` (`state: LambdaState | null`), only ever rides
     // the LATER `result` reply — after the whole run has finished, which is not usable to seed a fork
@@ -386,6 +406,8 @@ export function createTransport(deps: {
           },
         }
       : {}),
+    // EVERY OTHER LEG'S *EDIT A COPY*, FROM ITS PROGRAM'S WHOLE TEXT.
+    ...programFork(slot),
     // THE EDIT PATH — 5d-iii design §4.3's second gesture: the sink `editSink` returns is the `onEdit` of the
     // editor a view builds (`LambdaPane.setEditor`, `CopyEditor.setEditor`), and it stays that editor's when
     // custody or *move the editor here* moves the editor to another view. `recompile` REBUILDS THE BUFFER THE
@@ -505,9 +527,6 @@ export function createTransport(deps: {
             if (sessions.entryOf(slot.binding.session).detached) return
             wiring.setLinkTo(wiring.index.nodeForInstr(pc), 'rxm')
           },
-          // `detachMachine`'s handler below, for an rxm copy: the program's text, as its session kept it from the
-          // `compiled` reply (`replies.ts`'s `setRxmProgram`), `null` only where the control is withdrawn or disabled.
-          detachRxm: () => forkCopy(slot, sessions.entryOf(slot.binding.session).rxmProgram?.rxmText ?? null, 0),
         }
       : {}),
     ...(slot.binding.leg === 'tm'
@@ -518,25 +537,6 @@ export function createTransport(deps: {
             if (sessions.entryOf(slot.binding.session).detached) return
             wiring.setLinkTo(wiring.index.nodeForState(stateId), 'tm')
           },
-          // THE MACHINE FORK — 5d-iv design §4.3, `detach`'s counterpart for this leg. **NO STEP TO RESOLVE,
-          // WHERE `detach` ABOVE RESOLVES ONE** — `PaneEvents.detachMachine`'s own doc has the argument:
-          // a machine's seed is the whole `.tm` file, not a replay to a frame.
-          //
-          // `sessions.entryOf(...).tmProgram?.tmText` IS THE TEXT THIS FORKS — `replies.ts`'s
-          // `setTmProgram` is what writes it, from the `compiled` reply's own `tmText` field, every time
-          // this session's TM leg recompiles. Reading it off the SLOT's OWN SESSION, not a fixed
-          // `SOURCE_SESSION` this file does not have: whichever session a TM pane is currently bound to is
-          // the one its fork control forks FROM, same as `detach` above resolves `slot.binding.session`
-          // rather than assuming which session it is.
-          //
-          // **`null` REACHING HERE IS A WIRING BUG, NOT A USER ACTION — `forkCopy` throws it.** The
-          // control is withdrawn or disabled (`CopyEditor.#refreshDetach`) whenever this would be `null` —
-          // over the cap (`tmText === null` with a machine present, disabled) or on a pane already
-          // showing the scratch it would fork (`#detached`, removed entirely: `setForkAvailable`'s own call
-          // site fans out over the SOURCE session only, so a pane that has just rebound onto its own new
-          // scratch needs `#refreshDetach` driven from `setDetached`, not another `setForkAvailable` call it
-          // will never receive).
-          detachMachine: () => forkCopy(slot, sessions.entryOf(slot.binding.session).tmProgram?.tmText ?? null, 0),
         }
       : {}),
     // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkState` above — `PaneEvents.linkLambda` is

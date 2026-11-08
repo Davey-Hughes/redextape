@@ -33,7 +33,7 @@ import {
  * **λ AND TM BUFFERS SURVIVE A RELOAD, END TO END — the composition check.** Node-tier tests pin the
  * `leg`-carrying payload shape (`tests/node/buffers-store.test.ts`) and the collection that reads it,
  * against a fake port (`tests/node/scratch.test.ts`); neither can see that `main.ts`'s restore loop
- * actually warms a TM buffer onto a `tm-scratch` request and a λ buffer onto a `lambda-scratch` one, or
+ * actually warms a TM buffer onto a `scratch` request on the TM leg and a λ buffer onto one on the λ leg, or
  * that a restored TM buffer's pane comes back showing its machine. That needs a real thread and a real
  * `pkg/`, which is why this is a browser-tier file. `ScratchBuffers.warm` reading `state.leg` and the cold
  * restore policy each have a unit-level pin in `tests/node/scratch.test.ts`, and for those this file only
@@ -248,8 +248,8 @@ describe('restoring λ and TM buffers', () => {
    * **A RESTORED COLD TM BUFFER LEAVES THE "ASLEEP" STATE WHEN WARMED.** `restore` inserts every buffer
    * cold; `main.ts` warms the ones its restored bindings name. The assertion shows the buffer's row stops
    * reporting the "asleep" state after the warm. The literal leg posted to the worker — that a TM buffer
-   * spawns `tm-scratch` and not `lambda-scratch` — is pinned in `web/tests/node/scratch.test.ts` by
-   * `warm re-spawns a cold tm buffer with tm-scratch, not lambda-scratch`, which reads the posted wire
+   * spawns on the TM leg and not the λ leg — is pinned in `web/tests/node/scratch.test.ts` by
+   * `warm re-spawns a cold tm buffer on the tm leg, not the lambda leg`, which reads the posted wire
    * message directly against a fake port.
    *
    * **`button.buffer-temperature`, NOT `button.temperature` — the same class of mismatch

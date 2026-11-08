@@ -17,31 +17,13 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 redextape-core = { path = "../redextape-core", features = ["serde"] }
-# NOT IN §5.3'S TABLE, and it is not a new edge in the graph either: `serde-wasm-bindgen` already
-# depends on it. It is named directly because `LambdaStatus`/`TmStatus` are declared in this crate and
-# a `derive` needs the crate in scope. The alternative was assembling both objects field by field
-# through `js_sys::Reflect` in `lib.rs`, which would move branching into the shell — the one thing
-# §5.2 says the shell must not have.
-serde = { version = "1", features = ["derive"] }
+redextape-wire = { path = "../redextape-wire" }
 wasm-bindgen = "0.2.130"
 serde-wasm-bindgen = "0.6.5"
 js-sys = "0.3.107"
 console_error_panic_hook = "0.1.7"
-# Optional and default-off, exactly as in `redextape-core` — see that manifest for why the
-# TypeScript is generated rather than hand-written. `wasm-pack` never enables this feature.
-ts-rs = { version = "12", optional = true }
 
 [features]
-# Forwards to core's so `ts` is ONE switch: without it, a run that enabled the feature only here would
-# compile derives for this crate's eight wire types and silently leave core's out of that run.
-#
-# IT IS LOAD-BEARING FOR IMPORTS, AND `RxmStatus::cap` IS WHY. That field is an `Option<RxmCap>`, core's
-# enum, so the generated `RxmStatus.ts` imports `./RxmCap` — and without core's `ts` switched on by this
-# line `RxmCap` has no `TS` impl and this crate's `ts` build does not compile. Every other field across the
-# eight types is `bool`, `String`, `Vec<String>`, `usize`, `u64`, the wasm-local `RunStatus` or
-# `ReductionStatus`, or `NodeId` — each bare or under one `Option` — and `NodeId` is a transparent alias for
-# `u32`, which inlines as a TypeScript `number`.
-ts = ["dep:ts-rs", "redextape-core/ts"]
 # SWITCHES OFF THE SIZE CHECK IN `tm_scratch_with_caps` (`src/session.rs`), SO A TM SCRATCH PARSES TEXT OF ANY
 # LENGTH. It exists for one caller: `web`'s `test:probe:tm-buffer` script, which builds this crate with it into
 # `target/probe-tm-buffer-wasm/` for `web/tests/browser/tm-buffer-cost.test.ts`, and never into `pkg/`.
@@ -49,7 +31,7 @@ ts = ["dep:ts-rs", "redextape-core/ts"]
 # file before parsing it can only price one side.
 #
 # A FEATURE RATHER THAN A PARAMETER, because no product caller chooses the ceiling, as none chooses the caps
-# `tm_scratch_with_caps` takes. The ceiling's two tests in `session.rs` compile only without it; with it, one test
+# `tm_scratch_with_caps` takes. The ceiling's tests in `session.rs` compile only without it; with it, one test
 # there holds what it does instead, and `scripts/check-all.sh` gives it a clippy and test leg of its own so that
 # test runs. No wasm build a gate or the app loads enables it.
 probe-no-tm-scratch-ceiling = []
@@ -64,11 +46,11 @@ probe-rxm-copy = []
 [dev-dependencies]
 wasm-bindgen-test = "0.3.80"
 
-# `redextape-test-support` HOLDS THE DERIVE-SITE SCANNER `tests/ts_bindings.rs` RUNS, and it is behind
-# a target gate for the same reason `redextape-core`'s `mimalloc` is: `wasm-pack test` builds this
-# crate's dev-dependency graph for wasm32, and nothing in that graph may be able to break the browser
-# leg. The gate this pulls in is `#![cfg(feature = "ts")]` and never compiled for wasm32 anyway, so the
-# dependency has no business being in that graph at all. `default-features = false` drops `proptest`,
-# which this crate does not use — the same opt-out `redextape-cli` takes.
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-redextape-test-support = { path = "../redextape-test-support", default-features = false }
+# `defunc_mapped` STAYS A FUNCTION OF ITS OWN IN `pkg/`. `wasm-opt -O` inlines a function with one caller
+# whatever its size, and each function from `defunc_mapped` up to the `compile` export has one, so without
+# this the defunctionalizer lands inside the export. V8 tiers a hot function up whole, so the first compile in
+# a fresh worker would share the CPU with a TurboFan job over all of it. `#[inline(never)]` cannot ask for
+# this: it reaches LLVM, which keeps the function apart already. The pattern matches the path wasm-bindgen
+# names the function by, whatever its crate hash, and must precede `-O`; one that matches nothing is no error.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["--no-inline=*::tm::defunc::defunc_mapped", "-O"]

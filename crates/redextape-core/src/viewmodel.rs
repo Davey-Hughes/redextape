@@ -879,7 +879,8 @@ pub struct LinkIndex {
     /// A node's span in `lambda_text`. ABSENT for a node whose subterm fell past the cut, never a
     /// span clamped to it — see `print_lambda_linked`.
     pub lambda_nodes: Vec<(Span, NodeId)>,
-    /// A node's span in the SOURCE text. Empty unless the map was built by `build_from_program`.
+    /// A node's span in the SOURCE text. Empty unless the map was built by `build_from_program` or
+    /// `build_prepared`.
     pub source_nodes: Vec<(Span, NodeId)>,
     /// `tm_owner[state_id]` is the Core node that produced that state, or `-1`.
     ///

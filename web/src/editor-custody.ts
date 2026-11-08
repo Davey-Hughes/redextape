@@ -98,7 +98,7 @@ export type EditorCustody = {
  * also hand this module the whole class — forking, cooling, retiring, every buffer's text — where this
  * file's own module doc holds `panes` and `sessions` to be the only dependencies, which is what makes it
  * a module at all. Widening the dependency to serve one field is the mistake `pane-host.ts` argues
- * against where it says `SessionRegistry` is not a dependency, one level up and with `tmProgramOf` as
+ * against where it says `SessionRegistry` is not a dependency, one level up and with `programOf` as
  * its example: a dependency that answers every question leaves the dependency list unable to say what
  * the module does not ask. `main.ts` supplies `(session) => scratchpad.collapsedOf(session)`.
  */
@@ -212,11 +212,11 @@ export function createEditorCustody(deps: {
     // claim names that leaf. That line's own comment carries the same fact from the other side; it must
     // not be read as being only about `reset preset`'s re-minted ids.
     //
-    // (2) THE BINDING CHECK DOES NOT CATCH IT. `pane-host.ts`'s `claiming` wraps `detachMachine` (and
-    // `detachRxm`) to claim a TM or rxm copy's session the same way it wraps `detach` for a λ one's, so a
-    // key in `editorOwner` can name a machine-legged scratch. `SessionRegistry.pairs()` DOES offer a TM
-    // pair for that session — the machine fork's own copy — so a rebind CAN produce a TM slot bound to
-    // exactly the session a claim names.
+    // (2) THE BINDING CHECK DOES NOT CATCH IT. `pane-host.ts`'s `claiming` wraps `detachProgram` to claim
+    // a TM or rxm copy's session the same way it wraps `detach` for a λ one's, so a key in `editorOwner`
+    // can name a machine-legged scratch. `SessionRegistry.pairs()` DOES offer a TM pair for that session
+    // — the machine fork's own copy — so a rebind CAN produce a TM slot bound to exactly the session a
+    // claim names.
     //
     // (1) IS THEREFORE THE FACT THIS CAST RESTS ON.
     //

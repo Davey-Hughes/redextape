@@ -118,28 +118,15 @@ pub fn compare_printed(text: &str, want: &[(Span, TokenClass)]) -> Result<(), St
     compare_classified(&RXM, HIGHLIGHTS, text, want)
 }
 
-/// `lower_program`'s template, reproduced here. `redextape_core::tm::lower_program` is public, with the
-/// same steps and an `Err` where this returns `None`.
-///
-/// **THE ORDER IS LOAD-BEARING AND IS NOT A PREFERENCE.** Try the program as first-order Core
-/// unchanged, and defunctionalize only when the direct attempt rejects it as higher-order.
-/// `lower_program`'s own doc records what the other order costs: `defunc` treats any bare `Lambda`
-/// in `Let`'s value position as a higher-order value-use, so defunctionalizing first regresses
-/// `let add1 = |x| x + 1; add1(41)` from lowering cleanly to `LowerError`. `TooDeep` is returned
-/// immediately rather than retried: it is never a signal that defunctionalizing would help.
+/// `redextape_core::tm::lower_program`, with `None` where it returns an `Err`: the program as
+/// first-order Core first, then through `defunc` when the direct attempt rejects it as higher-order.
 ///
 /// **THIS IS WHAT REACHES `box`/`box_get`/`box_set`.** Those three `Instr` variants are emitted only
 /// by `defunc`'s mutable-capture boxing rewrite, so a builder that called `lower_rxm` alone would
 /// leave three of the sixteen variants — and three of the twenty-four mnemonics — outside every
 /// corpus in this crate.
 fn lower_via_program_template(core: &redextape_core::core::Core) -> Option<redextape_core::tm::Program> {
-    match redextape_core::tm::lower_rxm(core) {
-        Ok(p) => return Some(p),
-        Err(redextape_core::tm::LowerError::Unsupported { .. }) => {}
-        Err(redextape_core::tm::LowerError::TooDeep { .. }) => return None,
-    }
-    let defunced = redextape_core::tm::defunc::defunc(core).ok()?;
-    redextape_core::tm::lower_rxm(&defunced).ok()
+    redextape_core::tm::lower_program(core).ok()
 }
 
 /// Lower a mini-language program to a `Program` and print it HEADER-LESS with its classification,

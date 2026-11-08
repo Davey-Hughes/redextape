@@ -28,7 +28,7 @@ use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
     Binary, Encoding, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary,
-    WORK, decode_tape, defunc, lower_rxm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
+    WORK, decode_tape, lower_program, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
 use redextape_core::value::format_value;
 
@@ -73,10 +73,7 @@ fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
-    let program = match lower_rxm(&core) {
-        Ok(p) => p,
-        Err(_) => lower_rxm(&defunc(&core).ok()?).ok()?,
-    };
+    let program = lower_program(&core).ok()?;
     let (m, overflow) = lower_tm_guarded(&program, enc).expect("report demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&program));
@@ -340,10 +337,7 @@ fn pinned_steps_any(src: &str, width: usize) -> Option<u64> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
-    let program = match lower_rxm(&core) {
-        Ok(p) => p,
-        Err(_) => lower_rxm(&defunc(&core).ok()?).ok()?,
-    };
+    let program = lower_program(&core).ok()?;
     let enc = Unary::at(width);
     let (m, _) = lower_tm_guarded(&program, &enc).expect("report demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];

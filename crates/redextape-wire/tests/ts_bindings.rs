@@ -24,7 +24,7 @@ use redextape_test_support::ts_derive_scan::{
     assert_generated_covers_every_derive_site, assert_no_generated_type_carries_bigint,
     assert_overrides_match_field_nullability,
 };
-use redextape_wasm::{
+use redextape_wire::{
     Decoded, LambdaStatus, ReductionStatus, RunStatus, RxmStatus, TmScratchStatus, TmStatus, ValueRun,
 };
 use ts_rs::TS;
@@ -54,7 +54,7 @@ fn generated() -> Vec<(&'static str, String)> {
 ///
 /// THE DEFAULT IS WRONG SILENTLY AND ONLY THE BROWSER TIER COULD OTHERWISE CATCH IT. `ts-rs` maps
 /// `u64` to `bigint` by default; `serde_wasm_bindgen` puts a `u64` on the wire as a JS number,
-/// which `browser.rs` measures directly in this very crate. A field of that class added without an
+/// which `redextape-wasm`'s `browser.rs` measures directly. A field of that class added without an
 /// override generates TypeScript that typechecks, ships, and is wrong at runtime. This fails at the
 /// commit instead.
 ///

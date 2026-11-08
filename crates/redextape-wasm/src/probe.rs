@@ -5,7 +5,8 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::{RxmScratch, session, to_value};
+use crate::{RxmScratch, session};
+use redextape_wire::to_value;
 
 /// `rxmScratchWithCaps(src, steps, stack, heap, mem)` -> `{ diagnostics, scratch }`, as `rxmScratch` answers, with the
 /// copy run under these caps rather than `COPY_CAPS`. `web/tests/browser/rxm-copy-memory.test.ts` builds a copy under

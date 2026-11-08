@@ -17,6 +17,7 @@ use std::rc::Rc;
 /// A register operand. `Loc` registers are function-local and frame-saved across `call`; `Arg`
 /// registers pass arguments (volatile); `Rr` carries the result of a `call` and the whole program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Reg {
     Loc(u32),
     Arg(u32),
@@ -25,6 +26,7 @@ pub enum Reg {
 
 /// One register-machine instruction. Labels are stored separately in `Program`.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Instr {
     /// `rd <- #n`
     Li(Reg, u64),
@@ -61,8 +63,10 @@ pub enum Instr {
 }
 
 /// A whole program: a flat instruction stream plus label positions (name -> index it precedes).
-/// Execution starts at index 0.
+/// Execution starts at index 0. Serialisable under `serde` so that a program lowered once can cross to another
+/// wasm module as data, not as rxm text it would parse again.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Program {
     pub code: Vec<Instr>,
     pub labels: Vec<(String, usize)>,
@@ -443,6 +447,7 @@ pub fn print_rxm_doc(d: &RxmDocument) -> Option<String> {
 
 /// Resource caps for `run_rxm`, mirroring the reference interpreter's budget/depth guards.
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Caps {
     pub steps: u64,
     pub stack: u64,

@@ -240,7 +240,7 @@ mod tests {
     use redextape_core::core::BinOp;
     use redextape_core::desugar::desugar;
     use redextape_core::parser::parse;
-    use redextape_core::tm::{defunc, lower_rxm};
+    use redextape_core::tm::{lower_program, lower_rxm};
 
     #[test]
     fn partitions_main_and_one_subroutine() {
@@ -309,16 +309,13 @@ mod tests {
     #[test]
     fn partitions_a_multi_fn_higher_order_program_into_disjoint_bodies() {
         // A higher-order program: `map` takes a function `f`. `lower_rxm` rejects it directly (a
-        // function-as-value), so defunctionalize first — yielding two inline subroutines
+        // function-as-value), so `lower_program` defunctionalizes it — yielding two inline subroutines
         // (`$apply1.*`, `map.*`), each guarded by its own jump-over, plus `$main`. Every fn entry
         // must partition into a disjoint body.
         let src = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
                    fn add1(x) { x + 1 } [1, 2].map(add1)";
         let core = desugar(&parse(src).0.unwrap());
-        let prog = match lower_rxm(&core) {
-            Ok(p) => p,
-            Err(_) => lower_rxm(&defunc(&core).expect("defunctionalizes")).expect("lowers after defunc"),
-        };
+        let prog = lower_program(&core).expect("lowers through defunc");
         let subs = partition(&prog).unwrap();
 
         // At least $main + two lowered functions (map + the $applyN dispatcher).

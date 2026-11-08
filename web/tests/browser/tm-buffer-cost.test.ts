@@ -1,6 +1,6 @@
 import { describe, expect, inject, it } from 'vitest'
 import type * as Wasm from '../../../pkg/redextape_wasm.js'
-import { VALUE_CHUNK } from '../../src/protocol'
+import { type RunRequest, VALUE_CHUNK } from '../../src/protocol'
 import { ScratchEditor } from '../../src/scratch-editor'
 import type { Decoded, Diagnostic, TmProgram, TmScratchStatus, ValueRun } from '../../src/types'
 import { cloneMs, median, ms } from './harness'
@@ -47,10 +47,10 @@ import { cloneMs, median, ms } from './harness'
  * **WHAT A ROW PRICES IS `MAX_FORK_RULES`' GESTURE WITH THE EMIT REPLACED BY THE RETURN TRIP** — the design's *The
  * ceiling* decision. Four costs, each the median of `REPS` passes over the same text:
  *
- *   1. `clone`, the request's structured clone to the worker (`{ kind: 'tm-scratch', gen, src }`), through a real
- *      `MessageChannel`;
+ *   1. `clone`, the request's structured clone to the worker (`{ kind: 'scratch', gen, leg, src, step }`), through a
+ *      real `MessageChannel`;
  *   2. `parse`, `tmScratch(src)` itself;
- *   3. `project`, the `tmProgram()`, `tmStatus()` and `tapeNames()` calls `onTmScratch` makes to build its reply;
+ *   3. `project`, the `tmProgram()`, `tmStatus()` and `tapeNames()` calls a TM copy's build makes for its reply;
  *   4. `back`, that reply's structured clone.
  *
  * `total` is the four medians summed, and **`spread` is the least and greatest of the per-pass totals**, so a row says
@@ -59,7 +59,7 @@ import { cloneMs, median, ms } from './harness'
  * rather than in it: the design leaves the editor's own cost out of the ceiling. **NOR DOES IT MEASURE THAT
  * COST:** it waits for animation frames, and `MAX_SCRATCH_TM_BYTES`' doc records it falling as the text grew.
  *
- * **`bytes` IS THE TEXT'S UTF-8 LENGTH,** the unit `MAX_SCRATCH_TM_BYTES` counts in, since `tm_scratch_with_caps` reads
+ * **`bytes` IS THE TEXT'S UTF-8 LENGTH,** the unit `MAX_SCRATCH_TM_BYTES` counts in, since `parse_copy` reads
  * `src.len()`. A string's `length` counts UTF-16 code units, which agree with it only on ASCII text.
  *
  * **A FULL COLLECTION BEFORE EVERY PASS**, through the `gc` the browser project exposes (`vite.config.ts`'s launch
@@ -164,7 +164,7 @@ describe('TM buffer cost', () => {
       let rules = 0
       for (let r = 0; r < REPS; r++) {
         collect()
-        const c = await cloneMs({ kind: 'tm-scratch', gen: 1, src: text })
+        const c = await cloneMs({ kind: 'scratch', gen: 1, leg: 'tm', src: text, step: 0 } satisfies RunRequest)
         const t1 = performance.now()
         const { scratch, value } = build(name, text)
         const p = performance.now() - t1

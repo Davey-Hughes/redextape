@@ -24,7 +24,7 @@ export type BufferRow = {
   /**
    * What the copy holds, under its name: a λ copy's current term, or, with none, its leg's reason while the leg is
    * not available (`building…`, `did not build`), or `null`; a TM or rxm copy's run, as its readout line says it
-   * without the name (`readout.ts`'s `tmCopyRow`). `main.ts`'s `copyHolds` resolves it.
+   * without the name (`readout.ts`'s `copyRow`). `main.ts`'s `copyHolds` resolves it.
    *
    * **WITHOUT IT A ROW IS A COUNTER'S OUTPUT AND A PANE COUNT, AND AT THE CAP EVERY PANE COUNT IS THE
    * SAME TOO.** The one gesture this control exists for is *choose a buffer and end it* — and the user

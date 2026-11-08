@@ -106,8 +106,8 @@ unique here is the route: real mini-language programs, lowered and printed, then
 span against a query result. `crates/redextape-core/tests/rxm_roundtrip.rs`'s own
 `the_demo_corpus_covers_thirteen_of_the_sixteen_instr_variants` asserts 13 of 16 `Instr` variants over
 its `DEMOS`, and that file is not changed by this grammar. The difference is how the corpus is built:
-this crate's builders lower a mini-language program through `lower_program`'s own template — try
-`lower_rxm` first, and retry through `defunc` only when it answers `Unsupported` — which is what
+this crate's builders lower a mini-language program through `lower_program`, which tries
+`lower_rxm` first and retries through `defunc` only when it answers `Unsupported`. That is what
 reaches `box`, `box_get` and `box_set`. Those three `Instr` variants are only ever emitted by
 `defunc`'s mutable-capture boxing rewrite.
 
@@ -121,8 +121,8 @@ Three corpora, because three different things need checking:
 | corpus | used for | how it is built | size |
 |---|---|---|---|
 | `rxm::CORPUS` | query agreement, query-pattern coverage, freedom from `ERROR` nodes, acceptance by `parse_rxm_full`, and the comment residue — **not** the differential, and **not** `tree-sitter test`, which reads `test/corpus/*.txt` instead | hand-written text, each entry asserted to parse under `parse_rxm_full` | 12 entries |
-| `rxm::FIXED_CORPUS`, headered | the differential, `print_rxm_with_mapped` | 12 of `rxm_roundtrip.rs`'s own `DEMOS`, plus a mutable-capture closure, plus four comparison programs, lowered through `lower_program`'s template | 17 entries |
-| generated, header-less | the differential, `print_rxm_mapped` | `arb_expr_over` through the same lowering template | 256 proptest cases |
+| `rxm::FIXED_CORPUS`, headered | the differential, `print_rxm_with_mapped` | 12 of `rxm_roundtrip.rs`'s own `DEMOS`, plus a mutable-capture closure, plus four comparison programs, lowered through `lower_program` | 17 entries |
+| generated, header-less | the differential, `print_rxm_mapped` | `arb_expr_over` through the same lowering | 256 proptest cases |
 
 **17 is a measurement.** The fixed corpus averages 198 bytes and 47 spans per headered listing —
 3,374 bytes and 810 spans in total — and reaches all 24 mnemonics; `FIXED_CORPUS` is fixed rather than

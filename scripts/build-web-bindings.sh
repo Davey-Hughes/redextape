@@ -64,12 +64,12 @@
 # the checks below are literal file-existence tests, not a trust in the exit code.
 #
 # THE CHECK IS PER LEG, NOT ONE COMBINED CHECK OVER A SHARED SCRATCH DIRECTORY. With both `redextape-core`
-# and `redextape-wasm` writing files, either leg's output alone satisfies a combined check, so a regression
+# and `redextape-wire` writing files, either leg's output alone satisfies a combined check, so a regression
 # that made ONE leg's filter match nothing — a removed derive, a `ts`-feature regression on that crate, a
 # `ts-rs` upgrade that renames the `export_bindings_*` test prefix — would ride in on the OTHER leg's files,
 # exit 0, and destroy the last-good `web/bindings` at swap: the single outcome this whole script exists to
 # prevent. So each leg writes into its own subdirectory of the scratch directory (`$TMP_DIR/core`,
-# `$TMP_DIR/wasm`) instead of into the scratch directory directly, each subdirectory is checked non-empty
+# `$TMP_DIR/wire`) instead of into the scratch directory directly, each subdirectory is checked non-empty
 # independently, and only once BOTH have proven non-empty are they merged into the flat tree that gets
 # swapped in. Neither subdirectory needs its own lock or trap entry: both live under the already
 # unique-per-process `$TMP_DIR`, so `rm -rf "${TMP_DIR:?}"` in cleanup already removes them.
@@ -99,8 +99,8 @@ OLD_DIR="${TMP_DIR}.old"   # never pre-created — appending to a unique name ke
 # "the other leg produced something". Both names are derived from the already per-process TMP_DIR, so they
 # carry the same collision-freedom without needing their own lock or trap entry.
 CORE_DIR="$TMP_DIR/core"
-WASM_DIR="$TMP_DIR/wasm"
-mkdir -p "$CORE_DIR" "$WASM_DIR"
+WIRE_DIR="$TMP_DIR/wire"
+mkdir -p "$CORE_DIR" "$WIRE_DIR"
 
 LOCK_HELD=0
 
@@ -170,9 +170,9 @@ acquire_lock() {
 env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
   TS_RS_EXPORT_DIR="$CORE_DIR" cargo test -p redextape-core --features ts export_bindings
 env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
-  TS_RS_EXPORT_DIR="$WASM_DIR" cargo test -p redextape-wasm --features ts export_bindings
+  TS_RS_EXPORT_DIR="$WIRE_DIR" cargo test -p redextape-wire --features ts export_bindings
 
-# Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WASM_DIR is full,
+# Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WIRE_DIR is full,
 # and vice versa — see the header comment for why a single combined check cannot catch that.
 check_leg_produced_files() {
   local dir="$1" crate="$2"
@@ -185,9 +185,9 @@ check_leg_produced_files() {
   fi
 }
 check_leg_produced_files "$CORE_DIR" "redextape-core"
-check_leg_produced_files "$WASM_DIR" "redextape-wasm"
+check_leg_produced_files "$WIRE_DIR" "redextape-wire"
 
-# A type of the same name exported from BOTH crates — say a `Span` added to redextape-wasm carrying the
+# A type of the same name exported from BOTH crates — say a `Span` added to redextape-wire carrying the
 # canonical derive — lands on the same basename in each leg's own directory, and the plain `mv` below would
 # merge them onto one file, silently keeping whichever it happens to write last. NO COVERAGE GATE SEES THIS:
 # each crate's `the_gate_covers_every_exported_type` (in its own `tests/ts_bindings.rs`) compares only that
@@ -196,25 +196,25 @@ check_leg_produced_files "$WASM_DIR" "redextape-wasm"
 # Checked here, before the merge and before anything under $BINDINGS_DIR is touched, so a collision refuses
 # loudly instead of being resolved by mv's last-write-wins.
 #
-# A BASENAME BOTH LEGS WROTE WITH THE SAME BYTES IS NOT A COLLISION, and it is dropped from the wasm leg. ts-rs
-# exports a type's dependencies with it, so a redextape-wasm type that names a redextape-core type — the rxm leg's
-# `RxmStatus` and its `cap: RxmCap` — writes that core type's file into the wasm leg too. Both files come from the
+# A BASENAME BOTH LEGS WROTE WITH THE SAME BYTES IS NOT A COLLISION, and it is dropped from the wire leg. ts-rs
+# exports a type's dependencies with it, so a redextape-wire type that names a redextape-core type — the rxm leg's
+# `RxmStatus` and its `cap: RxmCap` — writes that core type's file into the wire leg too. Both files come from the
 # one Rust declaration, so they agree to the byte, and keeping either is keeping both. Two DIFFERENT types of one
 # name print different declarations and still refuse below.
 check_no_leg_collisions() {
   local name collisions=""
   for path in "$CORE_DIR"/*.ts; do
     name="$(basename "$path")"
-    if [ -e "$WASM_DIR/$name" ]; then
-      if cmp -s "$path" "$WASM_DIR/$name"; then
-        rm -f "${WASM_DIR:?}/$name"
+    if [ -e "$WIRE_DIR/$name" ]; then
+      if cmp -s "$path" "$WIRE_DIR/$name"; then
+        rm -f "${WIRE_DIR:?}/$name"
       else
         collisions="$collisions $name"
       fi
     fi
   done
   if [ -n "$collisions" ]; then
-    echo "build-web-bindings.sh: redextape-core and redextape-wasm both generated:$collisions —" \
+    echo "build-web-bindings.sh: redextape-core and redextape-wire both generated:$collisions —" \
       "refusing to touch $BINDINGS_DIR. A type of that name is exported from both crates, so 'mv'" \
       "would silently keep whichever leg it wrote last, and neither crate's coverage gate can see" \
       "it — each only compares its own crate's derive sites against its own generated() list. Rename" \
@@ -228,8 +228,8 @@ check_no_leg_collisions
 # TMP_DIR itself so the tree that gets swapped in below keeps the same flat layout web/bindings has.
 # mv's directory-destination form takes any number of sources, so a third leg added later is one more
 # argument here, not a new check shape.
-mv "$CORE_DIR"/*.ts "$WASM_DIR"/*.ts "$TMP_DIR/"
-rm -rf "${CORE_DIR:?}" "${WASM_DIR:?}"
+mv "$CORE_DIR"/*.ts "$WIRE_DIR"/*.ts "$TMP_DIR/"
+rm -rf "${CORE_DIR:?}" "${WIRE_DIR:?}"
 
 # Generation succeeded and produced files: web/bindings.tmp.* is a complete, good tree. Everything past
 # this point that touches the SHARED name web/bindings runs under the lock.

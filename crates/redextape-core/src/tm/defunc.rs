@@ -60,8 +60,8 @@ use crate::tm::lower_rxm::LowerError;
 /// Bounds every recursive tree-walk in this module (`analyze`, `free_vars`/`fv_into`,
 /// `Rewriter::rewrite`/`rewrite_apply`/`rewrite_lambda_value`, `collect_calls`, `visit`) so `defunc`
 /// is TOTAL -- `LowerError::TooDeep`, never a native stack overflow -- on any Core, including a deep
-/// FIRST-order Core (that `run_tm` does not even route here, see `tm.rs::lower_program`) and a deep
-/// HIGHER-order one (which it does).
+/// FIRST-order Core (that `run_tm` does not even route here, see `tm.rs::lower_program_mapped`) and a
+/// deep HIGHER-order one (which it does).
 ///
 /// Rather than thread a live counter through every one of those functions, `defunc` measures the
 /// input's nesting depth ONCE, ITERATIVELY (`too_deep_node`, an explicit worklist -- no native

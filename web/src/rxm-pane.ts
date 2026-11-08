@@ -121,14 +121,14 @@ export class RxmPane implements EditablePane {
     // *FORMAT* IS REMOVED WHERE THERE IS NO EDITOR, *EDIT A COPY* WHERE THERE IS NO HANDLER OR NOTHING TO COPY, AND
     // *MOVE THE EDITOR HERE* WHERE THERE IS NO EDITOR TO MOVE — `TmPane`'s menu, and its reasons: a control that
     // cannot apply is removed (`CopyEditor`'s `#syncEditorControls`, `#refreshDetach` and `#refreshClaim`).
-    const detachRxm = on.detachRxm
+    const detachProgram = on.detachProgram
     this.#menu = viewMenu(this.#header.actions, {
       format: () => this.#copy.format(),
       ...(on.splitRow !== undefined && on.splitColumn !== undefined
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
       ...(on.close !== undefined ? { close: on.close } : {}),
-      ...(detachRxm !== undefined ? { editCopy: { run: detachRxm, what: 'the whole program' } } : {}),
+      ...(detachProgram !== undefined ? { editCopy: { run: detachProgram, what: 'the whole program' } } : {}),
       ...(on.showEditor !== undefined ? { claim: on.showEditor } : {}),
       choices: () => this.#choices,
     })

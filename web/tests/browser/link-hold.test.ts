@@ -69,7 +69,7 @@ const control = (leaf: string, label: string) =>
 const stepOf = (leaf: string) => paneByLeaf(leaf)?.querySelector('.step')?.textContent ?? ''
 
 /**
- * **THE SOURCE WORKER'S `compiled` REPLIES, AND ITS `tm-frames` REPLIES SINCE THE LAST, COUNTED**, by wrapping
+ * **THE SOURCE WORKER'S `compiled` REPLIES, AND ITS TM `frames` REPLIES SINCE THE LAST, COUNTED**, by wrapping
  * `Worker`'s own `addEventListener` before the app mounts, as `share-positions.test.ts` and
  * `readout-history-held.test.ts` do. With the TM view off the page nothing on it shows the TM leg recording, and the
  * worker's replies are what still counts it; this file makes no copy, so every worker reply is the program's. A reply
@@ -88,11 +88,11 @@ Worker.prototype.addEventListener = function (
     type === 'message' && typeof listener === 'function'
       ? (e: Event) => {
           listener.call(this, e)
-          const kind = ((e as MessageEvent).data as { kind?: unknown } | undefined)?.kind
-          if (kind === 'compiled') {
+          const data = (e as MessageEvent).data as { kind?: unknown; leg?: unknown } | undefined
+          if (data?.kind === 'compiled') {
             compiles += 1
             tmReplies = 0
-          } else if (kind === 'tm-frames') {
+          } else if (data?.kind === 'frames' && data.leg === 'tm') {
             tmReplies += 1
           }
         }
@@ -104,7 +104,7 @@ afterAll(() => {
 })
 
 /**
- * How many `tm-frames` replies the worker posts for `BIG`: its TM leg records 78,459 frames before its history fills at
+ * How many TM `frames` replies the worker posts for `BIG`: its TM leg records 78,459 frames before its history fills at
  * step 78,458, `RECORD_CHUNK` to a reply. 307.
  */
 const BIG_TM_REPLIES = Math.ceil(78_459 / RECORD_CHUNK)

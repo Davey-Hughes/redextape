@@ -34,7 +34,7 @@ pub struct RxmStep {
 /// steps and cannot help one capped on its stack, heap or saved-frame memory.
 ///
 /// **IT TAKES THE SERDE AND TS DERIVES, AND `RxmStatus` BELOW DOES NOT.** `redextape-wasm` reports how a
-/// leg's run stands in its own `RunStatus`, one vocabulary across legs; the one fact about an rxm run that
+/// leg's run stands in `redextape-wire`'s `RunStatus`, one vocabulary across legs; the one fact about an rxm run that
 /// vocabulary cannot carry is which cap stopped it, so this crosses beside it. `RxmStatus` stays a Rust
 /// type: its `Faulted` text is an answer, which a boundary reports as the run's value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

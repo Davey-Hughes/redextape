@@ -1,6 +1,6 @@
 import { canRecordFurther } from './controls'
 import { n } from './format'
-import { LEG_NAME, LEGS } from './legs'
+import { LEG_NAME, LEGS, perLeg } from './legs'
 import type { Leg, RunReply } from './protocol'
 import type { LegState } from './sessions'
 import type { Positions } from './share-link'
@@ -83,7 +83,7 @@ export class LinkPositions {
   #gen: number | null = null
   /** The positions not yet given to a leg: all of them, until the link's compile says which legs exist. */
   #held: Positions = {}
-  #continues: Record<Leg, number> = { lambda: 0, rxm: 0, tm: 0 }
+  #continues: Record<Leg, number> = perLeg(() => 0)
   /** The legs stopped short of their link's steps in this open, which its one notice names together. */
   #shorts: Short[] = []
 
@@ -106,7 +106,7 @@ export class LinkPositions {
   #drop(): void {
     this.#gen = null
     this.#held = {}
-    this.#continues = { lambda: 0, rxm: 0, tm: 0 }
+    this.#continues = perLeg(() => 0)
     this.#shorts = []
     for (const leg of LEGS) delete this.#deps.legOf(leg).pending
   }
@@ -145,18 +145,12 @@ export class LinkPositions {
         // A POSITION FOR A DECLINED LEG IS DROPPED SILENTLY: the leg's view already says why it is absent.
         for (const leg of LEGS) {
           const step = this.#held[leg]
-          if (step !== undefined && reply[leg].available) this.#deps.legOf(leg).pending = step
+          if (step !== undefined && reply.statuses[leg].available) this.#deps.legOf(leg).pending = step
         }
         this.#held = {}
         return
-      case 'lambda-frames':
-        this.#frames('lambda')
-        return
-      case 'rxm-frames':
-        this.#frames('rxm')
-        return
-      case 'tm-frames':
-        this.#frames('tm')
+      case 'frames':
+        this.#frames(reply.leg)
         return
       case 'result':
         this.#result()

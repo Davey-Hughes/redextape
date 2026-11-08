@@ -114,14 +114,14 @@ function record(pool: SessionPool, slot: Slot): { rings: Rings; done: Promise<vo
     settle = resolve
   })
   const client = pool.bind(slot.id, (r: RunReply) => {
-    if (r.kind === 'lambda-frames') {
+    if (r.kind === 'frames' && r.leg === 'lambda') {
       for (const f of r.frames) {
         const bytes = lambdaFrameBytes(f)
         rings.frames.lambda += 1
         rings.accounted.lambda += bytes
         rings.lambda?.push(f, bytes)
       }
-    } else if (r.kind === 'tm-frames') {
+    } else if (r.kind === 'frames' && r.leg === 'tm') {
       for (const f of r.frames) {
         const bytes = tmFrameBytes(f)
         rings.frames.tm += 1

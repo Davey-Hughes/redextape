@@ -40,7 +40,7 @@ cd "$(dirname "$0")/.."
 # ts-rs writes its generated TypeScript during `cargo test`, and resolves this variable relative to
 # each crate's MANIFEST directory rather than the workspace root — so leaving it unset makes the
 # `--features ts` test leg scatter a `bindings/` directory into whichever crate ran it,
-# `crates/redextape-core/` and `crates/redextape-wasm/` alike. `.gitignore`'s `crates/*/bindings/`
+# `crates/redextape-core/` and `crates/redextape-wire/` alike. `.gitignore`'s `crates/*/bindings/`
 # entry (beside `/web/bindings/`) keeps that scatter from ever showing up as an untracked file, but it
 # is still the wrong copy: not what the web build consumes, and silently stale the moment
 # `web/bindings/` and a crate-relative `bindings/` disagree. Absolute, and set once for every leg, so
@@ -157,9 +157,10 @@ LEGS=(
   "base|test|-p redextape-core --features ts"
   "base|wasm|-p redextape-core --lib --features ts"
   "base|wasm|-p redextape-wasm --lib"
-  "base|clippy|-p redextape-wasm --features ts --all-targets"
-  "base|test|-p redextape-wasm --features ts"
-  "base|wasm|-p redextape-wasm --lib --features ts"
+  "base|clippy|-p redextape-wire --features ts --all-targets"
+  "base|test|-p redextape-wire --features ts"
+  "base|wasm|-p redextape-wire --lib"
+  "base|wasm|-p redextape-wire --lib --features ts"
   # `probe-no-tm-scratch-ceiling` switches `MAX_SCRATCH_TM_BYTES`' check off for one browser probe, and its doc in
   # `crates/redextape-wasm/Cargo.toml` says why. It changes which tests `crates/redextape-wasm/src/session.rs` compiles,
   # so it is a config like `ts`, and a config no leg builds is one whose tests never run.

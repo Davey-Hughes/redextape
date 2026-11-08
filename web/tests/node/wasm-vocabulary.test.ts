@@ -23,9 +23,13 @@ describe('the built wasm', () => {
   it('says copy, not fork, in the sentences a user reads', () => {
     const bytes = readFileSync(WASM).toString('latin1')
     expect(bytes, 'pkg/ is stale — run `pnpm run build:wasm:dev` from web/').toContain('too large to copy')
-    expect(bytes).toContain('a TM copy builds files up to')
-    expect(bytes).toContain('an rxm copy builds files up to')
+    // ONE CEILING SENTENCE FOR BOTH COPIES, whose copy name is an argument: the module holds each name and the
+    // sentence's shared piece apart, so each is read on its own. The absence checks fail a module that holds an old
+    // wording, whether it stores that sentence whole or in pieces: `a TM buffer` is in both forms.
+    expect(bytes).toContain('a TM copy')
+    expect(bytes).toContain('an rxm copy')
+    expect(bytes).toContain(' builds files up to ')
     expect(bytes).not.toContain('too large to fork')
-    expect(bytes).not.toContain('a TM buffer builds files up to')
+    expect(bytes).not.toContain('a TM buffer')
   })
 })

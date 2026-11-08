@@ -1,19 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RecordEnd } from '../../src/protocol'
-import {
-  copyLegOf,
-  copyRows,
-  lambdaCopyParts,
-  lambdaCopySegments,
-  programRows,
-  programSegments,
-  rxmCopyParts,
-  rxmCopyRow,
-  rxmCopySegments,
-  tmCopyParts,
-  tmCopyRow,
-  tmCopySegments,
-} from '../../src/readout'
+import { copyLegOf, copyParts, copyRow, copyRows, copySegments, programRows, programSegments } from '../../src/readout'
 import { rxmSnapshot } from './rxm-fixtures'
 
 const LAMBDA = {
@@ -31,9 +18,9 @@ const TM = {
 const GEN = 3
 const leg = (newestStep: number, done: RecordEnd | null) => ({ hist: { newestStep }, done })
 /** The program's compile `gen`, as `replies.ts` stores its `result` reply. */
-const result = (gen = GEN) => ({ kind: 'result', gen, lambda: LAMBDA, rxm: RXM, tm: TM }) as never
-/** The program's recording for `GEN` with both machine legs ended: what a result with no full history is drawn beside. */
-const ENDED = { gen: GEN, rxm: leg(55, 'ended'), tm: leg(2_870, 'ended') }
+const result = (gen = GEN) => ({ kind: 'result', gen, legs: { lambda: LAMBDA, rxm: RXM, tm: TM } }) as never
+/** The program's recording for `GEN` with every leg ended: what a result with no full history is drawn beside. */
+const ENDED = { gen: GEN, lambda: leg(7, 'ended'), rxm: leg(55, 'ended'), tm: leg(2_870, 'ended') }
 /** The strip for `result()` with no full history in it. */
 const PLAIN = ['λ 42 · 7 reductions', 'rxm 42 · 55 instructions', 'TM 42 · 2,870 transitions · width 8']
 
@@ -59,7 +46,7 @@ describe('programSegments', () => {
  * after the leg's count and before its width, and in the inspector as a row of its own. The count beside it is the
  * compile's whole run; the step is the newest one the recording holds, the `of N` of the leg's step line, so the two
  * numbers differ and both are true. Every case passes the recording as `draw.ts` builds it: the generation the legs
- * record, and the two machine legs.
+ * record, and every leg.
  */
 describe('a machine leg’s full history, in the program’s readout', () => {
   it('puts the TM leg’s full history after its count and before its width', () => {
@@ -80,9 +67,10 @@ describe('a machine leg’s full history, in the program’s readout', () => {
 
   it('says nothing of a recording that ended, stopped elsewhere, or is still going', () => {
     for (const done of ['ended', 'capped', 'stack-full', null] as const)
-      expect(programSegments(result(), { gen: GEN, rxm: leg(55, done), tm: leg(2_870, done) }), String(done)).toEqual(
-        PLAIN,
-      )
+      expect(
+        programSegments(result(), { gen: GEN, lambda: leg(7, 'ended'), rxm: leg(55, done), tm: leg(2_870, done) }),
+        String(done),
+      ).toEqual(PLAIN)
   })
 
   /**
@@ -92,7 +80,7 @@ describe('a machine leg’s full history, in the program’s readout', () => {
    * do say it, so this is the generation and not the legs.
    */
   it('draws no fact beside a result from an earlier compile than the one the legs record', () => {
-    const filling = { gen: GEN + 1, rxm: leg(36_921, 'budget'), tm: leg(74_803, 'budget') }
+    const filling = { gen: GEN + 1, lambda: leg(7, 'ended'), rxm: leg(36_921, 'budget'), tm: leg(74_803, 'budget') }
     expect(programSegments(result(GEN), filling)).toEqual(PLAIN)
     expect(programRows(result(GEN), filling).some((r) => r.label.endsWith('recording'))).toBe(false)
     expect(programSegments(result(GEN + 1), filling)).toEqual([
@@ -129,7 +117,12 @@ describe('a machine leg’s full history, in the program’s readout', () => {
   })
 
   it('gives the inspector the same fact, as the leg’s recording row after its steps', () => {
-    const rows = programRows(result(), { gen: GEN, rxm: leg(40_000, 'budget'), tm: leg(75_850, 'budget') })
+    const rows = programRows(result(), {
+      gen: GEN,
+      lambda: leg(7, 'ended'),
+      rxm: leg(40_000, 'budget'),
+      tm: leg(75_850, 'budget'),
+    })
     expect(rows.map((r) => `${r.label}: ${r.value}`)).toEqual([
       'λ normal form: 42',
       'λ steps: 7 reductions',
@@ -149,7 +142,7 @@ describe('a machine leg’s full history, in the program’s readout', () => {
 
   it('says nothing for a leg that was declined', () => {
     const declined = { status: { ...TM.status, available: false, reason: 'no TM for this program' }, value: null }
-    const r = { kind: 'result', gen: GEN, lambda: LAMBDA, rxm: RXM, tm: declined } as never
+    const r = { kind: 'result', gen: GEN, legs: { lambda: LAMBDA, rxm: RXM, tm: declined } } as never
     const full = { ...ENDED, tm: leg(10, 'budget') }
     expect(programSegments(r, full)[2]).toBe('TM declined — no TM for this program')
     expect(programRows(r, full).filter((row) => row.label.startsWith('TM'))).toEqual([
@@ -158,21 +151,36 @@ describe('a machine leg’s full history, in the program’s readout', () => {
   })
 })
 
-describe('lambdaCopySegments', () => {
+describe('copySegments for a λ copy', () => {
   it('names the copy and says how far it has run and why it stopped', () => {
     expect(
-      lambdaCopySegments('λ copy 1', { newestStep: 12, done: 'ended', status: { available: true, reason: '' } }),
+      copySegments(
+        'lambda',
+        'λ copy 1',
+        {},
+        { newestStep: 12, done: 'ended', status: { available: true, reason: '' } },
+      ),
     ).toEqual(['λ copy 1 · 12 reductions'])
     expect(
-      lambdaCopySegments('λ copy 1', { newestStep: 5000, done: 'capped', status: { available: true, reason: '' } }),
+      copySegments(
+        'lambda',
+        'λ copy 1',
+        {},
+        { newestStep: 5000, done: 'capped', status: { available: true, reason: '' } },
+      ),
     ).toEqual(['λ copy 1 · 5,000 reductions · spent its step budget'])
     expect(
-      lambdaCopySegments('λ copy 1', { newestStep: 0, done: null, status: { available: false, reason: 'building…' } }),
+      copySegments(
+        'lambda',
+        'λ copy 1',
+        {},
+        { newestStep: 0, done: null, status: { available: false, reason: 'building…' } },
+      ),
     ).toEqual(['λ copy 1 · building…'])
   })
 })
 
-describe('tmCopySegments', () => {
+describe('copySegments for a TM copy', () => {
   const endedLeg = { newestStep: 241_666, done: 'ended' as const, status: { available: true, reason: '' } }
 
   it('names the copy and carries its count, value line and reduced-file sentence', () => {
@@ -180,37 +188,44 @@ describe('tmCopySegments', () => {
       status: { header: true, width: 4, reduction: { stages: ['single-tape'], steps: 241666 } },
       value: { run: { run: 'Ended', steps: 241666, cap: 1000000000 }, value: { Value: { text: '2' } } },
     }
-    expect(tmCopySegments('TM copy 1', reading as never, endedLeg)).toEqual([
+    expect(copySegments('tm', 'TM copy 1', { tm: reading as never }, endedLeg)).toEqual([
       'TM copy 1 · 241,666 transitions · value: 2 · reduced: single-tape · 241,666 steps',
     ])
   })
 
   /**
    * **A COPY WHOSE THREAD THREW READS ITS LEG, NOT ITS RETAINED READING** — spec §13. `replies.ts`'s
-   * `worker-error` arm clears `tmScratch` and writes the reason onto the leg, so a version of this that
+   * `worker-error` arm clears `readings.tm` and writes the reason onto the leg, so a version of this that
    * took only the reading would report a bare name for the rest of the page load, where the λ half of
    * the same arm reports `λ copy 1 · the copy failed`.
    */
   it('says why a copy stopped, and does not need a reading to say it', () => {
     expect(
-      tmCopySegments('TM copy 1', null, {
-        newestStep: 0,
-        done: null,
-        status: { available: false, reason: 'the copy failed' },
-      }),
+      copySegments(
+        'tm',
+        'TM copy 1',
+        { tm: null },
+        { newestStep: 0, done: null, status: { available: false, reason: 'the copy failed' } },
+      ),
     ).toEqual(['TM copy 1 · the copy failed'])
     expect(
-      tmCopySegments('TM copy 2', null, {
-        newestStep: 0,
-        done: null,
-        status: { available: false, reason: 'building…' },
-      }),
+      copySegments(
+        'tm',
+        'TM copy 2',
+        { tm: null },
+        { newestStep: 0, done: null, status: { available: false, reason: 'building…' } },
+      ),
     ).toEqual(['TM copy 2 · building…'])
   })
 
   it('counts transitions for a copy that has run but retains nothing yet', () => {
     expect(
-      tmCopySegments('TM copy 1', null, { newestStep: 12, done: null, status: { available: true, reason: '' } }),
+      copySegments(
+        'tm',
+        'TM copy 1',
+        { tm: null },
+        { newestStep: 12, done: null, status: { available: true, reason: '' } },
+      ),
     ).toEqual(['TM copy 1 · 12 transitions'])
   })
 
@@ -224,19 +239,19 @@ describe('tmCopySegments', () => {
       value: { run: { run: 'Ended', steps: 91785, cap: 1000000000 }, value: { Value: { text: '9' } } },
     }
     const leg = (done: RecordEnd | null) => ({ newestStep: 69_008, done, status: { available: true, reason: '' } })
-    expect(tmCopySegments('TM copy 1', reading as never, leg('budget'))).toEqual([
+    expect(copySegments('tm', 'TM copy 1', { tm: reading as never }, leg('budget'))).toEqual([
       'TM copy 1 · 69,008 transitions · history is full · value: 9',
     ])
-    expect(tmCopySegments('TM copy 1', reading as never, leg('ended'))).toEqual([
+    expect(copySegments('tm', 'TM copy 1', { tm: reading as never }, leg('ended'))).toEqual([
       'TM copy 1 · 69,008 transitions · value: 9',
     ])
-    expect(tmCopySegments('TM copy 1', reading as never, leg(null))).toEqual([
+    expect(copySegments('tm', 'TM copy 1', { tm: reading as never }, leg(null))).toEqual([
       'TM copy 1 · 69,008 transitions · value: 9',
     ])
   })
 })
 
-describe('rxmCopySegments', () => {
+describe('copySegments for an rxm copy', () => {
   const STATUS = { available: true, reason: '', run: 'Ended' as const, cap: null, total_steps: 3 }
   const leg = (newestStep: number, done: 'ended' | 'capped' | 'stack-full' | null) => ({
     newestStep,
@@ -246,23 +261,27 @@ describe('rxmCopySegments', () => {
 
   it('names the copy, counts its instructions, and reads its value as its view does', () => {
     const reading = { status: STATUS, value: { Value: { text: '7' } } }
-    expect(rxmCopySegments('rxm copy 1', reading, leg(3, 'ended'))).toEqual(['rxm copy 1 · 3 instructions · value: 7'])
+    expect(copySegments('rxm', 'rxm copy 1', { rxm: reading }, leg(3, 'ended'))).toEqual([
+      'rxm copy 1 · 3 instructions · value: 7',
+    ])
   })
 
   it('says a count of one in the singular', () => {
     const reading = { status: STATUS, value: { Value: { text: '0' } } }
-    expect(rxmCopySegments('rxm copy 1', reading, leg(1, 'ended'))).toEqual(['rxm copy 1 · 1 instruction · value: 0'])
+    expect(copySegments('rxm', 'rxm copy 1', { rxm: reading }, leg(1, 'ended'))).toEqual([
+      'rxm copy 1 · 1 instruction · value: 0',
+    ])
   })
 
   it('says why the recording stopped, and a fault as a fault', () => {
     const fault = { status: STATUS, value: { Fault: { message: 'head of empty list at pc1' } } }
-    expect(rxmCopyParts('rxm copy 1', fault, leg(2, 'ended'))).toEqual([
+    expect(copyParts('rxm', 'rxm copy 1', { rxm: fault }, leg(2, 'ended'))).toEqual([
       'rxm copy 1',
       '2 instructions',
       'fault: head of empty list at pc1',
     ])
     const full = { status: STATUS, value: 'Unfinished' as const }
-    expect(rxmCopyParts('rxm copy 1', full, leg(9, 'stack-full'))).toEqual([
+    expect(copyParts('rxm', 'rxm copy 1', { rxm: full }, leg(9, 'stack-full'))).toEqual([
       'rxm copy 1',
       '9 instructions',
       'the call stack is full',
@@ -272,7 +291,7 @@ describe('rxmCopySegments', () => {
 
   it('says only that it is building before its build lands', () => {
     const building = { newestStep: 0, done: null, status: { available: false, reason: 'building…' } }
-    expect(rxmCopySegments('rxm copy 1', null, building)).toEqual(['rxm copy 1 · building…'])
+    expect(copySegments('rxm', 'rxm copy 1', { rxm: null }, building)).toEqual(['rxm copy 1 · building…'])
   })
 })
 
@@ -296,20 +315,24 @@ describe('a machine copy’s row in the copies menu', () => {
 
   it('reads an rxm copy that halted with a value as its readout does', () => {
     const reading = { status: STATUS, value: { Value: { text: '6' } } }
-    expect(rxmCopyRow(reading, rxmLeg(55, 'ended'))).toBe('55 instructions · value: 6')
-    expect(rxmCopySegments('rxm copy 1', reading, rxmLeg(55, 'ended'))).toEqual([
-      `rxm copy 1 · ${rxmCopyRow(reading, rxmLeg(55, 'ended'))}`,
+    expect(copyRow('rxm', { rxm: reading }, rxmLeg(55, 'ended'))).toBe('55 instructions · value: 6')
+    expect(copySegments('rxm', 'rxm copy 1', { rxm: reading }, rxmLeg(55, 'ended'))).toEqual([
+      `rxm copy 1 · ${copyRow('rxm', { rxm: reading }, rxmLeg(55, 'ended'))}`,
     ])
   })
 
   it('reads an rxm copy that faulted as a fault', () => {
     const reading = { status: STATUS, value: { Fault: { message: 'ran past end of program at pc0' } } }
-    expect(rxmCopyRow(reading, rxmLeg(0, 'ended'))).toBe('0 instructions · fault: ran past end of program at pc0')
+    expect(copyRow('rxm', { rxm: reading }, rxmLeg(0, 'ended'))).toBe(
+      '0 instructions · fault: ran past end of program at pc0',
+    )
   })
 
   it('says why an rxm copy’s recording stopped at a cap, and that its run is unfinished', () => {
     const reading = { status: STATUS, value: 'Unfinished' as const }
-    expect(rxmCopyRow(reading, rxmLeg(9, 'capped'))).toBe('9 instructions · spent its step budget · not finished')
+    expect(copyRow('rxm', { rxm: reading }, rxmLeg(9, 'capped'))).toBe(
+      '9 instructions · spent its step budget · not finished',
+    )
   })
 
   it('reads a TM copy’s value, and a value run still going, as its readout does', () => {
@@ -317,14 +340,16 @@ describe('a machine copy’s row in the copies menu', () => {
       status: { header: true, width: 8, reduction: null },
       value: { run: { run: 'Ended', steps: 18574, cap: 1000000000 }, value: { Value: { text: '6' } } },
     }
-    expect(tmCopyRow(halted as never, tmLeg(18574))).toBe('18,574 transitions · value: 6')
+    expect(copyRow('tm', { tm: halted as never }, tmLeg(18574))).toBe('18,574 transitions · value: 6')
     const running = {
       status: { header: true, width: 8, reduction: null },
       value: { run: { run: 'Running', steps: 12, cap: 1000 }, value: 'Unfinished' },
     }
-    expect(tmCopyRow(running as never, tmLeg(12))).toBe('12 transitions · value: running · 12 of 1,000 steps')
-    expect(tmCopySegments('TM copy 2', running as never, tmLeg(12))).toEqual([
-      `TM copy 2 · ${tmCopyRow(running as never, tmLeg(12))}`,
+    expect(copyRow('tm', { tm: running as never }, tmLeg(12))).toBe(
+      '12 transitions · value: running · 12 of 1,000 steps',
+    )
+    expect(copySegments('tm', 'TM copy 2', { tm: running as never }, tmLeg(12))).toEqual([
+      `TM copy 2 · ${copyRow('tm', { tm: running as never }, tmLeg(12))}`,
     ])
   })
 
@@ -334,16 +359,16 @@ describe('a machine copy’s row in the copies menu', () => {
       value: { run: { run: 'Ended', steps: 91785, cap: 1000000000 }, value: { Value: { text: '9' } } },
     }
     const full = { newestStep: 69_008, done: 'budget' as const, status: { available: true, reason: '' } }
-    expect(tmCopyRow(halted as never, full)).toBe('69,008 transitions · history is full · value: 9')
-    expect(tmCopySegments('TM copy 1', halted as never, full)).toEqual([
-      `TM copy 1 · ${tmCopyRow(halted as never, full)}`,
+    expect(copyRow('tm', { tm: halted as never }, full)).toBe('69,008 transitions · history is full · value: 9')
+    expect(copySegments('tm', 'TM copy 1', { tm: halted as never }, full)).toEqual([
+      `TM copy 1 · ${copyRow('tm', { tm: halted as never }, full)}`,
     ])
   })
 
   it('says a machine copy that has not built yet is building, as its readout does', () => {
     const building = { newestStep: 0, done: null, status: { available: false, reason: 'building…' } }
-    expect(rxmCopyRow(null, building)).toBe('building…')
-    expect(tmCopyRow(null, building)).toBe('building…')
+    expect(copyRow('rxm', { rxm: null }, building)).toBe('building…')
+    expect(copyRow('tm', { tm: null }, building)).toBe('building…')
   })
 
   it('reads a leg’s live state into the one shape every copy line takes', () => {
@@ -355,14 +380,15 @@ describe('a machine copy’s row in the copies menu', () => {
 describe('a count of one, in every copy line', () => {
   it('reads "1 reduction" and "1 transition"', () => {
     expect(
-      lambdaCopyParts('λ copy 1', { newestStep: 1, done: 'ended', status: { available: true, reason: '' } }),
+      copyParts('lambda', 'λ copy 1', {}, { newestStep: 1, done: 'ended', status: { available: true, reason: '' } }),
     ).toEqual(['λ copy 1', '1 reduction'])
     expect(
-      tmCopyParts('TM copy 1', null, {
-        newestStep: 1,
-        done: 'ended' as const,
-        status: { available: true, reason: '' },
-      }),
+      copyParts(
+        'tm',
+        'TM copy 1',
+        { tm: null },
+        { newestStep: 1, done: 'ended' as const, status: { available: true, reason: '' } },
+      ),
     ).toEqual(['TM copy 1', '1 transition'])
   })
 })
@@ -387,7 +413,7 @@ describe('programRows', () => {
    */
   it('carries the note on a cut normal form, the row the strip drops', () => {
     const deep = { ...LAMBDA, state: { ...LAMBDA.state, cut: 'Depth' as const } }
-    const rows = programRows({ kind: 'result', gen: GEN, lambda: deep, rxm: RXM, tm: TM } as never, ENDED)
+    const rows = programRows({ kind: 'result', gen: GEN, legs: { lambda: deep, rxm: RXM, tm: TM } } as never, ENDED)
     const nf = rows.find((r) => r.label.includes('normal form') || r.label.includes('term so far'))
     expect(nf, 'no normal-form row to carry a note').toBeDefined()
     expect(nf?.note, 'the cut mark was dropped on the way to the inspector').toBeTruthy()
@@ -410,7 +436,7 @@ describe('programRows', () => {
 describe('copyRows', () => {
   it('makes the copy’s name the first row’s label and every other fact a row', () => {
     const rows = copyRows(
-      lambdaCopyParts('λ copy 1', { newestStep: 3, done: null, status: { available: true, reason: '' } }),
+      copyParts('lambda', 'λ copy 1', {}, { newestStep: 3, done: null, status: { available: true, reason: '' } }),
     )
     expect(rows).toEqual([{ label: 'λ copy 1', value: '3 reductions' }])
   })
@@ -423,7 +449,7 @@ describe('copyRows', () => {
       value: { run: { run: 'Ended', steps: 241666, cap: 1000000000 }, value: { Value: { text: '2' } } },
     }
     const leg = { newestStep: 241_666, done: 'ended' as const, status: { available: true, reason: '' } }
-    const rows = copyRows(tmCopyParts('TM copy 1', reading as never, leg))
+    const rows = copyRows(copyParts('tm', 'TM copy 1', { tm: reading as never }, leg))
     expect(rows).toEqual([
       { label: 'TM copy 1', value: '241,666 transitions' },
       { label: '', value: 'value: 2' },
@@ -431,6 +457,6 @@ describe('copyRows', () => {
     ])
     // THE EVIDENCE THAT THE SHORTCUT WOULD HAVE BEEN WRONG: the joined line the strip shows has FIVE
     // ` · `-separated pieces for these THREE facts, so splitting it back apart cuts the last one in two.
-    expect(tmCopySegments('TM copy 1', reading as never, leg)[0]?.split(' · ')).toHaveLength(5)
+    expect(copySegments('tm', 'TM copy 1', { tm: reading as never }, leg)[0]?.split(' · ')).toHaveLength(5)
   })
 })

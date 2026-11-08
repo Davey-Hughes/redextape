@@ -314,21 +314,27 @@ const DEFUNC_DEMOS: &[&str] = &[
     "let mut acc = 0; let bump = |n| { acc = acc + n; acc }; bump(1); acc",
 ];
 
+/// Every program the web app runs, lowered by the dispatch the session lowers through, `defunc` included.
+fn web_app_programs() -> impl Iterator<Item = (&'static str, Program)> {
+    DEMOS.iter().chain(DEFUNC_DEMOS).map(|&src| {
+        let (ast, ds) = parse(src);
+        assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
+        (src, lower_program(&desugar(&ast.unwrap())).unwrap_or_else(|e| panic!("{src} did not lower: {e:?}")))
+    })
+}
+
 /// Every program the web app runs prints to text that reads back to it, with nothing for
 /// `rxm_label_diagnostics` to mark — so *edit a copy* never hands the user a copy that refuses to run.
 ///
-/// **OVER `lower_program`, WHICH NOTHING ABOVE REACHES.** The round trips above lower with `lower_rxm`
-/// alone; the web session lowers through `lower_program`, which retries through `defunc`, and `defunc`
-/// mints the labels of the functions it builds. A minted name the printer could not write back, or two
-/// minted with one name, would reach a copy as a mark on text the user never wrote. The two corpora
-/// together reach all 16 instruction variants, which this test counts.
+/// **OVER `lower_program`, WHICH NOTHING ABOVE REACHES.** The round trips above lower with `lower_rxm` alone;
+/// the web session lowers through `lower_program`'s dispatch, which retries through `defunc`, and `defunc`
+/// mints the labels of the functions it builds. A minted name the printer could not write back, or two minted
+/// with one name, would reach a copy as a mark on text the user never wrote. The two corpora together reach
+/// all 16 instruction variants, which this test counts.
 #[test]
 fn every_program_the_web_app_runs_prints_to_text_a_copy_runs() {
     let mut seen: Vec<&'static str> = Vec::new();
-    for src in DEMOS.iter().chain(DEFUNC_DEMOS) {
-        let (ast, ds) = parse(src);
-        assert!(ds.is_empty(), "parse errors for {src}: {ds:?}");
-        let prog = lower_program(&desugar(&ast.unwrap())).unwrap_or_else(|e| panic!("{src} did not lower: {e:?}"));
+    for (src, prog) in web_app_programs() {
         let text = print_rxm_with(&prog, &RxmHeader { result: Ty::Nat });
         let (doc, nav) = parse_rxm_nav(&text);
         assert!(doc.diagnostics.is_empty(), "diagnostics reading back {src}: {:?}", doc.diagnostics);
@@ -339,4 +345,65 @@ fn every_program_the_web_app_runs_prints_to_text_a_copy_runs() {
     seen.sort_unstable();
     seen.dedup();
     assert_eq!(seen.len(), 16, "the corpora reach {seen:?}");
+}
+
+// ---------------------------------------------------------------------------
+// The program as data: serde round trips, under core's `serde` feature.
+// ---------------------------------------------------------------------------
+
+/// Every program the web app runs reads back from serde's JSON as the program written, and so does
+/// `all_ops`, which holds each of the nine operators: no corpus program is shown to reach them all, and
+/// each is a name serde writes.
+#[cfg(feature = "serde")]
+#[test]
+fn every_program_the_web_app_runs_survives_a_serde_round_trip() {
+    use redextape_core::core::BinOp;
+    use redextape_core::tm::Reg;
+
+    let ops = [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Eq, BinOp::Ne, BinOp::Lt, BinOp::Le, BinOp::Gt, BinOp::Ge];
+    // No wildcard arm: an operator added to `BinOp` fails to compile here until this match lists it, which is
+    // the prompt to add it to `ops` too. The compiler holds the match, not `ops`.
+    for op in ops {
+        match op {
+            BinOp::Add
+            | BinOp::Sub
+            | BinOp::Mul
+            | BinOp::Eq
+            | BinOp::Ne
+            | BinOp::Lt
+            | BinOp::Le
+            | BinOp::Gt
+            | BinOp::Ge => {}
+        }
+    }
+    let all_ops = Program {
+        code: ops.iter().map(|&op| Instr::Bin(op, Reg::Loc(1), Reg::Arg(2), Reg::Rr)).collect(),
+        labels: vec![("end".to_owned(), ops.len())],
+    };
+    let mut seen: Vec<&'static str> = Vec::new();
+    for (src, prog) in web_app_programs().chain([("all_ops", all_ops)]) {
+        let json = serde_json::to_string(&prog).unwrap_or_else(|e| panic!("{src} did not serialise: {e}"));
+        let back: Program = serde_json::from_str(&json).unwrap_or_else(|e| panic!("{src} did not read back: {e}"));
+        assert_eq!(back, prog, "{src}");
+        seen.extend(prog.code.iter().map(variant_name));
+    }
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 16, "the programs reach {seen:?}");
+}
+
+/// The caps a run is given read back from serde's JSON as written. The second value's four fields all
+/// differ: `DEFAULT_CAPS` gives `steps` and `heap` one value, so those two trading places on the way
+/// would show only on the second.
+#[cfg(feature = "serde")]
+#[test]
+fn the_rxm_caps_survive_a_serde_round_trip() {
+    use redextape_core::tm::{Caps, DEFAULT_CAPS};
+
+    for caps in [DEFAULT_CAPS, Caps { steps: 11, stack: 22, heap: 33, mem: 44 }] {
+        let json = serde_json::to_string(&caps).unwrap_or_else(|e| panic!("{caps:?} did not serialise: {e}"));
+        let back: Caps = serde_json::from_str(&json).unwrap_or_else(|e| panic!("{caps:?} did not read back: {e}"));
+        // `Caps` has no `PartialEq`; its `Debug` names every field.
+        assert_eq!(format!("{back:?}"), format!("{caps:?}"));
+    }
 }

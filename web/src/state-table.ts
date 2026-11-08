@@ -18,11 +18,11 @@ export type Row =
  *
  * NOT A FLATTENED ARRAY, AND THE MEASUREMENT IS WHY. `list60` is 33,699 states and 94,182 rules —
  * 127,881 rows (design §3.1) — so materializing one object per row is 12-25 MB to hold a list of which
- * ~40 are on screen, duplicating fields `tmProgram` is already holding. `rowStart` is one `Int32Array`
+ * ~40 are on screen, duplicating fields the `TmProgram` is already holding. `rowStart` is one `Int32Array`
  * of 33,699 entries instead: 135 KB, and a row resolves by binary search.
  *
- * BUILT ONCE PER COMPILE, never per step, which is the property `tmProgram` already has and for the
- * same reason (`protocol.ts`'s `compiled` reply: "`tmProgram` IS SENT ONCE, HERE"). Only the highlight  check-attributions: allow
+ * BUILT ONCE PER COMPILE, never per step, which is the property `programs.tm` already has and for the
+ * same reason (`protocol.ts`'s `compiled` reply: "`programs` IS SENT ONCE, HERE"). Only the highlight  check-attributions: allow
  * moves.
  */
 export class StateIndex {

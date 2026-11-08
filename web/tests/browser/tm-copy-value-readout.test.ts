@@ -6,7 +6,7 @@ import { copyShown, pickInViewMenu, resultsText, SHELL, stateIdle, until } from 
 /**
  * **A TM COPY'S VALUE REACHES THE FOOTER READOUT WITH NOTHING ELSE REDRAWING IT.** `replies.ts`'s scratch-reply
  * `case 'tm-value'` stores the reading on the entry and calls the TM view's own `setScratchValue`, which writes
- * `.tm-value`, the copy's IN-PANE line; `#results`, the footer readout `readout.ts`'s `tmCopyFacts` feeds
+ * `.tm-value`, the copy's IN-PANE line; `#results`, the footer readout `readout.ts`'s `COPY_FACTS` feeds
  * (spec §9), is repainted only by a draw, so an arm that skipped it would leave the footer without the value
  * until some unrelated gesture forced a redraw.
  *

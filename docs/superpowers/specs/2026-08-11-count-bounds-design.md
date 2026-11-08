@@ -290,7 +290,9 @@ fourth is reported by the lowering, because it can only be known after laying ou
 `lower_tm_all`. More informative, and it would let the three pre-checks collapse into the lowering
 and remove the duplicated guard logic. Not taken here because folding the pre-checks in means
 `MAX_SLOTS` no longer refuses *before* `init_reg`'s huge allocation, which `lower_and_size`'s doc
-calls out as a reason it checks early. Worth revisiting as its own slice.
+calls out as a reason it checks early. Worth revisiting as its own slice. (That reason does not hold:
+`attempt` asks `lower_tm_guarded` before it calls `init_reg`, and `lower_tm_all` refuses `MAX_SLOTS`
+itself, so the pre-checks, now `tm::sized`, are an early exit.)
 
 ### 4.3 `MAX_NODE_ID: NodeId = 1_000_000_000` — capping issuance at the source
 

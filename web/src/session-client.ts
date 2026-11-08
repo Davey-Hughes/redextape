@@ -94,48 +94,18 @@ export class SessionClient {
   }
 
   /**
-   * Post the λ scratchpad build for `gen`, or do nothing if a later `supersede` has already replaced
-   * it — 5d-i design §4.3's fork. ON A FORK, `src` IS THE SOURCE'S STEP-0 TEXT, NOT THE TEXT A PANE WAS
-   * SHOWING — the `step` parameter below is what turns that fixed text into the actual term a pane had
-   * on screen (`lambda_scratch_at`'s replay, `transport.ts`'s `detach`). Both arrive from the caller
-   * unresolved, for the reason `ScratchBuffers.fork`'s doc gives for being handed the same two: neither
-   * is this class's to go looking for.
+   * Post the build of a `leg` copy from `src` for `gen`, or do nothing if a later `supersede` has already replaced it
+   * (`protocol.ts`'s `RunRequest` says what `step` means). ON A λ FORK, `src` IS THE SOURCE'S STEP-0 TEXT, and
+   * `step` turns it into the term the pane had on screen (`lambda_scratch_at`'s replay, `transport.ts`'s `detach`);
+   * both arrive unresolved, for the reason `ScratchBuffers.fork`'s doc gives for being handed the same two.
    *
-   * THE SAME GUARD AS `request` AND FOR THE SAME REASON, spelled out rather than shared: both are
-   * "post this generation's work if it is still the current one", and the two differ only in the
-   * message they build. Folding them into one method taking a `RunRequest` would move the choice of
-   * message to every call site.
-   *
-   * IT DOES NOT CLAIM A GENERATION EITHER, mirroring `request`: a scratchpad is seeded by a caller who
-   * has just decided to supersede whatever that session was doing, and `SessionClient.supersede`'s own
-   * doc is the argument for keeping the claim at the dispatch site.
+   * THE SAME GUARD AS `request`, spelled out rather than shared: folding the two into one method taking a `RunRequest`
+   * would move the choice of message to every call site. IT DOES NOT CLAIM A GENERATION EITHER: a copy is seeded by a
+   * caller who has just superseded what the session was doing, and `supersede`'s doc keeps the claim at that site.
    */
-  scratch(gen: number, src: string, step: number): void {
+  scratch(gen: number, leg: Leg, src: string, step: number): void {
     if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'lambda-scratch', gen, src, step })
-  }
-
-  /**
-   * Build a TM scratchpad from `.tm` text and open a cursor on it — 5d-iv design §4.4.
-   *
-   * NO `step`, UNLIKE `scratch`, FOR THAT REQUEST'S OWN REASON STATED ON THE WIRE TYPE: a machine has
-   * no step-k term to replay to, so the text in the box IS the term the scratch starts from.
-   *
-   * THE SAME GUARD AS `request`/`scratch` AND FOR THE SAME REASON: post this generation's work only if
-   * it is still the current one.
-   */
-  tmScratch(gen: number, src: string): void {
-    if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'tm-scratch', gen, src })
-  }
-
-  /**
-   * Build an rxm copy from `.rxm` text and run it — Plan 7 part 5 spec §7. No `step`, for `tmScratch`'s reason: the
-   * text is the program, and a copy starts at its first instruction. The same generation guard as its siblings.
-   */
-  rxmScratch(gen: number, src: string): void {
-    if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'rxm-scratch', gen, src })
+    this.#port.postMessage({ kind: 'scratch', gen, leg, src, step })
   }
 
   /**
@@ -263,8 +233,8 @@ export class SessionPool {
    * element — a decision about DOM, taken in a module that has none.
    *
    * IT TAKES NO `SessionId`. A scratch session runs the SAME `session-worker.ts` module a source session
-   * does; what differs is the first message it is sent (`protocol.ts`'s `lambda-scratch`, `tm-scratch`
-   * or `rxm-scratch` against `run`), because the module's job is "hold one wasm handle and answer about
+   * does; what differs is the first message it is sent (a `scratch` request against a `run`, in
+   * `protocol.ts`'s `RunRequest`), because the module's job is "hold one wasm handle and answer about
    * it" and every kind of handle is that. So the kind is a fact about the CONVERSATION and not about the
    * thread, and there is nothing for a `SessionId` here to select.
    *

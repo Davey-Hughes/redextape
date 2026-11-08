@@ -269,7 +269,7 @@ impl TmHeader {
     /// `slots > MAX_SLOTS` will PRINT and then fail to parse back — optionality property 2 holds for
     /// headers within those caps, not for every value this constructor admits. `run_tm_described`
     /// cannot exceed them: its width comes from the auto-fit search, which clamps at `MAX_FIELD_WIDTH`,
-    /// and its slot count from `lower_and_size`, which refuses above `MAX_SLOTS` before a machine is
+    /// and its slot count from `sized`, which refuses above `MAX_SLOTS` before a machine is
     /// ever built; `reduce` (in `reduced_file.rs`) copies `width` and `slots` from the `DescribedRun` it
     /// reduces. The caps are not re-checked here because doing so would make a pure normalizer
     /// fallible for a case its callers cannot reach — but a hand-built header is outside the guarantee,

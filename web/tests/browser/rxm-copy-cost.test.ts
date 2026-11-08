@@ -1,5 +1,6 @@
 import { describe, expect, inject, it } from 'vitest'
 import type * as Wasm from '../../../pkg/redextape_wasm.js'
+import type { RunRequest } from '../../src/protocol'
 import { ScratchEditor } from '../../src/scratch-editor'
 import type { Decoded, Diagnostic, RxmProgram, RxmStatus } from '../../src/types'
 import { cloneMs, median, ms } from './harness'
@@ -103,7 +104,7 @@ describe('rxm copy cost', () => {
       const back: number[] = []
       let instructions = 0
       for (let r = 0; r < REPS; r++) {
-        clone.push(await cloneMs({ kind: 'rxm-scratch', gen: 1, src: text }))
+        clone.push(await cloneMs({ kind: 'scratch', gen: 1, leg: 'rxm', src: text, step: 0 } satisfies RunRequest))
         const t1 = performance.now()
         const copy = build(text)
         parse.push(performance.now() - t1)

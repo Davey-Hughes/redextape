@@ -4,6 +4,7 @@ import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
 import { PaneCollection, type PaneEntry } from '../../src/panes'
 import type { RecordEnd, RunReply, RunRequest } from '../../src/protocol'
+import { lambdaFrameBytes, rxmFrameBytes, tmFrameBytes } from '../../src/protocol'
 import { createReplies } from '../../src/replies'
 import { ScratchBuffers } from '../../src/scratch'
 import type { PoolPort, SessionId } from '../../src/session-client'
@@ -80,27 +81,25 @@ function sourceEntry(): SessionEntry {
       rxm: legState<RxmState>(false, 1_000_000),
       tm: legState<TmState>(false, 1_000_000),
     },
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   }
 }
 
-const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply => ({
+const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<RunReply, { kind: 'compiled' }> => ({
   kind: 'compiled',
   gen: 1,
-  lambda: { available: true, reason: '', node: null, run: null },
-  rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
-  tm: { available: true, reason: '', width: 8, run: null, total_steps: null },
+  statuses: {
+    lambda: { available: true, reason: '', node: null, run: null },
+    rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
+    tm: { available: true, reason: '', width: 8, run: null, total_steps: null },
+  },
+  programs: {
+    rxm: null,
+    tm: tmProgram === null ? null : { program: tmProgram, tapeNames, text: null, tmResultDecodable: true },
+  },
   declinedSpan: null,
-  tmProgram,
-  rxmProgram: null,
-  tapeNames,
   linkIndex: null,
-  tmText: null,
-  tmResultDecodable: true,
-  rxmText: null,
 })
 
 /**
@@ -108,7 +107,7 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): RunReply =>
  *
  * `frame` IS OVERRIDABLE FOR `scratchDriver`'s REASON, AND DEFAULTS TO ITS STAND-IN, a callback run straight. A
  * recording chunk that does not end the recording schedules its redraw on `frame`, and `createReplies`' own default,
- * `requestAnimationFrame`, is not defined in this tier: a `*-frames` reply sent here without a stand-in would throw.
+ * `requestAnimationFrame`, is not defined in this tier: a `frames` reply sent here without a stand-in would throw.
  */
 function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } = {}) {
   const reg = new SessionRegistry()
@@ -152,11 +151,11 @@ describe('a session retains its last compiled machine', () => {
     const entry = sourceEntry()
     const { replies, dispatched, indexed, drawn } = driver(entry)
 
-    expect(entry.tmProgram).toBeNull()
+    expect(entry.programs.tm).toBeNull()
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE', 'STACK']))
 
-    expect(entry.tmProgram?.program).toBe(ONE_RULE_PROGRAM)
-    expect(entry.tmProgram?.tapeNames).toEqual(['TAPE', 'STACK'])
+    expect(entry.programs.tm?.program).toBe(ONE_RULE_PROGRAM)
+    expect(entry.programs.tm?.tapeNames).toEqual(['TAPE', 'STACK'])
     // AND THE REST OF THE ARM RAN — see this file's doc: the two reached stubs are what say so.
     expect(dispatched.length).toBe(1)
     expect(indexed).toEqual([null])
@@ -165,21 +164,20 @@ describe('a session retains its last compiled machine', () => {
 
   /**
    * **A COMPILE THAT PRODUCED NO MACHINE RETAINS NOTHING, AND `null` IS NOT A PLACEHOLDER HERE.** The
-   * worker sends `tmProgram: null` for a program whose TM leg is declined, and the seeding in
-   * `pane-host.ts` reads exactly this field, so a retention that stored the reply unconditionally would
-   * hand a new pane a `null` program wrapped in a non-null envelope and have it paint an empty δ-table
-   * over a `width` line with no machine behind it.
+   * worker sends `programs.tm: null` for a program whose TM leg is declined, and the seeding in
+   * `pane-host.ts` reads exactly this field, so a retention that kept the last machine instead would
+   * hand a new pane the previous compile's δ-table over a `width` line with no machine behind it.
    */
   it('retains nothing when the reply carried no machine', () => {
     const entry = sourceEntry()
     const { replies } = driver(entry)
 
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
-    expect(entry.tmProgram).not.toBeNull()
+    expect(entry.programs.tm).not.toBeNull()
 
     replies.onReply(SOURCE, compiled(null, []))
 
-    expect(entry.tmProgram).toBeNull()
+    expect(entry.programs.tm).toBeNull()
   })
 
   /**
@@ -196,8 +194,8 @@ describe('a session retains its last compiled machine', () => {
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
     replies.onReply(SOURCE, compiled(second, ['REG']))
 
-    expect(entry.tmProgram?.program).toBe(second)
-    expect(entry.tmProgram?.tapeNames).toEqual(['REG'])
+    expect(entry.programs.tm?.program).toBe(second)
+    expect(entry.programs.tm?.tapeNames).toEqual(['REG'])
   })
 })
 
@@ -326,12 +324,12 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
       return { dismiss: () => void dismissed.push(t) }
     },
   })
-  // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST — `scratch.test.ts`'s `harness()`
+  // THE MOST RECENT PORT'S MOST RECENT λ `scratch` REQUEST — `scratch.test.ts`'s `harness()`
   // defines the identical helper under the identical name, for the identical reason: `cool`/`warm`'s
   // round trip opens a NEW port, so "most recent port" is what "the build `warm` just posted" means.
   const lastScratchPost = (): { src: string; step: number } | undefined => {
     const req = ports.at(-1)?.sent.at(-1)
-    return req?.kind === 'lambda-scratch' ? { src: req.src, step: req.step } : undefined
+    return req?.kind === 'scratch' && req.leg === 'lambda' ? { src: req.src, step: req.step } : undefined
   }
   return {
     reg,
@@ -433,7 +431,7 @@ describe('a poisoned buffer survives its own no-session reply', () => {
 
   /**
    * **THE COPY'S LEG SAYS IT DID NOT BUILD**, the reason its view's step line and its readout read while the leg is not
-   * available (`controls.ts`'s `controlState`, `readout.ts`'s `lambdaCopyParts`). The `building…` a new copy's leg
+   * available (`controls.ts`'s `controlState`, `readout.ts`'s `copyParts`). The `building…` a new copy's leg
    * starts with would go on saying a build is coming after this one has been answered. A build that lands replaces it.
    */
   it('says on the copy’s leg that it did not build, until a build of it lands', () => {
@@ -623,8 +621,8 @@ describe('a TM buffer retains what its panes were last told', () => {
     const { buffers, reg, replies } = scratchDriver()
     const id = buffers.forkBlank('tm')
     replies.onScratchReply(id, built(['5 tapes, interleaved']))
-    expect(reg.entryOf(id).tmProgram?.tapeNames).toEqual(['5 tapes, interleaved'])
-    expect(reg.entryOf(id).tmScratch).toEqual({ status: STATUS, value: null })
+    expect(reg.entryOf(id).programs.tm?.tapeNames).toEqual(['5 tapes, interleaved'])
+    expect(reg.entryOf(id).readings.tm).toEqual({ status: STATUS, value: null })
   })
 
   it('holds the latest value reading beside that status', () => {
@@ -635,7 +633,7 @@ describe('a TM buffer retains what its panes were last told', () => {
     replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: running, value: 'Unfinished' })
     const ended = { run: 'Ended', steps: 241_666, cap: 241_666 } as const
     replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: ended, value: { Value: { text: '2' } } })
-    expect(reg.entryOf(id).tmScratch).toEqual({
+    expect(reg.entryOf(id).readings.tm).toEqual({
       status: STATUS,
       value: { run: ended, value: { Value: { text: '2' } } },
     })
@@ -692,7 +690,7 @@ describe('a TM buffer retains what its panes were last told', () => {
     // but it must not draw again for a run that has already ended and already flushed.
     fireFrame()
     expect(drawn).toBe(2)
-    expect(reg.entryOf(id).tmScratch?.value).toEqual({ run: ended, value: { Value: { text: '2' } } })
+    expect(reg.entryOf(id).readings.tm?.value).toEqual({ run: ended, value: { Value: { text: '2' } } })
   })
 
   it('a new build forgets the previous value', () => {
@@ -706,7 +704,7 @@ describe('a TM buffer retains what its panes were last told', () => {
       value: { Value: { text: '2' } },
     })
     replies.onScratchReply(id, built(['REG']))
-    expect(reg.entryOf(id).tmScratch?.value).toBeNull()
+    expect(reg.entryOf(id).readings.tm?.value).toBeNull()
   })
 
   it('forgets a reading that was still running when the next text does not build', () => {
@@ -720,7 +718,7 @@ describe('a TM buffer retains what its panes were last told', () => {
       value: 'Unfinished',
     })
     replies.onScratchReply(id, { kind: 'no-session', gen: 1, diagnostics: [] })
-    expect(reg.entryOf(id).tmScratch).toEqual({ status: STATUS, value: null })
+    expect(reg.entryOf(id).readings.tm).toEqual({ status: STATUS, value: null })
   })
 
   it('keeps a finished reading when the next text does not build', () => {
@@ -734,29 +732,37 @@ describe('a TM buffer retains what its panes were last told', () => {
       value: { Value: { text: '2' } },
     })
     replies.onScratchReply(id, { kind: 'no-session', gen: 1, diagnostics: [] })
-    expect(reg.entryOf(id).tmScratch?.value).toEqual({
+    expect(reg.entryOf(id).readings.tm?.value).toEqual({
       run: { run: 'Ended', steps: 241_666, cap: 241_666 },
       value: { Value: { text: '2' } },
     })
   })
+
+  it('forgets its reading when its worker throws', () => {
+    const { buffers, reg, replies } = scratchDriver()
+    const id = buffers.forkBlank('tm')
+    replies.onScratchReply(id, built(['REG']))
+    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
+    expect(reg.entryOf(id).readings.tm).toBeNull()
+  })
 })
 
 /**
- * **A RECORDING CHUNK'S REDRAW IS COALESCED TO ONE PER FRAME, AS A RUNNING VALUE'S IS** — the six `*-frames` arms,
- * three in each switch. `record-loop.ts`'s `recordLeg` posts one chunk per `RECORD_CHUNK` steps while any leg records,
- * far more often than a display paints, so each arm pushes the chunk's frames at once and leaves only the paint for
- * the next frame; the chunk that ends the recording paints at once, since a copy's run gets no `result` reply to
- * paint its last frame.
+ * **A RECORDING CHUNK'S REDRAW IS COALESCED TO ONE PER FRAME, AS A RUNNING VALUE'S IS** — the two `frames` arms, one
+ * in each switch, over three legs. `record-loop.ts`'s `recordLeg` posts one chunk per `RECORD_CHUNK` steps while any
+ * leg records, far more often than a display paints, so each arm pushes the chunk's frames at once and leaves only the
+ * paint for the next frame; the chunk that ends the recording paints at once, since a copy's run gets no `result`
+ * reply to paint its last frame.
  *
- * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. Each of the six arms passes its own leg and sizer to the
- * helper they share, and a wrong one is wrong in that arm alone, so a case run against one says nothing of the rest.
+ * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. The helper both arms share sizes a chunk by its leg's
+ * `LEG_FRAME_BYTES` entry, and a wrong entry is wrong for that leg alone, so one leg's case says nothing of the rest.
  */
 describe('a recording chunk redraws once per frame', () => {
   const FRAMES_LEGS = ['lambda', 'tm', 'rxm'] as const
   type FramesLeg = (typeof FRAMES_LEGS)[number]
   const CASES = (['onReply', 'onScratchReply'] as const).flatMap((sw) => FRAMES_LEGS.map((l) => [sw, l] as const))
 
-  /** A `*-frames` reply for `leg` carrying steps `from` to `from + 1` under `epoch`, and the frames it carries. */
+  /** A `frames` reply for `leg` carrying steps `from` to `from + 1` under `epoch`, and the frames it carries. */
   const chunk = (
     leg: FramesLeg,
     from: number,
@@ -767,15 +773,15 @@ describe('a recording chunk redraws once per frame', () => {
     switch (leg) {
       case 'lambda': {
         const frames = steps.map((step) => ({ ...lambdaFrame(`t${step}`), step }))
-        return { reply: { kind: 'lambda-frames', gen: 1, epoch, frames, done }, frames }
+        return { reply: { kind: 'frames', leg: 'lambda', gen: 1, epoch, frames, done }, frames }
       }
       case 'tm': {
         const frames = steps.map((step) => tmFrame(0, step, 'a'))
-        return { reply: { kind: 'tm-frames', gen: 1, epoch, frames, done }, frames }
+        return { reply: { kind: 'frames', leg: 'tm', gen: 1, epoch, frames, done }, frames }
       }
       case 'rxm': {
         const frames = steps.map((step) => frameOf({ step }))
-        return { reply: { kind: 'rxm-frames', gen: 1, epoch, frames, done }, frames }
+        return { reply: { kind: 'frames', leg: 'rxm', gen: 1, epoch, frames, done }, frames }
       }
     }
   }
@@ -924,6 +930,40 @@ describe('a recording chunk redraws once per frame', () => {
     q.fire()
     expect(drawn).toBe(1)
   })
+
+  /** `frames`, charged by `leg`'s own function, named here rather than read off `LEG_FRAME_BYTES`. */
+  const ownCharge = (leg: FramesLeg, frames: unknown[]): number[] => {
+    switch (leg) {
+      case 'lambda':
+        return (frames as LambdaState[]).map((f) => lambdaFrameBytes(f))
+      case 'tm':
+        return (frames as TmState[]).map((f) => tmFrameBytes(f))
+      case 'rxm':
+        return (frames as RxmState[]).map((f) => rxmFrameBytes(f))
+    }
+  }
+
+  /**
+   * **EACH LEG'S FRAMES ARE CHARGED BY THAT LEG'S OWN FUNCTION, IN BOTH SWITCHES.** Both size a chunk through
+   * `LEG_FRAME_BYTES`, and an entry that charges a leg's frame otherwise fills or empties the ring early with nothing on
+   * screen to say so. The charge is read where the ring takes it, at its `push`, and checked against `ownCharge`, so
+   * that the table is checked against something other than itself.
+   */
+  it('charges each leg’s frames by that leg’s own function, in both switches', () => {
+    for (const [sw, leg] of CASES) {
+      const h = harness(sw, leg)
+      const { hist } = h.leg()
+      const charged: number[] = []
+      const push = hist.push.bind(hist)
+      hist.push = (frame, bytes) => {
+        charged.push(bytes)
+        push(frame, bytes)
+      }
+      const { reply, frames } = chunk(leg, 0, 'ended')
+      h.send(reply)
+      expect(charged, `${sw}, ${leg}`).toEqual(ownCharge(leg, frames))
+    }
+  })
 })
 
 /**
@@ -947,8 +987,8 @@ describe('an rxm copy retains what its views were last told', () => {
     const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built({ Value: { text: '0 (no result type)' } }))
     const entry = reg.entryOf(id)
-    expect(entry.rxmProgram).toEqual({ program: LISTING, rxmText: null })
-    expect(entry.rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '0 (no result type)' } } })
+    expect(entry.programs.rxm).toEqual({ program: LISTING, text: null })
+    expect(entry.readings.rxm).toEqual({ status: STATUS, value: { Value: { text: '0 (no result type)' } } })
     expect(entry.legs.rxm?.status).toEqual({ available: true, reason: '' })
     expect(persists()).toBe(1)
   })
@@ -958,7 +998,8 @@ describe('an rxm copy retains what its views were last told', () => {
     const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, {
-      kind: 'rxm-frames',
+      kind: 'frames',
+      leg: 'rxm',
       gen: 1,
       epoch: 0,
       frames: [frameOf(), frameOf({ step: 1 })],
@@ -975,7 +1016,7 @@ describe('an rxm copy retains what its views were last told', () => {
     const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '[1, 2, 3]' } } })
-    expect(reg.entryOf(id).rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
+    expect(reg.entryOf(id).readings.rxm).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
   })
 
   /** A rewind takes the copy's cursor back under its build's cap, where its next `[continue]` reads `Unfinished`. */
@@ -985,7 +1026,7 @@ describe('an rxm copy retains what its views were last told', () => {
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '6' } } })
     replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: 'Unfinished' })
-    expect(reg.entryOf(id).rxmScratch).toEqual({ status: STATUS, value: { Value: { text: '6' } } })
+    expect(reg.entryOf(id).readings.rxm).toEqual({ status: STATUS, value: { Value: { text: '6' } } })
   })
 
   it('tells every view on the copy the value a [continue] brings, and the null a dead worker leaves', () => {
@@ -999,7 +1040,7 @@ describe('an rxm copy retains what its views were last told', () => {
       pane: { setScratch: (r: unknown) => told.push(r) } as unknown as PaneEntry<'rxm'>['pane'],
       host: {} as HTMLElement,
     })
-    reg.entryOf(id).rxmScratch = { status: STATUS, value: 'Unfinished' }
+    reg.entryOf(id).readings.rxm = { status: STATUS, value: 'Unfinished' }
     replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '6' } } })
     replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
     expect(told).toEqual([{ status: STATUS, value: { Value: { text: '6' } } }, null])
@@ -1010,11 +1051,11 @@ describe('an rxm copy retains what its views were last told', () => {
     const id = buffers.forkBlank('rxm')
     replies.onScratchReply(id, built('Unfinished'))
     replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
-    expect(reg.entryOf(id).rxmScratch).toBeNull()
+    expect(reg.entryOf(id).readings.rxm).toBeNull()
   })
 })
 
-/** The program's rxm text rides `compiled` beside its listing, for *edit a copy* — `tmText`'s arrangement. */
+/** The program's rxm text rides `compiled` beside its listing, for *edit a copy* — `TmCompiled.text`'s arrangement. */
 describe('a session retains its rxm text beside its listing', () => {
   const LISTING: RxmProgram = { listing: ['li\trr, #1', 'halt'], labels: [] }
 
@@ -1023,15 +1064,15 @@ describe('a session retains its rxm text beside its listing', () => {
     const { replies } = driver(entry)
     const rxm: RxmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 2 }
     const text = 'result Nat\n\n    li\trr, #1\n    halt\n'
+    const base = compiled(ONE_RULE_PROGRAM, ['TAPE'])
     replies.onReply(SOURCE, {
-      ...compiled(ONE_RULE_PROGRAM, ['TAPE']),
-      rxm,
-      rxmProgram: LISTING,
-      rxmText: text,
-    } as RunReply)
-    expect(entry.rxmProgram).toEqual({ program: LISTING, rxmText: text })
+      ...base,
+      statuses: { ...base.statuses, rxm },
+      programs: { ...base.programs, rxm: { program: LISTING, text } },
+    })
+    expect(entry.programs.rxm).toEqual({ program: LISTING, text })
 
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
-    expect(entry.rxmProgram).toBeNull()
+    expect(entry.programs.rxm).toBeNull()
   })
 })

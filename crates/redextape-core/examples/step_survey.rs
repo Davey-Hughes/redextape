@@ -57,7 +57,7 @@ use redextape_core::run;
 use redextape_core::tm::attribute::{Attribution, StepBucket, attribute, attribute_at};
 use redextape_core::tm::{
     Binary, Encoding, LowerError, MIN_FIELD_WIDTH, Program, REG, TAPES, TM_DEFAULT_CAPS, TmRun, TmStatus, Unary, WORK,
-    defunc, lower_rxm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
+    defunc, lower_program, lower_rxm, lower_tm_guarded, n_slots_of, run_tm_fitted, simulate_counts, simulate_final,
 };
 
 #[path = "common/allocator.rs"]
@@ -533,10 +533,7 @@ fn steps_at(src: &str, enc: &dyn Encoding) -> Option<u64> {
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in `{src}`: {ds:?}");
     let core = desugar(&prog.unwrap());
-    let program = match lower_rxm(&core) {
-        Ok(p) => p,
-        Err(_) => lower_rxm(&defunc(&core).ok()?).ok()?,
-    };
+    let program = lower_program(&core).ok()?;
     let (m, overflow) = lower_tm_guarded(&program, enc).expect("survey demo must not be refused");
     let mut init = vec![Vec::new(); TAPES];
     init[REG] = enc.init_reg(n_slots_of(&program));
@@ -1326,9 +1323,9 @@ fn classify_callee(callee: &Core, rec: &[&str]) -> ApplyClass {
 
 /// The Core `attribute` actually lowered for `src`: original if first-order, defunctionalized if
 /// higher-order, plus whether it was first-order. Mirrors `lower_program`'s try-first-order-then-defunc
-/// retry — the same pattern `tm_demo.rs`'s own `compile_tm` helper already uses. Needed only so a
-/// `Node(id)` bucket can be labeled; `attribute` deliberately does not expose its internal Core (zero
-/// blast radius on the pipeline is the whole point of the source-map design). `defunc` is literally
+/// retry, because `lower_program` returns no Core to label against. Needed only so a `Node(id)` bucket
+/// can be labeled; `attribute` deliberately does not expose its internal Core (zero blast radius on the
+/// pipeline is the whole point of the source-map design). `defunc` is literally
 /// `defunc_mapped(..).map(|(c, _)| c)`, so this Core is bit-identical to the attributed one, same ids.
 fn core_for_display(src: &str) -> (Core, bool) {
     let (prog, ds) = redextape_core::parser::parse(src);

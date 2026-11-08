@@ -7,7 +7,7 @@ import type { RxmState, RxmStatus } from '../../src/types'
  * does, records its rxm leg to `HISTORY_BYTES` charged, and answers the frames it recorded and the leg's run state
  * (`rxmStatus().run`) after the last step.
  *
- * **THE RECORDING IS `session-worker.ts`'s `RXM_RECORDING` RUN BY `recordLeg`, IN ITS ORDER**: the first frame, then a
+ * **THE RECORDING IS `session-worker.ts`'s `RECORDINGS.rxm` RUN BY `recordLeg`, IN ITS ORDER**: the first frame, then a
  * step and a frame while the charged bytes are under the allowance, which `recordLeg` checks before each step, so it
  * stops at the first frame that reaches `HISTORY_BYTES` or at the leg's end. A recording that reached the allowance is
  * the one that fills the page's ring; one that ended short of it does not, and the test refuses it.

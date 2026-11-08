@@ -33220,3 +33220,565 @@ build, test or timing; the other rows name the report or log a figure comes from
 | exit 0 each; 0.28.0; `e9bbf67` | the whole-branch gate's steps, at `50710a8` (now `cf1dfed`); the tree-sitter its first `check-all.sh` stopped on; the comment guard's base | `$R/gate-logs/whole-branch-gate.md`, from the logs it names |
 | 117; 13; 1319, 32; 7, 3; exit 0 each | after the second rebase | `Summary` and `EXIT=` in `$R/rebase2-logs/{n1-native-llvm,n2-native-rt,n3-core,s-snapshot-gate,c-clippy,p-pnpm-install}.log` |
 | the user's words | D5, the re-measure and the code-placement test | the `USER` lines of `$R/progress.md` |
+
+#### THE IR VIEWS GROUNDWORK'S PR 3: THE EIGHT WIRE TYPES, THEIR HELPERS AND `to_value` MOVE TO A NEW CRATE, `redextape-wire`, AND `web/bindings/` CHANGES IN JSDOC ONLY; CORE'S RXM `Program` GAINS SERDE; A COMPILE LOWERS CORE TO RXM ONCE FOR THE SOURCE MAP, THE TM RUN AND THE RXM LEG, WITH ONE TM STATUS MAPPING AND ONE COPY PROLOGUE; THE WEB'S FRAMES, RECORDINGS, SCRATCH REQUESTS, REPLIES AND SESSION FIELDS ARE KEYED BY `Leg` THROUGH TABLES; AND A `wasm-opt` SETTING, HELD BY A NODE TEST, KEEPS THE DEFUNCTIONALIZER OUT OF THE `compile` EXPORT (2026-11-07, branch `ir-wire-legs`, `783af0e..4065424`, 53 commits, plus this entry)
+
+**Spec §4.4 and §5.1** (`docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md`), the groundwork's third pull
+request in §6's order, gated by §7.2 (no hot path slows) and §7.3 (the app behaves the same, with a walkthrough in a
+browser). The plan is `docs/superpowers/plans/2026-11-06-ir-views-pr3-wire-legs.md`, committed as `daafd4c` and
+`bc068d1`. The user started the lane on 2026-11-06 ("resume the next IR step is PR 3 of the groundwork spec") and
+decided Q1 the same day: `redextape-wire`'s comment budget is its measured share after the verbatim move, and the trim
+of the moved docs is a later comment pass. On 2026-11-07 he accepted the amend of `ab0e8ee`'s message and the
+controller's rulings that the first two handoffs list ("amend is fine and the rulings you made are fine"), said to wait
+for the `ra-gui` session's CI job before the quiet-machine hold, to "try the `#[inline(never)]` split first", to land
+the `wasm-opt` setting that trial found "with a guard", and to leave the check of upstream binaryen's `wasm-opt` to CI.
+Later that day, after a fact-check of this entry, he decided to amend it with the check's corrections and to have the
+record probe's cases (e), (f) and (h) measured again at the head under a quiet-machine hold. On 2026-11-08, when that
+round flagged (b)'s `compiled` ms, he decided to run both a four-side diagnosis of (b) and the rule's repeat round in
+one hold, then to test the mechanism before choosing, and then to keep WOPT's setting, this entry recording (b)'s cost
+at the head, with the diagnosis, the mechanism and their limits, as an open item. Of the 53 commits, 2 change only
+`docs/` (the plan's two) and 51 change something outside it. The lane record is `~/temp/redextape-ir-wire-legs-record/`
+(`$R` below); its ledger is `$R/progress.md`. `$V` is `$R/z4/verify`: `$V/figures.zsh` re-reads the figures below that
+git, a record file or a log gives, and re-runs the comparers of the window's rounds, the heap rounds, the trace and the
+split trial, and the two module comparisons, comparing each output with the stored one by `cmp`, into `$V/figures.log`;
+`$V/heavy.zsh` rebuilds `web/bindings/` and runs the leg count at the head, into `$V/heavy.log`. A row that names a
+report gives the figure as that report states it. `figures.zsh` runs none of the commands in the rows for the re-run,
+the diagnosis and the mechanism.
+
+**The amend.** On 2026-11-07 a scripted rebase from `3b2bfa7` corrected `ab0e8ee`'s message, which had left 2 renamed
+setup lines in `sessions.test.ts` out of its count. `ab0e8ee`, `88bca6f` and `3930912` became `7b7e974`, `e8dd37f` and
+`0e1f5ac`; `git diff --quiet 3930912 0e1f5ac` exits 0, and the ledger's range-diff changed the message line only. This
+entry names those three commits by their new SHAs.
+
+##### WHAT SHIPPED, TASK BY TASK
+
+Each task was its implementers' commits, then a review; the commits after "then" answer that review.
+
+- **The plan, `daafd4c` and `bc068d1`.** `bc068d1` names a new `web/src/copy-build.ts` as the home of the copy build.
+- **W0 (§7.2's base point), `6c11fe6`, then `7e2bbe8` and `eb1d954`.** A new probe,
+  `web/tests/browser/record-cost.test.ts`, times recording through the real session worker: (a) fact-12 and (b)
+  `sum_to(2750)` through all three legs, (c) and (d) two rxm copies, (g) a TM copy, (e) and (f) stepping the program's
+  and a copy's views in the strip and the inspector, and (h) a replay of fact-12's captured replies through `onReply`.
+  It prints each timing as a `RUN` line and each count that must not vary as a `FIXED` line. W0 changes no Rust.
+- **R1, `f883480`, then `83a66a9`.** Serde for core's rxm `Program`, its instructions, registers, operators and caps,
+  behind core's `serde` feature, with a round trip over the web app's corpus.
+- **R2, `35def12`, then `23c63a1` and `b958906`.** One lowering dispatch, `tm::lower_program_mapped`, which keeps each
+  instruction's origin, for `lower_program`, the source map and attribution. `b958906` sends 17 test and example helpers
+  that wrote the dispatch by hand through `lower_program`; its message says 15.
+- **R3, `4286fc8`, then `fc0bb83`.** The TM run (`run_tm_described_program`) and the source map (`sourcemap::Prepared`,
+  `build_prepared`) take a lowering their caller hands them.
+- **R4, `3f1afbf` and `e1fd2c1`, then `b64341b` and `219c9ce`.** One lowering per compile: `compile_with_caps` builds
+  one `Prepared`, which the source map, the TM run and the rxm leg share, and `build_rxm_leg` is gone. `e1fd2c1` and
+  `219c9ce` hold the Mul-count and frame-bank refusals through `run_tm_described_program` and through `sized` itself.
+- **R5, `10f4d9a`, and R6, `9e85993`, then `5be47d2` and `7838a85`.** One TM cursor → `RunStatus` mapping,
+  `tm_run_status`; one copy prologue, the size `Ceiling` (`TM_CEILING`, `RXM_CEILING`) and then `parse_copy`.
+- **R7, `2e1285f` and `36384e0`, then `7acfc3c` and `95985b6`.** The eight wire types move verbatim to
+  `crates/redextape-wire`, a path dependency of `redextape-wasm`, which loses its `ts` feature and `ts-rs`; the bindings
+  come from the wire crate. `36384e0` and `95985b6` change doc words (THE GENERATED TYPESCRIPT), and `7acfc3c` doc words
+  and the wire crate's test-support dev-dependency, whose target gate it drops (a controller's ruling). The wire crate's
+  budget is its measured share (Q1): 0.6950 at R7, written down to 0.6328 by `cba2ac0`.
+- **R8, `0ac62bf`, then `4567489` and `cba2ac0`.** `to_value`, `rxm_fault`, `decoded_value`, `grouped`,
+  `decoded_or_undecodable` and `decoded_of` move to `redextape-wire`, and `redextape-wasm` drops `serde`. The review
+  found `to_value`'s instantiations no longer inlined across the crate boundary; `4567489` marks it `#[inline]`, and at
+  `cba2ac0` the code section of the raw `cargo build --release` module was 1,138,154 B, the figure at R8's base,
+  `95985b6`.
+- **W1, `17b7c6b` and `4dea6c3`, then `6e4d9a4`.** One `frames` reply carrying its leg, and one frame-bytes table,
+  `LEG_FRAME_BYTES`. `4dea6c3` makes `wasm-vocabulary.test.ts` read the copy names and the ceiling sentence as the built
+  module holds them: it had failed since R6's `9e85993` made the sentence a template, and no R task rebuilt `pkg/`, so
+  W1 was the first to run the web tiers against R1 to R8. `6e4d9a4` posts each chunk through a per-leg table without a
+  cast.
+- **W2, `a31596f`, then `7ffe6ba`.** `RECORDINGS`: legs record, extend and rewind through one table and the `<K extends
+  Leg>` helpers `record`, `extend` and `rewind` in `session-worker.ts`; `onRun` records in `LEGS` order (λ, rxm, TM),
+  held by a new browser case.
+- **W3, `aeda0df` and `fe2e858`, then `8eb4cce`.** One `scratch` request carrying its leg, one reset (`resetRecording`)
+  and one fresh-leg builder; the copy build and the one-occupant rule move to `copy-build.ts`.
+- **W4, `a99fd10`, then `b4c441c`.** The `result` reply's legs, and the rows read from them, keyed by leg, with
+  `mapLegs`.
+- **W5, `7c206ea`, then `3b2bfa7`.** The `compiled` reply carries each leg's status and program under its leg; `3b2bfa7`
+  makes a TM program fail to pass as the rxm one, unless it is widened first.
+- **W6, `7b7e974` and `e8dd37f`, then `0e1f5ac`.** `SessionEntry`'s `programs` and `readings` keyed by leg, and one seed
+  table, `SEED`.
+- **W7, `cdae0ec`, then `0796d92`.** A copy's readout and its row from one table, `COPY_FACTS`. The review found that
+  the first form let a union leg pass one leg's reading under another's, which the base refused; `0796d92` gives each
+  copy function its own leg's readings.
+- **W8, `a8a1451`, then `9e05912`.** One detach for a machine's or a listing's program (`programFork`), and one table
+  for an editor whose view leaves (`EDITOR_ON_LEAVE`). `9e05912` is the controller's comment fix.
+- **WOPT, `5fac6ac` and `3c382ab`.** `5fac6ac`, cherry-picked from the split trial's `ae5fdac`, gives
+  `crates/redextape-wasm/Cargo.toml` a wasm-pack release profile, `wasm-opt =
+  ["--no-inline=*::tm::defunc::defunc_mapped", "-O"]` (THE §7.2 MEASUREMENTS). `3c382ab` adds
+  `web/tests/node/wasm-compile-export.test.ts`: the node tier fails when the built module's `compile` export body
+  reaches 36,000 B, or when a module without a name section has no function that large.
+- **The whole-branch review's answers, `d981a1a`, `0269591`, `a0f3904`, `d08e21d` and `4065424`.** `d981a1a` corrects
+  two manifest comments. `0269591` builds `copy-build.test.ts`'s books with `perLeg`. `a0f3904` makes the `compiled`,
+  `no-session` and `worker-error` arms set each program leg from `TELL`'s keys, and clears a dead copy's readings
+  through a new `CLEAR_READING`, keyed by `LegReading`. `d08e21d` seeds a view a compile missed off the page because it
+  is in `unseen`, whatever its leg, with no cast. `4065424` adds the TM twin of the test that a copy whose worker throws
+  forgets its reading: with only the TM write skipped, no test failed before it.
+
+##### THE GENERATED TYPESCRIPT
+
+`web/bindings/`, rebuilt at the head by `bash scripts/build-web-bindings.sh`, differs from the baseline W0 regenerated
+at `783af0e` (`$R/bindings-783af0e/`, 29 files) by R7's JSDoc alone: `diff -r` names `Decoded.ts`, `RxmCap.ts` and
+`TmScratchStatus.ts`, its output is byte-identical to `$R/bindings-r7.diff`, and with each `/** … */` block stripped
+every file equals the baseline's. `pkg/redextape_wasm.d.ts` is another matter: wasm-bindgen carries the exports' doc
+comments into it, and R7's `36384e0` and `7acfc3c` and R8's `0ac62bf` replace 48 of its lines, all JSDoc, with 48
+others. With JSDoc stripped, the head's `redextape_wasm.d.ts`, `redextape_wasm_bg.wasm.d.ts` and `redextape_wasm.js`
+equal `783af0e`'s (`$R/r9/pkg-base/`). So no export, signature or import changed, and the d.ts's doc text did.
+
+##### THE LEG COUNT
+
+Spec §5.1's "Done when". The method is the plan's "The leg count": T is the sites `tsc` names once a fourth member,
+`'probe'`, joins `Leg` and `PaneKind`, by `$R/leg-count/tsc-sites.zsh <worktree> <outdir>`, and N is the (file, family)
+pairs in which one file of `web/src` spells a leg-named token for two or more legs, by `cd web && python3 -I
+$R/leg-count/leg-names.py src --list`. W0 ran both at `783af0e` (`$R/leg-count/base/`), Z1 at `9e05912`, the last commit
+of both halves before WOPT (`$R/leg-count/final/`, every site named in its `Z1-table.md`), and `heavy.zsh` at the head.
+
+| figure | `783af0e` | `9e05912` | `4065424` |
+|---|---|---|---|
+| `tsc` error lines in the edited tree (the unedited tree: 0) | 80 | 163 | 159 |
+| T sites, unique `file:line` | 78 | 155 | 151 |
+| T in `web/src`: sites / files | 46 / 15 | 65 / 21 | 65 / 21 |
+| T in `web/tests`: sites / files | 32 / 7 | 90 / 12 | 86 / 12 |
+| N: sites / files / families / lines | 101 / 21 / 43 / 536 | 51 / 17 / 28 / 311 | 51 / 17 / 28 / 306 |
+| files with T-`src` and N sites; with either | 10; 26 | 11; 27 | 11; 27 |
+
+By Z1's reading of each site at `9e05912`, T's 65 `web/src` sites are 26 table entries, 5 switches and 34 cascades,
+where the base had 19, 14 and 13; one of the 5, `programFork`, is new and not on the plan's list of switches that stay,
+with W8's reason (the leg an arm narrows does not survive into a closure inside an inline spread). Of the families of
+per-leg names, 15 went, every one the plan expected to go among them, and none is new; `<L>program`, `<L>state` and
+`<L>leg` stayed in more than one file, each for a reason Z1 names (among them the wasm method names the Rust half keeps,
+the ts-rs re-exports, the type maps).
+
+**T rose.** The plan expected T to move "toward table entries (TS2741) and away from cascades (TS2536, TS7053)". Tables
+went 19 → 26 and switches 14 → 5, but cascades went 13 → 34, so T in `src` rose 46 → 65 (TS2536 10 → 28 error lines).
+The W tasks used the plan's typing pattern, a `<K extends Leg>` that indexes a per-leg type map, and the 8 maps
+(`LegFrame`, `LegResult`, `LegStatus`, `LegReading`, `LegPane`, `ScratchOf`, `Made`, `CopyCompiled`) list their legs as
+literal keys: `tsc` names each generic index into a map that lacks the key, and not the map. What a new leg must touch
+in `src` is, by Z1's count, the 26 table entries, the 5 switches and one line in each of the 8 maps, which clears the 34
+cascades; a leg that compiles a program also needs its key in `LegProgram`, and only then does `tsc` name `TELL`; since
+`a0f3904` a key in `LegReading` likewise makes it name `CLEAR_READING`. T in `web/tests` rose 32 → 90 at `9e05912`, 46
+of the 58 more being fixtures for `ResultLegs` and `ProgramRecording`, which `a99fd10` keyed by leg; `0269591` removed 4
+(86 at the head).
+
+**Against §2.4.** §2.4 counted "about 60 sites in about 20 files" by hand. T counts `tsc` error sites and N (file,
+family) pairs, neither of them §2.4's unit, so only the file counts compare: at the base T's `src` sites lie in 15 files
+and N's in 21, 26 in either; at `9e05912` and at the head, 21, 17 and 27.
+
+**What neither instrument sees.** A bare leg comparison, `leg === 'tm'`: 15 code lines in `web/src` at the base, at
+`9e05912` and at the head. The branch removed 3 in `pane-host.ts` and spelt three of the base's `'tm-scratch'` and
+`'rxm-scratch'` checks in `session-worker.ts` as `kind === 'scratch' && leg === …`, one in its negated form, so part of
+N's drop in `<L>-scratch` is a re-spelling into a form N does not count (`Z1-table.md`). And `TELL`, keyed by `keyof
+LegProgram`: a leg added to `Leg` alone does not make `tsc` name it.
+
+##### THE §7.2 MEASUREMENTS
+
+**The sides.** Base: `783af0e` for the Rust figures (R9) and `eb1d954`, W0's last commit, for the browser ones (Z2);
+`git diff --quiet 783af0e eb1d954 -- crates Cargo.toml Cargo.lock rust-toolchain.toml` exits 0. Final: `9e05912`, W8's
+last commit. Each side ran in a scratch worktree with its own `CARGO_TARGET_DIR`, built before the window with rustc
+1.99.1 and wasm-pack 0.15.0, whose `wasm-opt` is Arch's binaryen 130 (`$R/z2/logs/build-final.log`;
+`$R/tasks/WOPT-report.md`, 2). The final module, `pkg/redextape_wasm_bg.wasm` sha256 `b1c013a8…`, is not the head's;
+"What holds at the head" below says which figures carry over, and which were measured again at the head.
+
+**The window.** On the user's word the hold waited for `ra-gui`'s CI job, which ended at 15:45 on 2026-11-07; then
+`desktop-windows`, `ra-gui` and `save-manager` held their heavy work (the ledger's 15:35 to 15:51 lines). The window ran
+from 15:51:41 to 16:45:45, its measured runs from 15:52:11 to 16:45:35, every round pinned to CPUs 8-15 and 24-31 of 32
+(`$R/r9z2-results.md`, its opening, and "Conditions" from `$R/logs/window-conditions.log`). At its start the loads were
+1.97, 3.43 and 4.56, and `vmstat`'s us+sy 4 to 7; `/proc/pressure/io` read "full" 50.1, 53.4 and 46.8 (avg10, 60, 300),
+with a `kworker` in D state and nvme0n1 idle at 16:27, and 15.3, 30.2 and 30.6 at its end. From about 16:35 an outside
+load nobody traced took the 1-minute load to 10 to 16 and in-run us+sy to 87 to 100 with r up to 57; it covered the
+repeat rounds (record r2's pair 3 in part and its pair 4, native r2, warm-buffer r2 and r3, rxm-copy r2), and the r1
+rounds ran before it. Nothing was built in the window: each round checked its sides' sha256s before running them, and no
+log has a `Compiling` line.
+
+**The commands.** Each round ran in one `systemd-run --user` unit, the timed ones in ABBA pairs behind the harness's
+gate (`vmstat` us+sy ≤ 20 and r ≤ 8, and port 63315 free for the browser rounds), with `uptime` and `vmstat` read at
+each round's start and end:
+
+- R9 ct, `zsh -f $R/r9/run-unit-ct.zsh r1 8`: the probe `$R/r9/ct_probe.rs` (sha256 `0f9c656f…`), appended to each
+  side's `session.rs` as a test, compiles each of `web/src/examples/`' 7 programs in each encoding twice untimed and 15
+  times timed around `Session::compile`, run as the side's prebuilt test binary.
+- R9 native, `zsh -f $R/r9/b/run-unit2.zsh r1 8`: `opt_report`'s whole grid (`loop1000000`, `sum30000`, `list30000`,
+  `box30000` and `map30000` under Cranelift and LLVM at O0 to Oz, `compile` and `compile+run`, 120 figures) and
+  `ab_rows`' `iso` and `rot`, each under `perf stat`. `compile` is codegen alone, which R2 does not reach, so it is the
+  plan's control; `compile+run` lowers through `lower_program`.
+- Z2 rxm-copy, `zsh -f $R/z2/c/run-unit3.zsh r1 8`: `test:probe:rxm-copy`'s vitest command without its `wasm-pack
+  build`, on each side's prebuilt `--features probe-rxm-copy` module (`178cb792…` final).
+- Z2 record, `zsh -f $R/z2/record/run-unit-record.zsh r1 8`: `record-cost.test.ts` under `REDEXTAPE_PROBE=1`.
+- Z2 warm-buffer, `zsh -f $R/z2/afford/run-unit-afford.zsh r1`: `buffer-affordability.test.ts`, which reads memory, not
+  time; ruled on its counted fields, with its JS-heap readings shown (the controller's ruling 8).
+- Repeats for r1's flags: record r2 at 4 pairs and rxm-copy r2 at 3, both shortened to end inside the hold, native r2 at
+  8, warm-buffer r2 and r3. R9 ct was not repeated.
+- The tables: `zsh -f $R/z2/table.zsh r1`, then `r1 r2 r3`, which runs each comparer on each round and the pooled
+  comparers on every round a kind has.
+- The rule, #160's: per figure, each side's median over its runs; a final median above base's by more than base's spread
+  (largest less smallest) is flagged; a flag calls for a repeat round and the pooled comparison, and a figure flagged
+  after pooling blocks the PR until explained or removed. Counts that must not vary must be equal in every run.
+
+**The verdicts.**
+
+| comparer | r1 | pooled (r1 + r2) |
+|---|---|---|
+| R9 ct, 15 figures | 0 of 15; median final/base 0.995 (0.982 to 1.000); the total 75,127.7 → 74,818.4 µs | not repeated |
+| R9 native, `loop1000000` Cranelift (`cmp2.py`) | `opt`, `iso p1`, `rot` 0 of 12 each; object sizes equal | 0 of 12 each, 16 pairs; object sizes equal in every run |
+| R9 native, the whole grid (`native-grid.py`) | `opt` 2 of 120, `rot` 0 of 120 | 0 of 120 each |
+| Z2 rxm-copy, 124 ruled figures | 1 of 124; the 68 that must not vary equal | 0 of 124, 11 pairs; the 68 equal over 26 runs |
+| Z2 record, 37 `RUN` figures | 1 of 37; the 54 `FIXED` equal; median ratio 1.005 (0.992 to 1.034) | 0 of 37, 12 pairs; the 54 equal; median 1.002 (0.931 to 1.032) |
+| Z2 warm-buffer | counted fields 49 of 49 equal | 49 of 49 in r2 and in r3 |
+
+The `instructions` ratios in `cmp2.py`'s r1 and r2 outputs run from 0.99932 to 1.00131. The two grid flags of r1 are
+`list30000` Cranelift O1 `compile`, 1.074, the plan's control, and `map30000` Cranelift O1 `compile+run`, 1.082; pooled
+they read 1.027 and 1.022, with one r2 base run (`opt` pair 6, 6.9 s against about 1.6 s) widening base's spread, and
+with it left out 1.032 and 1.022, still not flagged (`$R/r9z2-results.md`). rxm-copy's r1 flag, `SIZE#03
+with_worst_run`, 1.021, had final's fastest run below base's slowest; pooled it reads 1.026, not flagged. rxm-copy's
+pooled comparer also prints its clean pairs alone, where 7 of 124 are flagged (`SIZE#00`, `#01`, `#03`, `#04` figures);
+the rule reads all pairs, and nobody ruled on these.
+
+**The flag that was real: (a) fact-12's `compiled` ms.** In r1, base 71.85 ms (spread 2.4) against final 74.30, ratio
+1.034, every final run (72.6 to 76.1) above every base run (69.8 to 72.2). Pooled over 12 pairs it reads 1.032, not
+flagged, but only because r2's base run 4, 74.0 ms under the outside load, widened base's spread from 2.4 to 4.2; with
+it left out final clears by 0.2 ms. The controller did not call §7.2 passed on that, and a trace followed
+(`$R/trace-compile-latency.md`, 16:52 to 17:43, on the window's worktrees, quiet samples only, a sample being quiet when
+`procs_running` stays at or under 16 through its span). Cold, fact-12's first run in a fresh worker: base 75.90 ms,
+final 78.10, +2.20 [95% CI +1.60, +2.80], n 169 and 167 over 12 ABBA pairs, final higher in 10. The phase that moves is
+the reply build after the wasm `compile` call returns, mostly `session.tmProgram()`, +1.30 [+1.00, +1.70]; the call
+itself +0.20. Warm, the same compile again in the same worker: −0.30 [−0.60, −0.10]. The reply's content is JSON-equal
+between the sides. In final the `compile` export is one function of 75,402 B, where base had 22,849 B and a separate
+53,025 B (twiggy 0.8.0); V8 tiers that function up on a background thread in a fresh worker, and in final's cold span
+the background compile threads ran 47 ms more CPU. With `--no-liftoff` the difference was +0.00; with only the `compile`
+export allowed to tier up it was +2.30; with `--liftoff-only`, +1.0 ms, not explained. The trace named R4's `3f1afbf` as
+likely, not bisected.
+
+**The split.** The user said to "try the `#[inline(never)]` split first". On `defunc_mapped` the attribute leaves the
+shipped module byte-identical: LLVM already keeps that function apart, and it is `wasm-opt -O` that inlines a function
+with one caller, whatever its size (`$R/trial-inline-split.md`, 1). The trial made the split a wasm-pack release profile
+instead, `--no-inline=*::tm::defunc::defunc_mapped` before `-O`, which keeps `compile` at 22,798 B and `defunc_mapped`
+at 52,778 B (twiggy). It ran 24 rounds interleaving base, final and split, from 17:59:12 to 18:30:42 at 1-minute loads
+of 2.12 to 54.57, quiet samples only. Cold: split − final −1.50 [−2.00, −0.80] (n 300 and 305), split − base +0.55
+[−0.10, +1.30], final − base +2.05 [+1.40, +2.70]; warm: split − final −0.00 [−0.50, +0.30]. The renderer's thread-pool
+CPU in the cold span read 46.59 ms for base, 95.28 for final and 46.46 for split. The user said to land it "with a
+guard": WOPT's `5fac6ac` and `3c382ab`. The release module is then 896,914 B, sha256 `daa8c6b0…`, which is the trial's
+split module; by the function-level compare below and by the guard, its `compile` body is 22,794 B and `defunc_mapped`'s
+52,774 B, each 4 B below twiggy's figure.
+
+**What holds at the head.** The window measured `9e05912`. The head's release module, `daa8c6b0…`, is the same at
+`3c382ab`, where the gate built it, and at `4065424`, where it was built for the re-run below; the Rust differs between
+the two by two manifest comments. It differs from the window's in `compile` and the new `defunc_mapped` alone: 831 of
+the window's 832 function bodies are byte-identical to the head's after index normalisation, every other section is
+identical once indices are mapped, and the +179 B is accounted for to the byte (`$R/z3/cmp-report.md`). So 10 of the
+window's 37 record figures, (a) fact-12's and (b) `sum_to(2750)`'s `compiled`, λ, rxm and TM `done` and `result` ms, are
+of a `compile` the head no longer has. The head's own `compile` is the split trial's module, which the trial measured
+for fact-12's cold and warm `compiled` ms. At `3c382ab` the window's other 27 hold, as nothing they time runs a changed
+byte: (c), (d) and (g) send `scratch` requests (6 figures), (e) and (f) time steps after an untimed compile (20), and
+(h) replays captured replies (1). That argument does not reach `4065424`: `a0f3904` and `d08e21d` changed `replies.ts`,
+whose `createReplies` (h) calls, and `d08e21d` changed `main.ts`, through which (e) and (f) mount the app. The re-run
+below measured all 37 at `4065424`. The rxm-copy round's module holds too: `3c382ab`'s `probe-rxm-copy` build,
+`dd8f1d68…`, differs from the window's `178cb792…` in `compile` and `defunc_mapped` alone (834 of 835 bodies identical),
+and that round never calls `compile` (`$R/z3/cmp2-report.md`, 1). Three warm-buffer runs at `3c382ab` read every TM heap
+figure as the window's final did, to the byte, and 540 of 540 counted fields equal both sides' (`$R/z3/cmp2-report.md`,
+2).
+
+**The record probe at the head.** On the user's word for (e), (f) and (h), and by the controller's ruling for the whole
+file, the record round ran again, base `eb1d954` against the head `4065424`, from 23:47:26 on 2026-11-07 to 00:13:19 on
+2026-11-08, under a hold from `ra-gui` (23:46 to 00:21): `AB_WHOLE=1 zsh -f $R/z3/rerun/run-unit-rerun.zsh r1 8`, the
+window's round with the head as its second side, 1 warm-up a side and 8 ABBA pairs. Each run ran the whole
+`record-cost.test.ts`, as the window did, so it holds all 37 figures; the window's comparer, `cmp-record.py`, read the
+round through a view that names the head `final` (`$R/z3/rerun-results.md`). By the window's rule 1 of 37 is flagged,
+and the 54 `FIXED` are equal, and equal to the window's; the median head/base ratio is 1.009 (0.983 to 1.047). Of (e),
+(f) and (h), 0 of 21 are flagged, median 1.008 (0.983 to 1.026). The flag is (b) `sum_to(2750)`'s `compiled` ms: base
+135.15 ms (spread 5.8) against head 141.55, ratio 1.047, every head run (140.5 to 144.7) above every base run (133.0 to
+138.8). (b)'s λ `done` ms, base 170.25 (spread 5.8) against head 175.80, is not flagged, though there too every head run
+is above every base run. In the window, at `9e05912`, (b)'s `compiled` ms read 1.008. At the round's start the 1-minute
+load was 2.43 and falling and `vmstat`'s us+sy 3 to 4, but `wa` read 12 and `b` 4, I/O wait as in the window. From
+00:02:38 to 00:11:55 an outside load nobody traced took in-run us+sy to peaks of 50 to 100 and r to 11 to 42, in head's
+runs of pairs 5 to 8 and base's of pairs 6 and 7, and widened base's spreads: (h)'s is 319.7 ms, where the window's was
+81.3. The gate read each run clean before it started, after 16 s of waiting in all.
+
+**The repeat round.** Round r2 ran the same command from 00:40:24 to 01:07:44 on 2026-11-08, after the diagnosis below
+and in one hold with it, which `desktop-windows` and `save-manager` gave from 00:33 and `ra-gui` from 00:34, all
+released at about 01:08; at 00:33 the ledger read the load at 4.09, falling, and us+sy 5 to 6. Alone it flags 0 of 37,
+median 1.011 (0.980 to 1.065). Pooled over r1 and r2, 16 pairs, 0 of 37 are flagged, the 54 `FIXED` are equal over all
+36 runs, and the median ratio is 1.010 (0.992 to 1.049). That clears (b)'s `compiled` ms only through r2's wider base
+spread: pooled, base reads 135.25 ms (spread 12.2) against head 141.90, ratio 1.049, a head median above base's by more
+than r1's base spread of 5.8 and by less than the pooled 12.2. Base's 16 runs read 132.9 to 145.1, the 145.1 being r2's
+base run 8, where r2's other seven base runs read 132.9 to 136.5. Base run 8 ran after 46 s at the gate, in an outside
+load nobody traced that from 00:56:57 to the round's end, base 6 aside, took in-run us+sy to peaks of 64 to 100 and r to
+31 to 72; the gate's waits came to 70 s in all.
+
+**Where (b)'s cost comes from.** Before r2, from 00:35:13 to 00:40:24, `zsh -f $R/z3/diag/run-unit-diag.zsh d1 16` ran
+(b) alone (`-t '\(b\) '`) on four sides, 1 warm-up a side and 16 rounds in a rotating order: base `eb1d954`, final
+`9e05912`, split `ae5fdac`, the split trial's commit, whose tree is `5fac6ac`'s, so final's web with the head's module
+`daa8c6b0…`, and head `4065424`. The ratio split/final then measures WOPT's module change alone, and head/split the
+commits after `5fac6ac`, with the module the same. Its comparer, `cmp-diag.py`, reads (b)'s `compiled` ms at medians of
+134.55, 135.15, 142.15 and 141.95 ms: final/base 1.004, final above in 9 of 16 rounds; split/final 1.052, flagged, split
+above in 16 of 16 and every split run above every final run; head/split 0.999, 10 of 16; and head/base 1.055, flagged,
+16 of 16. The 9 `FIXED` are equal over all 68 runs, and in-run us+sy peaked at 8 to 35 and r at 15 at most. So the cost
+is WOPT's `5fac6ac`, not the commits after it.
+
+**The mechanism, as far as it was found** (`$R/z3/mech-report.md`). The experiments ran without a hold, at 1-minute
+loads of 2.6 to 22.8, final against split, (b) alone, each run's figure the median of its 5 fresh workers, in the
+browser vitest drives, Playwright's `chrome-headless-shell` 156.0.8078.4. The hypothesis tested first, that split's
+separate `defunc_mapped` stays in V8's baseline tier, Liftoff, is wrong: `defunc_mapped` never runs in (b) nor in its
+warm-up, and no V8 trace compiles it. The cost sits in the Liftoff code of the `compile` export, on a compile that is
+not the worker's first and runs before the export tiers up. It holds with `--liftoff-only`, +5.85 ms, split above in 6
+of 6. It goes when that call runs TurboFan code: −1.40 with `--no-liftoff` (2 of 6), and a worker's second
+`sum_to(2750)` compile, after the first has tiered the export up, reads −3.85 and −4.70 in two variants of the probe,
+final above in every run. A worker's first `sum_to(2750)` compile reads −2.00, split above in 3 of 12. binaryen
+re-optimised the whole export, which uses 60 locals in split and 73 in final, so its Liftoff code differs throughout.
+The cost is fragile: four timestamps added to the worker's `onRun`, one field on its `compiled` message and one print on
+the page, touching no wasm, took it from +6.60 ms (8 of 8) to +0.20 (4 of 8) in one interleaved round. By the report's
+reading at most one compile in a worker's life pays it, a heavy one that is not its first. Not identified: the
+lowest-level cause, for which code or data placement is the report's inference, not a measurement; nor was the cost
+shown in the app, whose `main.ts` drives the worker differently. Tiering the export up eagerly, measured only through
+V8's `--wasm-eager-tier-up-function` flag, removes the Liftoff call, −2.05, but costs a worker's first compile about 11
+ms on split (29.25 ms against 18.1). On 2026-11-08 the user kept WOPT: the head ships `5fac6ac`'s setting, and (b)'s
+cost is open (WHAT THIS DID NOT CLOSE).
+
+**The warm-buffer heap: 40 B a copy.** Every TM round read final's JS heap above base's in every window round, by +160,
++200, +280, +560 and +360 B at 1, 2, 4, 8 and 9 copies, with a spread of 0 B on each side; the λ rounds did not differ
+beyond a side's spread. The cause is the probe's own `entries` literal in `tmRound`, which mirrors `SessionEntry`:
+`7b7e974` took it from 3 objects a copy to 5, two more `{ rxm, tm }` wrappers of 20 B each, and the rest of each round's
+figure is V8's metadata for the new shape (`$R/trace-heap.md`). Base's probe file run on the final worktree read base's
+figures to the byte in all 6 TM rounds, twice. The app's `SessionEntry` gained the same two wrappers in place of four
+flat fields, so its net change per entry is roughly 40 B less the flat fields' slots, not measured (`$R/trace-heap.md`,
+5); nothing in the figure grows with frames, steps or rings. The probe's "main-thread wasm module" and "source session
+fixed cost" lines are constants in the test file, and its "wasm growth over module baseline" line comes from the λ
+worker, which calls no `compile`, so nothing in it measures what `compile` allocates in wasm memory
+(`$R/z3/cmp2-report.md`, 2).
+
+**The module's size**, no gate: base `783af0e` 898,207 B raw and 318,020 B gzip; the window's final 896,735 and 317,251,
+−1,472 B (−0.164%) and −769 B (−0.242%); the head 896,914 and 317,364, −1,293 B (−0.144%) and −656 B (−0.206%) against
+base. gzip is `gzip -c <dir>/redextape_wasm_bg.wasm | wc -c`, whose header holds the file name.
+
+##### §7.3: THE GATE AND THE WALKTHROUGH
+
+The whole-branch gate ran at `3c382ab` and passed with no finding (VERIFICATION). The review's fix round then changed
+`web/src`, `web/tests` and two manifest comments, and its gates re-ran at `4065424` the typecheck, the bindings check,
+Biome, the node and browser tiers, the comment guard and coverage, not `check-all.sh`, llvm-cov, `check-slow.sh`, the
+scans or the image. The whole-branch review, in a Rust half and a web half over `783af0e..3c382ab`, found nothing
+Critical or Important and six Minors; `d981a1a` to `d08e21d` fix five, and the sixth, that no test holds one lowering
+per compile, is under WHAT THE PLAN STATED THAT NO GATE HELD (`$R/z3/review-rust.md`, `$R/z3/review-web.md`,
+`$R/z3/fix1-report.md`).
+
+The walkthrough drove the app at `4065424` in a headless Chrome, 1440×1000 at desktop width, by real CDP input through
+the `chrome-devtools` CLI of `chrome-devtools-mcp` 1.5.0, as the MCP's own browser profile was held by another session's
+Chrome: part A, the examples menu (7 examples against `examples.ts`' outcomes), each leg's run, steps, ⏭ and ↺ per view,
+the continue at `capped` and `budget` and its absence at `stack-full` (`$R/walk/A-report.md`); part B1, copies of each
+leg, built, stepped, edited and closed, and a `heap-full` rxm stop at step 2,020,001, which offers no continue
+(`$R/walk/B1-report.md`); part B2, share links, link highlighting, and the results panel and inspector at desktop and
+phone width (`$R/walk/B2-report.md`). Every item passed but two findings of B2, and both reproduce at `783af0e`
+(`$R/walk/base-check-report.md`): F1, at desktop width with the inspector open, fact(12)'s 64 KiB λ `term so far` makes
+the page 35,807 px tall at the head and 35,783 at the base, where `.inspector-body`'s own comment says its rows scroll;
+F2, a source pin whose λ node starts on the λ body's half-visible last row does not scroll the λ view to it.
+
+##### WHAT THE PLAN STATED THAT NO GATE HELD
+
+- **W5's sentence** "a new leg that compiles a program still has to say so in `LegProgram`, where `tsc` then reaches
+  every reader" was false at `3c382ab`. With a probe leg added to `Leg`, `PaneKind`, `LegProgram` and `LegReading` (the
+  web review's probe B), `tsc` named `TELL` but none of `replies.ts`' four places that set programs and cleared readings
+  by a literal key. `a0f3904` made those places loop over `TELL`'s and `CLEAR_READING`'s keys; at `d08e21d` probe B
+  names 69 `src` sites, 67 before, the two new ones `CLEAR_READING` and an `UnseenViews` cascade. The fix round checked
+  those four places and no other reader.
+- **§4.4's "one lowering per compile"** is held by `Prepared`'s private fields and `into_parts`, and by review, not by a
+  test: `the_rxm_leg_and_the_map_index_one_lowering_through_defunc` passes a `compile` that lowers a second time, as
+  `lower_program` is a pure function of its `Core`, and so does `3c382ab`'s guard. The Rust review argued this and did
+  not probe it.
+- **The leg count** went the other way from the plan's expectation (THE LEG COUNT).
+- **Sabotages that did not fire:** R3's skip of `sized`, since `lower_tm_all` refuses the same programs, so `sized`'s
+  checks are an early exit (`fc0bb83` says so) and its slot count is what a sabotage reaches; R4's frame-bank pre-check,
+  until `219c9ce` tested `sized` itself; W8's `EDITOR_ON_LEAVE.tm = 'hold'` in the two files the plan named, where the
+  whole browser tier fails 9 tests in 4 files; and the fix round's skip of the TM reading's clear alone, until
+  `4065424`. The ones the plan's Z4 asked after fired: R8's `serialize_missing_as_null(false)` in `to_value`, and R2's
+  and R5's.
+- **The `CopyBuild<M>` of W3's brief did not tie a copy build to its leg.** With it, a `<K extends Leg>` body paired
+  `BUILD[leg]` with another leg's `RECORDINGS` at `tsc` 0; `fe2e858`'s `CopyBuild<K, M>` refuses all four mismatches.
+- **The R tasks' gates ran no web tier,** so `wasm-vocabulary.test.ts` failed from `9e85993` until W1.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Links, displays and pane construction stay per leg, for PR 4:** `draw.ts`'s focus links, `link-wiring.ts`'s pin
+  fan-outs, `applyLayout`'s pane construction, and the `<L>display` family, λ's and TM's persisted view settings, whose
+  shapes differ (λ layout, vars and map; TM level and edges; rxm none).
+- **`PaneKind` is still a literal union,** not derived from `Leg`.
+- **T sites with no reason, all from before the branch:** `main.ts`'s scratchpad `legs`, three `freshLeg` calls under
+  one rule that `mapLegs` would build, and uniform fixtures in `examples.test.ts`, `protocol.test.ts`,
+  `record-loop.test.ts` and `share-positions.test.ts` (`Z1-table.md`, "T sites with no reason").
+- **What `tsc` does not name when a leg is added to `Leg`:** `TELL`, keyed by `keyof LegProgram`; the 15 bare leg
+  comparisons; and a union leg argument, which defeats the per-leg tables (`setLegProgram`, `onScratch(req.leg, req)`,
+  and `main.ts`'s `readingOf`, which has the same shape).
+- **Holes a cast or a hand-built value still opens:** a `TmProgram` widened to `RxmProgram` first, or cast, passes as
+  the rxm program (closing it needs a ts-rs discriminant or a brand); a hand-built entry passed to `seedPane` compiles
+  with no cast; `tsc` does not stop a `RecordLeg<Leg, …>` from being built; and a TM pane built with an rxm slot's
+  events compiles, which `applyLayout` never does (a phantom `LegEvents<K>` would close it).
+- **Unheld behaviour, from before the branch:** nothing holds `BUILD.tm.free`'s `value?.free()` (removing it leaks a
+  value run), and `copy-edit-leaving.test.ts`'s header claim that the typing is "sent as the view leaves" has no
+  assertion.
+- **The probe's case (h) does not time `LinkPositions.onReply`.**
+- **The Rust half's leftovers:** the later comment pass that trims the history in `redextape-wire`'s moved docs (Q1),
+  whose bindings difference will be JSDoc only and with which the crate's budget falls; each compile still builds the TM
+  machine twice (`lower_tm_guarded` in the run, `lower_tm_mapped` in the map's TM half) and lowers λ twice
+  (`lambda::lower`, `lambda::lower_mapped`), where §4.4 asked only for Core → rxm once; no test holds that it is once
+  (WHAT THE PLAN STATED THAT NO GATE HELD); `to_value` refuses a `u64` above 2^53 − 1 (serde-wasm-bindgen 0.6.5 with
+  bigints off), which `Instr::Li`'s immediate and native-rt's `Caps { mem: u64::MAX }` can hold, untested, and core's
+  `Program` doc gives no caveat; the CLI's `emit.rs` emits rxm for first-order programs only; `b958906`'s message says
+  "Fifteen helpers" where 17 are meant; and grammar-check's `src/rxm.rs` keeps the name `lower_via_program_template` for
+  what is now `lower_program(core).ok()`.
+- **The guard is a size, the profile a name.** A rename of `defunc_mapped`, a move or a `wasm-opt` that ignores the pass
+  each fail `3c382ab`'s test, but its 36,000 B bound needs a human when `compile` or the defunctionalizer legitimately
+  changes size, and it misses an inlined defunctionalizer under about 13 KB while some other function reaches the bound
+  (`$R/tasks/WOPT-report.md`, 5). `build:wasm:dev` runs no `wasm-opt`, and the guard is inert there.
+- **CI's `wasm-opt` has not run the pass:** by the user's decision of 2026-11-07 that check is CI's. The guard has run
+  only on local builds, with Arch's binaryen 130; CI's `web` job runs it against its own build, by wasm-pack 0.15.1 and
+  the upstream binaryen `version_130` it downloads. The gate's Docker image, built that way, served a module of 896,121
+  B against the local 896,914 B, and nothing tests the image's module.
+- **What §7.2 left unexplained:** the split's cold residual over base, +0.55 [−0.10, +1.30]; the trace's
+  `--liftoff-only` residual of +1.0 ms; which commit merged the lowering into `compile` (not bisected); base's 36 B
+  wobble in the TM warm-up round; the λ warm-up round reading about 10,000 B low on two of three runs at `3c382ab`;
+  rxm-copy's 7 clean-pairs flags; and the outside loads, from about 16:35 in the window, 00:02 in r1 and 00:57 in r2,
+  and the I/O pressure, whose sources were not traced.
+- **(b)'s cost at the head is kept, not closed.** With WOPT's module, (b) `sum_to(2750)`'s `compiled` ms reads 1.047
+  head/base in r1 and 1.052 split/final in the diagnosis, every run of the one side above every run of the other; pooled
+  over r1 and r2 the rule clears it only through r2's wider base spread. Its limits: it was read only in the record
+  probe's worker, where edits to the worker's and the page's JS that touch no wasm take it to +0.20 ms in one round and
+  +2.15 ms in another; it was not shown to pay in the app; its lowest-level cause is not identified; and eager tier-up
+  of the export, measured only through a V8 flag, costs a worker's first compile about 11 ms on split. To close it, a
+  later change would have to read (b) beside a variant of the worker's JS that changes no wasm, as the control
+  (`$R/z3/mech-report.md`'s p3), and read (b)'s sequence, a small compile and then a `sum_to(2750)`-sized one in one
+  worker, as the app's `main.ts` and session client drive the worker, which no run here did.
+- **Two strip behaviours the walkthrough saw, which comments at `783af0e` describe** (not re-driven at the base): the
+  strip keeps the λ count from before a rewind until the next result, and keeps "stopped after 5,000,000 … at a cap"
+  after a raise. And F1 and F2 (§7.3).
+- **The gate differs from CI:** its local wasm-pack was 0.15.0, where CI and the `Dockerfile` pin 0.15.1, and it built
+  the image with `docker build`, where CI runs `docker buildx build` on a `docker-container` builder.
+- **Nothing has run in CI:** the branch has not been pushed.
+
+##### VERIFICATION
+
+**The whole-branch gate** ran at `3c382ab` on 2026-11-07, `s01` at 19:39:41 and its chain, `s02` to `s10b`, from
+19:41:21 to 20:01:30, each step from `s01` to `s10b` in its own `systemd-run --user` unit with `MemoryMax=16G` and
+`MemorySwapMax=0`, a heavy step under the heavy lock and a browser step under it and the browser lock, each such log
+ending in `EXIT=` and the unit's status, and `s11`, the tree check, after the chain (`$G/Z3-gate-report.md`, logs
+`$G/s*.log`, `G=$R/gate`). The comment guard's base was `783af0e`, the merge base with `origin/main`, and `TREE_SITTER`
+was the worktree's own `.tools/tree-sitter` 0.25.10.
+
+```
+cargo nextest run --no-fail-fast -p <crate> [--features …], ten runs
+                                                 → exit 0 each; core 1321, 1329 (serde), 1353 (ts), 32 skipped
+                                                   each; wasm 129, 127 (probe-no-tm-scratch-ceiling), 128
+                                                   (probe-rxm-copy); wire 1, 12 (ts); native 75, 117 (llvm)
+scripts/check-all.sh --list                      → exit 0; 37 rows, 4 naming redextape-wire (s01)
+bash scripts/build-web-bindings.sh; diff -r, cmp, the JSDoc-strip loop
+                                                 → exit 0 each step; diff -r exit 1, 3 files; cmp 0 against
+                                                   bindings-r7.diff; 29 files (s02, s02b)
+scripts/check-all.sh --no-browser                → exit 0; 49 ==> lines; 10 nextest runs, 5,080 passed, 97 skipped
+                                                   (s04)
+scripts/check-all.sh --browser-only              → exit 0; 34 passed, Chrome 157 (s05)
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                 → exit 0; 1942 passed, 33 skipped; lines 95.61%;
+                                                   redextape-wire/src/lib.rs 91.30% (s06)
+scripts/check-slow.sh                            → exit 0; 33 passed (s07)
+the eight scans, --self-test then alone; check-comments --self-test, then --base 783af0e
+                                                 → exit 0; 16 of 16; 16 areas within budget (s08a)
+check-comments's shares                          → web/src 0.48290 against 0.4836; crates/redextape-wire 0.63277
+                                                   against 0.6328 (s08b)
+pnpm install --frozen-lockfile; build:wasm; build:lsp-wasm; build:bindings; check-licences.sh; biome ci
+  --error-on-warnings; typecheck                 → exit 0 each (s09a to s09g); pkg wasm daa8c6b0…; 446 files
+pnpm exec vitest run --project node / --project browser
+                                                 → exit 0; 73 files, 1,474 tests / 215 files, 1,617 (s09h, s09i)
+pnpm run test:coverage                           → exit 0; 288 files, 3,091 tests; 97.73 / 92.56 / 98.44 / 99.03
+                                                   against the floors 95 / 89 / 97 / 97, unchanged (s09j)
+pnpm run build:app                               → exit 0 (s09k)
+docker build --build-arg COMMIT_HASH=… -t redextape-ir-wire-legs-check .; run, health, HTTP
+                                                 → exit 0; image 7f9e7af5…, 99,316,635 B; healthy at t+6 s; /,
+                                                   the hashed JS and both wasm 200, the main wasm 896,121 B (s10a,
+                                                   s10b)
+```
+
+**The fix round's gates** ran at `4065424` (`$X/g*.log`, `X=$R/z3/fix1`):
+
+```
+pnpm run typecheck; diff -r against the baseline → typecheck exit 0; cmp 0 against bindings-r7.diff (g01, g01b)
+pnpm exec biome ci --error-on-warnings           → exit 0; 446 files (g02)
+node tier / browser tier                         → 73 files, 1,475 tests / 215 files, 1,617 (g03, g04)
+node scripts/check-comments.mjs --base 783af0e   → exit 0; web/src 0.48286, web/tests 0.25494 (g05, g05b)
+pnpm run test:coverage                           → 288 files, 3,092 tests; 97.74 / 92.56 / 98.45 / 99.03 (g06)
+```
+
+**This entry's own commands** ran at `4065424` on 2026-11-07: `heavy.zsh` from 22:23:48, with `git status` empty before
+and after, and `figures.zsh` from 22:35:42 to 22:35:56.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-ir-wire-legs-record`, `V=$R/z4/verify`, `G=$R/gate` and `X=$R/z3/fix1`. A row naming a section of
+`$V/figures.log` (`G1` to `X3`) is a command `$V/figures.zsh` runs, whose output that section holds; a row naming
+`$V/heavy.log` is one of `$V/heavy.zsh`'s.
+
+| Value | What | Produced by |
+|---|---|---|
+| 53; 2, `daafd4c` and `bc068d1`; 51 | the branch's commits; those changing only `docs/`; the others | `git rev-list --count 783af0e..4065424`; per commit, `git diff --name-only <c>~1 <c> -- . ':!docs'` empty (G1) |
+| the user's words and dates | the start, Q1, the amend and rulings, the hold, the split, the guard, CI's check, this entry's amend and the re-run; on 2026-11-08 the diagnosis with r2, the mechanism first and keeping WOPT | the `USER` lines of `$R/progress.md` and its 2026-11-06 Log lines; the plan's "Decisions" |
+| `ab0e8ee`, `88bca6f`, `3930912` → `7b7e974`, `e8dd37f`, `0e1f5ac`; exit 0 | the amend; the trees | the ledger's session 3; `git merge-base --is-ancestor` of each old SHA, exit 1 (G6); `git diff --quiet 3930912 0e1f5ac` (X3) |
+| each task's SHAs; 17 and "Fifteen" | WHAT SHIPPED; `b958906`'s helpers and its message | the ledger's "complete" line for each task and `git log --format='%h %s' 783af0e..4065424`; the ledger's R2 fix-round line |
+| 0.6950, 0.6328 | the wire crate's budget at R7 and now | the ledger's R7 and R8 lines; `grep` of `scripts/comment-budget.json` at the head, and at `783af0e`, which has no wire row (G5) |
+| 1,138,154 B | the code section of the raw `cargo build --release` module at `cba2ac0` and at R8's base, `95985b6` | the ledger's R8 fix-round line; `$R/tasks/R8-report.md`, "Fix round 1"; `$R/tasks/R8-review.md`, its title and "Head plus `#[inline]`" |
+| exit 0, 0 | no Rust in W0 nor in the W tasks | `git diff --quiet 783af0e eb1d954 -- crates …` and `cba2ac0 9e05912` (G2) |
+| two `Cargo.toml` files; 0 | the crates after `9e05912`; Rust lines after `3c382ab` that are not TOML comments | `git diff --name-only 9e05912 4065424 -- crates …` (G3); `git diff 3c382ab 4065424 -- crates`, changed lines not starting `#` (X1) |
+| 3 files; cmp 0; nothing; 29 | `web/bindings/` at the head against `$R/bindings-783af0e/` | `### files named`, the `cmp`, strip-loop and `ls` lines of `$V/heavy.log` |
+| 48 and 48, 0 not JSDoc; cmp 0 ×3 | the d.ts lines `783af0e` → head; the three files, JSDoc stripped | `diff $R/r9/pkg-base/redextape_wasm.d.ts pkg/redextape_wasm.d.ts`, `grep -c '^<'`, `'^>'`, and the non-comment count; `perl -0pe 's{/\*\*.*?\*/\n}{}gs'` on each side, then `cmp` (S8) |
+| the base and `9e05912` columns | the leg count | `$R/leg-count/base/tsc-sites.txt` and the first line of its `leg-names.txt`; `$R/leg-count/final/tsc-sites.txt` and the first line of its `names.txt` (L1) |
+| the `4065424` column | the leg count at the head | `$R/leg-count/tsc-sites.zsh $W $V/leg-count-head` and `leg-names.py src --list` in `$V/heavy.log`; L1 |
+| 10, 26; 11, 27; 11, 27 | files with T-`src` and N sites, and with either | `comm -12` and `sort -u` over each run's `t.files` and `n.files` (L2) |
+| 26, 5, 34; 19, 14, 13; `programFork`; 15 families; the 8 maps; 3, 3 | T's kinds at `9e05912` and at the base; the switch not on the plan's list; families gone; the maps; the bare comparisons removed and re-spelt | `$R/leg-count/final/Z1-table.md`, "Base against final", "Switches", "Cascades", "Families the plan expected to go" and "What neither instrument sees" |
+| TS2536 10 → 28 | `src` error lines by code | `grep '^src/' tsc-after.log \| grep -o 'error TS[0-9]*' \| sort \| uniq -c` per run (L3) |
+| 46 of 58; 4 | the test sites keyed by `a99fd10`; those `0269591` removed | `Z1-table.md`, "Every T site in `web/tests`"; L1's 90 and 86 |
+| 15, 15, 15 | bare leg comparisons in `web/src` code lines | `git grep -nE "[!=]== '(lambda\|rxm\|tm)'" <rev> -- 'web/src/*.ts'`, comment lines dropped, at `783af0e`, `9e05912`, `4065424` (L4) |
+| 67; 69 | probe B's `src` sites at `3c382ab` and `d08e21d` | `wc -l` of `$X/probe-base/B.sites` and `$X/probe-head/B.sites` (L5); `$R/z3/fix1-report.md`, "Probe B" |
+| `b1c013a8…`, `178cb792…`, `e1559de8…`, `0f9c656f…`; exit 0 ×3 | the window's modules and probe; the binaries and modules against their sums | `$R/z2/sums/*.sha256`, `$R/r9/sizes.txt`; `sha256sum -c --quiet` of `$R/r9/bin/SHA256SUMS`, `$R/r9/b/bin/SHA256SUMS` and both `$R/z2/sums/` files, and `sha256sum $R/r9/ct_probe.rs` (X2) |
+| rustc 1.99.1; wasm-pack 0.15.0; binaryen 130 | the window's builds | `sed -n '1p;39p' $R/z2/logs/build-final.log`; `$R/tasks/WOPT-report.md`, 2 |
+| 15:45; the three sessions | the hold | the ledger's 15:35 to 15:51 lines on 2026-11-07 |
+| 7, twice, 15; 120 | the ct probe's programs and its untimed and timed compiles; the grid's figures | the plan's Task R9, "The probe" and "Programs" |
+| 15:51:41 to 16:45:45, 15:52:11 to 16:45:35; 8-15 and 24-31 of 32; 1.97, 3.43, 4.56, 4 to 7; 50.1, 53.4, 46.8, 16:27, 15.3, 30.2, 30.6; 16:35, 10 to 16, 87 to 100, 57 | the window, its CPUs, its start, the I/O pressure, the outside load | `$R/r9z2-results.md`, its opening, and "Conditions" from `$R/logs/window-conditions.log`: `sed -n '3,4p;9,37p' $R/r9z2-results.md` |
+| the commands; r2 at 4, 3 and 8; r2, r3 | the rounds; the repeats | `$R/r9z2-results.md`, "Commands"; the runbook `$R/r9z2-window.md` |
+| every verdict in the table; 0.99932 to 1.00131 | R9 and Z2, r1 and pooled; the `instructions` ratios | each comparer re-run on its rounds, its output `cmp`-equal to the stored `cmp-<round>.txt`, `grid-<round>.txt` or `cmp-pooled-r1+r2+r3.txt`, 15 of 15 (S2); their verdict lines (S3); `instructions` in `native-r1.txt` and `native-r2.txt` (S4) |
+| 75,127.7, 74,818.4, 0.996 | R9 ct's total | the `total` line of `$V/cmp/ct-r1.txt` (X1) |
+| 1.074, 1.082, 1.027, 1.022; 6.9 s, about 1.6 s; 1.032, 1.022 | the grid's flags, pooled, and without `opt` base pair 6 | `$R/r9z2-results.md`, "Every flagged figure"; `$V/cmp/grid-r1.txt` |
+| 1.021, 91.4, 92.8; 1.026; 7 of 124 | rxm-copy's r1 flag, pooled; its clean pairs pooled | `FLAGGED FIGURE` in `$V/cmp/rxmcopy-r1.txt`; `$R/r9z2-results.md`; `FLAGGED (clean pairs, pooled)` in `$V/cmp/rxmcopy-pooled.txt` (X1) |
+| 71.85, 2.4, 74.30, 1.034, the run lists; 1.032, 4.2, 74.0; 0.2 ms | (a)'s `compiled` ms, r1 and pooled | `(a) fact-12 compiled ms` in `$V/cmp/record-r1.txt` and `record-r2.txt` (S4), and in the POOLED section of `$V/cmp/record-pooled.txt`, `sed -n '/^######## POOLED/,$p' $V/cmp/record-pooled.txt \| grep -m1 'fact-12 compiled'`; `$R/r9z2-results.md`, "Every flagged figure" |
+| 75.90, 78.10, +2.20 [+1.60, +2.80]; +1.30 [+1.00, +1.70]; −0.30 [−0.60, −0.10] | the trace, cold and warm | `cd $R && python3 -I trace/phases.py r2 g1 t1 --max-run=16`, `cmp`-equal to `trace/logs/default-quiet-phases.md` (S5) |
+| 16:52 to 17:43; 16; 169, 167, 12, 10; +0.20; JSON-equal; 75,402, 22,849, 53,025; 47 ms; +0.00, +2.30, +1.0; `3f1afbf` | the trace's time, its quiet filter, its samples, the call, the reply, the functions, the background CPU, the flag runs, the commit | `$R/trace-compile-latency.md`, "Verdict" and §2 |
+| −1.50 [−2.00, −0.80], +0.55 [−0.10, +1.30], +2.05 [+1.40, +2.70], −0.00 [−0.50, +0.30]; n 300, 305; 46.59, 95.28, 46.46 | the split trial | `cd $R && python3 -I trial-split/phases3.py --max-run=16 s1 s2` and `bg-cpu3.py`, `cmp`-equal to `trial-split/logs/pooled-phases.md` and `pooled-bgcpu.md` (S5) |
+| 24; 17:59:12 to 18:30:42; 2.12 to 54.57; 22,798, 52,778 | the trial's rounds, window, loads and twiggy sizes | `$R/trial-inline-split.md`, §2 and §3 |
+| 831 of 832; 75,398 → 22,794, 52,774; +179 | the window's module against the head's | `python3 -I -B $R/z3/cmp/wasmcmp.py $R/z3/final-9e05912.wasm $R/z3/head-3c382ab.wasm`, `cmp`-equal to `cmp-out.txt` (S7); `$R/z3/cmp-report.md`, 4 |
+| `daa8c6b0…`, 896,914, 317,364 | the head's module | `sha256sum`, `wc -c` and `gzip -c \| wc -c` of `pkg/redextape_wasm_bg.wasm` and of `$R/z3/head-3c382ab.wasm` (S1) |
+| `daa8c6b0…` at `3c382ab` and at `4065424` | the head's module, built at each | `s09b` in `$G/Z3-gate-report.md`, "Steps"; the `pre` `head` line of `$R/z3/rerun/rounds/r1/wasm-sha.tsv`, and line 1 of `$R/z3/rerun/logs/build-head.log` (`HEAD 4065424…`) |
+| `a0f3904`, `d08e21d`; `createReplies`, `main` | the changes after `3c382ab` that the record probe runs | `git show --stat a0f3904 d08e21d`; `git grep -n "createReplies\|src/main" 4065424 -- web/tests/browser/record-cost.test.ts` |
+| 10 of 37, 27; 6, 20, 1 | the window's record figures that are of a `compile`, and the rest | `$R/z3/cmp-report.md`, 7 |
+| 23:47:26 to 00:13:19; 23:46 to 00:21; 1 and 8; whole file | the re-run's window, the hold, its warm-ups and pairs, what each run ran and the ruling for it | `meta.txt` in `$R/z3/rerun/rounds/r1/` (`filter=whole`); the ledger's "ra-gui HOLD granted" line and its "CONTROLLER RULING: run with `AB_WHOLE=1`" line |
+| 1 of 37, 54 equal and equal to the window's, 1.009, 0.983 to 1.047; 0 of 21, 1.008, 0.983 to 1.026 | the re-run's verdicts, all 37 and (e), (f), (h) | `zsh -f $R/z3/rerun/asfinal/view.zsh r1`, then `python3 -I -B $R/z2/record/cmp-record.py $R/z3/rerun/asfinal/r1`, its `FLAGGED` and `FIXED` lines (`$R/z3/rerun/asfinal/cmp-record-r1.txt`), and `diff` of its `FIXED EQUAL` block with `$R/z2/record/rounds/r1/cmp-r1.txt`'s; `zsh -f $R/z3/rerun/table-rerun.zsh r1` (`$R/z3/rerun/rounds/r1/cmp-r1.txt`); `$R/z3/rerun-results.md` |
+| 135.15, 5.8, 141.55, 1.047, 140.5 to 144.7, 133.0 to 138.8; 170.25, 175.80; 1.008 | the re-run's flag, (b)'s λ `done` ms, (b)'s `compiled` ms in the window | the `(b) sum_to(2750)` lines of the all-pairs table in `$R/z3/rerun/asfinal/cmp-record-r1.txt`; `python3 -I -B $R/z3/rerun/asfinal/separation.py` on that file; `$R/r9z2-results.md`, "Z2 record r1" |
+| 2.43, 3 to 4, 12, 4; 00:02:38 to 00:11:55, 50 to 100, 11 to 42; 319.7, 81.3; 16 s | the re-run's load at its start, the outside load, (h)'s base spread in the re-run and the window, the gate's wait | the ledger's "ra-gui HOLD granted" line; `python3 -I -B $R/z3/rerun/asfinal/load.py $R/z3/rerun/rounds/r1` (`$R/z3/rerun/asfinal/load-r1.txt`); (h)'s line in `$R/z3/rerun/asfinal/cmp-record-r1.txt` and `$R/r9z2-results.md`; `total wait` in `meta.txt` |
+| 00:40:24 to 01:07:44; 00:33, 00:34, about 01:08; 4.09, 5 to 6 | r2's window; the holds; the load at 00:33 | `meta.txt` in `$R/z3/rerun/rounds/r2/` (`filter=whole`, 8 pairs); the ledger's lines from 00:33 to "Window 2 DONE" on 2026-11-08 |
+| 0 of 37, 1.011, 0.980 to 1.065; 0 of 37, 16 pairs, 54 equal over 36 runs, 1.010, 0.992 to 1.049 | r2 alone; r1 and r2 pooled | `zsh -f $R/z3/rerun/asfinal/view.zsh r2`, then `python3 -I -B $R/z2/record/cmp-record.py $R/z3/rerun/asfinal/r2` (`$R/z3/rerun/asfinal/cmp-record-r2.txt`) and the same on `$R/z3/rerun/asfinal/r1 $R/z3/rerun/asfinal/r2` (`cmp-record-r1+r2.txt`, exit 0), their `FLAGGED` and `FIXED` lines; both re-run on 2026-11-08, `cmp`-equal to the stored files |
+| 135.25, 12.2, 141.90, 1.049; 5.8; 132.9 to 145.1; 145.1, 132.9 to 136.5 | (b)'s `compiled` ms pooled; r1's base spread; base's 16 runs; r2's base run 8 and its other seven | the `(b) sum_to(2750) compiled` lines of the r1, r2 and pooled tables in `$R/z3/rerun/asfinal/cmp-record-r1+r2.txt`; `python3 -I -B $R/z3/rerun/asfinal/rows.py $R/z3/rerun/asfinal/cmp-record-r1+r2.txt 'all pairs, pooled'` (`rows-r1+r2.txt`) |
+| 46 s, 70 s; 00:56:57, 64 to 100, 31 to 72 | r2's gate wait before base 8 and in all; its outside load | `wait_s` in `runs.tsv` and `total wait` in `meta.txt`, both in `$R/z3/rerun/rounds/r2/`; `python3 -I -B $R/z3/rerun/asfinal/load.py $R/z3/rerun/rounds/r2` (`$R/z3/rerun/asfinal/load-r2.txt`) |
+| 00:35:13 to 00:40:24; 1 warm-up, 16 rounds, 68 runs; `ae5fdac`, `daa8c6b0…` | the diagnosis's window and runs; the split side | `zsh -f $R/z3/diag/run-unit-diag.zsh d1 16`, its `meta.txt` in `$R/z3/diag/rounds/d1/`; `git diff --quiet 5fac6ac ae5fdac`, exit 0; the `pkg wasm sha256` line of `$R/z3/diag/rounds/cmp-d1.txt`; the runbook `$R/z3/diag-window.md`, 0 |
+| 134.55, 135.15, 142.15, 141.95; 1.004, 9 of 16; 1.052, 16 of 16; 0.999, 10 of 16; 1.055, 16 of 16; 9 equal over 68 runs; 8 to 35, 15 | (b)'s `compiled` ms in the diagnosis: the medians, final/base, split/final, head/split, head/base; the `FIXED`; the in-run load peaks | `python3 -I -B $R/z3/diag/cmp-diag.py $R/z3/diag/rounds/d1` (`$R/z3/diag/rounds/cmp-d1.txt`, exit 0; re-run on 2026-11-08, `cmp`-equal): its all-rounds tables for `(b) sum_to(2750) compiled ms`, `FIXED EQUAL in all 9` and its `RUNS in order` lines |
+| 2.6 to 22.8; 5 workers; 156.0.8078.4; no compile of `defunc_mapped`; 60, 73 | the mechanism's loads, a run's figure, the browser; the defunctionalizer; the export's locals | `$R/z3/mech-report.md`, "Verdict", "Method", 1 and 6; `$R/z3/mech/logs/load-all.txt`, `v8-flags-headless-shell-156.txt` and `export-shape.txt` |
+| +5.85, 6 of 6; −1.40, 2 of 6; −3.85, −4.70; +6.60, 8 of 8, +0.20, 4 of 8; +2.15; −2.05, `--wasm-eager-tier-up-function` | the mechanism's rounds: `--liftoff-only`, `--no-liftoff`, a second `sum_to(2750)` compile, the unedited and the edited probe, the edited probe in a second round, eager tier-up and its flag | `cd $R/z3/mech && python3 -I cmp.py <tag> …` over its `rounds/<tag>/`, re-run on 2026-11-08 and `cmp`-equal to `logs/cmp-all.txt` (e1 to e4) and `logs/cmp-e5-e6.txt`: tags `e1-liftoff-only`, `e1-no-liftoff`, `e2-sumk1`, `e3-delay-sum1`, `e5-probe-edits`, `e6-delay-only`, `e2-eager-export`, the last with its `js-flags` lines |
+| −2.00, 3 of 12; 29.25, 18.1, about 11 ms | a worker's first `sum_to(2750)` compile; a worker's first compile with eager tier-up and without | `cd $R/z3/mech && python3 -I warm0.py e2-sumk1 e2-sumk2` and `python3 -I warm0.py e2-eager-export`, re-run on 2026-11-08 and equal to `logs/warm-all.txt`; `e2-42k3`'s warm-up medians in `logs/cmp-all.txt`; `$R/z3/mech-report.md`, 9 |
+| 834 of 835; `dd8f1d68…` | the probe modules | `python3 -I -B ../cmp/wasmcmp.py probe-final-9e05912.wasm probe-head-3c382ab.wasm` in `$R/z3/cmp2`, `cmp`-equal to `probe-cmp-out.txt` (S7); `$R/z3/cmp2-report.md`, 1 |
+| +160, +200, +280, +560, +360; 0 B; 540 of 540 | the TM heap rounds, window and `3c382ab`; the counted fields | `heap-table.py $R/z2/afford/rounds afford/rounds r1 r2 r3 -- h1 h2 h3` in `$R/z3/cmp2`, `cmp`-equal to `afford/heap-table-out.txt` (S6) |
+| 3 → 5 objects, 20 B, 40 B; 6 rounds, twice; 36 B | the heap's cause | `$R/trace-heap.md`, "The code difference", "The arithmetic" and its proof |
+| about 10,000 B; the two constants | the λ warm-up at `3c382ab`; the probe's fixed-cost lines | `$R/z3/cmp2-report.md`, "Reading the figures" |
+| 898,207, 318,020; 896,735, 317,251, −1,472, −0.164%, −769, −0.242%; −1,293, −0.144%, −656, −0.206% | the module's size | `$R/r9/sizes.txt` (S1); the head's row above; `$R/z3/cmp-report.md`, 4 |
+| 19:39:41; 19:41:21 to 20:01:30; `EXIT=0` each | `s01`; the gate's chain; its steps | `LAUNCHED` in `$G/s01-check-all-list.log`; `$G/Z3-gate-report.md` and `$G/chain.log`; the last `EXIT=` of each `$G/s*.log` (Z1) |
+| the ten nextest counts; 49, 10, 5,080, 97; 34; 1942, 33, 95.61%, 91.30%; 33; 16; 0.48290, 0.63277 | the gate's Rust steps, scans and shares | `Summary` lines of `$G/s03*.log`; `grep -c '^==>'` and the summed `Summary` lines of `$G/s04-check-all-nobrowser.log`; `test result: ok. 34` in `s05`; `Summary`, `TOTAL` and the wire row of `s06`; `s07`'s summed `test result` lines; `SCAN … EXIT=0` in `s08a`; `SHARE` in `s08b` (Z1) |
+| 37, 4; 0.25.10; Chrome 157 | `check-all.sh --list`; tree-sitter; the browser leg's Chrome | `$G/Z3-gate-report.md`, "Steps" (`s01`, `treesitter-install.log`, `s05`) |
+| 73, 1,474; 215, 1,617; 288, 3,091; 97.73, 92.56, 98.44, 99.03; 95, 89, 97, 97; 446 | the gate's web tiers, coverage, floors and Biome | `Test Files`, `Tests` and `All files` of `$G/s09h`, `s09i`, `s09j`; `thresholds` in `web/vite.config.ts`; `Checked` in `s09f` (Z1) |
+| 7f9e7af5…, 99,316,635; healthy; 200; 896,121 | the image | `image`, `health` and `GET` lines of `$G/s10b-docker-serve.log` (Z1) |
+| 0.15.0; 0.15.1; `docker build` | the gate's wasm-pack, CI's, the build path | `$G/Z3-gate-report.md`, "Notes" and "The Docker image" |
+| 73, 1,475; 215, 1,617; 288, 3,092; 97.74, 92.56, 98.45, 99.03; 0.48286, 0.25494; cmp 0 | the fix round's gates | `Test Files`, `Tests`, `All files` and `SHARE` lines of `$X/g03`, `g04`, `g06`, `g05b`; `cmp $X/g01b-bindings.diff $R/bindings-r7.diff` (Z2) |
+| 71, 1,453; 215, 1,616; 97.65, 92.39, 98.43, 98.94 | W0's tiers and coverage | the ledger's "Baselines (W0)" |
+| 9 in 4 files; four; fired | W8's sabotage over the whole tier; W3's mismatches; R2's, R5's and R8's sabotages | the ledger's W8, W3b, R2, R5+R6 and R8 lines |
+| six, five | the review's Minors; those fixed | `$R/z3/review-rust.md` and `$R/z3/review-web.md`, "Findings"; `$R/z3/fix1-report.md`, "The fixes" |
+| about 60, about 20 | §2.4's hand count | `grep -n 'about 60 sites' docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md` (L6) |
+| 1440×1000, 1.5.0; 7 examples; 2,020,001; 35,807, 35,783 | the walkthrough | `$R/walk/A-report.md`, `B1-report.md`, `B2-report.md`, `base-check-report.md`; `grep -o` of the two heights (Z3) |
+| 36,000; 22,794, 75,398, 52,774; about 13 KB | the guard | `$R/tasks/WOPT-report.md`, 3 and 5 |

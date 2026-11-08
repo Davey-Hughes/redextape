@@ -110,9 +110,9 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
   const legs = { lambda: legState<LambdaState>(false, HISTORY_BYTES), tm: legState<TmState>(false, HISTORY_BYTES) }
   const client = pool.bind(SOURCE, (reply) => {
     seen.push(reply)
-    if (reply.kind === 'lambda-frames') {
+    if (reply.kind === 'frames' && reply.leg === 'lambda') {
       for (const f of reply.frames) legs.lambda.hist.push(f, lambdaFrameBytes(f))
-    } else if (reply.kind === 'tm-frames') {
+    } else if (reply.kind === 'frames' && reply.leg === 'tm') {
       for (const f of reply.frames) legs.tm.hist.push(f, tmFrameBytes(f))
     }
   })
@@ -122,10 +122,8 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
     detached: false,
     client,
     legs,
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   }
 }
 
@@ -209,7 +207,7 @@ describe('detach is a fork', () => {
         historyBytes: HISTORY_BYTES,
         onReply: (_session, reply) => {
           seen.push(reply)
-          if (reply.kind === 'lambda-frames') {
+          if (reply.kind === 'frames' && reply.leg === 'lambda') {
             const l = reg.legOf({ session: SCRATCH, leg: 'lambda' })
             for (const f of reply.frames) l.hist.push(f, lambdaFrameBytes(f))
             l.done = reply.done
@@ -218,7 +216,10 @@ describe('detach is a fork', () => {
       })
 
       pad.fork(new PaneSlot('lambda', SOURCE), '(λx. x) (λy. y)', 0, 'lambda')
-      await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the scratchpad's frames")
+      await until(
+        () => seen.some((r) => r.kind === 'frames' && r.leg === 'lambda' && r.done !== null),
+        "the scratchpad's frames",
+      )
 
       // `scratch-compiled`, NOT `compiled`, and never a `result`: 5d-i §3.3 puts `lambdaValue`,
       // `linkIndex` and the TM leg off this type, so the messages that carry them cannot be sent for it.
@@ -282,7 +283,7 @@ describe('detach is a fork', () => {
       expect(thread.terminated).toBe(1)
       const afterDeath: RunReply[] = []
       thread.worker.addEventListener('message', (e: MessageEvent<RunReply>) => afterDeath.push(e.data))
-      thread.worker.postMessage({ kind: 'lambda-scratch', gen: 99, src: 'λz. z', step: 0 })
+      thread.worker.postMessage({ kind: 'scratch', gen: 99, leg: 'lambda', src: 'λz. z', step: 0 })
       // 3 SECONDS AGAINST A THREAD THAT ANSWERED THE IDENTICAL MESSAGE IN THE `until` ABOVE, which is
       // what makes silence mean something here. A live worker's `lambdaScratch` on a two-token term is
       // one uninterruptible parse and a print; the wait above measures it at well under a second.
@@ -308,7 +309,7 @@ describe('detach is a fork', () => {
  * user aims at is what repairs.
  *
  * **AN UNPARSEABLE SEED, DELIBERATELY, NOT A GENUINELY OVER-BUDGET TERM.** Both reach the identical
- * `scratch === null` branch of `session-worker.ts`'s `onLambdaScratch` (`ForkedAt`'s doc in
+ * `scratch === null` branch of the λ entry in `session-worker.ts`'s `BUILD` (`ForkedAt`'s doc in
  * `session.rs`: "`text` IS `None` FOR EXACTLY THE CASES `scratch` IS"), but a real term over
  * `LAMBDA_BYTE_BUDGET` (65,536 bytes) needs a genuinely large fixture to construct and would make this
  * test slow; garbage text is one string literal and fails in the same place for a different reason
@@ -345,7 +346,7 @@ describe('the no-session report for a failed fork', () => {
       // resolution `replies.ts`'s `onScratchReply` performs.
       onReply: (session, r) => {
         seen.push(r)
-        if (r.kind === 'lambda-frames') {
+        if (r.kind === 'frames' && r.leg === 'lambda') {
           const l = reg.legOf({ session, leg: 'lambda' })
           for (const f of r.frames) l.hist.push(f, lambdaFrameBytes(f))
           l.done = r.done
@@ -432,7 +433,10 @@ describe('the no-session report for a failed fork', () => {
       // reissues a retired name, so this line's buffer is `scratch 2`.
       expect(reg.has(SCRATCH_2)).toBe(false)
       pad.fork(slot, '(λx. x) (λy. y)', 0, 'lambda')
-      await until(() => seen.some((r) => r.kind === 'lambda-frames' && r.done !== null), "the buffer's frames")
+      await until(
+        () => seen.some((r) => r.kind === 'frames' && r.leg === 'lambda' && r.done !== null),
+        "the buffer's frames",
+      )
       expect(reg.has(SCRATCH_2)).toBe(true)
       expect(reg.legOf({ session: SCRATCH_2, leg: 'lambda' }).hist.current).not.toBeUndefined()
 
@@ -579,7 +583,7 @@ describe('the no-session report for a failed fork', () => {
       })
 
       // THE PHANTOM BUILD — an unparseable seed, for the reason this `describe`'s doc gives: it reaches the
-      // identical `scratch === null` branch of `onLambdaScratch` as a genuinely over-budget term without
+      // identical `scratch === null` branch of the λ copy's build as a genuinely over-budget term without
       // needing an enormous fixture.
       pad.fork(slot, 'not a valid lambda term (((', 0, 'lambda')
       expect(slot.binding.session).toBe(SCRATCH)

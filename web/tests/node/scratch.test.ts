@@ -63,12 +63,12 @@ function harness(): {
     historyBytes: 1_000_000,
     onReply: (session, reply) => replies.push({ session, reply }),
   })
-  // THE MOST RECENT PORT'S MOST RECENT `lambda-scratch` REQUEST, trimmed to the two fields a test
+  // THE MOST RECENT PORT'S MOST RECENT λ `scratch` REQUEST, trimmed to the two fields a test
   // cares about — `cool`/`warm`'s round trip opens a NEW port (`SessionPool.bind` asks the factory
   // again), so "most recent port" is what "the build `warm` just posted" means.
   const lastScratchPost = (): { src: string; step: number } | undefined => {
     const req = ports.at(-1)?.sent.at(-1)
-    return req?.kind === 'lambda-scratch' ? { src: req.src, step: req.step } : undefined
+    return req?.kind === 'scratch' && req.leg === 'lambda' ? { src: req.src, step: req.step } : undefined
   }
   // A FRESH SLOT PER CALL, BOUND TO `SOURCE` ON THE λ LEG — a test that forks more than once wants its
   // own `Detachable` per fork. The leg is fixed at `'lambda'` because `Detachable` never reads it
@@ -119,10 +119,8 @@ function sourceEntry(text = 'from source'): SessionEntry {
     detached: false,
     client: fakeClient(),
     legs: { lambda },
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   }
 }
 
@@ -144,7 +142,7 @@ describe('ScratchBuffers.fork', () => {
     // — the source leg's frame says `'from source'`. `gen: 1` is `supersede` claiming the fresh
     // client's first generation before the post, without which the client's reply filter would drop
     // the request's own replies (generation 0 matches nothing, `SessionClient`'s constructor).
-    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1', step: 0 }])
+    expect(ports[0]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: '(λx. x) 1', step: 0 }])
     // The pane moved, and it moved to the buffer `fork` MINTED rather than to a session that
     // merely exists: the binding names the id `fork` returned, which design §4.1 has the caller
     // record rather than guess.
@@ -152,7 +150,7 @@ describe('ScratchBuffers.fork', () => {
   })
 
   // 5d-iii §4.1: `step` says how far the worker replays `src` before forking (`session-worker.ts`'s
-  // `onLambdaScratch`), and `fork` is handed it rather than resolving it — see `fork`'s own doc.
+  // `BUILD`, its λ entry), and `fork` is handed it rather than resolving it — see `fork`'s own doc.
   it('posts the step it was forked at', () => {
     const { reg, buffers, ports } = harness()
     reg.add(sourceEntry())
@@ -160,7 +158,7 @@ describe('ScratchBuffers.fork', () => {
 
     buffers.fork(slot, '(λx. x) 1', 7, 'lambda')
 
-    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '(λx. x) 1', step: 7 }])
+    expect(ports[0]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: '(λx. x) 1', step: 7 }])
   })
 
   /**
@@ -233,8 +231,8 @@ describe('ScratchBuffers.fork', () => {
     buffers.fork(new PaneSlot('lambda', SOURCE), 'let b = 2; b', 3, 'lambda')
 
     expect(ports.map((p) => p.sent)).toEqual([
-      [{ kind: 'lambda-scratch', gen: 1, src: 'let a = 1; a', step: 0 }],
-      [{ kind: 'lambda-scratch', gen: 1, src: 'let b = 2; b', step: 3 }],
+      [{ kind: 'scratch', gen: 1, leg: 'lambda', src: 'let a = 1; a', step: 0 }],
+      [{ kind: 'scratch', gen: 1, leg: 'lambda', src: 'let b = 2; b', step: 3 }],
     ])
   })
 
@@ -280,7 +278,7 @@ describe('ScratchBuffers.fork', () => {
     expect(slot.binding.session).toBe(second)
     expect(pool.size).toBe(2)
     expect(pool.has(first)).toBe(true)
-    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'first', step: 0 }])
+    expect(ports[0]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: 'first', step: 0 }])
     expect(ports[0]?.terminated).toBe(0)
   })
 
@@ -600,7 +598,7 @@ describe('ScratchBuffers.retire', () => {
     expect(second).not.toBe(first)
     expect(ports.length).toBe(2)
     expect(ports[0]).not.toBe(ports[1])
-    expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'second', step: 0 }])
+    expect(ports[1]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: 'second', step: 0 }])
     expect(ports[1]?.terminated).toBe(0)
     expect(slot.binding.session).toBe(second)
     expect(buffers.list()).toEqual([{ id: second, label: 'copy 2', warm: true, leg: 'lambda' }])
@@ -827,7 +825,9 @@ describe('ScratchBuffers.recompile', () => {
 
     expect(pool.size).toBe(before)
     expect(ports.length).toBe(1)
-    expect(ports[0]?.sent).toContainEqual(expect.objectContaining({ kind: 'lambda-scratch', src: 'λz. z', step: 0 }))
+    expect(ports[0]?.sent).toContainEqual(
+      expect.objectContaining({ kind: 'scratch', leg: 'lambda', src: 'λz. z', step: 0 }),
+    )
   })
 
   /**
@@ -845,10 +845,10 @@ describe('ScratchBuffers.recompile', () => {
     expect(buffers.recompile(first, 'λz. z')).toBe(true)
 
     expect(ports[0]?.sent).toEqual([
-      { kind: 'lambda-scratch', gen: 1, src: 'x', step: 0 },
-      { kind: 'lambda-scratch', gen: 2, src: 'λz. z', step: 0 },
+      { kind: 'scratch', gen: 1, leg: 'lambda', src: 'x', step: 0 },
+      { kind: 'scratch', gen: 2, leg: 'lambda', src: 'λz. z', step: 0 },
     ])
-    expect(ports[1]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'y', step: 0 }])
+    expect(ports[1]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: 'y', step: 0 }])
   })
 
   // No such buffer exists, so there is nothing to rebuild — `recompile` cannot mean "create one from
@@ -1253,12 +1253,12 @@ describe('two legs, one collection', () => {
     expect(() => buffers.fork(slotOf(), 'text', 0, 'lambda')).toThrow(BufferCapReached)
   })
 
-  it('sends lambda-scratch for a lambda buffer and tm-scratch for a tm one', () => {
+  it('sends a scratch request on the lambda leg for a lambda buffer and on the tm leg for a tm one', () => {
     const { buffers, slotOf, postedTo } = harness()
     const l = buffers.fork(slotOf(), 'lambda text', 3, 'lambda')
     const t = buffers.fork(slotOf(), 'tm text', 0, 'tm')
-    expect(postedTo(l)).toEqual([{ kind: 'lambda-scratch', gen: 1, src: 'lambda text', step: 3 }])
-    expect(postedTo(t)).toEqual([{ kind: 'tm-scratch', gen: 1, src: 'tm text' }])
+    expect(postedTo(l)).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: 'lambda text', step: 3 }])
+    expect(postedTo(t)).toEqual([{ kind: 'scratch', gen: 1, leg: 'tm', src: 'tm text', step: 0 }])
   })
 
   /**
@@ -1284,7 +1284,7 @@ describe('two legs, one collection', () => {
     const { buffers, postedTo } = harness()
     const id = buffers.forkBlank('tm')
     expect(buffers.warmCount()).toBe(1)
-    expect(postedTo(id)).toEqual([{ kind: 'tm-scratch', gen: 1, src: '' }])
+    expect(postedTo(id)).toEqual([{ kind: 'scratch', gen: 1, leg: 'tm', src: '', step: 0 }])
   })
 
   // `forkBlank` SPENDS THE SAME SHARED SEAT, SO IT REFUSES AT THE SAME CAP — the one difference from
@@ -1299,35 +1299,35 @@ describe('two legs, one collection', () => {
   })
 
   /**
-   * **`recompile` BRANCHES ON THE BUFFER'S OWN LEG.** A `recompile` that posted `client.scratch`
-   * (`lambda-scratch` on the wire) unconditionally would send a TM buffer's `.tm` text to
-   * `onLambdaScratch`, which parses it as a λ term and answers `no-session` with a λ syntax error every
-   * time. A TM buffer rebuilds with `tm-scratch`, mirroring `#spawn`'s own branch on `state.leg`.
+   * **`recompile` SENDS THE BUFFER'S OWN LEG.** A `recompile` that posted the λ leg unconditionally
+   * would send a TM buffer's `.tm` text to the λ copy's build, which parses it as a λ term and answers
+   * `no-session` with a λ syntax error every time. A TM buffer rebuilds on the TM leg, as `#spawn`
+   * sends `state.leg`.
    */
-  it('recompile posts tm-scratch for a tm buffer, not lambda-scratch', () => {
+  it('recompile posts the tm leg for a tm buffer, not the lambda leg', () => {
     const { buffers, postedTo } = harness()
     const id = buffers.forkBlank('tm')
 
     expect(buffers.recompile(id, 'new tm text')).toBe(true)
 
     expect(postedTo(id)).toEqual([
-      { kind: 'tm-scratch', gen: 1, src: '' },
-      { kind: 'tm-scratch', gen: 2, src: 'new tm text' },
+      { kind: 'scratch', gen: 1, leg: 'tm', src: '', step: 0 },
+      { kind: 'scratch', gen: 2, leg: 'tm', src: 'new tm text', step: 0 },
     ])
   })
 
-  // `warm` POSTS BY LEG THROUGH `#spawn`'s BRANCH, AS `recompile` DOES THROUGH ITS OWN — a cold TM
-  // buffer that comes back must post `tm-scratch` on its own fresh thread, not `lambda-scratch`.
+  // `warm` POSTS BY LEG THROUGH `#spawn`, AS `recompile` DOES ITSELF — a cold TM buffer that comes
+  // back must post the TM leg on its own fresh thread, not the λ leg.
   // `postedTo` reads the NEWEST port bound to `id`, which is the one `warm`'s re-spawn just opened
   // (`cool` terminated the old one), so this is the request that new thread actually received.
-  it('warm re-spawns a cold tm buffer with tm-scratch, not lambda-scratch', () => {
+  it('warm re-spawns a cold tm buffer on the tm leg, not the lambda leg', () => {
     const { buffers, postedTo } = harness()
     const id = buffers.forkBlank('tm')
     buffers.cool(id, SOURCE, [])
 
     buffers.warm(id)
 
-    expect(postedTo(id)).toEqual([{ kind: 'tm-scratch', gen: 1, src: '' }])
+    expect(postedTo(id)).toEqual([{ kind: 'scratch', gen: 1, leg: 'tm', src: '', step: 0 }])
   })
 
   /**
@@ -1351,12 +1351,12 @@ describe('two legs, one collection', () => {
 
 /** An rxm copy is a copy on a third leg: the same collection, one seat, one id space, and its own request. */
 describe('rxm copies', () => {
-  it('sends rxm-scratch for an rxm copy, whether forked or blank', () => {
+  it('sends a scratch request on the rxm leg for an rxm copy, whether forked or blank', () => {
     const { buffers, slotOf, postedTo } = harness()
     const forked = buffers.fork(slotOf(), 'result Nat\n\thalt\n', 0, 'rxm')
     const blank = buffers.forkBlank('rxm')
-    expect(postedTo(forked)).toEqual([{ kind: 'rxm-scratch', gen: 1, src: 'result Nat\n\thalt\n' }])
-    expect(postedTo(blank)).toEqual([{ kind: 'rxm-scratch', gen: 1, src: '' }])
+    expect(postedTo(forked)).toEqual([{ kind: 'scratch', gen: 1, leg: 'rxm', src: 'result Nat\n\thalt\n', step: 0 }])
+    expect(postedTo(blank)).toEqual([{ kind: 'scratch', gen: 1, leg: 'rxm', src: '', step: 0 }])
   })
 
   it('registers an rxm copy detached, with one rxm leg building and nothing retained yet', () => {
@@ -1366,27 +1366,32 @@ describe('rxm copies', () => {
     expect(entry.detached).toBe(true)
     expect(Object.keys(entry.legs)).toEqual(['rxm'])
     expect(entry.legs.rxm?.status).toEqual({ available: false, reason: 'building…' })
-    expect([entry.rxmProgram, entry.rxmScratch, entry.tmProgram, entry.tmScratch]).toEqual([null, null, null, null])
+    expect([entry.programs.rxm, entry.readings.rxm, entry.programs.tm, entry.readings.tm]).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ])
     expect(buffers.nameOf(id)).toBe('rxm copy 1')
   })
 
-  it('recompile posts rxm-scratch for an rxm copy', () => {
+  it('recompile posts the rxm leg for an rxm copy', () => {
     const { buffers, postedTo } = harness()
     const id = buffers.forkBlank('rxm')
     expect(buffers.recompile(id, '\thalt\n')).toBe(true)
     expect(postedTo(id)).toEqual([
-      { kind: 'rxm-scratch', gen: 1, src: '' },
-      { kind: 'rxm-scratch', gen: 2, src: '\thalt\n' },
+      { kind: 'scratch', gen: 1, leg: 'rxm', src: '', step: 0 },
+      { kind: 'scratch', gen: 2, leg: 'rxm', src: '\thalt\n', step: 0 },
     ])
   })
 
-  it('warm re-spawns a cold rxm copy with rxm-scratch', () => {
+  it('warm re-spawns a cold rxm copy on the rxm leg', () => {
     const { buffers, postedTo } = harness()
     const id = buffers.forkBlank('rxm')
     buffers.setText(id, '\thalt\n')
     buffers.cool(id, SOURCE, [])
     buffers.warm(id)
-    expect(postedTo(id)).toEqual([{ kind: 'rxm-scratch', gen: 1, src: '\thalt\n' }])
+    expect(postedTo(id)).toEqual([{ kind: 'scratch', gen: 1, leg: 'rxm', src: '\thalt\n', step: 0 }])
   })
 
   it('round-trips an rxm copy’s leg through snapshot and restore', () => {

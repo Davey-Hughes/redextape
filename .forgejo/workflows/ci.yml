@@ -669,8 +669,8 @@ jobs:
   # `crates/redextape-wasm/**` misses what it primarily exists to catch: a wasm-bindgen or
   # serde-wasm-bindgen bump changing what actually crosses, which shows up in **`Cargo.lock`** and
   # nowhere else. `.cargo/config.toml` belongs in the set too — it carries the 8 MiB shadow-stack link
-  # arg the depth cases were calibrated against — as does `crates/redextape-core/**`, since the view
-  # models that cross the boundary are defined there rather than here.
+  # arg the depth cases were calibrated against — as do `crates/redextape-core/**` and `crates/redextape-wire/**`, since
+  # the view models and the statuses that cross the boundary are defined there rather than here.
   #
   # Caches /var/cache/apt/archives rather than the installed Chrome, and keeps `apt-get install`
   # unconditional — the same reasoning `rust-llvm` documents above: a directory cache that skips the

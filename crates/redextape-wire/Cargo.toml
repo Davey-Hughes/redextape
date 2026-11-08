@@ -1,0 +1,35 @@
+[package]
+name = "redextape-wire"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+redextape-core = { path = "../redextape-core", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+wasm-bindgen = "0.2.130"
+serde-wasm-bindgen = "0.6.5"
+# Optional and default-off, exactly as in `redextape-core` — see that manifest for why the
+# TypeScript is generated rather than hand-written. `wasm-pack` never enables this feature.
+ts-rs = { version = "12", optional = true }
+
+[features]
+# Forwards to core's so `ts` is ONE switch: without it, a run that enabled the feature only here would
+# compile derives for this crate's eight wire types and silently leave core's out of that run.
+#
+# IT IS LOAD-BEARING FOR IMPORTS, AND `RxmStatus::cap` IS WHY. That field is an `Option<RxmCap>`, core's
+# enum, so the generated `RxmStatus.ts` imports `./RxmCap` — and without core's `ts` switched on by this
+# line `RxmCap` has no `TS` impl and this crate's `ts` build does not compile. Every other field across the
+# eight types is `bool`, `String`, `Vec<String>`, `usize`, `u64`, this crate's own `RunStatus` or
+# `ReductionStatus`, or `NodeId` — each bare or under one `Option` — and `NodeId` is a transparent alias for
+# `u32`, which inlines as a TypeScript `number`.
+ts = ["dep:ts-rs", "redextape-core/ts"]
+
+# `redextape-test-support` holds the derive-site scanner `tests/ts_bindings.rs` runs. `default-features =
+# false` drops `proptest`, which this crate does not use — the same opt-out `redextape-cli` takes.
+[dev-dependencies]
+redextape-test-support = { path = "../redextape-test-support", default-features = false }

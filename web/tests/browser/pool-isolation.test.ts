@@ -107,7 +107,7 @@ const kinds = (rs: RunReply[]): string => rs.map((r) => r.kind).join(',')
 function answer(r: RunReply): string {
   if (r.kind === 'worker-error') return `worker-error: ${r.message}`
   if (r.kind !== 'result') return `unexpected reply: ${r.kind}`
-  const v = r.lambda.value
+  const v = r.legs.lambda.value
   // `typeof v === 'object'` BEFORE the `in`, because `Decoded` is not all objects — `'Unfinished'`,
   // `'Undecodable'` and `'TooLargeToPrint'` are bare string members (`types.ts`'s header records this),
   // and `in` does not narrow a union that still admits a primitive. All three fall through to the
@@ -151,7 +151,7 @@ describe('SessionPool isolation', () => {
       for (const s of [source, lambdaScratch, tmScratch]) {
         expect(s.seen.filter((r) => r.kind === 'compiled').length, kinds(s.seen)).toBe(1)
         expect(
-          s.seen.some((r) => r.kind === 'lambda-frames'),
+          s.seen.some((r) => r.kind === 'frames' && r.leg === 'lambda'),
           kinds(s.seen),
         ).toBe(true)
       }

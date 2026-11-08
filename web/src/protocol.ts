@@ -1,3 +1,4 @@
+import { mapLegs } from './legs'
 import type { LinkIndexWire } from './link'
 import type {
   Decoded,
@@ -243,6 +244,16 @@ export const VALUE_CHUNK = 500_000
 export type Leg = 'lambda' | 'rxm' | 'tm'
 
 /**
+ * The frame type each leg records, keyed by the same `Leg` the protocol already speaks.
+ *
+ * THIS TABLE IS WHAT MAKES ONE GENERIC RESOLVER POSSIBLE. `sessions.ts`'s `legOf` returns `LegState<LegFrame[K]>`, so
+ * a `Binding<'lambda'>` resolves to `LegState<LambdaState>` and a `Binding<'tm'>` to
+ * `LegState<TmState>` with no narrowing at either call site — the property `Binding`'s own doc
+ * is about. Two named resolvers would be the duplication 5d-i design §3.1 refused one layer down.
+ */
+export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState }
+
+/**
  * Why recording stopped. FOUR OUTCOMES, NOT THREE, and conflating any two of them is the trap
  * `session.rs`'s `run_lambda` names one layer in ("A SPENT `budget` IS NOT A SPENT CAP"):
  *
@@ -299,12 +310,12 @@ export function tmFrameBytes(f: TmState): number {
 }
 
 /**
- * A finished λ or TM cursor's `RunStatus` as a `RecordEnd`.
+ * A λ or TM cursor's `RunStatus` as a `RecordEnd`.
  *
- * `Running` maps to `ended` and cannot occur: this is only called once `stepLambda`/`stepTm` has
- * answered `false`, which means the cursor is finished. Mapped rather than thrown so a future
- * `RunStatus` variant degrades to a legible label instead of aborting the worker — and to `ended`, the
- * one end that offers no continue, so a variant nothing here knows cannot offer one that does nothing.
+ * **`Running` OCCURS, AND MAPS TO `ended`.** `extendLeg` asks a cursor that a `budget` stop left running, and any end
+ * but `capped` is what keeps it from raising that cursor's cap; a throw would drop the session at every such
+ * `[continue]`. A future `RunStatus` variant lands on `ended` too, rather than a throw: the one end that offers no
+ * continue, so a variant nothing here knows cannot offer one that does nothing.
  *
  * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, for `rxmRecordEnd`'s reason below.
  */
@@ -320,7 +331,7 @@ export function endOf(run: RunStatus | null): RecordEnd {
 }
 
 /**
- * A finished rxm cursor's status as a `RecordEnd`: `ended` for a halt or a fault, and a cap named.
+ * An rxm cursor's status as a `RecordEnd`: `ended` for a halt or a fault, and a cap named.
  *
  * **ONLY THE STEP CAP IS `capped`.** Raising the step cap resumes a run it stopped and does nothing for one the stack,
  * the heap or the saved frames stopped, so each of those is its own end with no continue (Plan 7 part 5 spec §8,
@@ -333,8 +344,8 @@ export function endOf(run: RunStatus | null): RecordEnd {
  *
  * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, as `forkable` is (its call site there says why):
  * the coverage gate cannot see the worker (that file's module doc: v8 coverage does not attach to a dedicated worker's
- * context), so a branch written there moves none of the gate's numbers. `Running` cannot occur, since this is asked
- * once `stepRxm` has answered `false`; it maps to `ended`, as `endOf` maps it, rather than throwing.
+ * context), so a branch written there moves none of the gate's numbers. `Running` occurs, at a `budget` stop, and maps
+ * to `ended` without throwing, for `endOf`'s reason: so that `extendLeg` raises no cap on a run that was not capped.
  */
 export function rxmRecordEnd(status: Pick<RxmStatus, 'run' | 'cap'>): RecordEnd {
   if (status.run !== 'Capped') return 'ended'
@@ -374,6 +385,16 @@ export function rxmFrameBytes(f: RxmState): number {
 }
 
 /**
+ * Each leg's charge for a frame, keyed as `LegFrame` is: what the worker spends against a leg's allowance and the page
+ * charges its ring, through one entry, so that the two sides cannot charge a leg's frame differently.
+ */
+export const LEG_FRAME_BYTES: { readonly [K in Leg]: (frame: LegFrame[K]) => number } = {
+  lambda: lambdaFrameBytes,
+  rxm: rxmFrameBytes,
+  tm: tmFrameBytes,
+}
+
+/**
  * The largest machine, in δ rules, that may be opened in an editor.
  *
  * **MEASURED, NOT CHOSEN.** Emit, structured clone, `tmScratch` parse and the editor's mount were priced
@@ -402,8 +423,8 @@ export function ruleCount(p: TmProgram): number {
  * Whether this machine may be forked into an editable buffer.
  *
  * A TYPE PREDICATE, so a caller that passes the check has a non-null `TmProgram` without a second
- * check. `compiled` carries `tmProgram: TmProgram | null` and every consumer would otherwise repeat
- * the null test beside this one.
+ * check. A declined leg has no `TmProgram`, and every consumer would otherwise repeat the null test
+ * beside this one.
  */
 export function forkable(p: TmProgram | null): p is TmProgram {
   return p !== null && ruleCount(p) <= MAX_FORK_RULES
@@ -441,45 +462,15 @@ export type LambdaTreeWire = {
 export type RunRequest =
   | { kind: 'run'; gen: number; src: string; encoding: string }
   /**
-   * Build a λ scratchpad from λ TEXT and record its reduction — 5d-i design §4.3's fork.
+   * Build a copy of `leg` from that leg's TEXT and record it: a λ fork (5d-i design §4.3), a TM copy (5d-iv design
+   * §4.4) or an rxm copy (Plan 7 part 5 spec §7). A `ScratchBuffers` buffer sends the leg it was minted on.
    *
-   * NO `encoding`, UNLIKE `run`, AND THAT IS 5d-i DECISION 2 ARRIVING ON THE WIRE. An encoding says how a
-   * VALUE is decoded, decoding is type-directed, and a `LambdaScratch` has no `ty` to decode against —
-   * 5d-i §3.3 puts `lambdaValue` off the type entirely rather than leaving it to decline. A scratch is
-   * stepped and watched, not evaluated, so an `encoding` field here would be a parameter with no
-   * reader on either side.
-   *
-   * λ ONLY — `tm-scratch`, BELOW, IS THE VARIANT FOR THE MACHINE HALF OF 5d-i §4.1's `TmScratch`. See
-   * that variant's own doc for why it needs neither `step` nor `encoding` either. **THIS REQUEST STAYS λ
-   * ONLY**: a `ScratchBuffers` buffer picks among it, `tm-scratch` and `rxm-scratch` per mint (`#spawn`'s
-   * branch on the leg) rather than this request growing a `leg` field of its own.
-   *
-   * **`step` IS WHICH FRAME THE PANE WAS SHOWING, AND THE WORKER REPLAYS TO IT** (5d-iii design §4.1).
-   * It is not an offset into `src`: `src` is the SOURCE session's step-0 term at `LAMBDA_BYTE_BUDGET`,
-   * and `step` says how far to reduce it before forking. An edit posts `step: 0`, because the text in
-   * the box IS the term — which is why editing needs no message of its own.
+   * **`step` IS READ FOR λ ALONE**: the frame a λ pane was showing, to which the worker reduces `src`, the source's
+   * step-0 term, before forking (5d-iii design §4.1); an edit sends 0, the text being the term. A machine's text IS its
+   * program, run from its first configuration, so a TM or rxm copy has no step to replay to. **NO `encoding`**: a λ
+   * copy has no `ty` to decode against (5d-i decision 2), and a TM or rxm copy decodes by its own header.
    */
-  | { kind: 'lambda-scratch'; gen: number; src: string; step: number }
-  /**
-   * Build a TM scratchpad from `.tm` TEXT and open a cursor on it — 5d-iv design §4.4.
-   *
-   * **NO `step`, UNLIKE `lambda-scratch`.** That request carries one because a λ fork replays the
-   * source term to the frame the pane was showing. A machine has no step-k term: its text IS the
-   * machine, and the scratch starts from its header's initial configuration. A `step` here would be a
-   * field with no reader on either side.
-   *
-   * **NO `encoding`, AND NOT FOR `lambda-scratch`'s REASON.** A headered TM buffer's value IS
-   * decoded, by the `TmValueRun` `tmScratch` builds beside the scratch, but under the encoding its own
-   * header names, so a request field would be a second answer to a question the text already settles.
-   * The scratch itself still has no `ty`: `tmValue`, `sourceSpan` and `linkIndex` are absent from it
-   * rather than declining.
-   */
-  | { kind: 'tm-scratch'; gen: number; src: string }
-  /**
-   * Build an rxm copy from `.rxm` TEXT and run it — Plan 7 part 5 spec §7. `tm-scratch`'s shape and for its reasons: no
-   * `step`, since the text is the program, and no `encoding`, since a copy decodes by its own `result` header.
-   */
-  | { kind: 'rxm-scratch'; gen: number; src: string }
+  | { kind: 'scratch'; gen: number; leg: Leg; src: string; step: number }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes. `epoch` is the leg's, as `rewind`'s doc says.
@@ -514,8 +505,10 @@ export type LambdaLeg = {
 export type TmLeg = { status: TmStatus; value: Decoded | null }
 /** The rxm leg's answer after recording: its status and its value — `null` for an absent leg, as TM's. */
 export type RxmLeg = { status: RxmStatus; value: Decoded | null }
-/** The three legs a `result` reply carries. */
-export type ResultLegs = { lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
+/** Each leg's part of a `result`, keyed as `LegFrame` is. */
+export type LegResult = { lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
+/** Every leg's part of a `result`: what the reply carries as `legs`. */
+export type ResultLegs = { [K in Leg]: LegResult[K] }
 
 /**
  * The legs a `result` posts: `next`, except that a leg whose value `prev` had decided keeps `prev`'s part while
@@ -530,11 +523,7 @@ export type ResultLegs = { lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
  */
 export function keepDecided(prev: ResultLegs | null, next: ResultLegs): ResultLegs {
   if (prev === null) return next
-  return {
-    lambda: keepDecidedPart(prev.lambda, next.lambda),
-    rxm: keepDecidedPart(prev.rxm, next.rxm),
-    tm: keepDecidedPart(prev.tm, next.tm),
-  }
+  return mapLegs<ResultLegs>((leg) => keepDecidedPart(prev[leg], next[leg]))
 }
 
 /**
@@ -546,7 +535,7 @@ export function keepDecidedPart<P extends { readonly value: Decoded | null }>(pr
 }
 
 /** Each leg's part of a `result`, or `null` for a leg with none: what `keepInFlight` keeps for a leg in flight. */
-export type HeldLegs = { [K in keyof ResultLegs]: ResultLegs[K] | null }
+export type HeldLegs = { [K in Leg]: LegResult[K] | null }
 
 /**
  * The legs a `result` posts: `next`, except that a leg whose recording is in flight keeps its `held` part when it has
@@ -558,18 +547,94 @@ export type HeldLegs = { [K in keyof ResultLegs]: ResultLegs[K] | null }
  * so a leg with no part held is read as it stands.
  */
 export function keepInFlight(held: HeldLegs, next: ResultLegs, recording: Readonly<Record<Leg, boolean>>): ResultLegs {
-  return {
-    lambda: recording.lambda && held.lambda !== null ? held.lambda : next.lambda,
-    rxm: recording.rxm && held.rxm !== null ? held.rxm : next.rxm,
-    tm: recording.tm && held.tm !== null ? held.tm : next.tm,
-  }
+  return mapLegs<ResultLegs>((leg) => {
+    const part = held[leg]
+    return recording[leg] && part !== null ? part : next[leg]
+  })
+}
+
+/**
+ * One chunk of leg `L`'s recording. **ONE MEMBER PER LEG, EACH WITH ITS OWN LEG'S FRAMES**, so a reply narrowed by
+ * `kind` passes to a function generic in its leg, which indexes `LEG_FRAME_BYTES` with `leg`, without a cast.
+ */
+export type FramesReply<L extends Leg = Leg> = {
+  [K in L]: { kind: 'frames'; leg: K; gen: number; epoch: number; frames: LegFrame[K][]; done: RecordEnd | null }
+}[L]
+
+/** Each leg's status at compile time, keyed as `LegFrame` is: what `compiled` carries as `statuses`. */
+export type LegStatus = {
+  lambda: LambdaStatus
+  /** Unavailable only when the program does not lower, including where TM declines it (spec §5.2). */
+  rxm: RxmStatus
+  tm: TmStatus
+}
+
+/**
+ * What `compiled` carries as `programs`: the program of each leg that compiles one, which its views are seeded from,
+ * `null` for a leg that is unavailable. **NO λ ENTRY**, since the λ leg compiles none; keyed by these legs rather than
+ * by `Leg` with a `lambda: never`, so a leg that comes to compile one is added here, and the worker's post fails `tsc`
+ * until it sends it.
+ */
+export type LegProgram = { rxm: RxmCompiled; tm: TmCompiled }
+
+/**
+ * A session's machine in the form a TM view is handed one: `compiled`'s `programs.tm`, which the session keeps as
+ * `SessionEntry.programs.tm`. A TM copy's entry holds one built from its own reply.
+ *
+ * **`program` AND `tapeNames` ARE `TmPane.setProgram`'s TWO ARGUMENTS, AND THEY ARE ONE VALUE BECAUSE
+ * THEY ARE ONLY MEANINGFUL TOGETHER.** `TmProgram` says `tapes: 5` and nothing about what any of them is
+ * called; `tapeNames` is what `tapeRows` labels them with. Two nullable fields side by side on the entry
+ * would make "a program with no names" and "names with no program" representable states that no producer
+ * can produce and no consumer could render — one nullable envelope has exactly the two states the wire has.
+ */
+export type TmCompiled = {
+  readonly program: TmProgram
+  readonly tapeNames: string[]
+  /**
+   * The machine as `.tm` text, or `null` when it is over `MAX_FORK_RULES`, when the program's result type is a
+   * function (`tmResultDecodable` is `false`), which a `.tm` header's `result` line cannot name, and on a TM copy,
+   * which offers no copy of itself. **`null` IS THE ONLY FACT BEHIND *WHETHER* THE CONTROL IS OFFERED**: a second
+   * encoding of one fact is how a control comes to be offered for a fork that cannot happen.
+   *
+   * **BESIDE `program` BECAUSE `TmPane.setForkAvailable`'s decision (5d-iv design §4.3) needs it the moment a TM pane
+   * exists**, and a view built after the reply is seeded from the entry. Not a second nullable envelope: a machine
+   * can exist and still have no text.
+   */
+  readonly text: string | null
+  /**
+   * Whether the program's result type has a decoding a `.tm` header's `result` line can name — `false` only for a
+   * function-valued program (`ty::is_decodable`'s answer, `redextape-core`). **READ ONLY WHEN `text` IS `null`**, to
+   * tell "the type has no decoding" apart from "the machine is over `MAX_FORK_RULES`":
+   * `CopyEditor.setForkAvailable`'s third argument, worded into *edit a copy*'s disabled reason by `#refreshDetach`.
+   */
+  readonly tmResultDecodable: boolean
+}
+
+/**
+ * The rxm listing a session compiled, and the text *edit a copy* seeds a copy from — `TmCompiled`'s shape for the rxm
+ * leg, and for its reason: the view that offers a copy needs both, and a view built after the reply is seeded from
+ * the session's entry.
+ */
+export type RxmCompiled = {
+  /** No `states`: a `TmProgram` has every `RxmProgram` field, so without this a TM machine would pass as this one. */
+  readonly program: RxmProgram & { readonly states?: never }
+  /**
+   * The program as `.rxm` text, or `null` on a copy, which offers no copy of itself, and for text longer than
+   * `session.rs`'s `MAX_SCRATCH_RXM_BYTES`, which no copy could build. As with `TmCompiled.text`, `null` is the only
+   * fact behind a refusal: the view words its reason from the listing's instruction count.
+   *
+   * **NO `tmResultDecodable` BESIDE IT.** A function-valued program's rxm text is still `Some`, headerless
+   * (`RxmHeader::for_type` answers `None` and `rxm_text` falls back to `print_rxm`): the rxm leg's header is
+   * optional, unlike TM's, so it has no such refusal to word.
+   */
+  readonly text: string | null
 }
 
 export type RunReply =
   /**
    * The program did not analyze, so there is no session at all.
    *
-   * SHARED WITH THE `lambda-scratch` REQUEST, WHICH IS A REUSE AND NOT A STRETCH. `lambdaScratch(src)`
+   * SHARED WITH THE `scratch` REQUEST, WHICH IS A REUSE AND NOT A STRETCH. `lambdaScratch(src)`
    * answers `{ diagnostics, scratch: null }` for text that did not parse, and "there is nothing to
    * step, and here is why" is the same claim this variant already makes for a program that did not
    * analyze — same shape, same consumer obligation (clear the panes, show the diagnostics). A second
@@ -582,7 +647,7 @@ export type RunReply =
    * it (5d-i design §4.1, §4.3).
    *
    * A SEPARATE VARIANT RATHER THAN `compiled` WITH FIVE NULLS, and that is 5d-i decision 2 restated on
-   * the wire. `compiled` carries `tm`, `tmProgram`, `tapeNames`, `declinedSpan` and `linkIndex`; a
+   * the wire. `compiled` carries a TM status, a machine, its tape names, `declinedSpan` and `linkIndex`; a
    * `LambdaScratch` has no TM leg, no `SourceMap` and no `ty`, so every one of those would be a
    * fabricated field on a message about a session that provably cannot have them — the shape §3.3
    * refuses at the type level and `session.rs`'s `Session::tm` prices. A consumer that receives this one
@@ -601,7 +666,7 @@ export type RunReply =
    *
    * **IT IS NULLABLE DEFENSIVELY AND IS NEVER `null` ON THIS REPLY.** The type mirrors
    * `session::ForkedAt`, where `scratch` and `text` are one fact — null together or neither. But
-   * `onLambdaScratch` posts `no-session` and returns the moment `scratch` is null, so the only path
+   * `copy-build.ts`'s `buildCopy` posts `no-session` and returns once `scratch` is null, so the only path
    * that reaches `scratch-compiled` has already proved both are present. **Unparseable text and a
    * term over budget do not arrive here as a null `text`; they do not arrive here at all** — they
    * take `no-session`, which carries the diagnostics and has no `text` field. A reader hunting for a
@@ -617,7 +682,7 @@ export type RunReply =
    * `total_steps` — and a machine. Folding them would put a union inside the arm and a switch in every
    * consumer to open it.
    *
-   * **`tmProgram` IS NOT NULLABLE HERE, WHERE IT IS ON `compiled`.** A `TmScratch` exists only for text
+   * **`tmProgram` IS NOT NULLABLE HERE, WHERE `compiled`'s `programs.tm` IS.** A `TmScratch` exists only for text
    * that parsed to a machine, so the δ-table always has a program to render; text that did not parse
    * takes `no-session`, carrying the diagnostics, exactly as it does for λ.
    *
@@ -655,21 +720,20 @@ export type RunReply =
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
    *
-   * `tmProgram` IS SENT ONCE, HERE. It does not change as the cursor moves, so putting it on every
+   * `programs` IS SENT ONCE, HERE. A program does not change as the cursor moves, so putting it on every
    * frame would send the same machine again with each one.
    */
   | {
       kind: 'compiled'
       gen: number
-      lambda: LambdaStatus
-      /** The rxm leg: absent only when the program does not lower, including where TM declines it (spec §5.2). */
-      rxm: RxmStatus
-      tm: TmStatus
+      statuses: { [K in Leg]: LegStatus[K] }
+      /**
+       * Sent eagerly, with each program's text, for `linkIndex`'s reason below: a lazy fetch on the first *edit a copy*
+       * costs a round trip into a worker that is recording, which is when a user reaches for one. `MAX_FORK_RULES` and
+       * `session.rs`'s `MAX_SCRATCH_RXM_BYTES` bound the texts, which is what makes that affordable.
+       */
+      programs: { [K in keyof LegProgram]: LegProgram[K] | null }
       declinedSpan: Span | null
-      tmProgram: TmProgram | null
-      /** The rxm listing and its labels, sent once for `tmProgram`'s reason; `null` when there is no rxm leg. */
-      rxmProgram: RxmProgram | null
-      tapeNames: string[]
       /**
        * The link index for this compile.
        *
@@ -688,58 +752,15 @@ export type RunReply =
        * The eleven typed arrays inside are TRANSFERRED, not cloned; see the worker's `postMessage`.
        */
       linkIndex: LinkIndexWire | null
-      /**
-       * This session's machine as `.tm` text, or `null` when there is no TM leg, the machine is over
-       * `MAX_FORK_RULES`, or the program's result type is a function (`tmResultDecodable` below is
-       * `false`) — a `.tm` header's `result` line has no way to name a function value.
-       *
-       * **IT RIDES THIS REPLY FOR `linkIndex`'s REASON, AND THE CAP IS WHAT MAKES THAT AFFORDABLE.**
-       * A lazy fetch on first click costs a round trip into a worker measured starved for 4,679 ms
-       * during recording, which is exactly when a user reaches for a fork. Eager and unbounded would
-       * post 7.8 MB on every `list60` compile whether or not anyone ever forks; eager and capped costs
-       * at most `MAX_FORK_RULES` rules of text.
-       *
-       * **`null` IS THE ONLY FACT BEHIND *WHETHER* THE CONTROL IS OFFERED.** There is no `canFork`
-       * boolean beside it: a second encoding of one fact is how a control comes to be offered for a
-       * fork that cannot happen. `tmResultDecodable` exists beside it anyway, for a narrower job: not
-       * deciding presence, but telling apart the two reasons `null` can mean, so the pane can word
-       * the right one — `ruleCount(tmProgram)` for one, `tmResultDecodable` for the other.
-       */
-      tmText: string | null
-      /**
-       * Whether this session's result type has a decoding a `.tm` header's `result` line can name —
-       * `false` only for a function-valued program (`ty::is_decodable`'s answer, `redextape-core`).
-       *
-       * **READ ONLY WHEN `tmProgram` IS NOT `null` AND `tmText` IS**, to tell "the type has no decoding"
-       * apart from "the machine is over `MAX_FORK_RULES`", which also leaves `tmText` `null` without
-       * this session ever having been asked (`session-worker.ts` guards the call with this file's own
-       * `forkable`, short-circuiting `session.tmText()` first). `CopyEditor.setForkAvailable`'s third
-       * argument is this fact, worded into *edit a copy*'s disabled reason by `#refreshDetach`.
-       */
-      tmResultDecodable: boolean
-      /**
-       * This session's rxm program as `.rxm` text, for *edit a copy* — the role `tmText` plays for the TM view — or
-       * `null` when there is no rxm leg or the text is longer than `session.rs`'s `MAX_SCRATCH_RXM_BYTES`, which no
-       * copy could build. As with `tmText`, `null` is the only fact behind a refusal: the view words its reason from
-       * the listing's instruction count, and offers *edit a copy* disabled where there is a program and no text.
-       *
-       * **NO EQUIVALENT OF `tmResultDecodable` FOR RXM.** A function-valued program's rxm text is still
-       * `Some`, headerless (`RxmHeader::for_type` answers `None` and `rxm_text` falls back to
-       * `print_rxm`) — the rxm leg's header is optional, unlike TM's, so it has no analogous refusal to
-       * word.
-       */
-      rxmText: string | null
     }
   /** One chunk of a leg's recording, under the leg's epoch when it was recorded (`rewind`'s doc). */
-  | { kind: 'lambda-frames'; gen: number; epoch: number; frames: LambdaState[]; done: RecordEnd | null }
-  | { kind: 'tm-frames'; gen: number; epoch: number; frames: TmState[]; done: RecordEnd | null }
-  | { kind: 'rxm-frames'; gen: number; epoch: number; frames: RxmState[]; done: RecordEnd | null }
+  | FramesReply
   /**
    * Every leg interrogated once a request's recording stopped — what `results.ts` renders. A leg still recording keeps
    * the part last posted for it, or before the generation's first `result` the part a rewind found, where there is one
    * (`keepInFlight`); one whose decided value a rewind took away keeps its last `result`'s (`keepDecided`).
    */
-  | { kind: 'result'; gen: number; lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
+  | { kind: 'result'; gen: number; legs: ResultLegs }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**

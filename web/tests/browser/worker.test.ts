@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LEGS } from '../../src/legs'
-import type { Leg, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
+import type { FramesReply, Leg, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
 import type { LambdaState } from '../../src/types'
 import { until } from './until'
 
@@ -52,11 +52,11 @@ describe('session-worker', () => {
     if (reply?.kind !== 'result') return
 
     expect(reply.gen).toBe(1)
-    expect(reply.lambda.status.run).toBe('Ended')
-    expect(reply.lambda.state?.step).toBe(7)
-    expect(reply.lambda.value).toEqual({ Value: { text: '42' } })
-    expect(reply.tm.status.total_steps).toBe(2870)
-    expect(reply.tm.value).toEqual({ Value: { text: '42' } })
+    expect(reply.legs.lambda.status.run).toBe('Ended')
+    expect(reply.legs.lambda.state?.step).toBe(7)
+    expect(reply.legs.lambda.value).toEqual({ Value: { text: '42' } })
+    expect(reply.legs.tm.status.total_steps).toBe(2870)
+    expect(reply.legs.tm.value).toEqual({ Value: { text: '42' } })
   })
 
   it('answers no-session with diagnostics for a program that does not analyze', async () => {
@@ -76,13 +76,13 @@ describe('session-worker', () => {
     const reply = replies.at(-1)
     expect(reply?.kind).toBe('result')
     if (reply?.kind !== 'result') return
-    expect(reply.lambda.status.available).toBe(false)
-    expect(reply.lambda.status.reason).not.toBe('')
-    expect(reply.tm.status.available).toBe(true)
+    expect(reply.legs.lambda.status.available).toBe(false)
+    expect(reply.legs.lambda.status.reason).not.toBe('')
+    expect(reply.legs.tm.status.available).toBe(true)
     // The TM leg captures `n` by reference (`defunc` boxes a mutable that a closure captures), so
     // `apply0(f)` reads `n`'s value at the point `g(0)` runs — after `n = 10` — giving `0 + 10`. That
     // mutable capture is exactly why the λ leg declines this program instead.
-    expect(reply.tm.value).toEqual({ Value: { text: '10' } })
+    expect(reply.legs.tm.value).toEqual({ Value: { text: '10' } })
   })
 
   // `sourceSpan` is a Session method, so only the worker can turn `status.node` into a range. Without
@@ -94,9 +94,9 @@ describe('session-worker', () => {
     const reply = replies.at(-1)
     expect(reply?.kind).toBe('result')
     if (reply?.kind !== 'result') return
-    expect(reply.lambda.status.node).not.toBeNull()
-    expect(reply.lambda.declinedSpan).not.toBeNull()
-    const span = reply.lambda.declinedSpan
+    expect(reply.legs.lambda.status.node).not.toBeNull()
+    expect(reply.legs.lambda.declinedSpan).not.toBeNull()
+    const span = reply.legs.lambda.declinedSpan
     if (!span) return
     expect(span.end).toBeGreaterThan(span.start)
     expect(span.end).toBeLessThanOrEqual(src.length)
@@ -128,35 +128,53 @@ describe('session-worker recording', () => {
     worker.terminate()
     expect(replies[0]?.kind).toBe('compiled')
     expect(replies.at(-1)?.kind).toBe('result')
-    expect(replies.some((r) => r.kind === 'lambda-frames')).toBe(true)
-    expect(replies.some((r) => r.kind === 'tm-frames')).toBe(true)
+    expect(replies.some((r) => r.kind === 'frames' && r.leg === 'lambda')).toBe(true)
+    expect(replies.some((r) => r.kind === 'frames' && r.leg === 'tm')).toBe(true)
+  })
+
+  it('records λ, then rxm, then TM, each in turn', async () => {
+    const { replies, worker } = await askAll(
+      run('let mut n = 4; let mut acc = 0; while n > 0 { acc = acc + 1; n = n - 1; } acc'),
+    )
+    worker.terminate()
+    const legs = replies.flatMap((r) => (r.kind === 'frames' ? [r.leg] : []))
+    // λ records in several replies, so a leg that started before λ finished would put its replies between two of λ's.
+    expect(legs.filter((leg) => leg === 'lambda').length).toBeGreaterThan(1)
+    // The legs in the order their replies arrived, each run of one leg's replies taken once.
+    expect(legs.filter((leg, i) => leg !== legs[i - 1])).toEqual(['lambda', 'rxm', 'tm'])
   })
 
   it('records a frame per β-step plus the initial term', async () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
-    const frames = replies.flatMap((r) => (r.kind === 'lambda-frames' ? r.frames : []))
+    const frames = replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' ? r.frames : []))
     // The run is 7 β-steps, so 8 frames: step 0 through step 7.
     expect(frames.length).toBe(8)
     expect(frames[0]?.step).toBe(0)
     expect(frames.at(-1)?.step).toBe(7)
-    const last = replies.filter((r) => r.kind === 'lambda-frames').at(-1)
-    expect(last?.kind === 'lambda-frames' && last.done).toBe('ended')
+    const last = replies.filter((r) => r.kind === 'frames' && r.leg === 'lambda').at(-1)
+    expect(last?.kind === 'frames' && last?.leg === 'lambda' && last.done).toBe('ended')
   })
 
-  it('sends tmProgram and tapeNames once, on compiled', async () => {
+  it('sends the TM program and its tape names once, on compiled', async () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
     const compiled = replies.find((r) => r.kind === 'compiled')
-    expect(compiled?.kind === 'compiled' && compiled.tapeNames).toEqual(['REG', 'WORK', 'STACK', 'HEAP', 'BOX'])
-    expect(compiled?.kind === 'compiled' && compiled.tmProgram?.tapes).toBe(5)
+    expect(compiled?.kind === 'compiled' && compiled.programs.tm?.tapeNames).toEqual([
+      'REG',
+      'WORK',
+      'STACK',
+      'HEAP',
+      'BOX',
+    ])
+    expect(compiled?.kind === 'compiled' && compiled.programs.tm?.program.tapes).toBe(5)
     expect(replies.filter((r) => r.kind === 'compiled').length).toBe(1)
   })
 
   it('records TM frames from step 0 even though compile already ran the TM leg', async () => {
     const { replies, worker } = await askAll(run('[1, 2]'))
     worker.terminate()
-    const frames = replies.flatMap((r) => (r.kind === 'tm-frames' ? r.frames : []))
+    const frames = replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'tm' ? r.frames : []))
     expect(frames[0]?.step).toBe(0)
     expect(frames[1]?.step).toBe(1)
     expect(frames.at(-1)?.step).toBeGreaterThan(100)
@@ -170,9 +188,9 @@ describe('session-worker recording', () => {
     const { replies, worker } = await askAll(run(src))
     worker.terminate()
     const compiled = replies.find((r) => r.kind === 'compiled')
-    expect(compiled?.kind === 'compiled' && compiled.lambda.available).toBe(false)
-    expect(replies.flatMap((r) => (r.kind === 'lambda-frames' ? r.frames : [])).length).toBe(0)
-    expect(replies.flatMap((r) => (r.kind === 'tm-frames' ? r.frames : [])).length).toBeGreaterThan(0)
+    expect(compiled?.kind === 'compiled' && compiled.statuses.lambda.available).toBe(false)
+    expect(replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' ? r.frames : [])).length).toBe(0)
+    expect(replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'tm' ? r.frames : [])).length).toBeGreaterThan(0)
     expect(replies.at(-1)?.kind).toBe('result')
   })
 
@@ -181,13 +199,15 @@ describe('session-worker recording', () => {
     const { replies, worker } = await askAll(run('let x = 200; x + 1'))
     worker.terminate()
     const compiled = replies.find((r) => r.kind === 'compiled')
-    expect(compiled?.kind === 'compiled' && compiled.tm.available).toBe(false)
-    expect(replies.flatMap((r) => (r.kind === 'lambda-frames' ? r.frames : [])).length).toBeGreaterThan(0)
-    // The mirror of the λ-declines test above, which asserts `lambda-frames` is exactly 0. Here the TM
-    // leg is the one declining, so `tm-frames` must be exactly 0 and `tmProgram` must be the specific
+    expect(compiled?.kind === 'compiled' && compiled.statuses.tm.available).toBe(false)
+    expect(replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' ? r.frames : [])).length).toBeGreaterThan(
+      0,
+    )
+    // The mirror of the λ-declines test above, which asserts the λ `frames` are exactly 0. Here the TM
+    // leg is the one declining, so the TM `frames` must be exactly 0 and `programs.tm` must be the specific
     // null value the decline guard produces, not merely absent from the reply.
-    expect(replies.flatMap((r) => (r.kind === 'tm-frames' ? r.frames : [])).length).toBe(0)
-    expect(compiled?.kind === 'compiled' && compiled.tmProgram).toBeNull()
+    expect(replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'tm' ? r.frames : [])).length).toBe(0)
+    expect(compiled?.kind === 'compiled' && compiled.programs.tm).toBeNull()
     expect(replies.at(-1)?.kind).toBe('result')
   })
 
@@ -199,7 +219,7 @@ describe('session-worker recording', () => {
     // in the record loop would leave frames longer than 512 and this test would catch it.
     const { replies, worker } = await askAll(run('let x = 200; x + 1'))
     worker.terminate()
-    const frames = replies.flatMap((r) => (r.kind === 'lambda-frames' ? r.frames : []))
+    const frames = replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' ? r.frames : []))
     expect(frames.length).toBeGreaterThan(0)
     for (const f of frames) expect(f.text.length).toBeLessThanOrEqual(512)
   })
@@ -207,7 +227,7 @@ describe('session-worker recording', () => {
   it('abandons a superseded run without replying for it', async () => {
     const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
     const seen: RunReply[] = []
-    // Resolved on generation 1's FIRST `lambda-frames` reply — the moment its record loop has posted
+    // Resolved on generation 1's FIRST λ `frames` reply — the moment its record loop has posted
     // one `RECORD_CHUNK` and suspended at `await yieldToEventLoop()`, still holding `recording.lambda`.
     // Posting generation 2 only after this point (not immediately, back-to-back) is what makes the
     // stale-flag race reachable: a `run` posted right away can land before the worker's wasm init
@@ -219,7 +239,7 @@ describe('session-worker recording', () => {
     const done = new Promise<void>((resolve) => {
       worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
         seen.push(e.data)
-        if (e.data.gen === 1 && e.data.kind === 'lambda-frames') resolveGen1Recording()
+        if (e.data.gen === 1 && e.data.kind === 'frames' && e.data.leg === 'lambda') resolveGen1Recording()
         if (e.data.gen === 2 && (e.data.kind === 'result' || e.data.kind === 'no-session')) resolve()
       })
     })
@@ -245,11 +265,11 @@ describe('session-worker recording', () => {
     // Generation 2 must have actually RECORDED, not merely replied. Without this the test passes
     // when gen 2's record loop is suppressed by gen 1's stale flag and `result` reports the
     // unstepped initial term as the answer.
-    const gen2Frames = seen.flatMap((r) => (r.kind === 'lambda-frames' && r.gen === 2 ? r.frames : []))
+    const gen2Frames = seen.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' && r.gen === 2 ? r.frames : []))
     expect(gen2Frames.length).toBeGreaterThan(1)
     expect(gen2Frames.at(-1)?.step).toBeGreaterThan(0)
     const gen2Result = seen.find((r) => r.gen === 2 && r.kind === 'result')
-    expect(gen2Result?.kind === 'result' && gen2Result.lambda.status.run).toBe('Ended')
+    expect(gen2Result?.kind === 'result' && gen2Result.legs.lambda.status.run).toBe('Ended')
   })
 
   it('replies to extend even when the run already ended', async () => {
@@ -269,12 +289,15 @@ describe('session-worker recording', () => {
     worker.postMessage({ kind: 'extend', gen: 1, leg: 'lambda', epoch: 0 })
     await done
     worker.terminate()
-    expect(replies.some((r) => r.kind === 'lambda-frames' && r.frames.length === 0 && r.done === 'ended')).toBe(true)
+    expect(
+      replies.some((r) => r.kind === 'frames' && r.leg === 'lambda' && r.frames.length === 0 && r.done === 'ended'),
+    ).toBe(true)
     expect(replies.some((r) => r.kind === 'result')).toBe(true)
   })
 })
 
-const recorded = (r: RunReply): boolean => (r.kind === 'rxm-frames' && r.done !== null) || r.kind === 'no-session'
+const recorded = (r: RunReply): boolean =>
+  (r.kind === 'frames' && r.leg === 'rxm' && r.done !== null) || r.kind === 'no-session'
 
 describe('session-worker rxm copies', () => {
   const FORTY_TWO = 'result Nat\n\n    li\trr, #42\n    halt\n'
@@ -283,7 +306,7 @@ describe('session-worker rxm copies', () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
     const compiled = replies.find((r) => r.kind === 'compiled')
-    expect(compiled?.kind === 'compiled' && compiled.rxmText).toBe(
+    expect(compiled?.kind === 'compiled' && compiled.programs.rxm?.text).toBe(
       'result Nat\n\n    li\tr0, #40\n    mov\tr1, r0\n    li\tr2, #2\n    add\trr, r1, r2\n    halt\n',
     )
 
@@ -291,11 +314,14 @@ describe('session-worker rxm copies', () => {
     const declined = await askAll(run(list))
     declined.worker.terminate()
     const second = declined.replies.find((r) => r.kind === 'compiled')
-    expect(second?.kind === 'compiled' && [second.rxm.available, second.rxmText]).toEqual([false, null])
+    expect(second?.kind === 'compiled' && [second.statuses.rxm.available, second.programs.rxm]).toEqual([false, null])
   })
 
   it('builds an rxm copy, answers with its status, listing and value, then records its frames', async () => {
-    const { replies, worker } = await askUntil({ kind: 'rxm-scratch', gen: 1, src: FORTY_TWO }, recorded)
+    const { replies, worker } = await askUntil(
+      { kind: 'scratch', gen: 1, leg: 'rxm', src: FORTY_TWO, step: 0 },
+      recorded,
+    )
     worker.terminate()
     const [built, ...rest] = replies
     expect(built?.kind).toBe('rxm-scratch-compiled')
@@ -303,17 +329,20 @@ describe('session-worker rxm copies', () => {
     expect(built.rxm).toEqual({ available: true, reason: '', run: 'Running', cap: null, total_steps: 2 })
     expect(built.rxmProgram).toEqual({ listing: ['li\trr, #42', 'halt'], labels: [] })
     expect(built.value).toEqual({ Value: { text: '42' } })
-    const frames = rest.flatMap((r) => (r.kind === 'rxm-frames' ? r.frames : []))
+    const frames = rest.flatMap((r) => (r.kind === 'frames' && r.leg === 'rxm' ? r.frames : []))
     expect(frames.map((f) => [f.step, f.source_node])).toEqual([
       [0, null],
       [1, null],
       [2, null],
     ])
-    expect(rest.at(-1)).toMatchObject({ kind: 'rxm-frames', done: 'ended' })
+    expect(rest.at(-1)).toMatchObject({ kind: 'frames', leg: 'rxm', done: 'ended' })
   })
 
   it('refuses text with a label mistake, and names it', async () => {
-    const { replies, worker } = await askUntil({ kind: 'rxm-scratch', gen: 1, src: '\tjmp\tnowhere\n' }, recorded)
+    const { replies, worker } = await askUntil(
+      { kind: 'scratch', gen: 1, leg: 'rxm', src: '\tjmp\tnowhere\n', step: 0 },
+      recorded,
+    )
     worker.terminate()
     expect(replies.map((r) => r.kind)).toEqual(['no-session'])
     expect(replies[0]?.kind === 'no-session' && replies[0].diagnostics.map((d) => d.message)).toEqual([
@@ -322,7 +351,7 @@ describe('session-worker rxm copies', () => {
   })
 
   it('answers extend on an rxm copy with its frames and its value, where a session gets a result', async () => {
-    const { worker } = await askUntil({ kind: 'rxm-scratch', gen: 1, src: FORTY_TWO }, recorded)
+    const { worker } = await askUntil({ kind: 'scratch', gen: 1, leg: 'rxm', src: FORTY_TWO, step: 0 }, recorded)
     const replies: RunReply[] = []
     const done = new Promise<void>((resolve) => {
       worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
@@ -333,7 +362,10 @@ describe('session-worker rxm copies', () => {
     worker.postMessage({ kind: 'extend', gen: 1, leg: 'rxm', epoch: 0 })
     await done
     worker.terminate()
-    expect(replies.map((r) => r.kind)).toEqual(['rxm-frames', 'rxm-value'])
+    expect(replies.map((r) => [r.kind, 'leg' in r ? r.leg : null])).toEqual([
+      ['frames', 'rxm'],
+      ['rxm-value', null],
+    ])
     expect(replies.at(-1)).toEqual({ kind: 'rxm-value', gen: 1, value: { Value: { text: '42' } } })
   })
 })
@@ -351,13 +383,7 @@ const EXAMPLE = 'let mut n = 100000; while n > 0 { n = n - 1; } n'
 /** A recording is waited on in stages of this many frames, each within `until`'s one bound. */
 const STAGE = 37_000
 
-type FramesReply = Extract<RunReply, { kind: 'lambda-frames' | 'tm-frames' | 'rxm-frames' }>
 type ResultReply = Extract<RunReply, { kind: 'result' }>
-const FRAMES: Readonly<Record<Leg, FramesReply['kind']>> = {
-  lambda: 'lambda-frames',
-  tm: 'tm-frames',
-  rxm: 'rxm-frames',
-}
 
 /** One TM chunk as `watch` keeps it in a long run: its epoch, its steps and its end. */
 type TmChunk = { epoch: number; steps: number[]; done: RecordEnd | null }
@@ -377,9 +403,10 @@ function watch(light = false) {
   worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
     const r = e.data
     if (r.kind === 'worker-error') error = r.message
-    if (r.kind === 'lambda-frames' || r.kind === 'rxm-frames' || r.kind === 'tm-frames') frames += r.frames.length
-    if (r.kind === 'tm-frames') tm.push({ epoch: r.epoch, steps: r.frames.map((f) => f.step), done: r.done })
-    replies.push(light && r.kind === 'tm-frames' ? { ...r, frames: [] } : r)
+    if (r.kind === 'frames') frames += r.frames.length
+    if (r.kind === 'frames' && r.leg === 'tm')
+      tm.push({ epoch: r.epoch, steps: r.frames.map((f) => f.step), done: r.done })
+    replies.push(light && r.kind === 'frames' && r.leg === 'tm' ? { ...r, frames: [] } : r)
   })
   return {
     worker,
@@ -398,7 +425,7 @@ function watch(light = false) {
 
 /** `leg`'s chunks recorded under `epoch`, in order. */
 const chunks = (replies: readonly RunReply[], leg: Leg, epoch: number): FramesReply[] =>
-  replies.filter((r): r is FramesReply => r.kind === FRAMES[leg] && (r as FramesReply).epoch === epoch)
+  replies.filter((r): r is FramesReply => r.kind === 'frames' && r.leg === leg && r.epoch === epoch)
 
 /** Whether `leg`'s recording under `epoch` has stopped. */
 const stopped = (replies: readonly RunReply[], leg: Leg, epoch: number): boolean =>
@@ -449,11 +476,12 @@ describe('session-worker rewind', () => {
     if (compiled?.kind !== 'compiled') throw new Error('the run sent no `compiled`')
     const step0 = fill(source.replies, 'lambda', 0).frames[0] as LambdaState
     // THE WHOLE TERM, NOT A CUT ONE: a frame's text is cut at `FRAME_BYTES`, and a cut text is no λ text to fork.
-    expect([step0.cut, compiled.tmText === null, compiled.rxmText === null]).toEqual([null, false, false])
+    const [tmSrc, rxmSrc] = [compiled.programs.tm?.text ?? null, compiled.programs.rxm?.text ?? null]
+    expect([step0.cut, tmSrc === null, rxmSrc === null]).toEqual([null, false, false])
     const builds: [Leg, RunRequest][] = [
-      ['lambda', { kind: 'lambda-scratch', gen: 1, src: step0.text, step: 0 }],
-      ['tm', { kind: 'tm-scratch', gen: 1, src: compiled.tmText ?? '' }],
-      ['rxm', { kind: 'rxm-scratch', gen: 1, src: compiled.rxmText ?? '' }],
+      ['lambda', { kind: 'scratch', gen: 1, leg: 'lambda', src: step0.text, step: 0 }],
+      ['tm', { kind: 'scratch', gen: 1, leg: 'tm', src: tmSrc ?? '', step: 0 }],
+      ['rxm', { kind: 'scratch', gen: 1, leg: 'rxm', src: rxmSrc ?? '', step: 0 }],
     ]
     for (const [leg, build] of builds) {
       const w = watch()
@@ -490,11 +518,13 @@ describe('session-worker rewind', () => {
       w.post({ kind: 'rewind', gen: 1, leg: 'lambda', epoch: 1 })
       w.post({ kind: 'lambda-tree', gen: 1, step: 0, budget: 100 })
       await w.settle(() => w.replies.at(-1)?.kind === 'lambda-tree', 'the tree after both extends and the rewind')
-      expect(w.replies.slice(at).map((r) => [r.kind, 'epoch' in r ? r.epoch : null])).toEqual([
-        ['lambda-frames', 1],
-        ['lambda-frames', 1],
-        ['result', null],
-        ['lambda-tree', null],
+      expect(
+        w.replies.slice(at).map((r) => [r.kind, 'leg' in r ? r.leg : null, 'epoch' in r ? r.epoch : null]),
+      ).toEqual([
+        ['frames', 'lambda', 1],
+        ['frames', 'lambda', 1],
+        ['result', null, null],
+        ['lambda-tree', null, null],
       ])
     } finally {
       w.worker.terminate()
@@ -506,7 +536,7 @@ describe('session-worker rewind', () => {
     try {
       let asked = false
       w.worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
-        if (e.data.kind !== 'tm-frames' || asked) return
+        if (e.data.kind !== 'frames' || e.data.leg !== 'tm' || asked) return
         asked = true
         w.post({ kind: 'rewind', gen: 1, leg: 'tm', epoch: 1 })
       })
@@ -538,7 +568,7 @@ describe('session-worker rewind', () => {
         w.post({ kind: 'extend', gen: 1, leg: 'lambda', epoch: 0 })
         await w.settle(() => w.results().length > before, 'a λ extend’s result')
       }
-      const decided = w.results().at(-1)?.lambda
+      const decided = w.results().at(-1)?.legs.lambda
       expect(decided?.value).toEqual({ Value: { text: '[4, 2, 3, 5, 4, 2, 3, 5, 4, 2, 3, 5, 4, 2, 3, 5]' } })
 
       w.post({ kind: 'rewind', gen: 1, leg: 'lambda', epoch: 1 })
@@ -549,7 +579,7 @@ describe('session-worker rewind', () => {
       const tmLast = w.tm.flatMap((c) => c.steps).at(-1) ?? Number.NaN
       w.post({ kind: 'extend', gen: 1, leg: 'tm', epoch: 0 })
       await w.settle(() => w.results().length > before, 'the TM extend’s result')
-      expect(w.results().at(-1)?.lambda).toEqual(decided)
+      expect(w.results().at(-1)?.legs.lambda).toEqual(decided)
       // THE λ REWIND LEFT THE TM CURSOR WHERE IT STOOD: the TM leg's recording goes on from the step after its last.
       expect(w.tm.slice(tmAt).flatMap((c) => c.steps)[0]).toBe(tmLast + 1)
     } finally {
@@ -562,10 +592,10 @@ describe('session-worker rewind', () => {
     try {
       w.post(run(LONGER_SRC))
       await w.settle(() => w.results().length === 1, 'the run’s result')
-      const s0 = w.results()[0]?.lambda
+      const s0 = w.results()[0]?.legs.lambda
       w.post({ kind: 'extend', gen: 1, leg: 'lambda', epoch: 0 })
       await w.settle(() => w.results().length === 2, 'the λ extend’s result')
-      const s1 = w.results()[1]?.lambda
+      const s1 = w.results()[1]?.legs.lambda
       // FURTHER ON AND STILL UNFINISHED, so the drop-back below is a step back and not a value.
       expect([s0?.value, s1?.value]).toEqual(['Unfinished', 'Unfinished'])
       expect(s1?.state?.step).toBeGreaterThan(s0?.state?.step ?? Number.POSITIVE_INFINITY)
@@ -574,7 +604,7 @@ describe('session-worker rewind', () => {
       await w.settle(() => stopped(w.replies, 'lambda', 1), 'the λ leg’s rewound fill to stop')
       w.post({ kind: 'extend', gen: 1, leg: 'tm', epoch: 0 })
       await w.settle(() => w.results().length === 3, 'the TM extend’s result')
-      expect(w.results()[2]?.lambda).toEqual(s0)
+      expect(w.results()[2]?.legs.lambda).toEqual(s0)
     } finally {
       w.worker.terminate()
     }
@@ -590,11 +620,11 @@ describe('session-worker rewind', () => {
     try {
       w.post(run(LONGER_SRC))
       await w.settle(() => w.results().length === 1, 'the run’s result')
-      const s0 = w.results()[0]?.lambda
+      const s0 = w.results()[0]?.legs.lambda
       const at = chunks(w.replies, 'lambda', 0).length
       let asked = false
       w.worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
-        if (e.data.kind !== 'lambda-frames' || asked) return
+        if (e.data.kind !== 'frames' || e.data.leg !== 'lambda' || asked) return
         asked = true
         w.post({ kind: 'rewind', gen: 1, leg: 'lambda', epoch: 1 })
       })
@@ -602,10 +632,12 @@ describe('session-worker rewind', () => {
       await w.settle(() => stopped(w.replies, 'lambda', 1) && w.results().length === 2, 'the rewound fill and a result')
       const cut = chunks(w.replies, 'lambda', 0).slice(at)
       expect(cut.length > 0 && cut.every((c) => c.done === null), 'the extend’s chunks, all cut short').toBe(true)
-      const stop = w.replies.findIndex((r) => r.kind === 'lambda-frames' && r.epoch === 1 && r.done !== null)
+      const stop = w.replies.findIndex(
+        (r) => r.kind === 'frames' && r.leg === 'lambda' && r.epoch === 1 && r.done !== null,
+      )
       expect(w.replies.indexOf(w.results()[1] as RunReply)).toBeLessThan(stop)
       expect(fill(w.replies, 'lambda', 1)).toEqual(fill(w.replies, 'lambda', 0))
-      expect(w.results()[1]?.lambda).toEqual(s0)
+      expect(w.results()[1]?.legs.lambda).toEqual(s0)
     } finally {
       w.worker.terminate()
     }
@@ -616,15 +648,17 @@ describe('session-worker rewind', () => {
     try {
       w.post(run(LONG_SRC))
       await w.settle(() => w.results().length === 1, 'the run’s result')
-      const s0 = w.results()[0]?.lambda
+      const s0 = w.results()[0]?.legs.lambda
       // AN ENDED rxm LEG: its `extend` posts its `result` before the worker takes another message.
       expect([fill(w.replies, 'lambda', 0).done, fill(w.replies, 'rxm', 0).done]).toEqual(['budget', 'ended'])
       w.post({ kind: 'rewind', gen: 1, leg: 'lambda', epoch: 1 })
       w.post({ kind: 'extend', gen: 1, leg: 'rxm', epoch: 0 })
       await w.settle(() => stopped(w.replies, 'lambda', 1) && w.results().length === 2, 'the rewound fill and a result')
-      const stop = w.replies.findIndex((r) => r.kind === 'lambda-frames' && r.epoch === 1 && r.done !== null)
+      const stop = w.replies.findIndex(
+        (r) => r.kind === 'frames' && r.leg === 'lambda' && r.epoch === 1 && r.done !== null,
+      )
       expect(w.replies.indexOf(w.results()[1] as RunReply)).toBeLessThan(stop)
-      expect(w.results()[1]?.lambda).toEqual(s0)
+      expect(w.results()[1]?.legs.lambda).toEqual(s0)
     } finally {
       w.worker.terminate()
     }
@@ -642,7 +676,7 @@ describe('session-worker rewind', () => {
       let rewound = false
       w.worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
         const r = e.data
-        if (r.kind !== 'lambda-frames' || r.epoch !== 0 || rewound) return
+        if (r.kind !== 'frames' || r.leg !== 'lambda' || r.epoch !== 0 || rewound) return
         if (!extended && r.done === 'budget') {
           extended = true
           w.post({ kind: 'extend', gen: 1, leg: 'lambda', epoch: 0 })
@@ -655,7 +689,9 @@ describe('session-worker rewind', () => {
       await w.settle(() => stopped(w.replies, 'lambda', 1) && w.results().length === 2, 'the rewound fill and the run')
       const [first, second] = w.results()
       const at = (r: RunReply | undefined) => w.replies.indexOf(r as RunReply)
-      const tmStop = w.replies.findIndex((r) => r.kind === 'tm-frames' && r.epoch === 0 && r.done !== null)
+      const tmStop = w.replies.findIndex(
+        (r) => r.kind === 'frames' && r.leg === 'tm' && r.epoch === 0 && r.done !== null,
+      )
       expect(at(first), 'the extend’s result, before the run’s, which waits for the TM fill').toBeLessThan(tmStop)
       const lambda = chunks(w.replies, 'lambda', 0)
       const end = lambda.findIndex((c) => c.done !== null)
@@ -664,19 +700,21 @@ describe('session-worker rewind', () => {
         lambda.slice(end + 1).every((c) => c.done === null),
         'the extend’s chunks, all cut short',
       ).toBe(true)
-      const stop = w.replies.findIndex((r) => r.kind === 'lambda-frames' && r.epoch === 1 && r.done !== null)
+      const stop = w.replies.findIndex(
+        (r) => r.kind === 'frames' && r.leg === 'lambda' && r.epoch === 1 && r.done !== null,
+      )
       expect(at(first), 'the extend’s result, while the rewound fill records').toBeLessThan(stop)
       const cut = (lambda.flatMap((c): unknown[] => c.frames).at(-1) as LambdaState | undefined)?.step
       const refilled = (fill(w.replies, 'lambda', 1).frames.at(-1) as LambdaState | undefined)?.step
       expect(cut, 'precondition: the extend recorded past the λ fill').toBeGreaterThan(
         refilled ?? Number.POSITIVE_INFINITY,
       )
-      expect({ step: first?.lambda.state?.step, value: first?.lambda.value }).toEqual({
+      expect({ step: first?.legs.lambda.state?.step, value: first?.legs.lambda.value }).toEqual({
         step: cut,
         value: 'Unfinished',
       })
       expect([cut, refilled], 'the run’s λ part, kept or read once the fill stopped').toContain(
-        second?.lambda.state?.step,
+        second?.legs.lambda.state?.step,
       )
     } finally {
       w.worker.terminate()
@@ -695,10 +733,10 @@ describe('session-worker rewind', () => {
       let extended = false
       w.worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
         const r = e.data
-        if (r.kind === 'tm-frames' && r.gen === 1 && !rewound) {
+        if (r.kind === 'frames' && r.leg === 'tm' && r.gen === 1 && !rewound) {
           rewound = true
           w.post({ kind: 'rewind', gen: 1, leg: 'rxm', epoch: 1 })
-        } else if (r.kind === 'rxm-frames' && r.gen === 2 && !extended) {
+        } else if (r.kind === 'frames' && r.leg === 'rxm' && r.gen === 2 && !extended) {
           extended = true
           w.post({ kind: 'extend', gen: 2, leg: 'lambda', epoch: 0 })
         }
@@ -715,7 +753,7 @@ describe('session-worker rewind', () => {
       expect(at(chunks(of(1), 'rxm', 1)[0]), 'precondition: the rxm rewind came before the first result').toBeLessThan(
         at(one),
       )
-      expect(one?.rxm.status.run, 'precondition: generation 1’s rxm value is decided').toBe('Ended')
+      expect(one?.legs.rxm.status.run, 'precondition: generation 1’s rxm value is decided').toBe('Ended')
 
       w.post(run(EXAMPLE, 2))
       await w.settle(() => firstResult(2) !== undefined, 'generation 2’s first result')
@@ -725,8 +763,11 @@ describe('session-worker rewind', () => {
         'precondition: generation 2’s rxm leg still recorded at its first result',
       ).toBe(false)
       const compiled = of(2).find((r) => r.kind === 'compiled')
-      expect({ steps: two?.rxm.status.total_steps, value: two?.rxm.value }, 'generation 2’s first rxm part').toEqual({
-        steps: compiled?.kind === 'compiled' ? compiled.rxm.total_steps : Number.NaN,
+      expect(
+        { steps: two?.legs.rxm.status.total_steps, value: two?.legs.rxm.value },
+        'generation 2’s first rxm part',
+      ).toEqual({
+        steps: compiled?.kind === 'compiled' ? compiled.statuses.rxm.total_steps : Number.NaN,
         value: { Value: { text: '0' } },
       })
     } finally {

@@ -12,7 +12,7 @@ use redextape_core::lambda::Status;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
     BLANK, Encoding, Machine, Move, REG, Rule, State, Symbol, TAPES, TM_DEFAULT_CAPS, TmCaps, TmStatus, Unary, WORK,
-    defunc, lower_rxm, lower_tm, n_slots_of, parse_tm, simulate_trace,
+    lower_program, lower_tm, n_slots_of, parse_tm, simulate_trace,
 };
 use redextape_core::trace::{LambdaCursor, StepEvent, TmCursor};
 
@@ -25,10 +25,7 @@ fn machine_and_init(src: &str) -> (Machine, Vec<Vec<Symbol>>) {
     let (p, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors in {src:?}: {ds:?}");
     let core = desugar(&p.unwrap());
-    let prog = match lower_rxm(&core) {
-        Ok(p) => p,
-        Err(_) => lower_rxm(&defunc(&core).expect("defunc")).expect("lower"),
-    };
+    let prog = lower_program(&core).expect("lower");
     let enc = Unary::default();
     let m = lower_tm(&prog, &enc);
     let mut init = vec![Vec::new(); TAPES];

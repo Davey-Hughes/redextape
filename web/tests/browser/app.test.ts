@@ -190,7 +190,7 @@ describe('the app, end to end', () => {
     // one screen, which is the failure this test's name ("says it did not compile") is written to
     // exclude. Of the program's rows only `lambdaRows` (`results.ts`) writes that string, and it needs a
     // compiled `state` to reach the line that emits it, so a non-compiling program cannot honestly show
-    // it; a λ copy's readout (`readout.ts`'s `lambdaCopyParts`) writes it too, and this file makes no
+    // it; a λ copy's readout (`readout.ts`'s `copyParts`) writes it too, and this file makes no
     // copy. The tests above leave those β-steps on screen — 'colours keywords once the grammar lands, and
     // reports all three legs' asserts them — so the string really is there to lose.
     expect(resultsText()).not.toContain('reductions')

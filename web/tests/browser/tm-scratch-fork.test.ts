@@ -7,16 +7,16 @@ import { editedToHaltImmediately, idle, SHELL, startStateGoesToHalt, tmPaneHost,
 
 /**
  * **THE FORK GESTURE FOR THE TM LEG, DRIVEN THROUGH THE APP**: the control a user clicks to reach the
- * machinery — the cap (`MAX_FORK_RULES`), the `tm-scratch` request/reply pair, the buffer collection's second
- * leg, the editor region on `TmPane` — and its wiring: `PaneEvents.detachMachine`, `TmPane.setForkAvailable`,
- * `transport.ts`'s handler, and `replies.ts`'s `tm-scratch-compiled` arm.
+ * machinery — the cap (`MAX_FORK_RULES`), the `scratch` request on the TM leg and its reply, the buffer
+ * collection's second leg, the editor region on `TmPane` — and its wiring: `PaneEvents.detachProgram`,
+ * `TmPane.setForkAvailable`, `transport.ts`'s handler, and `replies.ts`'s `tm-scratch-compiled` arm.
  *
  * **MODELLED ON `scratch-fork.test.ts`'s DOM `describe` AND `scratch-edit.test.ts`, NOT ON
  * `scratch-fork.test.ts`'s OTHER `describe`s.** Those drive `ScratchBuffers` directly over a hand-built
  * registry specifically because the claims under test there — pool size, a terminated worker's thread staying
  * silent — are not reachable from the DOM. Nothing here makes either claim; `fork`'s pool/registry mechanics
- * are leg-agnostic (`scratch.ts`'s own doc: "`#spawn` below reads `state.leg`... to pick both the request kind
- * it posts... and the one leg record it builds") and are already proven once, for λ, at that layer. What is
+ * are leg-agnostic (`scratch.ts`'s own doc: "`#spawn` below reads `state.leg`... for both the leg its build
+ * request carries... and the one leg record it builds") and are already proven once, for λ, at that layer. What is
  * new and IS a DOM fact is the control existing, offering the right disabled reason, and an edit in the
  * mounted editor reaching a running machine — so this file drives the real app, the same `SHELL`
  * `scratch-app.test.ts` and `scratch-edit.test.ts` use.
@@ -56,13 +56,13 @@ fn add1(x) { x + 1 }
 fold([3, 1, 2].map(add1), 0, add)`
 
 /**
- * How many `tm-frames` replies the source worker posts for `BIG`: its TM leg records 78,459 frames before its history
+ * How many TM `frames` replies the source worker posts for `BIG`: its TM leg records 78,459 frames before its history
  * fills at step 78,458, `RECORD_CHUNK` to a reply. 307.
  */
 const BIG_TM_REPLIES = Math.ceil(78_459 / RECORD_CHUNK)
 
 /**
- * **THE SOURCE WORKER'S `tm-frames` REPLIES SINCE ITS LAST `compiled`, COUNTED**, by wrapping `Worker`'s own
+ * **THE SOURCE WORKER'S TM `frames` REPLIES SINCE ITS LAST `compiled`, COUNTED**, by wrapping `Worker`'s own
  * `addEventListener` and `postMessage` before the app mounts, as `share-positions.test.ts` and
  * `readout-history-held.test.ts` do. Once the TM pane is forked away no view shows the source's TM leg, and its replies
  * are what still counts its recording. Only the source session's worker posts `compiled`, which is what names it here;
@@ -92,11 +92,16 @@ Worker.prototype.addEventListener = function (
     type === 'message' && typeof listener === 'function'
       ? (e: Event) => {
           listener.call(this, e)
-          const kind = ((e as MessageEvent).data as { kind?: unknown } | undefined)?.kind
-          if (kind === 'compiled') {
+          const data = (e as MessageEvent).data as { kind?: unknown; leg?: unknown } | undefined
+          if (data?.kind === 'compiled') {
             sourceWorker = this
             sourceTmReplies = 0
-          } else if (kind === 'tm-frames' && this === sourceWorker && sourceTmReplies !== null) {
+          } else if (
+            data?.kind === 'frames' &&
+            data.leg === 'tm' &&
+            this === sourceWorker &&
+            sourceTmReplies !== null
+          ) {
             sourceTmReplies += 1
           }
         }
@@ -232,8 +237,8 @@ describe('forking a TM pane', () => {
    * `idle`, which it reaches only once the WHOLE run has finished, so a fork after it on
    * `'let x = 40; x + 2'` lands on a session with nowhere left to go. `BIG` (this file's own copy of
    * `scratch-fork.test.ts`'s fixture) is what makes the claim discriminating: its λ leg finishes in
-   * 555 steps before TM recording even starts (`onRun` awaits `recordLambda`, `recordRxm` and
-   * `recordTm` in turn, not interleaved), so by the time this pane's fork control is enabled the
+   * 555 steps before TM recording even starts (`onRun` awaits the λ, rxm and TM legs'
+   * recordings in turn, not interleaved), so by the time this pane's fork control is enabled the
    * source is only just beginning several seconds of TM recording — `#results` reads `'running'`,
    * checked directly below rather than assumed from the timing comment alone. The claim is the second
    * of the two `scratch-fork.test.ts`'s λ version makes: the source "RUNS TO ITS OWN ANSWER, not
@@ -244,7 +249,7 @@ describe('forking a TM pane', () => {
    * readout proves nothing once `BIG` is the source. The TM leg IS still running, but `tm-0` — the one
    * pane that shows it — is the pane this test forks away, and nothing else on this page displays the
    * source's TM leg. What SURVIVES the fork and is still checkable is whether the source reaches its
-   * own answer at all: a regression that made `detachMachine` mutate or steal the source's own worker
+   * own answer at all: a regression that made `detachProgram` mutate or steal the source's own worker
    * instead of minting a second one would leave `#results` stuck on `'running'` forever, which this
    * fails on by timeout rather than by a value that already happened to be final.
    */
@@ -266,7 +271,7 @@ describe('forking a TM pane', () => {
     // see this test's own doc for why this axis and not a step comparison.
     //
     // **TWO WAITS, SPLIT ON THE SOURCE WORKER'S REPLIES.** No view shows the source's TM leg after the fork, so the
-    // page has no state between the fork and the result; the worker's `tm-frames` replies still count its recording,
+    // page has no state between the fork and the result; the worker's TM `frames` replies still count its recording,
     // 307 for `BIG`. Split so that no one wait holds the whole recording. The first wait ends half way from the count
     // at the fork to the last reply, or at the result.
     const atFork = sourceTmReplies
@@ -282,9 +287,9 @@ describe('forking a TM pane', () => {
   /**
    * **THE CONTROL MUST NOT SURVIVE ITS OWN FORK.** Were `button.detach` to stay present AND enabled on
    * the pane that just rebound onto its own new scratch, a second click would reach `transport.ts`'s
-   * `detachMachine` with no machine text (a TM scratch's own `tmProgram.tmText` is always `null` —
+   * `detachProgram` with no machine text (a TM scratch's own `programs.tm.text` is always `null` —
    * `replies.ts`'s `tm-scratch-compiled` arm constructs it that way on purpose) and throw
-   * `detachMachine reached with no machine text` rather than do nothing. A view already showing a copy
+   * `detachProgram reached with no machine text` rather than do nothing. A view already showing a copy
    * has nothing left to copy — `CopyEditor.#refreshDetach` states that rule and enforces it — so the
    * control must withdraw the instant this pane's OWN session becomes the scratch it just made — not only
    * when some later reply happens to tell it to.

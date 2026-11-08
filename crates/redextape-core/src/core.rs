@@ -5,6 +5,7 @@
 pub type NodeId = u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BinOp {
     Add,
     Sub,

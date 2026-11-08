@@ -57,7 +57,9 @@ pub use syntax::{
     print_tm_with, print_tm_with_mapped, rule_at, state_rule_count,
 };
 
-use crate::core::Core;
+use std::collections::BTreeSet;
+
+use crate::core::{Core, NodeId};
 use crate::ty::Ty;
 // `Encoding`, `lower_rxm`, `LowerError`, `lower_tm`, `simulate`, `Tape`, `TmCaps`, `TmStatus`, `REG`,
 // and `TAPES` are in scope via this module's `pub use` re-exports.
@@ -91,7 +93,7 @@ pub enum TmRun {
     /// O(width²) states under `Binary`), or a machine that exceeds `build::MAX_MACHINE_STATES`.
     ///
     /// THE FOURTH IS NOT LIKE THE OTHER THREE. Those bound a quantity readable off the `Program`, so
-    /// `lower_and_size` pre-checks them before lowering. The state count is only known once the
+    /// `sized` pre-checks them before lowering. The state count is only known once the
     /// gadgets have been laid out, so it is reported BY the lowering — see `lower_tm_guarded`.
     ///
     /// `MAX_SLOTS` in particular would also make `init_reg` allocate an oversized bank were lowering to
@@ -118,7 +120,17 @@ pub enum TmRun {
     LowerError(LowerError),
 }
 
-/// Lower `core` to rxm, trying direct (first-order) lowering before defunctionalizing.
+/// `lower_program`'s one lowering, with each instruction's origin.
+#[derive(Clone, Debug)]
+pub struct Lowered {
+    pub program: Program,
+    /// `origins[i]` is the Core node whose lowering emitted `program.code[i]`.
+    pub origins: Vec<NodeId>,
+    /// The nodes `defunc` minted, which name no source construct; empty for a first-order program.
+    pub synthetic: BTreeSet<NodeId>,
+}
+
+/// Lower `core` to rxm, trying direct (first-order) lowering before defunctionalizing, keeping origins.
 ///
 /// `lower_rxm` is tried FIRST, not just as a fast path: `defunc`'s top-level peeling only recognizes a
 /// `fn`-chain (`LetRec`-with-`Lambda`), not a directly-applied, call-only `let f = |params| body; ...`
@@ -139,10 +151,10 @@ pub enum TmRun {
 /// retrying it is redundant work at best.
 ///
 /// PUBLIC SO A CALLER CAN STEP THE PROGRAM THE MACHINE WAS BUILT FROM. Every `run_tm*` entry point in
-/// this module lowers through it, via `lower_and_size`, so a `trace::RxmCursor` over its result runs the
+/// this module that takes a `Core` lowers through it, so a `trace::RxmCursor` over its program runs the
 /// very instructions whose `pc{i}` entry states their machines pass through — which is what lets the
-/// three-way oracle hold the two step for step. Not every lowering calls it: `attribute.rs` and
-/// `sourcemap.rs` repeat its dispatch over the `_mapped` lowerings, to keep each instruction's origin.
+/// three-way oracle hold the two step for step. `sourcemap.rs` and `attribute.rs` lower through it too,
+/// so the program a map or an attribution describes is the program the machine was built from.
 ///
 /// # Errors
 ///
@@ -150,14 +162,25 @@ pub enum TmRun {
 /// `LowerError::TooDeep` when a depth guard refuses it: `lower_rxm`'s `MAX_LOWER_DEPTH`, on `core` or on
 /// the Core `defunc` rewrote it to, or `defunc`'s own `MAX_DEFUNC_DEPTH`, which a program the first
 /// attempt refused as `Unsupported` can still reach.
-pub fn lower_program(core: &Core) -> Result<Program, LowerError> {
-    match lower_rxm(core) {
-        Ok(p) => return Ok(p),
+pub fn lower_program_mapped(core: &Core) -> Result<Lowered, LowerError> {
+    // Exhaustive rather than wildcarded, so a new `LowerError` variant must decide whether it retries.
+    match lower_rxm_mapped(core) {
+        Ok((program, origins)) => return Ok(Lowered { program, origins, synthetic: BTreeSet::new() }),
         Err(LowerError::Unsupported { .. }) => {}
         Err(e @ LowerError::TooDeep { .. }) => return Err(e),
     }
-    let defunced = defunc(core)?;
-    lower_rxm(&defunced)
+    let (defunced, synthetic) = defunc_mapped(core)?;
+    let (program, origins) = lower_rxm_mapped(&defunced)?;
+    Ok(Lowered { program, origins, synthetic })
+}
+
+/// `lower_program_mapped`'s program, for a caller that needs no origins.
+///
+/// # Errors
+///
+/// As `lower_program_mapped`.
+pub fn lower_program(core: &Core) -> Result<Program, LowerError> {
+    lower_program_mapped(core).map(|l| l.program)
 }
 
 /// Lower (`lower_rxm`, defunctionalizing first if needed -> `lower_tm`) then simulate. The convenience
@@ -172,8 +195,8 @@ pub fn run_tm(core: &Core, enc: &dyn Encoding, caps: TmCaps) -> TmRun {
 
 /// One attempt at `enc`'s own width: lower, lay out the bank, simulate, and classify the halt.
 ///
-/// `None` IF THE LAYOUT WAS REFUSED. Three of the four refusals are pre-checked by `lower_and_size`
-/// and so never reach here; `MAX_MACHINE_STATES` cannot be pre-checked — it is only known once the
+/// `None` IF THE LAYOUT WAS REFUSED. Three of the four refusals are pre-checked by `sized` and so
+/// never reach here; `MAX_MACHINE_STATES` cannot be pre-checked — it is only known once the
 /// gadgets have been built — so this is where it surfaces.
 ///
 /// Returns the machine and the initial tapes it built alongside the outcome. `run_tm_fitted` drops
@@ -201,11 +224,11 @@ fn attempt(
     Some((run, machine, init, steps))
 }
 
-/// Lower `core`, then pre-check the THREE of `lower_tm`'s FOUR layout refusals that can be settled
-/// before lowering — `MAX_SLOTS` (an absurd register file, which would also drive `init_reg` into a
-/// huge or aborting allocation just below), `frame_bank_unrepresentable` (an absurd `Loc` bank in a
+/// Pre-check the THREE of `lower_tm`'s FOUR layout refusals that can be settled before lowering —
+/// `MAX_SLOTS` (an absurd register file), `frame_bank_unrepresentable` (an absurd `Loc` bank in a
 /// call-containing program), and `mul_count_unrepresentable` (too many `Mul` instructions, each
-/// O(width²) states under `Binary`). The fourth is `MAX_MACHINE_STATES` — see the third paragraph.
+/// O(width²) states under `Binary`) — and give back the `SlotMap` whose slot count the run lays its
+/// bank out from. The fourth is `MAX_MACHINE_STATES` — see the third paragraph.
 ///
 /// The single place every `run_tm*` entry point PRE-CHECKS representability, so they cannot drift from
 /// each other or from the guards they mirror — the same reason `frame_bank_unrepresentable` is a shared
@@ -213,22 +236,28 @@ fn attempt(
 ///
 /// THREE OF THE FOUR REFUSALS, NOT ALL FOUR. `MAX_MACHINE_STATES` cannot be pre-checked: it bounds
 /// the machine, and the machine does not exist until the gadgets are built. `attempt` reports it via
-/// `lower_tm_guarded`'s `None`. Keeping these three here anyway is deliberate — `MAX_SLOTS` in
-/// particular must refuse BEFORE `init_reg` lays out a bank from `n_slots`, which is an allocation
-/// the state ceiling would never see.
+/// `lower_tm_guarded`'s `None`. The three here are an early exit: `lower_tm_all` refuses them itself,
+/// before `attempt` (above) calls `init_reg`, so without them the first attempt answers the same
+/// `TooLarge`, after `lower_tm_all`'s setup and, for the frame bank, its `pc{i}` states.
 ///
 /// A refused program is reported as `TmRun::TooLarge`: it never took a step, so it must not come back
 /// as `Ran` over tapes that decode to nothing or as `HitCap` (which claims a run started and then hit a
 /// resource cap mid-flight).
-fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
-    let prog = lower_program(core).map_err(TmRun::LowerError)?;
-    let sm = lower_tm::SlotMap::of(&prog);
+fn sized(prog: &Program) -> Result<lower_tm::SlotMap, TmRun> {
+    let sm = lower_tm::SlotMap::of(prog);
     if sm.n_slots() > crate::tm::lower_tm::MAX_SLOTS
-        || lower_tm::frame_bank_unrepresentable(&prog, &sm)
-        || lower_tm::mul_count_unrepresentable(&prog)
+        || lower_tm::frame_bank_unrepresentable(prog, &sm)
+        || lower_tm::mul_count_unrepresentable(prog)
     {
         return Err(TmRun::TooLarge);
     }
+    Ok(sm)
+}
+
+/// `lower_program`, then `sized`'s pre-checks, with a lowering error as `TmRun::LowerError`.
+fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
+    let prog = lower_program(core).map_err(TmRun::LowerError)?;
+    let sm = sized(&prog)?;
     Ok((prog, sm))
 }
 
@@ -250,7 +279,7 @@ fn lower_and_size(core: &Core) -> Result<(Program, lower_tm::SlotMap), TmRun> {
 ///
 /// Only the GUARD triggers a retry, never `HitCap` (nor `TooLarge`) — a nil/dangling dereference spins
 /// to a cap at every width, so retrying on caps would burn the full step budget five times over and
-/// still report the same thing; a program `lower_and_size` refuses is refused independently of width,
+/// still report the same thing; a program `sized` refuses is refused independently of width,
 /// so retrying it would just re-refuse it at every width up to the ceiling for no benefit. That
 /// distinction is the reason the guard is a state id rather than a spin (see `Builder::overflow`).
 ///
@@ -366,24 +395,40 @@ fn describe_at(
 ///
 /// The error type is `TmRun` itself, not a dedicated error enum, because both failure shapes ARE
 /// `TmRun` outcomes that just never reached a configuration to describe: `Err(TmRun::LowerError(_))`
-/// if `core` could not be lowered to rxm (see `lower_program`'s doc — an unsupported higher-order
+/// if `core` could not be lowered to rxm (see `lower_program_mapped`'s doc — an unsupported higher-order
 /// construct or a too-deep program), and `Err(TmRun::TooLarge)` if `lower_tm` refused to build a
 /// machine at all (`MAX_SLOTS`/`MAX_FRAME_LOC`/`MAX_MUL_INSTRS`/`MAX_MACHINE_STATES` — see
 /// `TmRun::TooLarge`'s doc). Neither is recoverable by retrying: the caller's only recourse is
 /// rewriting `core`. `TmRun::Overflow` and `TmRun::HitCap`, by contrast, are NOT errors here — they
 /// are `Ok(DescribedRun)` results, because a run that started (even one that overflowed or hit a cap)
 /// still has a configuration to describe.
+pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCaps) -> Result<DescribedRun, TmRun> {
+    run_tm_described_program(&lower_program(core).map_err(TmRun::LowerError)?, kind, result, caps)
+}
+
+/// `run_tm_described`'s search and run over a program the caller has already lowered, so a caller that
+/// also steps or maps that program lowers once. Hand it `lower_program`'s program: that is what keeps a
+/// `trace::RxmCursor` over the same program in step with the machine.
+///
+/// # Errors
+///
+/// As `run_tm_described`, less `TmRun::LowerError`, which the caller met when it lowered:
+/// `Err(TmRun::TooLarge)` when `lower_tm` refuses to build a machine at all.
 //
 // `result: Ty` is taken by value even though the loop below only ever `.clone()`s it. Narrowing it
-// to `&Ty` spreads the lint to `run_tm_described_at` rather than silencing it. Probing the width with
+// to `&Ty` spreads the lint to `run_tm_described` rather than silencing it. Probing the width with
 // a bare `attempt` and building the `DescribedRun` once afterwards compiles clean, but runs the TM
 // simulation twice at the winning width, where this shape runs it once per width plus a `Ty::clone`.
 // The clone is the cheaper of the two, so the allow is a cost trade: re-measure before reopening it.
 #[allow(clippy::needless_pass_by_value)]
-pub fn run_tm_described(core: &Core, kind: EncodingKind, result: Ty, caps: TmCaps) -> Result<DescribedRun, TmRun> {
-    let (prog, sm) = lower_and_size(core)?;
-    let n_slots = sm.n_slots();
-    search_width(|w| describe_at(&prog, n_slots, kind, result.clone(), caps, w), |d| matches!(d.run, TmRun::Overflow))
+pub fn run_tm_described_program(
+    prog: &Program,
+    kind: EncodingKind,
+    result: Ty,
+    caps: TmCaps,
+) -> Result<DescribedRun, TmRun> {
+    let n_slots = sized(prog)?.n_slots();
+    search_width(|w| describe_at(prog, n_slots, kind, result.clone(), caps, w), |d| matches!(d.run, TmRun::Overflow))
         .map(|(d, _)| d)
         .ok_or(TmRun::TooLarge)
 }
@@ -530,14 +575,25 @@ mod run_tm_tests {
         assert!(matches!(run_tm(&core_of("100 * 100"), &Unary::default(), TM_DEFAULT_CAPS), TmRun::Overflow));
     }
 
+    /// `2 * 2 * … * 2`, with more `Mul`s than `lower_tm::MAX_MUL_INSTRS`.
+    fn too_many_muls() -> String {
+        vec!["2"; crate::tm::lower_tm::MAX_MUL_INSTRS as usize + 2].join(" * ")
+    }
+
+    /// More than `lower_tm::MAX_FRAME_LOC` (1,000) locals in a function that contains a call.
+    fn a_frame_bank_too_wide() -> String {
+        const N: usize = 1_100;
+        let params: String = (0..N).map(|i| format!("p{i}, ")).collect();
+        format!("fn g(y) {{ y }} fn f({params}n) {{ g(n) }} f({}3)", "1, ".repeat(N))
+    }
+
     /// A program with more `Mul`s than `lower_tm::MAX_MUL_INSTRS` must be reported as `TooLarge`
     /// through `run_tm`/`run_tm_at`/`run_tm_fitted` alike — never `Ran` (the machine `lower_tm` refuses
     /// to build cannot have simulated to a value) and never retried as `Overflow` (which would just
     /// re-refuse the same program at every width up to the ceiling).
     #[test]
     fn too_many_muls_is_reported_as_too_large_not_ran_or_overflow() {
-        let src = vec!["2"; crate::tm::lower_tm::MAX_MUL_INSTRS as usize + 2].join(" * ");
-        let core = core_of(&src);
+        let core = core_of(&too_many_muls());
         assert!(matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
         assert!(matches!(run_tm(&core, &Binary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
         assert!(matches!(run_tm_at(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
@@ -546,19 +602,44 @@ mod run_tm_tests {
         assert_eq!(width, None, "a refused program was never fitted to any width");
     }
 
-    /// A call-containing program whose `Loc` bank `lower_tm` refuses to lay out (`MAX_FRAME_LOC`) must
-    /// report `TooLarge`, not `Ran` over tapes that decode to nothing: `run_tm` must mirror
-    /// `frame_bank_unrepresentable`, exactly as `attribute` does (see
-    /// `attribute.rs`'s `a_program_too_wide_for_the_frame_bank_reports_that_nothing_ran`).
+    /// A call-containing program whose `Loc` bank is too wide to lay out (`MAX_FRAME_LOC`) is reported as
+    /// `TooLarge` through `run_tm`/`run_tm_at`/`run_tm_fitted`, not `Ran` over tapes that decode to nothing.
+    /// The outcome cannot say which guard refused: frame gadgets for a bank this wide would also pass
+    /// `MAX_MACHINE_STATES`. `sized_refuses_both_fixtures_before_a_machine_is_built` holds the early exit.
     #[test]
     fn a_frame_bank_too_wide_to_lay_out_is_too_large_not_ran() {
-        const N: usize = 1_100; // > MAX_FRAME_LOC (1,000) locals in a function that contains a call.
-        let params: String = (0..N).map(|i| format!("p{i}, ")).collect();
-        let src = format!("fn g(y) {{ y }} fn f({params}n) {{ g(n) }} f({}3)", "1, ".repeat(N));
-        let core = core_of(&src);
+        let core = core_of(&a_frame_bank_too_wide());
         assert!(matches!(run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
         assert!(matches!(run_tm_at(&core, &Unary::default(), TM_DEFAULT_CAPS), TmRun::TooLarge));
         assert!(matches!(run_tm_fitted(&core, &Unary::default(), TM_DEFAULT_CAPS).0, TmRun::TooLarge));
+    }
+
+    /// `sized` mirrors `frame_bank_unrepresentable` and `mul_count_unrepresentable`, so every `run_tm*` entry
+    /// point refuses both fixtures before `lower_tm_all` builds anything. Without the frame-bank check the state
+    /// ceiling answers that fixture with the same `TooLarge`, after building its gadgets, which no outcome
+    /// above can tell apart.
+    #[test]
+    fn sized_refuses_both_fixtures_before_a_machine_is_built() {
+        for (name, src) in [("the Mul count", too_many_muls()), ("the frame bank", a_frame_bank_too_wide())] {
+            let prog = lower_program(&core_of(&src)).expect("both lower to rxm");
+            assert!(matches!(sized(&prog), Err(TmRun::TooLarge)), "`sized` lets {name} through");
+        }
+    }
+
+    /// Both refusals above reach the session's path, `run_tm_described_program` over `lower_program`'s
+    /// program, as the same `TooLarge` under either encoding, and as an `Err`, since no run started.
+    #[test]
+    fn the_described_run_of_a_lowered_program_refuses_both_as_too_large() {
+        let outcomes: Vec<String> = [too_many_muls(), a_frame_bank_too_wide()]
+            .iter()
+            .flat_map(|src| {
+                let prog = lower_program(&core_of(src)).expect("both lower to rxm");
+                [EncodingKind::Unary, EncodingKind::Binary].map(|kind| {
+                    format!("{:?}", run_tm_described_program(&prog, kind, Ty::Nat, TM_DEFAULT_CAPS).map(|d| d.run))
+                })
+            })
+            .collect();
+        assert_eq!(outcomes, ["Err(TooLarge)"; 4]);
     }
 
     /// `run_tm_at` does NOT search: it runs once at the encoding's own width, which is what the step

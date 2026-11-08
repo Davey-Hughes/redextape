@@ -28,13 +28,13 @@ proptest = { version = "1", optional = true }
 # whitelist asks whether a line IS one exact string, which needs no grammar at all.
 #
 # WHERE THIS DOES AND DOES NOT REACH, stated per crate. `redextape-wasm` — the crate that actually
-# builds to wasm — declares this crate under
-# `[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]`, so nothing here enters its wasm32
-# graph. `redextape-core`, `redextape-native`, `redextape-grammar-check` and `redextape-cli` declare
-# it under a PLAIN `[dev-dependencies]`, so `syn` and `quote` are in their wasm32 dev graphs — and
-# those graphs are already unbuildable for wasm32 (`wait-timeout`, through `proptest` or `assert_cmd`;
-# the note above `proptest` in `redextape-core`'s own manifest records the first). What SHIPS is
-# unaffected either way, because `wasm-pack build` compiles no dev-dependencies at all.
+# builds to wasm — does not declare this crate, so nothing here enters its wasm32 graph.
+# `redextape-core`, `redextape-native`, `redextape-grammar-check` and `redextape-cli` declare it under a
+# PLAIN `[dev-dependencies]`, so `syn` and `quote` are in their wasm32 dev graphs — and those graphs are
+# already unbuildable for wasm32 (`wait-timeout`, through `proptest` or `assert_cmd`; the note above
+# `proptest` in `redextape-core`'s own manifest records the first). `redextape-wire` declares it plain
+# too, and no leg builds that crate's tests for wasm32. What SHIPS is unaffected either way, because
+# `wasm-pack build` compiles no dev-dependencies at all.
 syn = { version = "2", features = ["full", "parsing", "printing", "visit"] }
 quote = "1"
 # For reading a `cfg_attr`'s predicate as opaque tokens rather than trying to parse it: `syn::Meta`

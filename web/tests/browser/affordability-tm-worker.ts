@@ -4,7 +4,7 @@ import type { TmState, ValueRun } from '../../src/types'
 
 /**
  * `buffer-affordability.test.ts`'s TM copy: one worker builds a `TmScratch` from machine text, records its TM leg to
- * `HISTORY_BYTES` charged and runs its value run to its end, as `session-worker.ts`'s `onTmScratch` does for a copy,
+ * `HISTORY_BYTES` charged and runs its value run to its end, as `session-worker.ts`'s `BUILD` does for a TM copy,
  * then answers its own wasm bytes, the frames it recorded, and what a copy's `tm-scratch-compiled` and last `tm-value`
  * replies hand the page: the machine, its status, its tape names, and the value run's end with its value. The page
  * keeps those on the copy's session entry whether or not a view shows it (`replies.ts`), so they are part of a copy.

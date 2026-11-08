@@ -57,7 +57,9 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::{MAX_TOKENS, parse};
 use redextape_core::tm::build::MAX_MACHINE_STATES;
 use redextape_core::tm::rxm::{Instr, Program, Reg};
-use redextape_core::tm::{Binary, Encoding, Machine, State, Unary, lower_rxm, lower_tm_guarded, n_slots_of};
+use redextape_core::tm::{
+    Binary, Encoding, Machine, State, Unary, lower_program, lower_rxm, lower_tm_guarded, n_slots_of,
+};
 
 #[path = "common/demos.rs"]
 mod demos;
@@ -410,8 +412,7 @@ fn part_g() {
             continue;
         };
         let core = desugar(&prog);
-        // `lower_program`'s own order: direct, then `defunc` on `Unsupported`.
-        let rxm = lower_rxm(&core).or_else(|_| redextape_core::tm::defunc(&core).and_then(|d| lower_rxm(&d)));
+        let rxm = lower_program(&core);
         let Ok(p) = rxm else {
             println!("  lower refused: {src:.40}");
             continue;

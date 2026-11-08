@@ -19,8 +19,7 @@ use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, lower, redu
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
-    LowerError, Machine, REG, TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, defunc, lower_rxm, lower_tm, print_rxm,
-    run_tm,
+    Machine, REG, TM_DEFAULT_CAPS, TmRun, Unary, decode_tape, lower_program, lower_rxm, lower_tm, print_rxm, run_tm,
 };
 use redextape_core::value::{Value, format_value};
 
@@ -138,14 +137,9 @@ fn core_of(src: &str) -> Core {
     desugar(&prog.expect("program parses"))
 }
 
-/// Compile Core to a TM the same way `run_tm` does: try first-order lowering, and defunctionalize
-/// only if the direct attempt rejects the program as higher-order. Returns the machine (for its size).
+/// Compile Core to a TM through `lower_program`, as `run_tm` does. Returns the machine (for its size).
 fn compile_tm(core: &Core) -> Option<Machine> {
-    let prog = match lower_rxm(core) {
-        Ok(p) => p,
-        Err(LowerError::Unsupported { .. }) => lower_rxm(&defunc(core).ok()?).ok()?,
-        Err(_) => return None,
-    };
+    let prog = lower_program(core).ok()?;
     Some(lower_tm(&prog, &Unary::default()))
 }
 

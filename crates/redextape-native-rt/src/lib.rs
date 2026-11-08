@@ -369,7 +369,7 @@ pub(crate) mod config {
 
 /// A decoded `Value` in hand, printed through the CAPPED printer rather than the uncapped
 /// `format_value` — the same cap `redextape-cli/src/run.rs`'s five capped print sites and
-/// `redextape-wasm`'s `decoded_value` apply, here on this crate's own decode (`decode_rxm_ty`,
+/// `redextape-wire`'s `decoded_value` apply, here on this crate's own decode (`decode_rxm_ty`,
 /// bounded by `MAX_DECODE_NODES` on DISTINCT nodes) whose answer can still be logically enormous once
 /// the memo shares Rc nodes across the output. `decode_rxm_ty` succeeding is no guarantee
 /// `format_value` would ever return.

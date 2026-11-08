@@ -192,28 +192,30 @@ describe('SessionClient streaming', () => {
     deliver({
       kind: 'compiled',
       gen: 1,
-      lambda: LAMBDA_OK,
-      rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
-      tm: TM_OK,
+      statuses: {
+        lambda: LAMBDA_OK,
+        rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
+        tm: TM_OK,
+      },
+      programs: { rxm: null, tm: null },
       declinedSpan: null,
-      tmProgram: null,
-      rxmProgram: null,
-      tapeNames: [],
       linkIndex: null,
-      tmText: null,
-      tmResultDecodable: true,
-      rxmText: null,
     })
-    deliver({ kind: 'lambda-frames', gen: 1, epoch: 0, frames: [], done: null })
-    deliver({ kind: 'lambda-frames', gen: 1, epoch: 0, frames: [], done: 'ended' })
+    deliver({ kind: 'frames', leg: 'lambda', gen: 1, epoch: 0, frames: [], done: null })
+    deliver({ kind: 'frames', leg: 'lambda', gen: 1, epoch: 0, frames: [], done: 'ended' })
     deliver({
       kind: 'result',
       gen: 1,
-      lambda: LEG_OK,
-      rxm: { status: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null }, value: null },
-      tm: TM_LEG_OK,
+      legs: {
+        lambda: LEG_OK,
+        rxm: {
+          status: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
+          value: null,
+        },
+        tm: TM_LEG_OK,
+      },
     })
-    expect(seen).toEqual(['compiled', 'lambda-frames', 'lambda-frames', 'result'])
+    expect(seen).toEqual(['compiled', 'frames', 'frames', 'result'])
   })
 
   it('drops every reply from a superseded generation', () => {
@@ -222,9 +224,9 @@ describe('SessionClient streaming', () => {
     const client = new SessionClient(port, (r) => seen.push(r.kind))
     client.request(client.supersede(), 'x', 'unary')
     client.request(client.supersede(), 'y', 'unary')
-    deliver({ kind: 'lambda-frames', gen: 1, epoch: 0, frames: [], done: null })
-    deliver({ kind: 'lambda-frames', gen: 2, epoch: 0, frames: [], done: null })
-    expect(seen).toEqual(['lambda-frames'])
+    deliver({ kind: 'frames', leg: 'lambda', gen: 1, epoch: 0, frames: [], done: null })
+    deliver({ kind: 'frames', leg: 'lambda', gen: 2, epoch: 0, frames: [], done: null })
+    expect(seen).toEqual(['frames'])
   })
 
   it('extend addresses the current generation without advancing it', () => {
@@ -264,30 +266,27 @@ function port(): ClientPort & { sent: RunRequest[]; deliver: (r: RunReply) => vo
 const compiled = (gen: number): RunReply => ({
   kind: 'compiled',
   gen,
-  lambda: { available: true, reason: '', node: null, run: 'Running' },
-  rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
-  tm: { available: true, reason: '', width: null, run: 'Running', total_steps: null },
+  statuses: {
+    lambda: { available: true, reason: '', node: null, run: 'Running' },
+    rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
+    tm: { available: true, reason: '', width: null, run: 'Running', total_steps: null },
+  },
+  programs: { rxm: null, tm: null },
   declinedSpan: null,
-  tmProgram: null,
-  rxmProgram: null,
-  tapeNames: [],
   linkIndex: null,
-  tmText: null,
-  tmResultDecodable: true,
-  rxmText: null,
 })
 
-describe('tmScratch', () => {
-  it('posts a tm-scratch request carrying only the text', () => {
+describe('scratch on the tm leg', () => {
+  it('posts a scratch request on the tm leg', () => {
     const { port, sent } = fakePort()
     const c = new SessionClient(port, () => {})
     const gen = c.supersede()
-    c.tmScratch(gen, 'tapes 1\nstart q0\nstate q0:\n')
-    expect(sent).toEqual([{ kind: 'tm-scratch', gen, src: 'tapes 1\nstart q0\nstate q0:\n' }])
+    c.scratch(gen, 'tm', 'tapes 1\nstart q0\nstate q0:\n', 0)
+    expect(sent).toEqual([{ kind: 'scratch', gen, leg: 'tm', src: 'tapes 1\nstart q0\nstate q0:\n', step: 0 }])
   })
 
   /**
-   * SAME STALE-GENERATION GUARD AS `scratch`, ASSERTED RATHER THAN ASSUMED. A request posted under a
+   * SAME STALE-GENERATION GUARD AS `request`, ASSERTED RATHER THAN ASSUMED. A request posted under a
    * superseded generation is a message the worker will answer into a pane that has moved on — the
    * shape `supersede` exists to prevent, and a new method that forgot the guard would reopen it.
    */
@@ -297,18 +296,18 @@ describe('tmScratch', () => {
     const stale = c.supersede()
     c.supersede()
     sent.length = 0
-    c.tmScratch(stale, 'tapes 1\n')
+    c.scratch(stale, 'tm', 'tapes 1\n', 0)
     expect(sent).toEqual([])
   })
 })
 
-describe('rxmScratch', () => {
-  it('posts an rxm-scratch request carrying only the text', () => {
+describe('scratch on the rxm leg', () => {
+  it('posts a scratch request on the rxm leg', () => {
     const { port, sent } = fakePort()
     const c = new SessionClient(port, () => {})
     const gen = c.supersede()
-    c.rxmScratch(gen, 'result Nat\n\thalt\n')
-    expect(sent).toEqual([{ kind: 'rxm-scratch', gen, src: 'result Nat\n\thalt\n' }])
+    c.scratch(gen, 'rxm', 'result Nat\n\thalt\n', 0)
+    expect(sent).toEqual([{ kind: 'scratch', gen, leg: 'rxm', src: 'result Nat\n\thalt\n', step: 0 }])
   })
 
   it('drops a request whose generation has been superseded', () => {
@@ -317,7 +316,7 @@ describe('rxmScratch', () => {
     const stale = c.supersede()
     c.supersede()
     sent.length = 0
-    c.rxmScratch(stale, '\thalt\n')
+    c.scratch(stale, 'rxm', '\thalt\n', 0)
     expect(sent).toEqual([])
   })
 })

@@ -71,6 +71,7 @@ const PROBE_FILES = [
   'tests/browser/lambda-tree-cost.test.ts',
   'tests/browser/rxm-copy-cost.test.ts',
   'tests/browser/rxm-copy-memory.test.ts',
+  'tests/browser/record-cost.test.ts',
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
 
@@ -190,7 +191,12 @@ function browserProject(
   options: ProjectOptions = {},
 ): TestProjectInlineConfiguration {
   return {
-    server: { fs: { allow: [REPO_ROOT] } },
+    server: {
+      fs: { allow: [REPO_ROOT] },
+      // A PROBE'S LOG IS WHAT IT DELIVERS, SO EACH LINE A PAGE PRINTS IS THERE ONCE, WHOEVER RUNS IT: where Vite
+      // detects a coding agent it also forwards a page's console errors to the terminal, beside the reporter's copy.
+      ...(process.env.REDEXTAPE_PROBE === undefined ? {} : { forwardConsole: false }),
+    },
     test: {
       name,
       include: options.include ?? ['tests/browser/**/*.test.ts'],

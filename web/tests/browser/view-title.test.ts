@@ -51,10 +51,8 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
     detached,
     client: fakeClient(),
     legs: { lambda: leg },
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   }
 }
 
@@ -81,10 +79,8 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     // A TM LEG WITH NO MACHINE BEHIND IT, WHICH IS A STATE THE APP HAS TOO — between registering the
     // source session and its first `compiled` reply. The panes here are built directly rather than by
     // `pane-host.ts`, so nothing in this file reads it.
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   }
 }
 

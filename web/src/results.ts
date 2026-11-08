@@ -1,5 +1,6 @@
 import { counted, n } from './format'
-import type { LambdaLeg, RxmLeg, TmLeg } from './protocol'
+import { LEGS } from './legs'
+import type { LambdaLeg, Leg, LegResult, ResultLegs, RxmLeg, TmLeg } from './protocol'
 import type { Decoded, Diagnostic, RunStatus, RxmCap, ValueReading } from './types'
 import { decodedText } from './types'
 
@@ -122,9 +123,11 @@ function rxmRows(a: RxmLeg): Row[] {
   return rows
 }
 
-/** Every leg's rows, in the order the legs are listed: λ, rxm, TM. */
-export function resultRows(lambda: LambdaLeg, rxm: RxmLeg, tm: TmLeg): Row[] {
-  return [...lambdaRows(lambda), ...rxmRows(rxm), ...tmRows(tm)]
+const ROWS: { readonly [K in Leg]: (part: LegResult[K]) => Row[] } = { lambda: lambdaRows, rxm: rxmRows, tm: tmRows }
+
+/** Every leg's rows, in `LEGS`' order. */
+export function resultRows(legs: ResultLegs): Row[] {
+  return LEGS.flatMap(<K extends Leg>(leg: K) => ROWS[leg](legs[leg]))
 }
 
 /**

@@ -1,6 +1,6 @@
-import type { Leg } from './protocol'
+import type { Leg, LegFrame } from './protocol'
 import type { SessionId } from './session-client'
-import type { LegFrame, PaneSlot, PaneView } from './sessions'
+import type { PaneSlot, PaneView } from './sessions'
 
 /** A leaf's stable identity — the key shared by the layout tree, the DOM and persistence. */
 export type LeafId = string
@@ -40,13 +40,13 @@ export function legOfPane(kind: PaneKind): Leg | null {
  * One live pane: its leaf identity, what it renders, the slot that resolves its binding, the view
  * itself and the element it is mounted in.
  *
- * PARAMETERISED BY THE LEG, so `of('lambda')` yields entries whose `pane` is a `PaneView<LambdaState>`
- * and whose `slot` is a `PaneSlot<'lambda'>` — the property `Binding<K>` exists to protect (its own doc
- * in `sessions.ts`), carried through the collection rather than lost at its boundary.
+ * PARAMETERISED BY THE LEG, so `of('lambda')` yields entries whose `kind` is `'lambda'`, whose `pane` is a
+ * `PaneView<LambdaState>` and whose `slot` is a `PaneSlot<'lambda'>` — the property `Binding<K>` exists to protect
+ * (its own doc in `sessions.ts`), carried through the collection rather than lost at its boundary.
  */
 export type PaneEntry<K extends Leg> = {
   readonly id: LeafId
-  readonly kind: PaneKind
+  readonly kind: K
   readonly slot: PaneSlot<K>
   readonly pane: PaneView<LegFrame[K]>
   readonly host: HTMLElement
@@ -87,8 +87,11 @@ export class PaneCollection {
    *
    * THROWS ON AN ID ALREADY HELD, mirroring `SessionRegistry.add` and `SessionPool.bind`. A pane owns
    * a mounted DOM subtree, so replacing one silently would strand an element nothing can reach.
+   *
+   * **ONE LEG'S ENTRY, NOT `PaneEntry<Leg>`**, so a kind that is not its pane's leg is a type error here: a generic
+   * `K` would be inferred as both legs. `pane-host.ts`'s `seedPane` picks a view's seed by its entry's kind.
    */
-  add<K extends Leg>(entry: PaneEntry<K>): void {
+  add(entry: { [K in Leg]: PaneEntry<K> }[Leg]): void {
     if (this.#entries.has(entry.id)) throw new Error(`pane is already in the collection: ${entry.id}`)
     this.#entries.set(entry.id, entry as PaneEntry<Leg>)
   }

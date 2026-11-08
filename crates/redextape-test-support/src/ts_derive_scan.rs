@@ -2,7 +2,7 @@
 //! `bigint` gate needs.
 //!
 //! **IT LIVES HERE BECAUSE THERE ARE TWO CRATES TO SCAN AND ONE SCANNER IS THE POINT.**
-//! `redextape-core` and `redextape-wasm` each declare types carrying `ts_rs::TS`, and each needs the
+//! `redextape-core` and `redextape-wire` each declare types carrying `ts_rs::TS`, and each needs the
 //! same coverage gate over its own sources. A second copy of that logic would drift from the first
 //! the moment one is widened and the other is not, which is the same class of defect the gate itself
 //! exists to catch. Parameterising by crate root costs one argument.
@@ -1216,7 +1216,7 @@ fn sweep_targets() -> usize {
         );
     }
 
-    /// `redextape-wasm`'s `session.rs` really does quote the wrong override in the doc comment
+    /// `redextape-wire`'s `TmStatus` really does quote the wrong override in the doc comment
     /// directly above the field it warns about.
     #[test]
     fn a_comment_quoting_the_wrong_override_is_not_an_anchor() {

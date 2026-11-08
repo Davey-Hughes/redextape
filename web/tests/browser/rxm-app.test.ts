@@ -136,7 +136,7 @@ describe('an rxm run that fills its history', () => {
 
   /**
    * **THE RXM LEG'S `[continue]`.** A `budget` stop costs history, not the answer — `compile` already ran the program
-   * to its end — so the step line offers to keep recording, and the worker's rxm arm grants the leg another
+   * to its end — so the step line offers to keep recording, and the worker grants the leg another
    * allowance from where it stopped (`session-worker.ts`'s `onExtend`).
    */
   it('keeps recording when asked, and the count recorded grows past where it stopped', async () => {

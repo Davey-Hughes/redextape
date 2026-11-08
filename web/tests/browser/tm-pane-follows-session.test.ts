@@ -43,7 +43,7 @@ import {
  * visited a reduced buffer would come back to source with the buffer's machine and false fork facts. Those two
  * tests compare every moved pane with a pane that never left source.
  *
- * **THE WORKER'S DEATH IS RECONSTRUCTED, NOT DRIVEN.** No text reaches `onTmScratch`'s `worker-error` reply through
+ * **THE WORKER'S DEATH IS RECONSTRUCTED, NOT DRIVEN.** No text reaches a TM copy build's `worker-error` reply through
  * the app — `tmScratch` answers every string with diagnostics or a scratch — so that describe drives `createReplies`
  * directly over a real registry and a real `ScratchBuffers` with no threads behind it, as `scratchDriver` in
  * `tests/node/replies.test.ts` does, but over real panes where `scratchDriver` uses a stub. It runs first, before the

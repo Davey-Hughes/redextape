@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import init, { compile, tmScratch } from '../../../pkg/redextape_wasm.js'
+import type { RunRequest } from '../../src/protocol'
 import { ScratchEditor } from '../../src/scratch-editor'
 import type { TmProgram, TmStatus } from '../../src/types'
 
@@ -117,7 +118,7 @@ describe('TM fork cost', () => {
         const ch = new MessageChannel()
         const start = performance.now()
         ch.port2.onmessage = () => resolve(performance.now() - start)
-        ch.port1.postMessage({ kind: 'tm-scratch', gen: 1, src: text })
+        ch.port1.postMessage({ kind: 'scratch', gen: 1, leg: 'tm', src: text, step: 0 } satisfies RunRequest)
       })
 
       const t1 = performance.now()

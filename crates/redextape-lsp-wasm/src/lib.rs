@@ -2,7 +2,7 @@
 //! `redextape-lsp`, and this crate adds no behaviour to it at all.
 //!
 //! **THE BOUNDARY IS JSON STRINGS, NOT `serde-wasm-bindgen` AND NOT `ts-rs`, AND THAT IS AN EXCEPTION
-//! TO THIS PROJECT'S WIRE-TYPE CONVENTION.** `redextape-wasm` generates TypeScript from its own Rust
+//! TO THIS PROJECT'S WIRE-TYPE CONVENTION.** `redextape-wire` generates TypeScript from its own Rust
 //! declarations because it owns those declarations. This crate owns none of its types: they are LSP's,
 //! generated into `gen-lsp-types` from Microsoft's official `MetaModel`. A generated TypeScript copy of
 //! them would be a second description of a shape nobody here controls, and it would be enormous — the

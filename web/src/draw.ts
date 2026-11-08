@@ -2,31 +2,28 @@ import type { EditorView } from '@codemirror/view'
 import { setFocus } from './highlight'
 import type { LambdaPane } from './lambda-pane'
 import type { LambdaTrees } from './lambda-trees'
-import { unhandled } from './legs'
+import { perLeg } from './legs'
 import { isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
 import type { LambdaLinkState } from './link-status'
 import type { LinkWiring } from './link-wiring'
+import type { PaneHost } from './pane-host'
 import { type LeafId, onPage, type PaneCollection } from './panes'
 import {
+  type CopyReadings,
   copyLegOf,
+  copyParts,
   copyRows,
+  copySegments,
   type Lines,
-  lambdaCopyParts,
-  lambdaCopySegments,
   type ProgramResult,
   programRows,
   programSegments,
-  rxmCopyParts,
-  rxmCopySegments,
-  tmCopyParts,
-  tmCopySegments,
 } from './readout'
+import type { UnseenViews } from './replies'
 import type { RxmPane } from './rxm-pane'
-import { seedRxm } from './rxm-seed'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
-import { seedTm } from './tm-seed'
 
 /**
  * ONE FRAME, PAINTED ONCE — the per-frame pass that runs on every recorded frame during playback.
@@ -71,8 +68,10 @@ export function createDraw(deps: {
   links: LinkWiring
   /** The λ trees the views draw — asked here for each connected view's displayed step (spec §4). */
   trees: LambdaTrees
-  /** TM and rxm views a machine reached while they were off the page (`replies.ts`); each is seeded when next shown. */
-  unseen: WeakSet<TmPane | RxmPane>
+  /** Views a compile reached while they were off the page (`replies.ts`); each is seeded when next shown. */
+  unseen: UnseenViews
+  /** What seeds a view in `unseen` when it is shown — `pane-host.ts`'s, so every route tells a view the same. */
+  seedPane: PaneHost['seedPane']
   leaves: () => number
   sourceAvailable: () => boolean
   /**
@@ -108,6 +107,7 @@ export function createDraw(deps: {
     links: linkWiring,
     trees,
     unseen,
+    seedPane,
     leaves,
     sourceAvailable,
     arranged,
@@ -224,27 +224,21 @@ export function createDraw(deps: {
       // `PaneSlot.render` requires (see that type's own doc), which does not carry `TmPane`'s own
       // methods; `null` on a non-tm leg keeps every read below honest about which leg it is on.
       const tmPane = p.slot.binding.leg === 'tm' ? (p.pane as TmPane) : null
-      const tmSeeded = tmPane !== null && unseen.has(tmPane)
-      if (tmSeeded) {
-        const entry = sessions.entryOf(p.slot.binding.session)
-        seedTm(tmPane, entry.tmProgram, entry.tmScratch)
-        unseen.delete(tmPane)
-      }
-      // AN RXM VIEW THAT MISSED WHAT ITS SESSION WAS TOLD, by being off the page when it came, is seeded from what the
-      // session kept — `seedTm`'s arrangement above, one leg over.
       const rxmPane = p.slot.binding.leg === 'rxm' ? (p.pane as RxmPane) : null
-      const rxmSeeded = rxmPane !== null && unseen.has(rxmPane)
-      if (rxmSeeded) {
-        const entry = sessions.entryOf(p.slot.binding.session)
-        seedRxm(rxmPane, entry.rxmProgram, entry.rxmScratch)
-        unseen.delete(rxmPane)
+      const machine = tmPane ?? rxmPane
+      // A VIEW THAT MISSED WHAT ITS SESSION WAS TOLD, by being off the page when it came, is seeded from what the
+      // session kept: because it is in `unseen`, whatever its leg, so `SEED` reaches every leg with a program here.
+      const seeded = unseen.has(p.pane)
+      if (seeded) {
+        seedPane(p, p.slot.binding.session)
+        unseen.delete(p.pane)
       }
       const leg = p.slot.resolve(sessions)
       // **A MACHINE VIEW SHOWING A COPY MARKS NOTHING OF THE PROGRAM'S** — neither its running focus here nor its pin
       // below. Both resolve to the PROGRAM's state and instruction indices, and a copy numbers its rows by itself, so
       // an index read there names whatever the copy has at it (spec amendment 32, in the inbound direction): the λ
       // loop's guard below, "A COPY IS NOT LINKED", for the machine views. Asked only of a TM or rxm view.
-      const unlinked = (tmPane !== null || rxmPane !== null) && sessions.entryOf(p.slot.binding.session).detached
+      const unlinked = machine !== null && sessions.entryOf(p.slot.binding.session).detached
       if (tmPane !== null) tmPane.setFocus(unlinked ? [] : (tmFocusLink?.states ?? []))
       if (rxmPane !== null) rxmPane.setFocus(unlinked ? [] : (rxmFocusLink?.instrs ?? []))
       p.slot.render(sessions, p.pane, leg)
@@ -265,16 +259,14 @@ export function createDraw(deps: {
       // **A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned** — `unlinked` above, as
       // `link-wiring.ts`'s fan-out guards its own. Resolved once, and only for a view seeded this frame.
       const seededPin =
-        (tmSeeded || rxmSeeded) &&
-        !unlinked &&
-        linkWiring.linkable &&
-        linkWiring.link !== null &&
-        linkWiring.index !== null
+        seeded && !unlinked && linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
           ? linkWiring.index.linkFor(linkWiring.link.node)
           : null
-      if (tmSeeded) tmPane.setLink(seededPin?.states ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'tm')
+      if (seeded && tmPane !== null) {
+        tmPane.setLink(seededPin?.states ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'tm')
+      }
       // THE RXM VIEW'S PIN, by the TM view's rules above and for their reasons.
-      if (rxmSeeded) {
+      if (seeded && rxmPane !== null) {
         rxmPane.setLink(seededPin?.instrs ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'rxm')
       }
       // WHICH LAYOUT GESTURES THIS PANE OFFERS — driven from here for the same reason `setBindings` already
@@ -288,12 +280,11 @@ export function createDraw(deps: {
       // pane's own pair, which the split menu puts first; it is read here rather than remembered by the
       // pane for `PaneCollection`'s reason for reading bindings through the slot on every call — a
       // copy is a second place to be wrong.
-      // `p.kind !== 'source' && !stage()` IS THE SPLIT REFUSAL, AND IT HAS TWO HALVES. One editor,
-      // nothing to duplicate into (`splitLeaf`'s own doc); and in Stage a split can never apply, because
-      // the stage draws ONE view over a tab strip and a split of it would be invisible — umbrella §4
-      // rule 4's "removed where it can never apply in that view". `+ view` is what adds a view there
-      // (Plan 7 part 2 spec §5), and it is in the app header rather than in the view's `⋯` menu.
-      p.pane.setLayoutControls(leaves() > 1, p.kind !== 'source' && !stage(), {
+      // `!stage()` IS THE SPLIT REFUSAL: in Stage a split can never apply, because the stage draws ONE view over a
+      // tab strip and a split of it would be invisible — umbrella §4 rule 4's "removed where it can never apply in
+      // that view". `+ view` is what adds a view there (Plan 7 part 2 spec §5), in the app header. The source view,
+      // one editor with nothing to duplicate into (`splitLeaf`'s own doc), has no entry here: `applyLayout` refuses it.
+      p.pane.setLayoutControls(leaves() > 1, !stage(), {
         options: pairs,
         sourceAvailable: canCreateSource,
         current: p.slot.binding,
@@ -304,7 +295,6 @@ export function createDraw(deps: {
       p.pane.setStepsShown(stepsInView())
       // *MOVE THE EDITOR HERE* ON A TM OR RXM VIEW, fed from custody every frame as the λ pass below feeds a λ view's:
       // whether another view holds the copy's editor is a fact about other views (`CopyEditor.#editorAvailable`).
-      const machine = tmPane ?? rxmPane
       if (machine !== null) machine.setEditorAvailable(hasEditor(p.slot.binding.session))
     }
 
@@ -400,7 +390,7 @@ export function createDraw(deps: {
     // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.
     const entry = panes.get(focused())
     if (entry === undefined || entry.slot.binding.session === sourceSession) {
-      // **THE PROGRAM'S MACHINE LEGS AS THEY ARE RECORDING, AND THE GENERATION THE CLIENT LAST CLAIMED**, which the
+      // **THE PROGRAM'S LEGS AS THEY ARE RECORDING, AND THE GENERATION THE CLIENT LAST CLAIMED**, which the
       // legs record from its `compiled` reply on, beside the last result the program's session answered: the result
       // counts a compile's whole run, and a leg's recording can fill its history before that run's end. Read on every
       // frame, so the readout follows *keep recording* as the step line does. The result may be an earlier compile's,
@@ -408,8 +398,7 @@ export function createDraw(deps: {
       // beside a result of the generation the client last claimed.
       const recording = {
         gen: sessions.entryOf(sourceSession).client.gen,
-        rxm: sessions.legOf({ session: sourceSession, leg: 'rxm' }),
-        tm: sessions.legOf({ session: sourceSession, leg: 'tm' }),
+        ...perLeg((leg) => sessions.legOf({ session: sourceSession, leg })),
       }
       readout.show(program(), {
         segments: () => programSegments(program(), recording),
@@ -423,36 +412,16 @@ export function createDraw(deps: {
       // literal finds.
       const name = nameOf(session) ?? 'a copy'
       const leg = entry.slot.resolve(sessions)
-      // **THE LEG FACTS ARE READ BEFORE THE SWITCH**, because both thunks below read them and a value built
-      // inside one of them is a value the other cannot see. One value for every leg, as the copies menu's
-      // rows read it (`main.ts`'s `copyHolds`).
+      // **THE LEG FACTS ARE READ HERE, OUTSIDE THE THUNKS**, because both thunks read them and a
+      // value built inside one of them is a value the other cannot see. One value for every leg, as the copies
+      // menu's rows read it (`main.ts`'s `copyHolds`).
+      const kind = entry.slot.binding.leg
       const copyLeg = copyLegOf(leg)
-      switch (entry.slot.binding.leg) {
-        case 'lambda':
-          readout.show(null, {
-            segments: () => lambdaCopySegments(name, copyLeg),
-            rows: () => copyRows(lambdaCopyParts(name, copyLeg)),
-          })
-          break
-        case 'tm': {
-          const reading = sessions.entryOf(session).tmScratch
-          readout.show(null, {
-            segments: () => tmCopySegments(name, reading, copyLeg),
-            rows: () => copyRows(tmCopyParts(name, reading, copyLeg)),
-          })
-          break
-        }
-        case 'rxm': {
-          const reading = sessions.entryOf(session).rxmScratch
-          readout.show(null, {
-            segments: () => rxmCopySegments(name, reading, copyLeg),
-            rows: () => copyRows(rxmCopyParts(name, reading, copyLeg)),
-          })
-          break
-        }
-        default:
-          unhandled(entry.slot.binding.leg)
-      }
+      const readings: CopyReadings = sessions.entryOf(session).readings
+      readout.show(null, {
+        segments: () => copySegments(kind, name, readings, copyLeg),
+        rows: () => copyRows(copyParts(kind, name, readings, copyLeg)),
+      })
     }
 
     // THE BAR (spec §8), AFTER THE READOUT AND AFTER EVERY PANE. It resolves its own target through the

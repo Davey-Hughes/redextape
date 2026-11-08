@@ -32,14 +32,14 @@
 //! highlighting computes that at its own call site, where it reads as the UI heuristic it is rather
 //! than as map data. `tests/sourcemap_coverage.rs` pins both halves of that boundary.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::ast::Program;
 use crate::core::{Core, NodeId};
 use crate::lambda::{Path, lower_mapped};
 use crate::span::Span;
 use crate::tm::machine::StateId;
-use crate::tm::{Encoding, LowerError, defunc_mapped, lower_rxm_mapped, lower_tm_mapped, print_instr};
+use crate::tm::{Encoding, LowerError, Lowered, lower_program_mapped, lower_tm_mapped, print_instr};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SourceMap {
@@ -50,7 +50,7 @@ pub struct SourceMap {
     /// printed text has to work in. See the module doc for why it is recorded rather than derived.
     pub tm_name_to_node: BTreeMap<String, NodeId>,
     /// `NodeId` -> the source text that produced it. Empty unless the map was built by
-    /// `build_from_program`; see that constructor for why it offers no setter for this leg — though
+    /// `build_from_program` or `build_prepared`; see the first for why neither offers a setter — though
     /// the field is `pub`, like every other field, so `map.node_to_source = other_spans` compiles and
     /// reintroduces the same mismatch a setter would.
     pub node_to_source: BTreeMap<NodeId, Span>,
@@ -77,8 +77,8 @@ impl SourceMap {
     /// Build the three halves: λ, rxm and TM.
     ///
     /// TOTAL OVER BACKEND REFUSALS *AND* OVER DEPTH. A backend that *declines* this program contributes
-    /// an empty half instead of aborting. The rxm half handles `LowerError::TooDeep` and `Unsupported`
-    /// explicitly (see `rxm_half`), and a program it refuses has no TM half either, since the machine is
+    /// an empty half instead of aborting. The rxm half answers `LowerError::TooDeep` and `Unsupported`
+    /// with no half (see `rxm_half`), and a program it refuses has no TM half either, since the machine is
     /// built from its program; a machine the TM refuses to lay out empties the TM half alone; and a λ
     /// backend that returns `LowerError` leaves `node_to_lambda` empty.
     ///
@@ -92,26 +92,7 @@ impl SourceMap {
     /// browser tab — with it. `build_is_total_on_a_core_too_deep_for_the_tm_lowering` pins it on an input
     /// past the depth at which an unguarded λ lowering would abort.
     pub fn build(core: &Core, enc: &dyn Encoding) -> SourceMap {
-        let rxm = rxm_half(core);
-        let tm = rxm.as_ref().map_or_else(TmHalf::default, |a| tm_half(a, enc));
-        let rxm_owner: Vec<Option<NodeId>> = rxm.map(|a| a.owners()).unwrap_or_default();
-        let mut node_to_rxm: BTreeMap<NodeId, Vec<usize>> = BTreeMap::new();
-        for (i, owner) in rxm_owner.iter().enumerate() {
-            if let Some(node) = owner {
-                node_to_rxm.entry(*node).or_default().push(i);
-            }
-        }
-        SourceMap {
-            node_to_lambda: lambda_half(core),
-            node_to_tm: tm.node_to_tm,
-            tm_name_to_node: tm.name_to_node,
-            node_to_source: BTreeMap::new(),
-            tm_name_to_instr: tm.name_to_instr,
-            tm_listing: tm.listing,
-            tm_labels: tm.labels,
-            rxm_owner,
-            node_to_rxm,
-        }
+        build_over(core, rxm_half(core).as_ref(), enc)
     }
 
     /// Every backend half — λ, rxm and TM — AND the source leg, from the one desugar that produced the
@@ -130,10 +111,19 @@ impl SourceMap {
     /// `build` remains for callers holding no `Program` (tests, examples, the oracle) and leaves
     /// `node_to_source` empty, staying total the way it already is over a λ backend that declines.
     pub fn build_from_program(program: &Program, enc: &dyn Encoding) -> (Core, SourceMap) {
-        let (core, spans) = crate::desugar::desugar_mapped(program);
-        let mut map = SourceMap::build(&core, enc);
-        map.node_to_source = spans.into_iter().collect();
-        (core, map)
+        let prepared = Prepared::new(program);
+        let map = SourceMap::build_prepared(&prepared, enc);
+        (prepared.into_parts().0, map)
+    }
+
+    /// `build_from_program` over a `Prepared` the caller keeps, so the map and the backends the caller
+    /// runs from `p` share one desugar and one lowering. The source leg is `p`'s own, for the reason
+    /// `build_from_program` gives.
+    #[must_use]
+    pub fn build_prepared(p: &Prepared, enc: &dyn Encoding) -> SourceMap {
+        let mut map = build_over(&p.core, p.lowered.as_ref().ok(), enc);
+        map.node_to_source = p.spans.iter().copied().collect();
+        map
     }
 
     #[must_use]
@@ -186,6 +176,67 @@ impl SourceMap {
     }
 }
 
+/// One desugar of a `Program` and one lowering of its `Core`, for a caller that builds a map AND runs
+/// the backends from them. The fields are private so the source leg can only come from the desugar that
+/// made `core`, and the rxm and TM halves only from the lowering of that `core`.
+#[derive(Debug)]
+pub struct Prepared {
+    core: Core,
+    spans: Vec<(NodeId, Span)>,
+    lowered: Result<Lowered, LowerError>,
+}
+
+impl Prepared {
+    /// `desugar_mapped`, then `tm::lower_program_mapped` over the `Core` it made.
+    #[must_use]
+    pub fn new(program: &Program) -> Prepared {
+        let (core, spans) = crate::desugar::desugar_mapped(program);
+        let lowered = lower_program_mapped(&core);
+        Prepared { core, spans, lowered }
+    }
+
+    #[must_use]
+    pub fn core(&self) -> &Core {
+        &self.core
+    }
+
+    /// The lowering, the one `tm::lower_program` would return the program of.
+    ///
+    /// # Errors
+    ///
+    /// The `LowerError` `tm::lower_program_mapped` returned for this `Core`.
+    pub fn lowered(&self) -> Result<&Lowered, &LowerError> {
+        self.lowered.as_ref()
+    }
+
+    pub fn into_parts(self) -> (Core, Result<Lowered, LowerError>) {
+        (self.core, self.lowered)
+    }
+}
+
+/// `build`'s and `build_prepared`'s one body, over a lowering of `core` or `None` for a refused one.
+fn build_over(core: &Core, rxm: Option<&Lowered>, enc: &dyn Encoding) -> SourceMap {
+    let tm = rxm.map_or_else(TmHalf::default, |a| tm_half(a, enc));
+    let rxm_owner: Vec<Option<NodeId>> = rxm.map(owners).unwrap_or_default();
+    let mut node_to_rxm: BTreeMap<NodeId, Vec<usize>> = BTreeMap::new();
+    for (i, owner) in rxm_owner.iter().enumerate() {
+        if let Some(node) = owner {
+            node_to_rxm.entry(*node).or_default().push(i);
+        }
+    }
+    SourceMap {
+        node_to_lambda: lambda_half(core),
+        node_to_tm: tm.node_to_tm,
+        tm_name_to_node: tm.name_to_node,
+        node_to_source: BTreeMap::new(),
+        tm_name_to_instr: tm.name_to_instr,
+        tm_listing: tm.listing,
+        tm_labels: tm.labels,
+        rxm_owner,
+        node_to_rxm,
+    }
+}
+
 fn lambda_half(core: &Core) -> BTreeMap<NodeId, Path> {
     // A node may be recorded more than once (a construct can appear in several lowered positions);
     // keep the FIRST, which is the leftmost-outermost occurrence and the one a reader expects.
@@ -198,36 +249,16 @@ fn lambda_half(core: &Core) -> BTreeMap<NodeId, Path> {
     out
 }
 
-/// One lowering to rxm with its origins: `origins[i]` is the node that emitted `prog.code[i]`, and
-/// `synthetic` the ids `defunc` minted, which name no source construct.
-struct RxmHalf {
-    prog: crate::tm::Program,
-    origins: Vec<NodeId>,
-    synthetic: BTreeSet<NodeId>,
+/// Each instruction's owner: the node that emitted it, or `None` for a node `defunc` minted, which names
+/// no source construct.
+fn owners(lowered: &Lowered) -> Vec<Option<NodeId>> {
+    lowered.origins.iter().map(|n| (!lowered.synthetic.contains(n)).then_some(*n)).collect()
 }
 
-impl RxmHalf {
-    fn owners(&self) -> Vec<Option<NodeId>> {
-        self.origins.iter().map(|n| (!self.synthetic.contains(n)).then_some(*n)).collect()
-    }
-}
-
-/// `tm::lower_program`, keeping the origins: try the program as first-order Core FIRST, retry through
-/// `defunc` only on `Unsupported`, and give up on `TooDeep` immediately — a looser `or_else` would swallow
-/// it and replay a deep Core through `defunc`'s own recursive passes. The match is exhaustive rather than
-/// wildcarded so a future `LowerError` variant must decide here too. `build` is total, so a refusal is
-/// `None` rather than an error. The successful `lower_rxm_mapped` is BOUND, not discarded: re-lowering a
-/// clone of the whole tree to get the pair back is pure waste on the common (first-order) path.
-fn rxm_half(core: &Core) -> Option<RxmHalf> {
-    match lower_rxm_mapped(core) {
-        Ok((prog, origins)) => Some(RxmHalf { prog, origins, synthetic: BTreeSet::new() }),
-        Err(LowerError::Unsupported { .. }) => {
-            let (defunced, synthetic) = defunc_mapped(core).ok()?;
-            let (prog, origins) = lower_rxm_mapped(&defunced).ok()?;
-            Some(RxmHalf { prog, origins, synthetic })
-        }
-        Err(LowerError::TooDeep { .. }) => None,
-    }
+/// `tm::lower_program_mapped`, the one lowering `tm::lower_program` returns the program of. `build` is
+/// total, so a refusal is `None` rather than an error.
+fn rxm_half(core: &Core) -> Option<Lowered> {
+    lower_program_mapped(core).ok()
 }
 
 /// Everything `tm_half` records about one lowering: the two owner indexes, the instruction index, and
@@ -242,12 +273,12 @@ struct TmHalf {
     labels: Vec<(String, usize)>,
 }
 
-fn tm_half(rxm: &RxmHalf, enc: &dyn Encoding) -> TmHalf {
-    let RxmHalf { prog, origins, synthetic } = rxm;
+fn tm_half(rxm: &Lowered, enc: &dyn Encoding) -> TmHalf {
+    let Lowered { program: prog, origins, synthetic } = rxm;
     // `None` is any of `lower_tm_mapped`'s four layout refusals (`MAX_SLOTS`, `MAX_FRAME_LOC`,
     // `MAX_MUL_INSTRS`, `MAX_MACHINE_STATES`; see its doc). NONE of the four is re-derived here:
     // `rxm_half` handles a different error entirely, `LowerError`'s `Unsupported`/`TooDeep` from
-    // `lower_rxm_mapped`/`defunc_mapped`. All four layout refusals arrive here, at this single `else`,
+    // `tm::lower_program_mapped`. All four layout refusals arrive here, at this single `else`,
     // deferred whole to `lower_tm_mapped`'s own `Option` — there is nothing here that could drift from
     // what it checks. It gives back empty TM maps, as `build` does when `rxm_half` refuses: a refused
     // program built no machine, so there is no state to own anything. The rxm half is unaffected — the
@@ -302,10 +333,12 @@ fn tm_half(rxm: &RxmHalf, enc: &dyn Encoding) -> TmHalf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
     use crate::desugar::desugar;
     use crate::parser::parse;
-    use crate::tm::Unary;
+    use crate::tm::{Unary, lower_rxm_mapped};
 
     fn core_of(src: &str) -> Core {
         let (p, ds) = parse(src);
@@ -327,12 +360,12 @@ mod tests {
     const MAP: &str = "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } \
                        map([3, 1, 2], |x| x + 1)";
 
-    /// The rxm half describes the program `tm::lower_program` returns — the one the TM runs and the rxm
-    /// view will step — one owner per instruction, and the TM half's listing is that same program: on
-    /// `FACT`, which lowers first-order, and on `MAP`, which lowers through `defunc`. So both of
-    /// `rxm_half`'s branches answer to `lower_program` itself, not only to the copy of its dispatch that
-    /// `sourcemap_coverage.rs` keeps. In the first-order program every instruction has an owner, and every
-    /// owner is a construct with source.
+    /// The rxm half describes the program `tm::lower_program` returns, one owner per instruction, and the TM
+    /// half's listing is that same program: on `FACT`, which lowers first-order, and on `MAP`, which lowers
+    /// through `defunc`. Tests and examples pair a map with a program they lowered apart from it, so both
+    /// branches of `tm::lower_program_mapped` answer here to `lower_program` itself; the web session hands its
+    /// map, its TM run and its rxm leg one `Prepared`. In the first-order program every instruction has an
+    /// owner, and every owner is a construct with source.
     #[test]
     fn rxm_owner_covers_the_program_lower_program_returns() {
         for src in [FACT, MAP] {

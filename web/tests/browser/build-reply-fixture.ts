@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { userEvent } from 'vitest/browser'
+import type { RunRequest } from '../../src/protocol'
 import { until } from './harness'
 
 /**
@@ -20,10 +21,10 @@ export type Answered = { readonly src: string; readonly reply: string }
 /** The builds answered since `recordBuildReplies` wrapped `postMessage`, in the order their replies arrived. */
 export const answered: Answered[] = []
 
-/** The three requests that build a copy, one per leg (`ScratchBuffers.recompile`'s switch on the leg). */
-const BUILDS = new Set(['lambda-scratch', 'tm-scratch', 'rxm-scratch'])
+/** The request that builds a copy, on whichever leg it names (`ScratchBuffers.recompile`'s one call). */
+const BUILD = 'scratch' satisfies RunRequest['kind']
 
-/** The replies that answer one of those builds: its leg's success, or the failure every leg shares. */
+/** The replies that answer such a build: its leg's success, or the failure every leg shares. */
 const REPLIES = new Set(['scratch-compiled', 'tm-scratch-compiled', 'rxm-scratch-compiled', 'no-session'])
 
 /**
@@ -35,7 +36,7 @@ export function recordBuildReplies(): () => void {
   Worker.prototype.postMessage = function (this: Worker, message: unknown, ...rest: unknown[]): void {
     ;(post as (...args: unknown[]) => void).apply(this, [message, ...rest])
     const sent = message as { kind?: string; gen?: number; src?: string } | null
-    if (sent?.kind === undefined || !BUILDS.has(sent.kind)) return
+    if (sent?.kind !== BUILD) return
     const heard = (e: MessageEvent): void => {
       if (e.data?.gen !== sent.gen || !REPLIES.has(e.data?.kind)) return
       this.removeEventListener('message', heard)

@@ -1,9 +1,9 @@
 import { showWorkerError } from './banner'
 import { counted, n } from './format'
 import { LEG_NAME, LEGS } from './legs'
-import type { LambdaLeg, RecordEnd, RxmLeg, TmLeg } from './protocol'
+import type { Leg, RecordEnd, ResultLegs } from './protocol'
 import { endedLine, noSessionRows, type Row, resultRows, valueLine } from './results'
-import type { RxmScratchReading, TmScratchReading } from './sessions'
+import type { SessionEntry } from './sessions'
 import type { Diagnostic } from './types'
 import type { ReadoutSwitch } from './workspace'
 
@@ -29,9 +29,7 @@ export type ProgramResult =
        * and a recording's fact is drawn only beside a result of the generation it records (`programResultRows`).
        */
       readonly gen: number
-      readonly lambda: LambdaLeg
-      readonly rxm: RxmLeg
-      readonly tm: TmLeg
+      readonly legs: Readonly<ResultLegs>
     }
   | { readonly kind: 'no-session'; readonly diagnostics: readonly Diagnostic[] }
   | { readonly kind: 'error'; readonly error: unknown }
@@ -47,14 +45,24 @@ export type RecordingLeg = {
 }
 
 /**
- * The program's two machine legs as they are recording, and the generation the session client last claimed, which the
- * legs record from its `compiled` reply on; from a supersede to that reply they still hold the earlier one's frames.
+ * The program's legs as they are recording, and the generation the session client last claimed, which the legs record
+ * from its `compiled` reply on; from a supersede to that reply they still hold the earlier one's frames.
  *
  * **EVERY FIELD IS REQUIRED.** The program's session has every leg (`main.ts` builds it so), and a caller that could
- * pass `{}` would draw the readout with no fact and a type checker satisfied. λ's leg is not here: nothing reads it
- * (`programResultRows`' doc).
+ * pass `{}` would draw the readout with no fact and a type checker satisfied. λ's leg is here though no row is read
+ * off it (`HISTORY_FULL_ROW`), so that one loop over `LEGS` reads every leg's.
  */
-export type ProgramRecording = { readonly gen: number; readonly rxm: RecordingLeg; readonly tm: RecordingLeg }
+export type ProgramRecording = { readonly gen: number } & { readonly [K in Leg]: RecordingLeg }
+
+/** Whether a leg whose recording filled its history gets a row saying so (`programResultRows`). */
+const HISTORY_FULL_ROW: Readonly<Record<Leg, boolean>> = {
+  // λ GETS NO SUCH ROW. Its `run` row already says that recording stopped before the run did (`results.ts`'s
+  // `runNote`), read off the result, which the worker posts once every leg has recorded (`onRun`) and again after a
+  // continue of any leg (`onExtend`); a second sentence would say it twice.
+  lambda: false,
+  rxm: true,
+  tm: true,
+}
 
 /**
  * `results.ts`'s rows for the program, with a row saying where a machine leg's recording filled its history.
@@ -81,21 +89,17 @@ export type ProgramRecording = { readonly gen: number; readonly rxm: RecordingLe
  * step N from the link` where it would say `— history is full` (`controls.ts`'s `controlState`): the link continues
  * the recording from that stop, so the readout leaves it unsaid too.
  *
- * **λ GETS NO SUCH ROW.** Its `run` row already says that recording stopped before the run did (`results.ts`'s
- * `runNote`), read off the result, which the worker posts once every leg has recorded (`onRun`) and again after a
- * continue of any leg (`onExtend`); a second sentence would say it twice.
- *
  * **AFTER THE LEG'S `steps` ROW**, so the strip reads it after the leg's count (`programSegments` puts the width last)
  * and the inspector between the count and the value, where λ's `run` row sits. A declined leg has no `steps` row and
  * records nothing, so it gets none.
  */
 function programResultRows(r: Extract<ProgramResult, { kind: 'result' }>, recording: ProgramRecording): Row[] {
-  const rows = resultRows(r.lambda, r.rxm, r.tm)
+  const rows = resultRows(r.legs)
   if (r.gen !== recording.gen) return rows
   const full = new Map<string, string>()
-  for (const l of ['rxm', 'tm'] as const) {
+  for (const l of LEGS) {
     const leg = recording[l]
-    if (leg.done === 'budget' && leg.pending === undefined)
+    if (HISTORY_FULL_ROW[l] && leg.done === 'budget' && leg.pending === undefined)
       full.set(LEG_NAME[l], `${STOPPED.budget} at ${n(leg.hist.newestStep)}`)
   }
   return rows.flatMap((row) => {
@@ -121,7 +125,7 @@ export function programSegments(r: ProgramResult | null, recording: ProgramRecor
     // THE WIDTH GOES LAST, AS `width N` (spec §9's `TM 42 · 18,574 transitions · width 8`): `results.ts`
     // lists it first, as `N cells`, for a table where each row has its label beside it.
     const rest = own.filter((row) => !['value', 'normal form', 'term so far', 'width'].includes(row.label))
-    const width = name === 'TM' && r.tm.status.width !== null ? [`width ${n(r.tm.status.width)}`] : []
+    const width = name === 'TM' && r.legs.tm.status.width !== null ? [`width ${n(r.legs.tm.status.width)}`] : []
     return [value === undefined ? name : `${name} ${value}`, ...rest.map((row) => row.value), ...width].join(' · ')
   }
   // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM — named as `LEG_NAME` names them, which is what `results.ts`'s
@@ -139,122 +143,104 @@ const STOPPED: Readonly<Record<RecordEnd, string>> = {
   'memory-full': 'its saved call frames are full',
 }
 
-export type LambdaCopyLeg = {
+/**
+ * What a copy's line reads of its leg (`copyLegOf`): how far its recording has got, how it stopped, and whether it has
+ * a status yet.
+ *
+ * **EVERY LEG'S LINE TAKES IT, NOT ONLY λ'S, WHOSE FACTS ARE ALL ON ITS LEG.** A machine copy's reading holds only what
+ * the worker's replies retained, so without the leg a copy still building would say nothing but its name where a λ copy
+ * says `building…`, a stepping copy would report no count, and a copy whose thread threw would
+ * read as a bare name for the rest of the page load: the `worker-error` arm clears the retained reading and writes the
+ * reason onto the LEG (spec §13).
+ */
+export type CopyLeg = {
   readonly newestStep: number
   readonly done: RecordEnd | null
   readonly status: { readonly available: boolean; readonly reason: string }
 }
 
 /**
- * A λ copy's facts, one per element, the copy's name first.
+ * What a copy's line reads besides its leg, keyed by leg: `SessionEntry.readings`, which holds a machine copy's
+ * reading, and nothing under λ, whose copy's facts are all on its leg. The copy functions take the record and index it
+ * with their own leg, because `tsc` cannot pair a lone reading with a leg its caller holds as a union.
+ */
+export type CopyReadings = SessionEntry['readings'] & { readonly lambda?: undefined }
+
+/**
+ * Why a copy's recording stopped short, in `STOPPED`'s words, or nothing for one that ended or is still going. A copy
+ * records into the history budget its leg has (`HISTORY_BYTES`) and can stop on it as on a cap, and without `done` its
+ * line would give the count and say nothing of it. It names no step where the program's readout names one: a copy's
+ * count already is the newest step its recording holds.
+ */
+function stopped(leg: CopyLeg): string[] {
+  const why = leg.done === null ? '' : STOPPED[leg.done]
+  return why === '' ? [] : [why]
+}
+
+/**
+ * Each leg's facts about an available copy, after its name, one per element: how far its recording has got, in its
+ * leg's unit, and why it stopped, then what its reading adds.
+ */
+const COPY_FACTS: { readonly [K in Leg]: (reading: CopyReadings[K], leg: CopyLeg) => string[] } = {
+  lambda: (_reading, leg) => [counted(leg.newestStep, 'reduction'), ...stopped(leg)],
+  // Its value came with its build (spec amendment 26) and reads as its view's value line reads.
+  rxm: (reading, leg) => [
+    counted(leg.newestStep, 'instruction'),
+    ...stopped(leg),
+    ...(reading === null ? [] : [endedLine(reading.value)]),
+  ],
+  tm: (reading, leg) => {
+    const facts = [counted(leg.newestStep, 'transition'), ...stopped(leg)]
+    const value = valueLine(reading?.value ?? null)
+    if (value !== null) facts.push(value)
+    const reduction = reading?.status.reduction ?? null
+    if (reduction !== null) facts.push(`reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`)
+    return facts
+  },
+}
+
+/** A copy's facts after its name: its leg's reason while the leg is not available, else `COPY_FACTS`' for its leg. */
+function copyFacts<K extends Leg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string[] {
+  return leg.status.available ? COPY_FACTS[kind](readings[kind], leg) : [leg.status.reason]
+}
+
+/**
+ * A copy's facts, one per element, the copy's name first.
  *
  * **THE PARTS ARE THE SOURCE AND THE JOINED LINE IS DERIVED, NOT THE OTHER WAY ROUND.** The strip wants one
  * line and the inspector wants one row per fact (spec §9), and the obvious shortcut — split the strip's
  * line back on its own ` · ` — is wrong: a TM copy's reduced-file sentence CONTAINS a ` · `
  * (`reduced: <stages> · <n> steps`), so the round trip cuts it in half. One list, two renderings.
  */
-export function lambdaCopyParts(name: string, leg: LambdaCopyLeg): string[] {
-  if (!leg.status.available) return [name, leg.status.reason]
-  const why = leg.done === null ? '' : STOPPED[leg.done]
-  return [name, counted(leg.newestStep, 'reduction'), ...(why === '' ? [] : [why])]
+export function copyParts<K extends Leg>(
+  kind: K,
+  name: string,
+  readings: Pick<CopyReadings, K>,
+  leg: CopyLeg,
+): string[] {
+  return [name, ...copyFacts(kind, readings, leg)]
 }
 
-export function lambdaCopySegments(name: string, leg: LambdaCopyLeg): string[] {
-  return [lambdaCopyParts(name, leg).join(' · ')]
-}
-
-/**
- * A TM copy's line: its name, how far it has run, why its recording stopped, its value, and the reduced-file sentence
- * if it has one.
- *
- * **IT TAKES THE LEG, AS THE λ ONE DOES, AND THAT IS NOT SYMMETRY FOR ITS OWN SAKE.** Without it this
- * would read only what the worker's last `tm-scratch-compiled` reply retained — so a copy still building
- * would say nothing but its name where a λ copy says `building…`, a stepping copy would report no count
- * at all, and a copy whose thread threw would read as a bare name for the rest of the page load: the
- * `worker-error` arm clears the retained reading and writes the reason onto the LEG (spec §13).
- *
- * **`done` IS READ AS THE λ AND RXM COPIES READ IT.** A TM copy records into the same history budget the program's TM
- * leg does (`HISTORY_BYTES`), so its recording can stop on that budget too, and without `done` this line would give
- * the count and the value and say nothing of it. It names no step where the program's readout names one: a copy's
- * count already is the newest step its recording holds.
- */
-export type TmCopyLeg = {
-  readonly newestStep: number
-  readonly done: RecordEnd | null
-  readonly status: { readonly available: boolean; readonly reason: string }
+export function copySegments<K extends Leg>(
+  kind: K,
+  name: string,
+  readings: Pick<CopyReadings, K>,
+  leg: CopyLeg,
+): string[] {
+  return [copyParts(kind, name, readings, leg).join(' · ')]
 }
 
 /**
- * A TM copy's facts after its name, one per element: how far it has run, why its recording stopped if something
- * stopped it short, its value line and its reduced-file sentence.
- */
-export function tmCopyFacts(reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
-  if (!leg.status.available) return [leg.status.reason]
-  const why = leg.done === null ? '' : STOPPED[leg.done]
-  const facts = [counted(leg.newestStep, 'transition'), ...(why === '' ? [] : [why])]
-  const value = valueLine(reading?.value ?? null)
-  if (value !== null) facts.push(value)
-  const reduction = reading?.status.reduction ?? null
-  if (reduction !== null) facts.push(`reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`)
-  return facts
-}
-
-/** A TM copy's facts, one per element, by `lambdaCopyParts`' rule. */
-export function tmCopyParts(name: string, reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
-  return [name, ...tmCopyFacts(reading, leg)]
-}
-
-export function tmCopySegments(name: string, reading: TmScratchReading | null, leg: TmCopyLeg): string[] {
-  return [tmCopyParts(name, reading, leg).join(' · ')]
-}
-
-/** What an rxm copy's line reads of its leg: how far its recording has got, and whether it has a status yet. */
-export type RxmCopyLeg = {
-  readonly newestStep: number
-  readonly done: RecordEnd | null
-  readonly status: { readonly available: boolean; readonly reason: string }
-}
-
-/**
- * An rxm copy's facts after its name, one per element: how far its recording has got, why it stopped if a cap stopped
- * it, and its value, which came with its build (spec amendment 26) and reads as its view's value line reads.
- */
-export function rxmCopyFacts(reading: RxmScratchReading | null, leg: RxmCopyLeg): string[] {
-  if (!leg.status.available) return [leg.status.reason]
-  const why = leg.done === null ? '' : STOPPED[leg.done]
-  return [
-    counted(leg.newestStep, 'instruction'),
-    ...(why === '' ? [] : [why]),
-    ...(reading === null ? [] : [endedLine(reading.value)]),
-  ]
-}
-
-/** An rxm copy's facts, by `lambdaCopyParts`' rule: its name, then `rxmCopyFacts`. */
-export function rxmCopyParts(name: string, reading: RxmScratchReading | null, leg: RxmCopyLeg): string[] {
-  return [name, ...rxmCopyFacts(reading, leg)]
-}
-
-export function rxmCopySegments(name: string, reading: RxmScratchReading | null, leg: RxmCopyLeg): string[] {
-  return [rxmCopyParts(name, reading, leg).join(' · ')]
-}
-
-/**
- * What a TM copy's row in the copies menu says below its name: its readout line without the name, so a copy that
- * halted with a value, is still running its value run, filled its history, or has not built yet reads there as it
- * reads in the strip, in the strip's words. `rxmCopyRow` is the rxm copy's. Both say what stopped a copy's recording
- * short after its count, in `STOPPED`'s words, and the rxm copy's value can be a fault.
+ * What a machine copy's row in the copies menu says below its name: its readout line without the name, so a copy that
+ * halted with a value (an rxm copy's can be a fault), is still running its value run, filled its history, or has not
+ * built yet reads there as it reads in the strip, in the strip's words.
  *
  * **A MACHINE COPY HAS NO TERM.** The row's second line is a λ copy's current term, and a `null` there reads `no term
  * yet` — "nothing has come back" — which is not true of a copy that has run to `value: 6`. What such a copy holds is
  * its run, and its readout already says what became of it.
  */
-export function tmCopyRow(reading: TmScratchReading | null, leg: TmCopyLeg): string {
-  return tmCopyFacts(reading, leg).join(' · ')
-}
-
-/** What an rxm copy's row in the copies menu says below its name — `tmCopyRow`'s rule, one leg over. */
-export function rxmCopyRow(reading: RxmScratchReading | null, leg: RxmCopyLeg): string {
-  return rxmCopyFacts(reading, leg).join(' · ')
+export function copyRow<K extends Leg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string {
+  return copyFacts(kind, readings, leg).join(' · ')
 }
 
 /**
@@ -265,7 +251,7 @@ export function copyLegOf(leg: {
   readonly hist: { readonly newestStep: number }
   readonly done: RecordEnd | null
   readonly status: { readonly available: boolean; readonly reason: string }
-}): LambdaCopyLeg & RxmCopyLeg & TmCopyLeg {
+}): CopyLeg {
   return { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status }
 }
 
@@ -313,7 +299,7 @@ export function programRows(r: ProgramResult | null, recording: ProgramRecording
 /**
  * A copy's rows: its name is the first row's label, and every other fact is a row of its own.
  *
- * **BUILT FROM THE SAME PARTS LIST THE SEGMENT IS** (`lambdaCopyParts`' doc), so the two readouts cannot
+ * **BUILT FROM THE SAME PARTS LIST THE SEGMENT IS** (`copyParts`' doc), so the two readouts cannot
  * disagree about a copy and no ` · ` inside a fact is mistaken for a separator between two.
  */
 export function copyRows(parts: readonly string[]): InspectorRow[] {

@@ -62,6 +62,17 @@ export function perLeg<T>(value: (leg: Leg) => T): Record<Leg, T> {
 }
 
 /**
+ * `perLeg` for a table whose entry type differs by leg, `M`, such as `protocol.ts`'s `ResultLegs`. **`value` IS GENERIC
+ * IN THE LEG**, so a body that answers one leg's entry for another is a type error at the call. The cast claims `M[K]`
+ * at each `K` that `LEGS` lists, not `M`, which may have keys `LEGS` lacks or be a union whose members `value` mixes.
+ */
+export function mapLegs<M extends { [K in Leg]: unknown }>(
+  value: <K extends Leg>(leg: K) => M[K],
+): { [K in Leg]: M[K] } {
+  return Object.fromEntries(LEGS.map((leg) => [leg, value(leg)])) as { [K in Leg]: M[K] }
+}
+
+/**
  * The end of a statement `switch` over a union: `default: unhandled(value)`.
  *
  * **ITS WHOLE JOB IS DONE BY `tsc`.** Once every member has an arm, the value that reaches `default` has type

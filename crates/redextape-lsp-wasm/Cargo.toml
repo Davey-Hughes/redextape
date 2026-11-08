@@ -21,9 +21,9 @@ crate-type = ["cdylib", "rlib"]
 # possible"; this crate is that web phase and adds nothing to the server.
 redextape-lsp = { path = "../redextape-lsp" }
 wasm-bindgen = "0.2.130"
-# THE BOUNDARY IS JSON STRINGS, SO THIS IS THE WHOLE MARSHALLING LAYER — there is no
-# `serde-wasm-bindgen` here and no `ts-rs`, unlike `redextape-wasm`. See `lib.rs`'s module doc: LSP's
-# types are generated from Microsoft's MetaModel into `gen-lsp-types`, so a TypeScript copy generated
-# from OUR Rust declarations would be a second description of a shape this project does not own.
+# THE BOUNDARY IS JSON STRINGS, SO THIS IS THE WHOLE MARSHALLING LAYER — no `serde-wasm-bindgen`, which
+# `redextape-wasm` marshals through, and no `ts-rs`, which `redextape-wire` derives its bindings with. See
+# `lib.rs`'s module doc: LSP's types are generated from Microsoft's MetaModel into `gen-lsp-types`, so a TypeScript
+# copy generated from OUR Rust declarations would be a second description of a shape this project does not own.
 serde_json = "1"
 console_error_panic_hook = "0.1.7"

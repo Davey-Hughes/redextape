@@ -8,21 +8,31 @@ import type { LinkWiring } from './link-wiring'
 import type { Notice } from './notice'
 import type { PaneCollection } from './panes'
 import {
+  type FramesReply,
   keepDecidedPart,
-  lambdaFrameBytes,
-  type RecordEnd,
+  LEG_FRAME_BYTES,
+  type Leg,
+  type LegFrame,
+  type LegProgram,
   type RunReply,
   ruleCount,
-  rxmFrameBytes,
-  tmFrameBytes,
+  type TmCompiled,
 } from './protocol'
 import type { ProgramResult } from './readout'
 import type { RxmPane } from './rxm-pane'
 import { seedRxm } from './rxm-seed'
 import type { ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
-import { type LegState, type RxmCompiled, resetLegs, type SessionRegistry, type TmCompiled } from './sessions'
+import { type LegReading, type PaneView, resetLegs, type SessionRegistry } from './sessions'
 import type { TmPane } from './tm-pane'
+import { tellTmProgram } from './tm-seed'
+
+/**
+ * Views a compile reached while they were off the page: `storeAndSetProgram` adds each, and `draw()` seeds and
+ * removes it when it is next shown. Over every program leg's views, so a view is put in without a cast and seeded
+ * because it is in the set, whatever its leg.
+ */
+export type UnseenViews = WeakSet<PaneView<LegFrame[keyof LegProgram]>>
 
 /**
  * `onReply` AND `onScratchReply` — the two reply switches. See each function's own doc below for what it
@@ -35,9 +45,9 @@ import type { TmPane } from './tm-pane'
  * this factory is called, unlike the `let`s `link-wiring.ts` and `draw.ts` themselves close over
  * earlier in construction.
  *
- * `panes: PaneCollection`: `setProgram`, reached through `setTmProgram` below, which retains what it
+ * `panes: PaneCollection`: `setProgram`, reached through `setLegProgram` below, which retains what it
  * pushes, is PER-SESSION: it belongs to the session whose worker sent the reply, routed through
- * `panes.ofSession('tm', session)`, while `setEditor` keeps exactly one target; see that call's own
+ * `panes.ofSession(leg, session)`, while `setEditor` keeps exactly one target; see that call's own
  * comment for why generalising it to "every pane bound to this session" is not the same move.
  *
  * **THE PROGRAM'S RESULT IS STORED, NOT RENDERED HERE** (Plan 7 part 2 spec §9): `setProgram` hands it to
@@ -65,10 +75,10 @@ export function createReplies(deps: {
   links: LinkWiring
   trees: LambdaTrees
   /**
-   * TM and rxm views a machine reached while they were off the page — `draw()` seeds each when it is next shown. Optional:
-   * a caller that never hides a view (every direct test of this module) needs none, and gets a set nothing reads.
+   * `UnseenViews`' set. Optional: a caller that never hides a view (every direct test of this module) needs none,
+   * and gets a set nothing reads.
    */
-  unseen?: WeakSet<TmPane | RxmPane>
+  unseen?: UnseenViews
   draw: () => void
   /**
    * Schedule a callback for the next paint — `requestAnimationFrame`, injectable so a node test can drive
@@ -124,7 +134,7 @@ export function createReplies(deps: {
     panes,
     links: linkWiring,
     trees,
-    unseen = new WeakSet<TmPane | RxmPane>(),
+    unseen = new WeakSet(),
     draw,
     frame = (cb: () => void) => void requestAnimationFrame(cb),
     editorHome,
@@ -153,88 +163,98 @@ export function createReplies(deps: {
   }
 
   /**
-   * Store `compiled` on `session`'s entry and fan `setProgram` out to every TM pane bound to it that is
-   * on the page — one off it goes in `unseen` instead, and `draw()` seeds it from the entry when it is
-   * shown. The half `setTmProgram` and the `tm-scratch-compiled` arm below share. Both callers need "the
-   * entry agrees with what the panes were just told", and that is why the store and the fan-out are one
-   * call: `draw()` seeds a view shown later from the entry, so an entry written apart from the fan-out
-   * could seed it with a machine the views on the page were never told. Both callers also need it on the
-   * SAME per-pane pass a second per-pane fact rides on — `then`, run immediately after `setProgram` for
-   * each pane in turn, is that second fact:
-   * `setForkAvailable` for `setTmProgram` below, `setScratchStatus` for `tm-scratch-compiled`. Passing
-   * it in rather than duplicating the loop is what keeps each caller's own second concern off a SECOND
-   * pass over `panes.ofSession('tm', session)`.
+   * Store `compiled` as `session`'s `leg` program and hand `tell` every `leg` view bound to it that is on the page;
+   * one off it goes in `unseen` instead, and `draw()` seeds it from the entry when it is shown. **THE STORE AND THE
+   * FAN-OUT ARE ONE CALL** because `draw()` seeds a view shown later from the entry, so an entry written apart from
+   * the fan-out could seed it with a program the views on the page were never told. **`tell` IS ALL A VIEW ON THE
+   * PAGE HEARS, ITS PROGRAM INCLUDED**, in this one pass over the views rather than a second: this call tells no view
+   * `compiled`, so each caller's `tell` must push it.
    */
-  const storeAndSetProgram = (
+  const storeAndSetProgram = <K extends keyof LegProgram>(
     session: SessionId,
-    compiled: TmCompiled | null,
-    then?: (pane: TmPane, rules: number) => void,
+    leg: K,
+    compiled: LegProgram[K] | null,
+    tell: (pane: PaneView<LegFrame[K]>) => void,
   ): void => {
-    sessions.entryOf(session).tmProgram = compiled
-    const rules = compiled === null ? 0 : ruleCount(compiled.program)
-    for (const p of panes.ofSession('tm', session)) {
-      const pane = p.pane as TmPane
+    sessions.entryOf(session).programs[leg] = compiled
+    for (const p of panes.ofSession(leg, session)) {
       // **A VIEW OFF THE PAGE IS NOT TOLD NOW** (Plan 7 part 4 spec §5.5): the session keeps what it was told,
       // above, and `draw()` seeds the view from it when its tab is next shown. Building a hidden view's δ table
       // on every compile is the cost this skips.
       if (!p.host.isConnected) {
-        unseen.add(pane)
+        unseen.add(p.pane)
         continue
       }
-      pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
-      then?.(pane, rules)
+      tell(p.pane)
     }
   }
 
   /**
-   * Tell every TM pane on `session` that is on the page what machine it is showing AND whether it may be
-   * forked, leaving both on the session's entry — `storeAndSetProgram` above plus the one fact only THIS
-   * caller adds. A pane off the page hears both when it is shown, from `draw()`'s seed.
-   *
-   * **`setForkAvailable` RIDES THE SAME FAN-OUT, NOT A SECOND LOOP.** A pane seeded with a machine is
-   * exactly a pane that needs to be told whether that machine may be forked; splitting the two into
-   * separate passes over `panes.ofSession('tm', session)` would be two chances for one to run and the
-   * other not to. `compiled?.tmText ?? null`, the rule count, and `compiled?.tmResultDecodable`
-   * all fall out of the SAME `compiled` this call already stores — see `TmCompiled.tmText`'s own doc for
-   * why the fields ride beside `program` rather than on a second envelope.
-   *
-   * **ONLY THIS CALLER PASSES A `tmText` THAT MEANS ANYTHING.** `tm-scratch-compiled` (below) calls
-   * `storeAndSetProgram` directly, with no `then` for fork availability at all, precisely because that
-   * reply carries no `tmText` (its own doc: "no text echo" — the main thread already holds what built
-   * the scratch) — routing a bare `null` through THIS function would read as "over the cap", which is
-   * a lie for a scratch that was never offered a fork control in the first place. See that arm's own
-   * comment.
+   * What a view on the page hears when a compile gives or clears its session's program: the program, and whether it
+   * may be copied. **TM'S FORK FACTS ARE A STEP TM'S ENTRY ADDS**, from the `compiled` it stores (`TmCompiled.text`'s
+   * doc has why they ride beside the program); `seedRxm` tells an rxm view its own, with the copy's reading that a
+   * copy's build writes on the entry before this runs. Built once per call, so a count is not taken per view.
    */
-  const setTmProgram = (session: SessionId, compiled: TmCompiled | null): void => {
-    storeAndSetProgram(session, compiled, (pane, rules) =>
-      pane.setForkAvailable(compiled?.tmText ?? null, rules, compiled?.tmResultDecodable ?? true),
-    )
+  const TELL: {
+    readonly [K in keyof LegProgram]: (
+      session: SessionId,
+      compiled: LegProgram[K] | null,
+    ) => (pane: PaneView<LegFrame[K]>) => void
+  } = {
+    rxm: (session, compiled) => {
+      const reading = sessions.entryOf(session).readings.rxm
+      return (pane) => seedRxm(pane as RxmPane, compiled, reading)
+    },
+    tm: (_session, compiled) => {
+      const rules = compiled === null ? 0 : ruleCount(compiled.program)
+      return (pane) => {
+        const tm = pane as TmPane
+        tellTmProgram(tm, compiled)
+        tm.setForkAvailable(compiled?.text ?? null, rules, compiled?.tmResultDecodable ?? true)
+      }
+    },
+  }
+
+  /** Store `session`'s `leg` program and tell its views on the page, as `TELL` says: a compile's, or `null`. */
+  const setLegProgram = <K extends keyof LegProgram>(
+    session: SessionId,
+    leg: K,
+    compiled: LegProgram[K] | null,
+  ): void => storeAndSetProgram(session, leg, compiled, TELL[leg](session, compiled))
+
+  /** `TELL`'s keys, so every leg `LegProgram` names; the cast restates them, for `LEGS`' reason (`legs.ts`). */
+  const PROGRAM_LEGS = Object.keys(TELL) as (keyof LegProgram)[]
+
+  /** `setLegProgram` for every program leg, each given its program from `programs`, or `null` for none. */
+  const setLegPrograms = (
+    session: SessionId,
+    programs: { readonly [K in keyof LegProgram]: LegProgram[K] | null } | null,
+  ): void => {
+    PROGRAM_LEGS.forEach(<K extends keyof LegProgram>(leg: K) => {
+      setLegProgram(session, leg, programs === null ? null : programs[leg])
+    })
   }
 
   /**
-   * Store `session`'s rxm listing on its entry and tell every rxm view bound to it that is on the page, by
-   * `storeAndSetProgram`'s rule: a view off the page goes in `unseen`, and `draw()` seeds it from the entry when it is
-   * shown. One call, so the entry always agrees with what the views were told.
+   * What a view hears when its session's copy reading goes: that there is none. Keyed by `LegReading`, so a leg that
+   * gains a reading is a type error here until its views are told it is gone.
    */
-  const setRxmProgram = (session: SessionId, compiled: RxmCompiled | null): void => {
-    const entry = sessions.entryOf(session)
-    entry.rxmProgram = compiled
-    for (const p of panes.ofSession('rxm', session)) {
-      const pane = p.pane as RxmPane
-      if (!p.host.isConnected) {
-        unseen.add(pane)
-        continue
-      }
-      // EVERYTHING THE SESSION KEEPS, THROUGH THE ONE SEED A VIEW BUILT LATER GETS: the listing, whether it can be
-      // copied, and a copy's value, which its build reply writes on the entry before this runs.
-      seedRxm(pane, compiled, entry.rxmScratch)
-    }
+  const CLEAR_READING: { readonly [K in keyof LegReading]: (pane: PaneView<LegFrame[K]>) => void } = {
+    rxm: (pane) => (pane as RxmPane).setScratch(null),
+    tm: (pane) => {
+      const tm = pane as TmPane
+      tm.setScratchStatus(null)
+      tm.setScratchValue(null)
+    },
   }
+
+  /** `CLEAR_READING`'s keys, so every leg `LegReading` names, as `PROGRAM_LEGS` are `TELL`'s. */
+  const READING_LEGS = Object.keys(CLEAR_READING) as (keyof LegReading)[]
 
   /**
    * Coalesce a redraw to at most one per animation frame, for the replies that arrive in a stream: a TM copy's
-   * `tm-value` while its run is `Running`, which the worker posts once per `VALUE_CHUNK`, and every `lambda-frames`,
-   * `tm-frames` and `rxm-frames` chunk that does not end its recording, which `record-loop.ts`'s `recordLeg` posts
+   * `tm-value` while its run is `Running`, which the worker posts once per `VALUE_CHUNK`, and every `frames` chunk,
+   * whichever leg it carries, that does not end its recording, which `record-loop.ts`'s `recordLeg` posts
    * once per `RECORD_CHUNK` while any leg records. Either comes far more often than a display paints, and a `draw()`
    * per reply is a full, synchronous redraw the browser cannot skip, even behind a hidden tab.
    *
@@ -277,23 +297,16 @@ export function createReplies(deps: {
   }
 
   /**
-   * One `*-frames` chunk applied to its leg: its frames pushed, each sized by `bytes`, its end and generation set, and
-   * a draw asked for as `scheduleDraw`'s doc says. **A CHUNK OF ANOTHER EPOCH THAN THE LEG'S IS DROPPED WHOLE**: it is
-   * from a recording a rewind replaced, posted before the worker took the rewind, and the page emptied the ring for
-   * the rewound recording at the press.
+   * One `frames` chunk applied to its session's leg: its frames pushed, each sized by its leg's `LEG_FRAME_BYTES`,
+   * its end and generation set, and a draw asked for as `scheduleDraw`'s doc says. **A CHUNK OF ANOTHER EPOCH THAN THE
+   * LEG'S IS DROPPED WHOLE**: it is from a recording a rewind replaced, posted before the worker took the rewind, and
+   * the page emptied the ring for the rewound recording at the press.
    */
-  const pushFrames = <F>(
-    leg: LegState<F>,
-    reply: {
-      readonly gen: number
-      readonly epoch: number
-      readonly frames: readonly F[]
-      readonly done: RecordEnd | null
-    },
-    bytes: (frame: F) => number,
-  ): void => {
+  const pushFrames = <K extends Leg>(session: SessionId, reply: FramesReply<K>): void => {
+    const leg = sessions.legOf({ session, leg: reply.leg })
     if (reply.epoch !== leg.epoch) return
     leg.gen = reply.gen
+    const bytes = LEG_FRAME_BYTES[reply.leg]
     for (const f of reply.frames) leg.hist.push(f, bytes(f))
     leg.done = reply.done
     if (reply.done === null) scheduleDraw()
@@ -328,30 +341,16 @@ export function createReplies(deps: {
         resetLegs(legs, {}, 'not compiled')
         // NOTHING TO SHOW, AND THE SESSION IS LEFT HOLDING NOTHING EITHER — one call, so a view shown
         // later, which `draw()` seeds from the entry, reads what the views on the page were just told.
-        setTmProgram(session, null)
-        setRxmProgram(session, null)
+        setLegPrograms(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         // `draw()` calls `drawLink()` itself, after its render loop and before its readout pass.
         draw()
         return
       case 'compiled':
-        resetLegs(legs, { lambda: reply.lambda, rxm: reply.rxm, tm: reply.tm })
-        setRxmProgram(session, reply.rxmProgram === null ? null : { program: reply.rxmProgram, rxmText: reply.rxmText })
-        // THE ONE REPLY THAT CARRIES A MACHINE, RETAINED AS IT IS FANNED OUT. `tmProgram` is `null` on the
-        // wire for a program with no TM leg, so a reply with no machine in it leaves the session holding
-        // nothing rather than an envelope around a `null`.
-        setTmProgram(
-          session,
-          reply.tmProgram === null
-            ? null
-            : {
-                program: reply.tmProgram,
-                tapeNames: reply.tapeNames,
-                tmText: reply.tmText,
-                tmResultDecodable: reply.tmResultDecodable,
-              },
-        )
+        resetLegs(legs, reply.statuses)
+        // THE ONE REPLY THAT CARRIES A MACHINE, RETAINED AS IT IS FANNED OUT.
+        setLegPrograms(session, reply.programs)
         linkWiring.setIndex(reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex))
         // `setLink.of(null)` HERE TOO, NOT ONLY `setDecline`. `linkMark` clears its own decoration on
         // `docChanged`, which covers the ordinary typing path — but the `#encoding` picker's `change`
@@ -368,18 +367,12 @@ export function createReplies(deps: {
       // is a wiring bug rather than a state to render. `legOf`'s throw is the one policy for that
       // whole class — see its doc — and reusing it here is what keeps this file from inventing a
       // second answer (a silent drop) for the same question.
-      case 'lambda-frames':
-        pushFrames(sessions.legOf({ session, leg: 'lambda' }), reply, lambdaFrameBytes)
-        return
-      case 'tm-frames':
-        pushFrames(sessions.legOf({ session, leg: 'tm' }), reply, tmFrameBytes)
-        return
-      case 'rxm-frames':
-        pushFrames(sessions.legOf({ session, leg: 'rxm' }), reply, rxmFrameBytes)
+      case 'frames':
+        pushFrames(session, reply)
         return
       case 'result':
         results.dataset.state = 'idle'
-        setProgram({ kind: 'result', gen: reply.gen, lambda: reply.lambda, rxm: reply.rxm, tm: reply.tm })
+        setProgram({ kind: 'result', gen: reply.gen, legs: reply.legs })
         draw()
         return
       case 'worker-error':
@@ -401,8 +394,7 @@ export function createReplies(deps: {
         // compiled" means, since a `compile()` that threw never produced one.
         resetLegs(legs, {}, 'not compiled')
         // NOTHING TO SHOW AND NOTHING RETAINED, same as the `no-session` arm above.
-        setTmProgram(session, null)
-        setRxmProgram(session, null)
+        setLegPrograms(session, null)
         linkWiring.setIndex(null)
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         setProgram({ kind: 'error', error: new Error(reply.message) })
@@ -433,20 +425,20 @@ export function createReplies(deps: {
    * (§3.3: no `linkIndex`, no `sourceSpan`, no `ty`).
    *
    * AN ARM FOR EVERY KIND, AND `unhandled` AS THE `default`. `session-worker.ts` answers a
-   * `lambda-scratch` request with exactly `scratch-compiled`, `lambda-frames`, `no-session` or
-   * `worker-error`; a `tm-scratch` request with `tm-scratch-compiled`, `tm-frames`, `tm-value`,
-   * `no-session` or `worker-error` (`onTmScratch`, `session-worker.ts`'s TM counterpart to
-   * `onLambdaScratch`); and an `rxm-scratch` request with `rxm-scratch-compiled`, `rxm-frames`, `no-session` or
-   * `worker-error` (`onRxmScratch`), and its `[continue]` with `rxm-value`. `tm-value` and `rxm-value` are the
+   * `scratch` request on the λ leg with exactly `scratch-compiled`, `frames`, `no-session` or
+   * `worker-error`; on the TM leg with `tm-scratch-compiled`, `frames`, `tm-value`,
+   * `no-session` or `worker-error` (`session-worker.ts`'s `BUILD`, whose TM entry's `after` posts
+   * `tm-value`); and on the rxm leg with `rxm-scratch-compiled`, `frames`, `no-session` or
+   * `worker-error`, and its `[continue]` with `rxm-value`. `tm-value` and `rxm-value` are the
    * machine legs' extra shapes: a headered TM buffer's value run reports through the first, and an rxm copy's
    * value read again after each of its `[continue]`s through the second, where a compiled
    * session's value arrives in `result`. A λ copy's views ask for `lambda-tree` too. `compiled`/`result`
    * need a `SourceMap`/`ty` no buffer has, on any leg, so their arm does nothing — written out for the reason
    * `onReply`'s own do-nothing arm is. `no-session` and `worker-error` are genuinely shared, one arm apiece for
    * every leg — a buffer's failure to build or its worker's death read the same whichever leg minted it.
-   * `lambda-frames`, `tm-frames` and `rxm-frames` get an arm each, which passes its own leg and sizer to the
-   * `pushFrames` the three share; `scratch-compiled`, `tm-scratch-compiled` and
-   * `rxm-scratch-compiled` likewise, because their payloads share no field (`tm-scratch-compiled`'s own doc in
+   * `frames` is one arm for every leg, as in `onReply`, since the reply names its leg and `pushFrames` sizes it
+   * by that leg; `scratch-compiled`, `tm-scratch-compiled` and `rxm-scratch-compiled` get an arm each,
+   * because their payloads share no field (`tm-scratch-compiled`'s own doc in
    * `protocol.ts` has the argument).
    *
    * IT NEVER TOUCHES `results.dataset.state` AT ALL — `onReply` above holds this file's writes of it. That
@@ -478,14 +470,14 @@ export function createReplies(deps: {
         // (5d-iii design §4.1: `text` "travels back so `main.ts` can seed the editor from the same
         // string that created the scratch, rather than from a second print that could disagree with
         // it"). `text: string | null` on the wire type is nullable DEFENSIVELY here rather than
-        // reachably — `onLambdaScratch` never posts `scratch-compiled` at all when its own `scratch`
-        // came back `null` (`session-worker.ts`'s `onLambdaScratch`, its `scratch === null` arm, which
+        // reachably — a λ copy's build never posts `scratch-compiled` at all when its own `scratch`
+        // came back `null` (`copy-build.ts`'s `buildCopy`, its `made === null` arm, which
         // posts `no-session` and returns) — the same "nullable defensively, not reachably" shape
         // `protocol.ts`'s `linkIndex` field states for itself, and the guard costs one `if` against a
         // wire contract that should not hard-code what its producer sends.
         //
         // `setEditor` KEEPS EXACTLY ONE TARGET — `editorHome` above, NOT
-        // `panes.ofSession('lambda', session)` fanned out. Two panes bound to the SAME lambda-scratch
+        // `panes.ofSession('lambda', session)` fanned out. Two panes bound to the SAME λ copy's
         // session would still mean one buffer; mounting a second live `CodeMirror` instance over it is
         // the desync 5d-ii-a design §4.3 rejects. That section's editor-moves rule is what makes
         // "which pane" a real question and `editorOwner` is the answer, resolved by the
@@ -534,34 +526,36 @@ export function createReplies(deps: {
         resetLegs(sessions.entryOf(session).legs, { tm: reply.tm })
         built(session)
         // THE MACHINE IS STORED ON THE ENTRY AND FANNED OUT TO `setProgram`, THE SAME PAIRING
-        // `setTmProgram` MAKES FOR THE `compiled` ARM — so a pane bound to this session later
-        // (`pane-host.ts`'s `tmProgramOf`) is seeded from the entry rather than left blank. THROUGH
-        // `storeAndSetProgram` RATHER THAN `setTmProgram` ITSELF: `setTmProgram` also pushes fork
-        // AVAILABILITY from a `tmText` this reply does not carry, and routing a bare `null` through it
+        // `setLegProgram` MAKES FOR THE `compiled` ARM — so a pane bound to this session later
+        // (`pane-host.ts`'s `programOf`) is seeded from the entry rather than left blank. THROUGH
+        // `storeAndSetProgram` RATHER THAN `setLegProgram`: TM's entry in `TELL` also pushes fork
+        // AVAILABILITY from a text this reply does not carry, and routing a bare `null` through it
         // would read as "this machine is over the cap", which is false for a scratch that was never
         // offered a fork control in the first place.
-        // `setScratchStatus` rides the SAME pass as `then` rather than a second loop over
+        // `setScratchStatus` rides the SAME pass as `tell` rather than a second loop over
         // `panes.ofSession('tm', session)` below — `storeAndSetProgram`'s own doc has the argument.
         // `tapeNames` RIDES THIS REPLY, PER SCRATCH, rather than being the fixed `tapeNames()` export
         // `onRun` posts: a reduced file's single-tape stage leaves one tape that the lowered bank names
         // would mislabel, and only the scratch knows its own stage list.
-        // `tmResultDecodable: true` IS INERT FOR THE SAME REASON `tmText: null` IS: this path never calls
-        // `setForkAvailable` (no `then` below), so neither field is ever read off this value.
+        // `tmResultDecodable: true` IS INERT FOR THE SAME REASON `text: null` IS: this path never calls
+        // `setForkAvailable` (not in the `tell` below), so neither field is ever read off this value.
         const compiled: TmCompiled = {
           program: reply.tmProgram,
           tapeNames: reply.tapeNames,
-          tmText: null,
+          text: null,
           tmResultDecodable: true,
         }
-        sessions.entryOf(session).tmScratch = { status: reply.tm, value: null }
-        storeAndSetProgram(session, compiled, (pane) => {
-          pane.setScratchStatus(reply.tm)
-          pane.setScratchValue(null)
+        sessions.entryOf(session).readings.tm = { status: reply.tm, value: null }
+        storeAndSetProgram(session, 'tm', compiled, (pane) => {
+          const tm = pane as TmPane
+          tellTmProgram(tm, compiled)
+          tm.setScratchStatus(reply.tm)
+          tm.setScratchValue(null)
         })
         // THE EDITOR IS SEEDED FROM THE BUFFER'S OWN TEXT OF RECORD, NOT FROM THIS REPLY — there is
         // none to seed from (`tm-scratch-compiled` carries no `text`, unlike `scratch-compiled`).
         // `ScratchBuffers.editorSeed` is also the seed `pane-host.ts`'s `mountScratchEditor` mounts a
-        // pane from when it arrives after this reply, the editor's half of the repair `tmProgramOf`
+        // pane from when it arrives after this reply, the editor's half of the repair `programOf`
         // performs. `ScratchBuffers.fork` and `.recompile` both write `BufferState.text` BEFORE posting
         // a build — the mint's own `src` argument, or the just-typed text — so by the time this reply
         // lands the buffer already holds its own correct text; there is nothing here to derive, only
@@ -583,12 +577,10 @@ export function createReplies(deps: {
         // RETAINED ON THE ENTRY, AS `tm-scratch-compiled` RETAINS THE STATUS, for a TM pane created after this reply.
         // A reading with no status before it cannot happen: the worker posts this only after `tm-scratch-compiled`
         // for the same generation, and a stale generation never reaches this switch (`SessionClient`'s filter).
-        const entry = sessions.entryOf(session)
-        if (entry.tmScratch !== null)
-          entry.tmScratch = { ...entry.tmScratch, value: { run: reply.run, value: reply.value } }
-        for (const p of panes.ofSession('tm', session))
-          (p.pane as TmPane).setScratchValue(entry.tmScratch?.value ?? null)
-        // **`draw()` REPAINTS THE FOOTER READOUT'S TM COPY LINE** (`readout.ts`'s `tmCopyFacts`, which reads
+        const { readings } = sessions.entryOf(session)
+        if (readings.tm !== null) readings.tm = { ...readings.tm, value: { run: reply.run, value: reply.value } }
+        for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setScratchValue(readings.tm?.value ?? null)
+        // **`draw()` REPAINTS THE FOOTER READOUT'S TM COPY LINE** (`readout.ts`'s `COPY_FACTS`, whose TM entry reads
         // `reading.value`), which reads this same entry — nothing else repaints it once the copy's own pane
         // has taken its `setScratchValue`. Without it, `value: running · N of M steps` would stay on screen
         // long after the value run ended, waiting on an unrelated event to redraw. **The copies menu's TM
@@ -601,7 +593,7 @@ export function createReplies(deps: {
         // `VALUE_CHUNK` (500,000 steps) while the run is `Running` (`session-worker.ts`'s `runValueLoop`),
         // so a `draw()` per chunk would be a full, synchronous redraw the browser could not skip even
         // behind a hidden tab, on a session that may be posting several chunks a second. `scheduleDraw`
-        // (above) is that coalescing, shared with the `*-frames` arms: at most one redraw is pending at a
+        // (above) is that coalescing, shared with the `frames` arms: at most one redraw is pending at a
         // time, and every reply that lands before it fires is absorbed into the one that is already
         // scheduled. The reply that ends the run (`run.run !== 'Running'`) calls `flushDraw` instead, so
         // the final value is drawn at once rather than left waiting on a frame a hidden tab may never paint.
@@ -612,11 +604,11 @@ export function createReplies(deps: {
       case 'rxm-scratch-compiled': {
         // `tm-scratch-compiled`'s arm for an rxm copy: one status, the listing stored and fanned out, and the copy's
         // status and value retained on the entry for a view built after this reply. The value comes with the build
-        // (`protocol.ts`'s own doc on this reply). No `rxmText`: a copy offers no copy of itself.
+        // (`protocol.ts`'s own doc on this reply). No text: a copy offers no copy of itself.
         resetLegs(sessions.entryOf(session).legs, { rxm: reply.rxm })
         built(session)
-        sessions.entryOf(session).rxmScratch = { status: reply.rxm, value: reply.value }
-        setRxmProgram(session, { program: reply.rxmProgram, rxmText: null })
+        sessions.entryOf(session).readings.rxm = { status: reply.rxm, value: reply.value }
+        setLegProgram(session, 'rxm', { program: reply.rxmProgram, text: null })
         // THE EDITOR FROM THE BUFFER'S OWN TEXT OF RECORD, as `tm-scratch-compiled`'s arm mounts a TM copy's, and for
         // its reason: a fork and an edit both write the text before posting the build.
         const rxmSeed = scratchpad.editorSeed(session)
@@ -632,39 +624,27 @@ export function createReplies(deps: {
         // A `[continue]`'s reading of the copy's value, retained over the build's, which it replaces; a reading with no
         // build before it cannot happen, for `tm-value`'s reason. **A DECIDED VALUE STAYS AGAINST `Unfinished`**
         // (`keepDecided`'s rule), which a `[continue]` after a rewind reads under the build cap.
-        const entry = sessions.entryOf(session)
-        if (entry.rxmScratch !== null)
-          entry.rxmScratch = keepDecidedPart(entry.rxmScratch, { ...entry.rxmScratch, value: reply.value })
-        for (const p of panes.ofSession('rxm', session)) (p.pane as RxmPane).setScratch(entry.rxmScratch)
+        const { readings } = sessions.entryOf(session)
+        if (readings.rxm !== null) readings.rxm = keepDecidedPart(readings.rxm, { ...readings.rxm, value: reply.value })
+        for (const p of panes.ofSession('rxm', session)) (p.pane as RxmPane).setScratch(readings.rxm)
         draw()
         return
       }
-      case 'rxm-frames':
-        // The rxm counterpart of `lambda-frames` below, unguarded for the identical reason.
-        pushFrames(sessions.legOf({ session, leg: 'rxm' }), reply, rxmFrameBytes)
-        return
-      case 'lambda-frames': {
+      case 'frames':
         // UNGUARDED FOR THE REASON THE `scratch-compiled` ARM ABOVE STATES: `legOf` throws for a session
         // the registry no longer holds, and a cooled buffer's worker cannot deliver a reply at all
         // because `cool`'s `terminate()` empties the parent side of the port. See
         // `ScratchBuffers.noSessionReply` for the argument in full.
-        pushFrames(sessions.legOf({ session, leg: 'lambda' }), reply, lambdaFrameBytes)
+        pushFrames(session, reply)
         return
-      }
-      case 'tm-frames': {
-        // THE TM COUNTERPART OF `lambda-frames` ABOVE, UNGUARDED FOR THE IDENTICAL REASON — a cooled
-        // buffer's worker cannot deliver this reply at all.
-        pushFrames(sessions.legOf({ session, leg: 'tm' }), reply, tmFrameBytes)
-        return
-      }
       case 'no-session': {
         // A VALUE RUN THAT WAS STILL GOING IS GONE. The worker drops a scratch, and the value run beside it, before
         // it parses the next text, so nothing will report on that run again, and a reading left at `Running` would
         // go on saying otherwise for as long as the text does not build. A finished reading still describes the
         // last text that built, like the frames this arm leaves on screen, so it stays.
-        const retained = sessions.entryOf(session).tmScratch
-        if (retained?.value?.run.run === 'Running') {
-          sessions.entryOf(session).tmScratch = { ...retained, value: null }
+        const { readings } = sessions.entryOf(session)
+        if (readings.tm?.value?.run.run === 'Running') {
+          readings.tm = { ...readings.tm, value: null }
           for (const p of panes.ofSession('tm', session)) (p.pane as TmPane).setScratchValue(null)
         }
         // WHICH OF TWO REASONS THIS FIRES IS `ScratchBuffers.noSessionReply`'s QUESTION, NOT THIS
@@ -735,17 +715,13 @@ export function createReplies(deps: {
         // `resetLegs` first, for `onReply`'s reason — stale frames must not survive under a message
         // saying it broke. Its reason, `the copy failed`, is what this copy's own readout then reads.
         resetLegs(sessions.entryOf(session).legs, {}, 'the copy failed')
-        // THE RETAINED READING GOES, AND SO DOES WHAT EVERY TM PANE ON THE BUFFER WAS TOLD OF IT — not only the pane
+        // THE RETAINED READING GOES, AND SO DOES WHAT EVERY VIEW ON THE BUFFER WAS TOLD OF IT — not only the view
         // holding the editor, which `setEditor(null)` below reaches. A split pane showing the same buffer would
         // otherwise go on reading `running` over a thread that will never answer again.
-        sessions.entryOf(session).tmScratch = null
-        sessions.entryOf(session).rxmScratch = null
-        for (const p of panes.ofSession('rxm', session)) (p.pane as RxmPane).setScratch(null)
-        for (const p of panes.ofSession('tm', session)) {
-          const pane = p.pane as TmPane
-          pane.setScratchStatus(null)
-          pane.setScratchValue(null)
-        }
+        READING_LEGS.forEach(<K extends keyof LegReading>(leg: K) => {
+          sessions.entryOf(session).readings[leg] = null
+          for (const p of panes.ofSession(leg, session)) CLEAR_READING[leg](p.pane)
+        })
         // `setEditor(null)` TOO. This thread is dead and a worker throwing is not a call to
         // `ScratchBuffers.retire`, so the registry entry keeps `detached: true`, the pane's binding does
         // not move, and `LambdaPane.setDetached`'s teardown never fires — its input never changes. But the

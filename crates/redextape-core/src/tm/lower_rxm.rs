@@ -141,7 +141,7 @@ impl Ctx {
 /// value (`reject_fn_value`), a call of a non-name (higher-order), a call arity mismatch, a call to an
 /// unknown/shadowed builtin, or a nested/local function definition. Each carries the offending
 /// `NodeId` and a `what` naming the construct; the caller's only recourse is rewriting the source, or
-/// routing the program through `defunc` first (see `tm.rs`'s `lower_program`) to eliminate the
+/// routing the program through `defunc` first (see `tm.rs`'s `lower_program_mapped`) to eliminate the
 /// higher-order constructs this backend does not lower directly.
 pub fn lower_rxm_mapped(core: &Core) -> Result<(Program, Vec<NodeId>), LowerError> {
     let mut ctx = Ctx::new();

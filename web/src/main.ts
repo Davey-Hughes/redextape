@@ -58,7 +58,6 @@ import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples
 import { createFocusDraw } from './focus-draw'
 import { handOff, nearest } from './focus-handoff'
 import { declineMark, focusMark, linkMark } from './highlight'
-import { History } from './history'
 import { icon } from './icons'
 import { LambdaTrees } from './lambda-trees'
 import {
@@ -90,14 +89,14 @@ import { createPanel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
 import { type LeafId, legOfPane, PaneCollection, type PaneKind } from './panes'
 import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
-import type { Leg, RunReply } from './protocol'
+import type { Leg, LegProgram, RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
-import { copyLegOf, createReadout, type ProgramResult, rxmCopyRow, tmCopyRow } from './readout'
-import { createReplies } from './replies'
+import { copyLegOf, copyRow, createReadout, type ProgramResult } from './readout'
+import { createReplies, type UnseenViews } from './replies'
 import type { RxmPane } from './rxm-pane'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
-import { legControlState, type SessionLegs, SessionRegistry } from './sessions'
+import { freshLeg, type LegReading, legControlState, type SessionLegs, SessionRegistry } from './sessions'
 import { decodeLink, isLink, type OpenedLink, type SharePayload } from './share-link'
 import { createShare } from './share-popover'
 import { LinkPositions, shortNotice } from './share-positions'
@@ -119,7 +118,6 @@ import {
 import { type BarTarget, barTarget, createStepBar } from './step-bar'
 import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
-import type { LambdaState, RxmState, TmState } from './types'
 import { assertTokenClasses } from './types'
 import { createUnsaved, type Refusal, refusalOf } from './unsaved'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
@@ -813,7 +811,7 @@ async function main(): Promise<EditorView> {
    * taking the same object.
    *
    * THE REPLY HANDLER IS THE BUFFERS' OWN, NOT `onReply`. A buffer has one leg, no results pane, no
-   * link index and no `tmProgram`, so routing its replies to `onReply` (`replies.ts`) would mean
+   * link index and no `compiled` reply, so routing its replies to `onReply` (`replies.ts`) would mean
    * `if (session === …)` guards inside a function whose whole point (see its doc) is that a reply
    * belongs to the session whose worker sent it. Two handlers, one per session kind, is the same split
    * 5d-i §3.2 draws at the port.
@@ -867,45 +865,20 @@ async function main(): Promise<EditorView> {
     // have no such leg to record, to bind a view to, or to offer in a selector. `Required` makes a leg with no
     // entry here a type error instead (`legs.ts` has the class of bug).
     legs: {
-      lambda: {
-        hist: new History<LambdaState>(HISTORY_BYTES),
-        status: { available: false, reason: '' },
-        done: null,
-        playing: false,
-        epoch: 0,
-        gen: 0,
-      },
-      rxm: {
-        hist: new History<RxmState>(HISTORY_BYTES),
-        status: { available: false, reason: '' },
-        done: null,
-        playing: false,
-        epoch: 0,
-        gen: 0,
-      },
-      tm: {
-        hist: new History<TmState>(HISTORY_BYTES),
-        status: { available: false, reason: '' },
-        done: null,
-        playing: false,
-        epoch: 0,
-        gen: 0,
-      },
+      lambda: freshLeg('lambda', HISTORY_BYTES, { available: false, reason: '' }),
+      rxm: freshLeg('rxm', HISTORY_BYTES, { available: false, reason: '' }),
+      tm: freshLeg('tm', HISTORY_BYTES, { available: false, reason: '' }),
     } satisfies Required<SessionLegs>,
     // NOTHING COMPILED YET, AND THIS SESSION IS THE ONE THAT EVER WILL — `compiled` is the reply the
     // scratch types cannot send (5d-i §4.1), so the scratchpad's own entry states the same `null` and keeps
-    // it. See `SessionEntry.tmProgram` for what reads this and when.
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    // it. See `SessionEntry.programs` for what reads this and when.
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   })
   /** The λ trees the views draw (spec §4) — one cache, asked through each session's own client. */
   const trees = new LambdaTrees((id) => (sessions.has(id) ? sessions.entryOf(id).client : undefined))
-  /**
-   * TM and rxm views a program reached while they were off the page — `replies.ts` adds, `draw()` seeds and removes.
-   */
-  const unseen = new WeakSet<TmPane | RxmPane>()
+  /** Views a compile reached while they were off the page — `replies.ts` adds, `draw()` seeds and removes. */
+  const unseen: UnseenViews = new WeakSet()
   /**
    * TRANSPORT, BEFORE ANY PANE — its `events(...)` is what each pane is constructed with, so it has
    * to exist first. `scratchpad` is a real value (constructed above, and nothing later reassigns it);
@@ -1490,10 +1463,8 @@ async function main(): Promise<EditorView> {
     // THE REGISTRY IS — that module's own doc argues why it takes these rather than the registry it would
     // otherwise need. `entryOf` throws for a session nothing registered, which is the policy `legOf`
     // already sets for the same class of wiring bug.
-    tmProgramOf: (session: SessionId) => sessions.entryOf(session).tmProgram,
-    tmScratchOf: (session: SessionId) => sessions.entryOf(session).tmScratch,
-    rxmProgramOf: (session: SessionId) => sessions.entryOf(session).rxmProgram,
-    rxmScratchOf: (session: SessionId) => sessions.entryOf(session).rxmScratch,
+    programOf: <K extends keyof LegProgram>(session: SessionId, leg: K) => sessions.entryOf(session).programs[leg],
+    readingOf: <K extends keyof LegReading>(session: SessionId, leg: K) => sessions.entryOf(session).readings[leg],
     // AND ITS SESSION QUESTION OF `ScratchBuffers`, ANSWERED HERE FOR THE SAME REASON — this file is where
     // `ScratchBuffers` is, and `pane-host.ts` takes a function from a `SessionId` to one value rather than
     // the class itself. `editorSeed` answers `null` for everything that is not a warm buffer, which is
@@ -2291,11 +2262,11 @@ async function main(): Promise<EditorView> {
 
   /**
    * What a WARM copy's row says it holds, under its name: a λ copy's current frame, as its text; a machine copy's run,
-   * as its readout line says it without the name (`readout.ts`'s `tmCopyRow`). The copies menu's `term` below asks
+   * as its readout line says it without the name (`readout.ts`'s `copyRow`). The copies menu's `term` below asks
    * this, and only for a warm buffer (that doc has why).
    *
    * **A λ COPY WITH NO FRAME READS ITS LEG'S REASON WHILE THE LEG IS NOT AVAILABLE**, as its readout does
-   * (`readout.ts`'s `lambdaCopyParts`): `building…` until its build is answered, `did not build` when that build
+   * (`readout.ts`'s `copyParts`): `building…` until its build is answered, `did not build` when that build
    * failed, where `no term yet` would read the same for both. `null`, which reads `no term yet`, is left for a leg
    * that is available with no frame yet: a build that landed, before its first frame has.
    *
@@ -2315,10 +2286,9 @@ async function main(): Promise<EditorView> {
         const copy = sessions.legOf({ session, leg: 'lambda' })
         return copy.hist.current?.text ?? (copy.status.available ? null : copy.status.reason)
       }
-      case 'tm':
-        return tmCopyRow(sessions.entryOf(session).tmScratch, copyLegOf(sessions.legOf({ session, leg: 'tm' })))
       case 'rxm':
-        return rxmCopyRow(sessions.entryOf(session).rxmScratch, copyLegOf(sessions.legOf({ session, leg: 'rxm' })))
+      case 'tm':
+        return copyRow(leg, sessions.entryOf(session).readings, copyLegOf(sessions.legOf({ session, leg })))
     }
   }
 
@@ -2615,6 +2585,7 @@ async function main(): Promise<EditorView> {
     links: linkWiring,
     trees,
     unseen,
+    seedPane: (entry, session) => paneHost.seedPane(entry, session),
     leaves: () => leaves(tree).length,
     sourceAvailable: () => !leaves(tree).some((l) => l.pane === 'source'),
     arranged,

@@ -1184,12 +1184,22 @@ dependencies = [
  "console_error_panic_hook",
  "js-sys",
  "redextape-core",
+ "redextape-wire",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "redextape-wire"
+version = "0.0.0"
+dependencies = [
+ "redextape-core",
  "redextape-test-support",
  "serde",
  "serde-wasm-bindgen",
  "ts-rs",
  "wasm-bindgen",
- "wasm-bindgen-test",
 ]
 
 [[package]]

@@ -38,8 +38,8 @@ const NEWEST = 'to the newest recorded step'
 
 let view: EditorView
 
-/** A session worker's reply the page has not been handed yet, with its kind, so a wait can name what it holds. */
-type Held = { readonly kind: string; readonly hand: () => void }
+/** A session worker's reply not yet handed to the page, with its kind and leg, so a wait can name what it holds. */
+type Held = { readonly kind: string; readonly leg: unknown; readonly hand: () => void }
 
 /**
  * The session workers' replies the page has not been handed yet, or `null` while they reach it as they come, **SO THAT
@@ -74,6 +74,7 @@ const hold = (worker: Worker, e: MessageEvent): void => {
   e.stopImmediatePropagation()
   held.push({
     kind: String(e.data?.kind),
+    leg: e.data?.leg,
     hand: () => {
       const copy = new MessageEvent('message', { data: e.data })
       handed.add(copy)
@@ -89,10 +90,10 @@ const release = (then: 'hold' | 'let through') => {
   for (const reply of replies) reply.hand()
 }
 
-/** Hand the page the held replies up to the first of `kind`, that one included, and go on holding the ones after it. */
-const releaseThrough = (kind: string) => {
+/** Hand the page the held replies up to the first of `kind` on `leg`, that one included, and go on holding the rest. */
+const releaseThrough = (kind: string, leg: string) => {
   const replies = held ?? []
-  const upTo = replies.findIndex((r) => r.kind === kind) + 1
+  const upTo = replies.findIndex((r) => r.kind === kind && r.leg === leg) + 1
   held = replies.slice(upTo)
   for (const reply of replies.slice(0, upTo)) reply.hand()
 }
@@ -326,8 +327,11 @@ describe('↺ back to step 0, in the app', () => {
     expect(alphaOf(getComputedStyle(restart).color), '↺ greyed: its glyph as faint as ▶’s').toBeCloseTo(faint, 2)
     expect(line('tm-0'), 'the TM line while the first frames are held').toBe('step 0 of 0…')
 
-    await until(() => held?.some((r) => r.kind === 'tm-frames') ?? false, 'the rewind’s first frames to be held')
-    releaseThrough('tm-frames')
+    await until(
+      () => held?.some((r) => r.kind === 'frames' && r.leg === 'tm') ?? false,
+      'the rewind’s first frames to be held',
+    )
+    releaseThrough('frames', 'tm')
     await until(() => at('tm-0').of > 0, 'the rewind’s first frames on the TM line')
     expect(line('tm-0'), 'precondition: the rewind records on').toContain('…')
     expect(await settledFocus(), 'where the focus settles at the rewind’s first frames').toBe(RESTART)
@@ -353,7 +357,10 @@ describe('↺ back to step 0, in the app', () => {
       'the TM view to drop its step 0 while it records',
     )
     held = []
-    await until(() => held?.some((r) => r.kind === 'tm-frames') ?? false, 'a frames reply of that recording to be held')
+    await until(
+      () => held?.some((r) => r.kind === 'frames' && r.leg === 'tm') ?? false,
+      'a frames reply of that recording to be held',
+    )
     await userEvent.click(button('tm-0', RESTART))
     const seen = watch(() => line('tm-0'))
 

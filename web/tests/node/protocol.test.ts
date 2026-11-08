@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LEGS, mapLegs } from '../../src/legs'
 import {
   endOf,
   FRAME_OVERHEAD_BYTES,
@@ -7,6 +8,7 @@ import {
   keepDecided,
   keepInFlight,
   type LambdaLeg,
+  type Leg,
   lambdaFrameBytes,
   MAX_FORK_RULES,
   OWNER_BYTES,
@@ -164,7 +166,7 @@ describe('the fork cap', () => {
 
   /**
    * A DECLINED LEG IS NOT FORKABLE, AND THE `null` ARM IS WHY THE PREDICATE TAKES A NULLABLE.
-   * `compiled` carries `tmProgram: TmProgram | null`, so every caller would otherwise write the same
+   * A declined leg has no `TmProgram`, so every caller would otherwise write the same
    * null check beside every call — which is the second place for it to be wrong.
    */
   it('refuses a null program without the caller checking', () => {
@@ -216,7 +218,7 @@ describe('rxmRecordEnd', () => {
     expect(rxmRecordEnd({ run: 'Capped', cap: null })).toBe('capped')
   })
 
-  it('reads a run that is still going as ended, since it is only asked once stepping has stopped', () => {
+  it('reads a run that is still going as ended, so that `extendLeg` raises no cap at a `budget` stop', () => {
     expect(rxmRecordEnd({ run: 'Running', cap: null })).toBe('ended')
   })
 })
@@ -227,7 +229,7 @@ describe('endOf', () => {
     expect(endOf('DepthRefused')).toBe('depth-refused')
   })
 
-  it('ends a finished run, a running one and an absent leg alike: it is asked only once stepping stops', () => {
+  it('ends a finished run, a running one and an absent leg alike, so that `extendLeg` raises no cap at a `budget` stop', () => {
     expect(endOf('Ended')).toBe('ended')
     expect(endOf('Running')).toBe('ended')
     expect(endOf(null)).toBe('ended')
@@ -251,6 +253,18 @@ const tmLeg = (value: Decoded | null): TmLeg => ({
 })
 const TWO: Decoded = { Value: { text: '2' } }
 const legs = (l: LambdaLeg, r: RxmLeg, t: TmLeg): ResultLegs => ({ lambda: l, rxm: r, tm: t })
+
+describe('mapLegs', () => {
+  it('builds one entry per leg, in `LEGS` order, calling `value` once for each', () => {
+    const called: Leg[] = []
+    const table = mapLegs<Record<Leg, string>>((leg) => {
+      called.push(leg)
+      return `${leg} entry`
+    })
+    expect(called).toEqual(LEGS)
+    expect(Object.entries(table)).toEqual(LEGS.map((leg) => [leg, `${leg} entry`]))
+  })
+})
 
 /**
  * A rewind posts no `result`, so the readout keeps a leg's decided value across it (spec §11 call 6), and the next

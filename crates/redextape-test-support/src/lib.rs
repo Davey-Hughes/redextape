@@ -31,7 +31,7 @@
 //! not behind that feature, so a consumer that opts out of `proptest` still gets it.
 //!
 //! **IT IS NOT FREE.** The nullability rule parses Rust instead of scanning it, which puts `syn`
-//! and `quote` in this crate's unconditional `[dependencies]`. `redextape-cli` and `redextape-wasm`
+//! and `quote` in this crate's unconditional `[dependencies]`. `redextape-cli` and `redextape-wire`
 //! declare `default-features = false` precisely to avoid paying for what they do not use, and `syn`
 //! still lands beneath them. See `Cargo.toml`'s note above the `syn` entry for why that cost
 //! was accepted and what it does not reach.

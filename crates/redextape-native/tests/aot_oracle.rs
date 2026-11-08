@@ -15,7 +15,7 @@
 //! rather than silently passing when it is absent, since `emit_object` alone is already covered by
 //! `aot.rs`'s unit tests (`emits_a_valid_object_with_main_and_rt_run` et al).
 
-use redextape_core::tm::{DEFAULT_CAPS, defunc, lower_rxm};
+use redextape_core::tm::{DEFAULT_CAPS, lower_program};
 use redextape_core::typeck::result_type;
 use redextape_core::value::format_value;
 use redextape_core::{desugar::desugar, parser::parse, run};
@@ -27,8 +27,7 @@ fn cc_available() -> bool {
 
 /// Compile `src` to a native binary, run it, return (stdout, exit_code).
 ///
-/// Lowers with `lower_rxm` and retries through `defunc` on any error, `TooDeep` included, where
-/// `redextape_core::tm::lower_program` retries only on `Unsupported` and returns `TooDeep` at once.
+/// Lowers through `redextape_core::tm::lower_program`, `defunc` included, as the compiler does.
 ///
 /// The binary lives under its own `redextape_test_support::ScratchDir` rather than directly in
 /// `std::env::temp_dir()`, so it is removed once this function returns (it has already been run and
@@ -45,7 +44,7 @@ fn run_binary(src: &str, name: &str) -> (String, i32) {
     // reading `ty` on either path (see `redextape_native_rt::{rt_run, print_outcome}`).
     let ty = redextape_core::ty::ground(result_type(&ast).unwrap());
     let core = desugar(&ast);
-    let prog = lower_rxm(&core).or_else(|_| defunc(&core).and_then(|d| lower_rxm(&d))).unwrap();
+    let prog = lower_program(&core).unwrap();
     let obj = emit_object(&prog, DEFAULT_CAPS, &ty, OptLevel::default()).unwrap();
     let dir = redextape_test_support::ScratchDir::new(&format!("aot-{name}")).unwrap();
     let out = dir.join(name);

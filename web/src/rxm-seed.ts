@@ -1,5 +1,6 @@
+import type { RxmCompiled } from './protocol'
 import type { RxmPane } from './rxm-pane'
-import type { RxmCompiled, RxmScratchReading } from './sessions'
+import type { RxmScratchReading } from './sessions'
 
 /**
  * Tell an rxm view what its session keeps: the listing, whether it can be copied, and a copy's value — `tm-seed.ts`'s
@@ -9,6 +10,6 @@ import type { RxmCompiled, RxmScratchReading } from './sessions'
  */
 export function seedRxm(pane: RxmPane, compiled: RxmCompiled | null, reading: RxmScratchReading | null): void {
   pane.setProgram(compiled?.program ?? null)
-  pane.setForkAvailable(compiled?.rxmText ?? null, compiled?.program.listing.length ?? 0)
+  pane.setForkAvailable(compiled?.text ?? null, compiled?.program.listing.length ?? 0)
   pane.setScratch(reading)
 }

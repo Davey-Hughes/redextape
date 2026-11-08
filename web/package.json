@@ -23,6 +23,7 @@
     "test:probe:rxm-copy": "export REDEXTAPE_PROBE_RXM_COPY_RUN=\"$(date +%s)-$$\" && wasm-pack build ../crates/redextape-wasm --release --target web --out-dir ../../target/probe-rxm-copy-wasm -- --features probe-rxm-copy && printf %s \"$REDEXTAPE_PROBE_RXM_COPY_RUN\" > ../target/probe-rxm-copy-wasm/run.txt && REDEXTAPE_PROBE=1 vitest run --project browser --reporter=verbose tests/browser/rxm-copy-cost.test.ts tests/browser/rxm-copy-memory.test.ts",
     "test:probe:floor": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/pane-floor.test.ts",
     "test:probe:lambda-tree": "REDEXTAPE_PROBE=1 vitest run --project browser --reporter=verbose tests/browser/lambda-tree-cost.test.ts",
+    "test:probe:record": "REDEXTAPE_PROBE=1 vitest run --project browser --reporter=verbose tests/browser/record-cost.test.ts",
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {

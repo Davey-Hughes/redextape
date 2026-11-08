@@ -84,8 +84,8 @@ export class CopyEditor implements EditablePane {
    * The last `setForkAvailable` call's facts, kept so `#refreshDetach` can re-evaluate them on every frame rather
    * than only at the moment they arrived.
    *
-   * **WITHOUT THIS SET, THE CONTROL COULD OUTLIVE THE FORK IT JUST PERFORMED.** `replies.ts`'s `setTmProgram` calls
-   * `setForkAvailable` over `panes.ofSession('tm', session)` for the SOURCE session, and `pane-host.ts`'s `seedTmPane`
+   * **WITHOUT THIS SET, THE CONTROL COULD OUTLIVE THE FORK IT JUST PERFORMED.** `replies.ts`'s `setLegProgram` calls
+   * `setForkAvailable` over `panes.ofSession('tm', session)` for the SOURCE session, and `pane-host.ts`'s `SEED.tm`
    * calls it when a view is created or moved by a pick, a cool or a retire, which a fork is not. `scratchpad.fork`
    * rebinds the view's slot to the new copy SYNCHRONOUSLY, so the view leaves that set on the very click that forked
    * it — nothing calls `setForkAvailable` again to say the new session has nothing to fork. Storing the facts here
@@ -364,11 +364,11 @@ export class CopyEditor implements EditablePane {
    * `#refreshDetach` checks first. Left out, the TM view's control would keep whatever rules and text the SOURCE
    * session last reported, forever, on a view that had since rebound onto its own new copy — the button would stay
    * present and enabled, and a second click would reach `transport.ts`'s fork handler with no text (a copy's own
-   * `tmProgram.tmText` is always `null`, `replies.ts`'s `tm-scratch-compiled` arm builds it that way) and throw. The
+   * `programs.tm.text` is always `null`, `replies.ts`'s `tm-scratch-compiled` arm builds it that way) and throw. The
    * rule this enforces: A VIEW ALREADY SHOWING A COPY HAS NOTHING LEFT TO COPY.
    *
    * **`this.#forkText !== null || !this.#resultDecodable || this.#count > 0` IS WHETHER THE CONTROL SHOWS AT ALL.** A
-   * `TmCompiled` whose program parsed to zero δ rules (`ruleCount(program) === 0`) still has non-`null` `tmText` and
+   * `TmCompiled` whose program parsed to zero δ rules (`ruleCount(program) === 0`) still has non-`null` `text` and
    * is genuinely forkable — `tests/node/sessions.test.ts`'s own fixture for the machine-fork handler constructs
    * exactly that shape (one state, no rules). `count > 0` alone would withdraw the control for it though nothing
    * about the machine makes it unforkable; `text !== null` is the worker's own decision (`forkable` for a machine,

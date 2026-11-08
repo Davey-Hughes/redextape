@@ -174,24 +174,19 @@ export type PaneEvents = {
   /** A TM view's display settings changed — `display`'s twin. */
   tmDisplay?: (d: TmDisplay) => void
   /**
-   * Fork this pane's MACHINE into a TM scratch buffer — 5d-iv design §4.3.
+   * Copy this view's PROGRAM, a TM view's machine or an rxm view's listing, into a copy on the view's leg — 5d-iv
+   * design §4.3, Plan 7 part 5 spec §7.
    *
    * **NO STEP, WHERE `detach` CARRIES ONE, AND THAT IS WHY IT IS A SECOND MEMBER RATHER THAN A REUSE.**
    * A λ fork replays the source term to the frame the pane was showing, so that handler reports the
-   * one fact it owns. A machine has no step-k text: the seed is the whole `.tm` file, which lives
-   * in `main.ts`'s and `replies.ts`'s retention of the last `compiled` reply, not in the pane. This
-   * handler needs nothing from the pane, and a `step` parameter its handler ignored would be a
-   * parameter with no reader.
+   * one fact it owns. A program has no step-k text: the seed is its whole text, which the session keeps
+   * (`SessionEntry.programs`), not the pane. This handler needs nothing from the pane, and a `step`
+   * parameter its handler ignored would be a parameter with no reader.
    *
    * OPTIONAL, LIKE `detach`, AND BY THE SAME TEST: a pane has this handler when it has the affordance
    * the handler reports.
    */
-  detachMachine?(): void
-  /**
-   * Copy this view's rxm PROGRAM into an rxm copy — Plan 7 part 5 spec §7. `detachMachine`'s shape and for its reason:
-   * the seed is the program's whole text, which the session keeps, so the handler needs nothing from the view.
-   */
-  detachRxm?(): void
+  detachProgram?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /** An instruction row in the rxm view's listing was clicked, or Enter pressed on it; `pc` is its index. */

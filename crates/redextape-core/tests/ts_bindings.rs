@@ -72,9 +72,9 @@ fn generated() -> Vec<(&'static str, String)> {
 /// **IT DOES NOT CATCH EVERY WAY AN OVERRIDE CAN BE WRONG.** `ts(type = ...)` replaces the WHOLE
 /// field type rather than the integer inside it, so `ts(type = "number")` on an `Option<u64>` field
 /// would generate `field: number` — no `bigint`, so this gate passes, and the `| null` that `None`
-/// puts on the wire is gone. None of this crate's fields are `Option<u64>` today; `redextape-wasm`'s
+/// puts on the wire is gone. None of this crate's fields are `Option<u64>` today; `redextape-wire`'s
 /// `TmStatus::total_steps` and `RxmStatus::total_steps` are. `no_override_misstates_a_field_s_nullability`
-/// below catches that class in this crate, and its twin in `redextape-wasm`'s `ts_bindings.rs` catches it
+/// below catches that class in this crate, and its twin in `redextape-wire`'s `ts_bindings.rs` catches it
 /// there. Naming the hole here is the point: a gate that implied it covered the whole override class
 /// would tell the next reader not to check.
 ///

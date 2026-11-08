@@ -86,13 +86,13 @@ describe('SessionPool', () => {
   })
 
   // 5d-iii design §4.1: the step the pane was showing rides the wire beside the seed text, so
-  // `session-worker.ts`'s `onLambdaScratch` can replay to it before forking — see `RunRequest`'s
-  // `lambda-scratch` doc in `protocol.ts` for what `step` means.
+  // the λ entry of `session-worker.ts`'s `BUILD` can replay to it before forking — see `RunRequest`'s
+  // `scratch` doc in `protocol.ts` for what `step` means.
   it('carries the fork step on the wire', () => {
     const { pool, ports } = harness()
     const client = pool.bind('lambda-scratch', () => {})
-    client.scratch(client.supersede(), '\\y. y', 7)
-    expect(ports[0]?.sent).toEqual([{ kind: 'lambda-scratch', gen: 1, src: '\\y. y', step: 7 }])
+    client.scratch(client.supersede(), 'lambda', '\\y. y', 7)
+    expect(ports[0]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: '\\y. y', step: 7 }])
   })
 
   // A `SessionClient` takes exactly one `onReply` at construction, so a second bind cannot be

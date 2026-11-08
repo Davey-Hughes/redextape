@@ -58,7 +58,7 @@ use redextape_core::parser::parse;
 use redextape_core::tm::build::MAX_MACHINE_STATES;
 use redextape_core::tm::rxm::{Instr, Program, Reg};
 use redextape_core::tm::{
-    Binary, EncodingKind, TM_DEFAULT_CAPS, TmRun, Unary, defunc, lower_rxm, lower_tm, lower_tm_guarded, run_tm_at,
+    Binary, EncodingKind, TM_DEFAULT_CAPS, TmRun, Unary, lower_program, lower_tm, lower_tm_guarded, run_tm_at,
     run_tm_described, run_tm_fitted,
 };
 use redextape_core::ty::Ty;
@@ -249,12 +249,9 @@ fn balanced(lo: usize, hi: usize) -> String {
     format!("({} + {})", balanced(lo, mid), balanced(mid, hi))
 }
 
-/// `Core` to rxm: `lower_rxm` directly, then, on ANY error — `TooDeep` included — again through `defunc`.
-/// That is looser than `lower_program`, which retries through `defunc` only on `Unsupported` and returns
-/// `TooDeep` at once.
+/// `Core` to rxm through `lower_program`, the lowering every `run_tm*` entry point uses.
 fn rxm_of(src: &str) -> redextape_core::tm::rxm::Program {
-    let core = core_of(src);
-    lower_rxm(&core).or_else(|_| defunc(&core).and_then(|d| lower_rxm(&d))).expect("program must lower to rxm")
+    lower_program(&core_of(src)).expect("program must lower to rxm")
 }
 
 /// THE WORST PROGRAM THIS PROJECT SHIPS must still lower, with room to spare.
@@ -400,7 +397,7 @@ fn the_balanced_tree_is_admitted_below_the_ceiling_and_refused_above_it() {
 /// a refusal with a machine that HALTS IMMEDIATELY, so a version of this that failed to plumb the
 /// refusal out would simulate that machine, halt at a state that is not the overflow guard, and
 /// come back as `Ran` over tapes that decode to nothing — a plausible-looking wrong answer rather
-/// than a crash. That is the outcome `lower_and_size`'s doc rules out, and `MAX_MACHINE_STATES` is
+/// than a crash. That is the outcome `sized`'s doc rules out, and `MAX_MACHINE_STATES` is
 /// the one refusal it cannot pre-check.
 ///
 /// `TooLarge` is what reaches the user as "the machine this program needs is too large to build"

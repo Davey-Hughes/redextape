@@ -118,7 +118,7 @@ export class TmPane implements EditablePane {
 
   /**
    * The view's `⋯` menu and `✕` — `LambdaPane.#menu`'s twin. `edit a copy` is **BUILT ONLY WHEN THE
-   * HANDLER EXISTS**, for that field's own reason: a caller with no `detachMachine` gets a view with no
+   * HANDLER EXISTS**, for that field's own reason: a caller with no `detachProgram` gets a view with no
    * copy offered rather than one that offers a copy and swallows it. *Move the editor here* likewise, for
    * `PaneEvents.showEditor`. `#copy` keeps *format*, *edit a copy* and *move the editor here* in step.
    */
@@ -181,9 +181,9 @@ export class TmPane implements EditablePane {
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#steps = stepControls(on)
-    // `detachMachine` carries no argument (`PaneEvents.detachMachine`'s own doc: a machine has no step-k
+    // `detachProgram` carries no argument (`PaneEvents.detachProgram`'s own doc: a machine has no step-k
     // text to report), so the item's run is the handler itself rather than a closure over a frame.
-    const detachMachine = on.detachMachine
+    const detachProgram = on.detachProgram
     this.#menu = viewMenu(this.#header.actions, {
       // REMOVED WHERE THERE IS NO EDITOR, not disabled: a view showing a running leg has no
       // document to format, which is the umbrella's rule for a control that cannot apply.
@@ -192,7 +192,7 @@ export class TmPane implements EditablePane {
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
       ...(on.close !== undefined ? { close: on.close } : {}),
-      ...(detachMachine !== undefined ? { editCopy: { run: detachMachine, what: 'the whole machine' } } : {}),
+      ...(detachProgram !== undefined ? { editCopy: { run: detachProgram, what: 'the whole machine' } } : {}),
       ...(on.showEditor !== undefined ? { claim: on.showEditor } : {}),
       choices: () => this.#choices,
     })
@@ -548,8 +548,8 @@ export class TmPane implements EditablePane {
     this.#header.setDetached(detached)
     this.#copy.setDetached(detached)
     // A PANE ON SOURCE DESCRIBES NO BUFFER, so nothing a buffer told it may stay on screen, whichever route moved it
-    // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `seedTmPane` doc
-    // lists them), so this clear is a second line behind that seed rather than what tells a moved pane.
+    // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `SEED` doc lists
+    // them), so this clear is a second line behind that seed rather than what tells a moved pane.
     // GUARDED, because `PaneSlot.render` calls this on every frame: once both are `null` it compares two fields
     // and writes nothing.
     if (!detached && (this.#scratch !== null || this.#reading !== null)) {

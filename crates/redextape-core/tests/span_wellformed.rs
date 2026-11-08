@@ -22,8 +22,8 @@ use redextape_core::core::{BinOp, Core, NodeId};
 use redextape_core::lambda::{lower, print_lambda_mapped};
 use redextape_core::sourcemap::SourceMap;
 use redextape_core::tm::{
-    Binary, EncodingKind, Machine, Move, Program, Rule, RxmHeader, State, TmHeader, Unary, defunc, lower_rxm, lower_tm,
-    print_rxm_mapped, print_rxm_with_mapped, print_tm_mapped, print_tm_with_mapped,
+    Binary, EncodingKind, Machine, Move, Program, Rule, RxmHeader, State, TmHeader, Unary, lower_program, lower_rxm,
+    lower_tm, print_rxm_mapped, print_rxm_with_mapped, print_tm_mapped, print_tm_with_mapped,
 };
 use redextape_core::ty::Ty;
 
@@ -48,10 +48,7 @@ const CORPUS: &[&str] = &[
 
 /// The same rxm and TM the source map is built against.
 fn rxm_and_tm(core: &Core) -> (Program, Machine) {
-    let prog = match lower_rxm(core) {
-        Ok(p) => p,
-        Err(_) => lower_rxm(&defunc(core).expect("defunc")).expect("lowers after defunc"),
-    };
+    let prog = lower_program(core).expect("lowers");
     let m = lower_tm(&prog, &Unary::default());
     (prog, m)
 }

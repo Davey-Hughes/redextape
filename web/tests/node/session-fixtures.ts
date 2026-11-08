@@ -1,7 +1,7 @@
-import type { Leg, RunReply, RunRequest } from '../../src/protocol'
+import type { Leg, LegFrame, RunReply, RunRequest } from '../../src/protocol'
 import type { ClientPort, PoolPort } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
-import type { LegFrame, PaneSlot, PaneView, SessionRegistry } from '../../src/sessions'
+import type { PaneSlot, PaneView, SessionRegistry } from '../../src/sessions'
 import type { LambdaState } from '../../src/types'
 
 /** A `ClientPort` with no thread behind it — `SessionEntry` needs a client and nothing here posts. */

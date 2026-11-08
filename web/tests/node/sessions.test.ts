@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ControlState } from '../../src/controls'
 import type { KeymapSetting } from '../../src/editor-keymap'
+import { LEGS } from '../../src/legs'
 import type { LinkWiring } from '../../src/link-wiring'
 import type { Leg } from '../../src/protocol'
 import { BufferCapReached, MAX_WARM_BUFFERS, type ScratchBuffers } from '../../src/scratch'
 import { SessionClient, type SessionId } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
-import { legControlState, PaneSlot, resetLegs, rewindLeg, SessionRegistry } from '../../src/sessions'
+import { freshLeg, legControlState, PaneSlot, resetLegs, rewindLeg, SessionRegistry } from '../../src/sessions'
 import { createTransport } from '../../src/transport'
 import type { LambdaState, RxmState, TmProgram, TmState } from '../../src/types'
 import { legState } from './leg-fixture'
@@ -57,7 +58,7 @@ function entry(
     for (const s of opts.tm) t.hist.push(tmFrame(s, 0, '_'), 1)
     legs.tm = t
   }
-  // NO MACHINE ON ANY OF THEM. `SessionEntry.tmProgram` is retained from a `compiled` reply, and this
+  // NO MACHINE ON ANY OF THEM. `SessionEntry.programs.tm` is retained from a `compiled` reply, and this
   // file drives the binding model rather than the reply switch — `tests/node/replies.test.ts` is where
   // the retention itself is asserted.
   return {
@@ -66,10 +67,8 @@ function entry(
     detached: opts.detached ?? false,
     client: fakeClient(),
     legs,
-    tmProgram: null,
-    tmScratch: null,
-    rxmProgram: null,
-    rxmScratch: null,
+    programs: { rxm: null, tm: null },
+    readings: { rxm: null, tm: null },
   }
 }
 
@@ -464,12 +463,12 @@ describe('PaneSlot', () => {
   })
 
   /**
-   * **THE IDENTICAL DISCRIMINATION, ON THE TM LEG'S OWN HANDLER.** `detachMachine` reaches the same
+   * **THE IDENTICAL DISCRIMINATION, ON THE TM LEG'S HANDLER.** `detachProgram` reaches the same
    * `instanceof BufferCapReached` catch as `detach` above (`transport.ts`'s `forkCopy`), over a fake
    * `scratchpad.fork` that throws — cheap, since no worker is needed to prove which branch a throw takes.
-   * What differs from the λ test is what `detachMachine` resolves BEFORE the `try`:
-   * `sessions.entryOf(session).tmProgram?.tmText`, not `linkWiring().index.lambdaText`, so the session
-   * here is seeded with a `tmProgram` a real `compiled` reply would have left rather than with an `index`.
+   * What differs from the λ test is what `detachProgram` resolves BEFORE the `try`:
+   * `sessions.entryOf(session).programs.tm?.text`, not `linkWiring().index.lambdaText`, so the session
+   * here is seeded with a `programs.tm` a real `compiled` reply would have left rather than with an `index`.
    */
   it('re-throws a non-cap error out of the machine-fork handler and keeps only the cap refusal', () => {
     const reg = new SessionRegistry()
@@ -483,10 +482,10 @@ describe('PaneSlot', () => {
       listing: [],
       labels: [],
     }
-    source.tmProgram = {
+    source.programs.tm = {
       program,
       tapeNames: ['TAPE'],
-      tmText: 'tapes 1\nstart pc0\nstate pc0:\n',
+      text: 'tapes 1\nstart pc0\nstate pc0:\n',
       tmResultDecodable: true,
     }
     reg.add(source)
@@ -498,7 +497,7 @@ describe('PaneSlot', () => {
 
     const transport = createTransport({
       sessions: reg,
-      // THE ONLY METHOD `detachMachine` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
+      // THE ONLY METHOD `detachProgram` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
       scratchpad: {
         fork: () => {
           throw thrown
@@ -513,8 +512,8 @@ describe('PaneSlot', () => {
       formatOnBlur: () => false,
       // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
       keymap: {} as KeymapSetting,
-      // NO `index` FIELD HERE, UNLIKE THE λ TEST'S FAKE — `detachMachine` never reads `linkWiring()`
-      // for its text (`sessions.entryOf(...).tmProgram?.tmText` is the whole resolution), so a fake
+      // NO `index` FIELD HERE, UNLIKE THE λ TEST'S FAKE — `detachProgram` never reads `linkWiring()`
+      // for its text (`sessions.entryOf(...).programs.tm?.text` is the whole resolution), so a fake
       // that omitted `index` would still be exercising the real handler rather than papering over a
       // read it does not perform.
       linkWiring: () => ({}) as unknown as LinkWiring,
@@ -532,7 +531,7 @@ describe('PaneSlot', () => {
     const events = transport.events(slot)
 
     // THE WIRING BUG, IDENTICAL IN SHAPE TO THE λ CASE ABOVE.
-    expect(() => events.detachMachine?.()).toThrow(/a pool invariant broke/)
+    expect(() => events.detachProgram?.()).toThrow(/a pool invariant broke/)
     expect(notified).toEqual([])
     expect(draws).toBe(0)
     expect(buffersChanged).toBe(0)
@@ -541,25 +540,25 @@ describe('PaneSlot', () => {
     thrown = new BufferCapReached(
       `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
-    expect(() => events.detachMachine?.()).not.toThrow()
+    expect(() => events.detachProgram?.()).not.toThrow()
     expect(notified.join(' ')).toContain('pause or delete one')
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
   })
 
   /**
-   * **THE IDENTICAL DISCRIMINATION, ON THE RXM LEG'S OWN HANDLER.** `detachRxm` reaches the same
-   * `instanceof BufferCapReached` catch as `detach` and `detachMachine` above (`transport.ts`'s
-   * `forkCopy`). What it resolves BEFORE the `try` is `sessions.entryOf(session).rxmProgram?.rxmText`, so
-   * the session here is seeded with the `rxmProgram` a real `compiled` reply would have left, as the TM
-   * test's is with a `tmProgram`.
+   * **THE IDENTICAL DISCRIMINATION, ON THE RXM LEG'S HANDLER.** `detachProgram` reaches the same
+   * `instanceof BufferCapReached` catch as `detach` and the TM leg's above (`transport.ts`'s
+   * `forkCopy`). What it resolves BEFORE the `try` is `sessions.entryOf(session).programs.rxm?.text`, so
+   * the session here is seeded with the `programs.rxm` a real `compiled` reply would have left, as the TM
+   * test's is with a `programs.tm`.
    */
   it('re-throws a non-cap error out of the rxm-fork handler and keeps only the cap refusal', () => {
     const reg = new SessionRegistry()
     const source = entry('source', { label: 'source', rxm: [0] })
-    source.rxmProgram = {
+    source.programs.rxm = {
       program: { listing: ['li\trr, #1', 'halt'], labels: [] },
-      rxmText: 'result Nat\n\n    li\trr, #1\n    halt\n',
+      text: 'result Nat\n\n    li\trr, #1\n    halt\n',
     }
     reg.add(source)
 
@@ -570,7 +569,7 @@ describe('PaneSlot', () => {
 
     const transport = createTransport({
       sessions: reg,
-      // THE ONLY METHOD `detachRxm` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
+      // THE ONLY METHOD `detachProgram` CALLS ON IT WHEN `fork` THROWS, mirroring the λ test's fake above.
       scratchpad: {
         fork: () => {
           throw thrown
@@ -585,8 +584,8 @@ describe('PaneSlot', () => {
       formatOnBlur: () => false,
       // NEVER REACHED, SO A CAST: a keymap setting is joined by an EDITOR, and no fixture in this file builds one.
       keymap: {} as KeymapSetting,
-      // NO `index` FIELD HERE, AS IN THE TM TEST'S FAKE — `detachRxm` resolves its text from the session's
-      // `rxmProgram`, not from `linkWiring()`.
+      // NO `index` FIELD HERE, AS IN THE TM TEST'S FAKE — `detachProgram` resolves its text from the session's
+      // `programs.rxm`, not from `linkWiring()`.
       linkWiring: () => ({}) as unknown as LinkWiring,
       notify: (t: string) => {
         notified.push(t)
@@ -602,7 +601,7 @@ describe('PaneSlot', () => {
     const events = transport.events(slot)
 
     // THE WIRING BUG, IDENTICAL IN SHAPE TO THE λ AND TM CASES ABOVE.
-    expect(() => events.detachRxm?.()).toThrow(/a pool invariant broke/)
+    expect(() => events.detachProgram?.()).toThrow(/a pool invariant broke/)
     expect(notified).toEqual([])
     expect(draws).toBe(0)
     expect(buffersChanged).toBe(0)
@@ -611,19 +610,19 @@ describe('PaneSlot', () => {
     thrown = new BufferCapReached(
       `cannot make a copy — all ${MAX_WARM_BUFFERS} copies are running; pause or delete one from the copies menu to make room`,
     )
-    expect(() => events.detachRxm?.()).not.toThrow()
+    expect(() => events.detachProgram?.()).not.toThrow()
     expect(notified.join(' ')).toContain('pause or delete one')
     expect(draws).toBe(1)
     expect(buffersChanged).toBe(0)
   })
 
   /**
-   * **`detachMachine` REACHED WITH NO MACHINE TEXT IS A WIRING BUG, NOT A REFUSAL — `transport.ts`'s
-   * own doc on the guard.** The control is withdrawn or disabled whenever `tmText === null`
+   * **`detachProgram` REACHED WITH NO MACHINE TEXT IS A WIRING BUG, NOT A REFUSAL — `transport.ts`'s
+   * own doc on the guard.** The control is withdrawn or disabled whenever `text === null`
    * (`CopyEditor.#refreshDetach`), so a click that reaches this handler with one names a gap between the
    * button's own state and what the handler reads, not a state a user chose. Asserted on a session with
-   * no `tmProgram` at all (the ordinary case — nothing has compiled a machine to this session yet), the
-   * cheapest way to reach `tmText === null` without also building a real one that IS forkable.
+   * no `programs.tm` at all (the ordinary case — nothing has compiled a machine to this session yet), the
+   * cheapest way to reach `text === null` without also building a real one that IS forkable.
    */
   it('throws loudly rather than forking with no machine text', () => {
     const reg = new SessionRegistry()
@@ -653,7 +652,7 @@ describe('PaneSlot', () => {
     })
 
     const events = transport.events(new PaneSlot('tm', 'source'))
-    expect(() => events.detachMachine?.()).toThrow(/detachMachine reached with no machine text/)
+    expect(() => events.detachProgram?.()).toThrow(/detachProgram reached with no machine text/)
   })
 
   /**
@@ -888,6 +887,29 @@ describe('a step gesture on a leg with a position pending', () => {
   })
 })
 
+describe('freshLeg', () => {
+  /** The ring's budget is `bytes`: three 6-byte frames under 10 keep the newest two, which a larger budget would not. */
+  it('builds each leg empty, unplayed, at epoch and generation 0, with a copy of the status given', () => {
+    const status = { available: false, reason: 'building…' }
+    for (const leg of LEGS) {
+      const fresh = freshLeg(leg, 10, status)
+      const { done, playing, epoch, gen } = fresh
+      expect({ length: fresh.hist.length, done, playing, epoch, gen, status: fresh.status }, leg).toEqual({
+        length: 0,
+        done: null,
+        playing: false,
+        epoch: 0,
+        gen: 0,
+        status,
+      })
+      expect(fresh.status, leg).not.toBe(status)
+    }
+    const rxm = freshLeg('rxm', 10, status).hist
+    for (const step of [0, 1, 2]) rxm.push(frameOf({ step }), 6)
+    expect({ length: rxm.length, evicted: rxm.evicted }).toEqual({ length: 2, evicted: true })
+  })
+})
+
 describe('rewindLeg', () => {
   it('raises the epoch by one and empties the ring and its end', () => {
     const tm = entry('source', { tm: [0, 1, 2] }).legs.tm
@@ -938,7 +960,7 @@ describe('↺ on a leg', () => {
     tm.hist.seek(tm.hist.length - 1)
     tm.done = 'budget'
     const gen = client.supersede()
-    port.deliver({ kind: 'tm-frames', gen, epoch: 0, frames: [], done: 'budget' })
+    port.deliver({ kind: 'frames', leg: 'tm', gen, epoch: 0, frames: [], done: 'budget' })
     tm.gen = gen
     if (branch === 'awaiting') client.supersede()
     if (branch === 'unparsed') port.deliver(noSessionReply(client.supersede()))

@@ -381,7 +381,7 @@ describe('edit a copy', () => {
   const item = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('button.detach')
 
   it('is offered for the program, disabled with a reason where its text is withheld, and absent with nothing to copy', () => {
-    const { host, pane } = mount(FACT3, inertEvents({ detachRxm: vi.fn() }))
+    const { host, pane } = mount(FACT3, inertEvents({ detachProgram: vi.fn() }))
     pane.setForkAvailable('result Nat\n\n    halt\n', 21)
     expect(item(host)?.disabled).toBe(false)
     // A PROGRAM WHOSE TEXT WAS WITHHELD HAS NO TEXT TO POST, AND THE REFUSAL SAYS HOW LARGE IT IS.
@@ -393,7 +393,7 @@ describe('edit a copy', () => {
   })
 
   it('is withdrawn from a view on a copy', () => {
-    const { host, pane } = mount(FACT3, inertEvents({ detachRxm: vi.fn() }))
+    const { host, pane } = mount(FACT3, inertEvents({ detachProgram: vi.fn() }))
     pane.setForkAvailable('result Nat\n\n    halt\n', 21)
     pane.setDetached(true)
     expect(item(host)).toBeNull()

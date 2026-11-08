@@ -1,5 +1,5 @@
 import { type ControlState, controlState } from './controls'
-import type { History } from './history'
+import { History } from './history'
 import { LEGS } from './legs'
 // A TYPE-ONLY IMPORT, AND THE ONE DIRECTION THAT WOULD OTHERWISE BE A CYCLE — `pane-chrome.ts` already
 // imports `Binding`/`PaneOption` from here. `import type` is erased entirely at build time, so this
@@ -7,19 +7,9 @@ import { LEGS } from './legs'
 // is declared beside the control that reads it because it is that control's input, not the registry's
 // output — this module does not supply all of it, and a count of what it does would go stale on sight.
 import type { SplitChoices } from './pane-chrome'
-import type { Leg, RecordEnd } from './protocol'
+import type { Leg, LegFrame, LegProgram, RecordEnd } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
-import type {
-  Decoded,
-  LambdaState,
-  RxmProgram,
-  RxmState,
-  RxmStatus,
-  TmProgram,
-  TmScratchStatus,
-  TmState,
-  ValueReading,
-} from './types'
+import type { Decoded, RxmStatus, TmScratchStatus, ValueReading } from './types'
 
 /**
  * One leg's live state on this side of the boundary: its history, how recording ended, and what the
@@ -60,16 +50,6 @@ export type LegState<T> = {
 }
 
 /**
- * The frame type each leg records, keyed by the same `Leg` the protocol already speaks.
- *
- * THIS TABLE IS WHAT MAKES ONE GENERIC RESOLVER POSSIBLE. `legOf` returns `LegState<LegFrame[K]>`, so
- * a `Binding<'lambda'>` resolves to `LegState<LambdaState>` and a `Binding<'tm'>` to
- * `LegState<TmState>` with no narrowing at either call site — the property `Binding`'s own doc below
- * is about. Two named resolvers would be the duplication 5d-i design §3.1 refused one layer down.
- */
-export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState }
-
-/**
  * The legs one session owns — AT MOST ONE PER `Leg`.
  *
  * The content of "the source session offers source/λ/TM; a `LambdaScratch` offers only λ; a
@@ -98,46 +78,6 @@ export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState }
 export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
 
 /**
- * The machine a session's last `compiled` reply carried, in the form a TM pane is handed one.
- *
- * **`program` AND `tapeNames` ARE `TmPane.setProgram`'s TWO ARGUMENTS, AND THEY ARE ONE VALUE BECAUSE
- * THEY ARE ONLY MEANINGFUL TOGETHER.** `TmProgram` says `tapes: 5` and nothing about what any of them is
- * called; `tapeNames` is what `tapeRows` labels them with. Two nullable fields side by side on the entry
- * would make "a program with no names" and "names with no program" representable states that no producer
- * can produce and no consumer could render — one nullable envelope has exactly the two states the wire has.
- *
- * `tapeNames` RATHER THAN `setProgram`'s OWN PARAMETER NAME (`names`), because on the entry the pair is
- * read a long way from that method: `protocol.ts` spells it `tapeNames`, and so does the reply this is
- * retained from.
- *
- * **`tmText`, RIDING BESIDE THEM.** `TmPane.setForkAvailable`'s decision (5d-iv design §4.3) needs it the
- * moment a TM pane exists: a pane created after the reply must still be seeded, the argument
- * `SessionEntry.tmProgram`'s doc makes for `program` and `tapeNames` — see `replies.ts`'s `setTmProgram`,
- * which pushes them all together. **INDEPENDENT OF `program` BEING NON-NULL, WHICH IS WHY IT IS NOT A SECOND
- * NULLABLE ENVELOPE ON THE ENTRY.** A machine can exist and still have `tmText: null` — over `MAX_FORK_RULES`,
- * or for a function-valued program (`protocol.ts`'s `compiled` reply, `tmText`'s own doc) —  check-attributions: allow
- * so this field carries a fact `program`'s own nullability cannot stand in for.
- *
- * **`tmResultDecodable` RIDES BESIDE `tmText` FOR THE IDENTICAL REASON**, and is `TmPane.setForkAvailable`'s
- * own third argument: `tmText: null` alone cannot say which of those two causes it is, and
- * `CopyEditor.#refreshDetach` needs to know which one to word.
- */
-export type TmCompiled = {
-  readonly program: TmProgram
-  readonly tapeNames: string[]
-  readonly tmText: string | null
-  readonly tmResultDecodable: boolean
-}
-
-/**
- * The rxm listing a session compiled, and the text *edit a copy* seeds a copy from — `TmCompiled`'s shape for the rxm
- * leg, and for its reason: the view that offers a copy needs both, and a view built after the reply is seeded from
- * here. `rxmText` is `null` on a copy, which offers no copy of itself, and for a program whose text is longer than
- * `session.rs`'s `MAX_SCRATCH_RXM_BYTES`, which no copy could build.
- */
-export type RxmCompiled = { readonly program: RxmProgram; readonly rxmText: string | null }
-
-/**
  * What an rxm copy's views were last told about its run: the status and value its build reply carried, the value
  * replaced by any `rxm-value` a `[continue]` brings. `null` on every session that is not an rxm copy.
  */
@@ -151,6 +91,9 @@ export type TmScratchReading = {
   readonly status: TmScratchStatus
   readonly value: ValueReading | null
 }
+
+/** A copy's reading, keyed by the leg it is a copy of: what `SessionEntry.readings` holds for it. */
+export type LegReading = { rxm: RxmScratchReading; tm: TmScratchReading }
 
 /**
  * One session: what it is called, whether it is inside the source correspondence, the legs it records
@@ -196,45 +139,34 @@ export type SessionEntry = {
   readonly client: SessionClient
   readonly legs: SessionLegs
   /**
-   * The machine this session's TM panes were last told about, or `null` for a session that has not
-   * compiled one — which every session is at construction, and which a `LambdaScratch` stays forever.
+   * Each leg's program as this session's views were last told it, or `null` where it has none: every session at
+   * construction, a leg that is unavailable, and for good a copy of another leg.
    *
-   * **IT EXISTS BECAUSE A TM PANE CAN BE CREATED AT ANY TIME AND A `compiled` REPLY ARRIVES ONCE.**
-   * Without this field a pane built after that reply would have no route to a program at all: it would
-   * render no tapes, no status line and no δ-rows until something recompiled. `pane-host.ts`'s
-   * `seedTmPane` tells a pane from this field when it comes to show the session without a reply: at
-   * creation, which covers a split, a cross-leg pick and a layout restore alike, and when a pick
-   * through its selector, a cool or a retire moves it onto the session.
+   * **IT EXISTS BECAUSE A VIEW CAN BE CREATED AT ANY TIME AND A REPLY ARRIVES ONCE.** A view that comes to show the
+   * session after the reply that told the others is seeded from here (`pane-host.ts`'s `SEED`, which `draw.ts` uses
+   * for one shown after a compile it missed). Without it, a view built by a split, a pick or a layout restore, or
+   * moved by its selector, a cool or a retire, would show no program until something recompiled.
    *
-   * **ONE OF THE WRITABLE FIELDS ON THIS TYPE, AND THE WRITABLE FIELDS ARE WHAT IS NOT KNOWN AT
-   * CONSTRUCTION.** `id`, `label`, `detached` and `client` are decided by whoever registers the session;
-   * `legs` is a record whose CONTENTS move (that is what `resetLegs` is) under a reference that does
-   * not. The writable fields are neither: each is a fact the worker sends back later, replaced whole
-   * each time it does. Retaining this one here rather than beside the TM `LegState` is deliberate —
-   * `LegState<T>` is the frame-generic every leg shares, and a machine is not a frame; it is set once
-   * per compile and does not change as the head moves, which is the whole point of the
-   * `TmProgram`/`TmState` split one layer in.
+   * **WRITABLE, AS `readings` IS, BECAUSE BOTH ARE WHAT IS NOT KNOWN AT CONSTRUCTION.** `id`, `label`, `detached` and
+   * `client` are decided by whoever registers the session, and `legs` is a record whose contents move under a
+   * reference that does not; each entry here is a fact the worker sends back later, replaced whole each time. Kept
+   * here rather than on the leg's `LegState`, because a program is not a frame: it is set once per compile and does
+   * not change as the head moves.
    *
-   * **IT IS WRITTEN WHEREVER THE PANES ARE PUSHED TO, WHICH IS WHY IT CANNOT GO STALE.** `replies.ts`
-   * stores and fans out in one call, so every arm that clears the panes (`no-session`, `worker-error`)
-   * or replaces their program (`compiled`, `tm-scratch-compiled`) leaves this holding exactly what a
-   * pane on screen is showing. A retention that only ever grew would seed a pane created during an
-   * outage with a machine no other pane is displaying.
+   * **WRITTEN WHEREVER THE VIEWS ARE TOLD, WHICH IS WHY IT CANNOT GO STALE.** `replies.ts` stores and fans out in one
+   * call, so every arm that clears the views (`no-session`, `worker-error`) or replaces their program (`compiled`
+   * and a copy's build) leaves this holding what a view on screen shows. A retention that only ever grew would seed a
+   * view created during an outage with a program no other view is displaying.
+   *
+   * **EVERY LEG'S KEY IS REQUIRED, `null` WHERE THERE IS NONE**, so "none" has one spelling: an absent key beside a
+   * `null` one would be a third state, and a reader testing `!== null` would take it for a value.
    */
-  tmProgram: TmCompiled | null
+  programs: { [K in keyof LegProgram]: LegProgram[K] | null }
   /**
-   * A TM buffer's status and value reading, retained for the reason `tmProgram` above is: a TM pane created after
-   * the reply that told the others is seeded from here. `null` for every session that is not a TM buffer.
+   * A copy's status and value, retained for `programs`' reason: a view of the copy built after the reply that told
+   * the others is seeded from here. `null`, never an absent key, for every leg the session is not a copy of.
    */
-  tmScratch: TmScratchReading | null
-  /**
-   * The rxm listing a session's last `compiled` or `rxm-scratch-compiled` reply carried, and the program's text,
-   * retained for `tmProgram`'s reason: an rxm view created after that reply is seeded from here (`pane-host.ts`'s
-   * `seedRxmPane`). `null` for a session with no rxm leg — a program that does not lower, and a λ or TM copy.
-   */
-  rxmProgram: RxmCompiled | null
-  /** An rxm copy's status and value, retained for `tmScratch`'s reason. `null` for every other session. */
-  rxmScratch: RxmScratchReading | null
+  readings: { [K in keyof LegReading]: LegReading[K] | null }
 }
 
 /**
@@ -310,6 +242,22 @@ export function rewindLeg(leg: LegState<unknown>): void {
   leg.epoch += 1
   leg.hist.clear()
   leg.done = null
+}
+
+/**
+ * A leg nothing has recorded yet: an empty ring of `bytes`, no end, not playing, epoch and generation 0, with
+ * `status`. **`_leg` IS READ BY `tsc` ALONE**: it picks `K`, so that the ring holds that leg's own frames
+ * (`SessionLegs`' doc). The status is copied, so legs built from one status share no object.
+ */
+export function freshLeg<K extends Leg>(_leg: K, bytes: number, status: LegAvailability): LegState<LegFrame[K]> {
+  return {
+    hist: new History<LegFrame[K]>(bytes),
+    status: { available: status.available, reason: status.reason },
+    done: null,
+    playing: false,
+    epoch: 0,
+    gen: 0,
+  }
 }
 
 /** Whether a leg is there and, when it is not, why — all of a leg's status that `resetLegs` reads. */

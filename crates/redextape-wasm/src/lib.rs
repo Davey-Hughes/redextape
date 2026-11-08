@@ -17,22 +17,8 @@
 mod probe;
 mod session;
 
-/// The eight wire types this crate declares, re-exported for `tests/ts_bindings.rs`.
-///
-/// **FEATURE-GATED, AND NARROWED TO EIGHT NAMES, BECAUSE IT EXISTS FOR A GATE.** `mod session` is
-/// private and stays private: `Session`, `Compiled`, `TmScratch` and the rest are this crate's
-/// internals, reached from JavaScript through `#[wasm_bindgen]` rather than from Rust. But the gates
-/// that read these types are integration tests, and an integration test links against this crate the
-/// way any consumer would — it cannot see into a private module. `pub mod session` would export
-/// everything to enable one test; an inline `#[cfg(test)]` gate inside `session.rs` cannot work at
-/// all, because the coverage scanner reads that file and a bare import of `ts-rs`'s `TS` trait
-/// anywhere in it fails the canonical-line check. Under default features — which is every browser
-/// build — this line does not exist.
-#[cfg(feature = "ts")]
-pub use session::{Decoded, LambdaStatus, ReductionStatus, RunStatus, RxmStatus, TmScratchStatus, TmStatus, ValueRun};
-
 use redextape_core::tm::EncodingKind;
-use serde::Serialize;
+use redextape_wire::to_value;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -62,7 +48,7 @@ pub struct Session(session::Session);
 /// Returns `Err` when `encoding` is not a name `EncodingKind::parse` recognizes; the JS caller receives
 /// a thrown string naming the value it sent (`unknown encoding "..."`) — see `encodings()` for the
 /// accepted set. A `to_value`/`Reflect::set` marshalling failure is also possible in principle but not
-/// expected for this crate's own types; either way it crosses as a thrown JS exception.
+/// expected for the types this crate marshals; either way it crosses as a thrown JS exception.
 #[wasm_bindgen]
 pub fn compile(src: &str, encoding: &str) -> Result<JsValue, JsValue> {
     let kind =
@@ -102,7 +88,7 @@ pub struct LambdaScratch(session::LambdaScratch);
 /// # Errors
 ///
 /// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the
-/// freshly created object fails; neither is expected for this crate's own types. Unparseable input is
+/// freshly created object fails; neither is expected for the types this crate marshals. Unparseable input is
 /// NOT an error here — it arrives as diagnostics beside a null `scratch`.
 #[wasm_bindgen(js_name = lambdaScratch)]
 pub fn lambda_scratch(src: &str) -> Result<JsValue, JsValue> {
@@ -130,7 +116,7 @@ pub fn lambda_scratch(src: &str) -> Result<JsValue, JsValue> {
 /// # Errors
 ///
 /// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the
-/// freshly created object fails; neither is expected for this crate's own types. Text that does not
+/// freshly created object fails; neither is expected for the types this crate marshals. Text that does not
 /// parse, and a term too large to print, are NOT errors — both arrive as diagnostics beside nulls.
 #[wasm_bindgen(js_name = lambdaScratchAt)]
 pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> Result<JsValue, JsValue> {
@@ -159,7 +145,7 @@ pub fn lambda_scratch_at(src: &str, step: u32, byte_budget: usize) -> Result<JsV
 /// absent for decision 2's reason (no `ty`, no `SourceMap`), and `tmStatus` here answers
 /// `TmScratchStatus` rather than `TmStatus` — a DIFFERENT wire shape, with no `total_steps` and with a
 /// `header` boolean. A renderer must not assume the two are interchangeable; see
-/// `session::TmScratchStatus` for why they are not.
+/// `redextape_wire::TmScratchStatus` for why they are not.
 #[wasm_bindgen]
 pub struct TmScratch(session::TmScratch);
 
@@ -174,7 +160,7 @@ impl TmValueRun {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the `ValueRun`; not expected for this crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the `ValueRun`; not expected for the types this crate marshals.
     #[wasm_bindgen]
     pub fn run(&mut self, budget: u32) -> Result<JsValue, JsValue> {
         to_value(&self.0.run(u64::from(budget)))
@@ -184,7 +170,7 @@ impl TmValueRun {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for this crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for the types this crate marshals.
     #[wasm_bindgen]
     pub fn value(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.value())
@@ -206,7 +192,7 @@ impl TmValueRun {
 /// # Errors
 ///
 /// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the
-/// freshly created object fails; neither is expected for this crate's own types. Text that does not
+/// freshly created object fails; neither is expected for the types this crate marshals. Text that does not
 /// parse to a machine is NOT an error — it arrives as diagnostics beside a null `scratch`.
 #[wasm_bindgen(js_name = tmScratch)]
 pub fn tm_scratch(src: &str) -> Result<JsValue, JsValue> {
@@ -247,7 +233,7 @@ pub struct RxmScratch(session::RxmScratch);
 /// # Errors
 ///
 /// Returns `Err` only if `to_value` cannot marshal the diagnostics, or if a `Reflect::set` on the freshly
-/// created object fails; neither is expected for this crate's own types. Text that is refused is NOT an
+/// created object fails; neither is expected for the types this crate marshals. Text that is refused is NOT an
 /// error — it arrives as diagnostics beside a null `scratch`.
 #[wasm_bindgen(js_name = rxmScratch)]
 pub fn rxm_scratch(src: &str) -> Result<JsValue, JsValue> {
@@ -271,7 +257,7 @@ pub fn rxm_scratch(src: &str) -> Result<JsValue, JsValue> {
 /// # Errors
 ///
 /// Returns `Err` only if `to_value` cannot marshal the diagnostics list to a JS value; not expected for
-/// this crate's own types. It crosses as a thrown JS exception like any other failure at this boundary.
+/// the types this crate marshals. It crosses as a thrown JS exception like any other failure at this boundary.
 #[wasm_bindgen]
 pub fn analyze(src: &str) -> Result<JsValue, JsValue> {
     to_value(&session::analyze(src))
@@ -287,8 +273,8 @@ pub fn analyze(src: &str) -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// Returns `Err` only if `to_value` cannot marshal the name list to a JS value; not expected for this
-/// crate's own types. It crosses as a thrown JS exception like any other failure at this boundary.
+/// Returns `Err` only if `to_value` cannot marshal the name list to a JS value; not expected for the
+/// types this crate marshals. It crosses as a thrown JS exception like any other failure at this boundary.
 #[wasm_bindgen]
 pub fn encodings() -> Result<JsValue, JsValue> {
     to_value(&EncodingKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>())
@@ -306,8 +292,8 @@ pub fn encodings() -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// Returns `Err` only if `to_value` cannot marshal the name list to a JS value; not expected for this
-/// crate's own types. It crosses as a thrown JS exception like any other failure at this boundary.
+/// Returns `Err` only if `to_value` cannot marshal the name list to a JS value; not expected for the
+/// types this crate marshals. It crosses as a thrown JS exception like any other failure at this boundary.
 #[wasm_bindgen(js_name = tokenClasses)]
 pub fn token_classes() -> Result<JsValue, JsValue> {
     to_value(&redextape_core::analysis::token_class_names())
@@ -328,8 +314,8 @@ pub fn token_classes() -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// Returns `Err` only if `to_value` cannot marshal the tables to a JS value; not expected for this
-/// crate's own types. It crosses as a thrown JS exception like any other failure at this boundary.
+/// Returns `Err` only if `to_value` cannot marshal the tables to a JS value; not expected for the
+/// types this crate marshals. It crosses as a thrown JS exception like any other failure at this boundary.
 #[wasm_bindgen(js_name = captureClasses)]
 pub fn capture_classes() -> Result<JsValue, JsValue> {
     let tables: Vec<(&str, Vec<(&str, redextape_core::analysis::TokenClass)>)> =
@@ -353,8 +339,8 @@ pub fn capture_classes() -> Result<JsValue, JsValue> {
 ///
 /// # Errors
 ///
-/// Returns `Err` only if `to_value` cannot marshal the name list to a JS value; not expected for this
-/// crate's own types. It crosses as a thrown JS exception like any other failure at this boundary.
+/// Returns `Err` only if `to_value` cannot marshal the name list to a JS value; not expected for the
+/// types this crate marshals. It crosses as a thrown JS exception like any other failure at this boundary.
 #[wasm_bindgen(js_name = tapeNames)]
 pub fn tape_names() -> Result<JsValue, JsValue> {
     to_value(&redextape_core::tm::TAPE_NAMES)
@@ -372,19 +358,6 @@ pub fn tape_names() -> Result<JsValue, JsValue> {
 #[allow(clippy::needless_pass_by_value)]
 fn err(e: session::SessionError) -> JsValue {
     JsValue::from_str(&e.to_string())
-}
-
-/// THE ONE SERIALIZER, so the boundary answers `None` the same way everywhere.
-///
-/// `serde_wasm_bindgen`'s default renders `Option::None` as `undefined`, and §5.1's TypeScript writes
-/// every optional as `T | null` — a renderer testing `x === null` would get it wrong. Getting this
-/// right only for top-level returns (`sourceSpan`) and leaving struct FIELDS on the
-/// default would be worse than either choice alone: `lambdaStatus().run` would be `undefined` while
-/// `sourceSpan()` is `null`, so one boundary would need two rules in the renderer. One serializer,
-/// one rule.
-fn to_value<T: Serialize>(v: &T) -> Result<JsValue, JsValue> {
-    let s = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
-    Ok(v.serialize(&s)?)
 }
 
 /// A `TreeAt` as `{ step, refused, kind, left, right, name, hint, link, names, nextRedex, contractum }`.
@@ -433,8 +406,8 @@ impl Session {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
-    /// crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for the
+    /// types this crate marshals.
     #[wasm_bindgen(js_name = lambdaStatus)]
     pub fn lambda_status(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.lambda_status())
@@ -452,8 +425,8 @@ impl Session {
     /// # Errors
     ///
     /// Returns `Err` when this session's λ leg is absent — check `lambdaStatus().available` first. Also
-    /// propagates a `to_value` marshalling failure, structurally possible but not expected for this
-    /// crate's own types.
+    /// propagates a `to_value` marshalling failure, structurally possible but not expected for the
+    /// types this crate marshals.
     #[wasm_bindgen(js_name = lambdaState)]
     pub fn lambda_state(&self, byte_budget: usize) -> Result<JsValue, JsValue> {
         let st = self.0.lambda_state(byte_budget).map_err(err)?;
@@ -524,8 +497,8 @@ impl Session {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
-    /// crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for the
+    /// types this crate marshals.
     #[wasm_bindgen(js_name = tmStatus)]
     pub fn tm_status(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.tm_status())
@@ -547,7 +520,7 @@ impl Session {
     /// function-valued program), is `null`, which is a fact rather than an error.
     ///
     /// **RETURNS `JsValue`, NOT A BARE `Option<String>`.** wasm-bindgen's native ABI marshals `None` as
-    /// `undefined`, never `null` — `serialize_missing_as_null(true)` is this crate's `to_value` helper's
+    /// `undefined`, never `null` — `serialize_missing_as_null(true)` is `redextape-wire`'s `to_value`'s
     /// setting, and this method does not call `to_value`. The explicit match below is what makes the
     /// doc's `string | null` claim true; collapsing it to a bare `Option<String>` return would keep
     /// this compiling while quietly turning a declined leg's `null` into `undefined`. Same idiom as
@@ -634,8 +607,8 @@ impl Session {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
-    /// crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for the
+    /// types this crate marshals.
     #[wasm_bindgen(js_name = rxmStatus)]
     pub fn rxm_status(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.rxm_status())
@@ -730,8 +703,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the decoded result; not expected for this
-    /// crate's own types. The interpreter's own failure modes (budget exhaustion, a value too
+    /// Returns `Err` only if `to_value` cannot marshal the decoded result; not expected for the
+    /// types this crate marshals. The interpreter's own failure modes (budget exhaustion, a value too
     /// logically large to print) are not errors here — they arrive as `Decoded::Fault`/
     /// `Decoded::TooLargeToPrint`.
     #[wasm_bindgen]
@@ -745,8 +718,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the decoded result; not expected for this
-    /// crate's own types. An exhausted budget is not an error — see this function's own doc above: it
+    /// Returns `Err` only if `to_value` cannot marshal the decoded result; not expected for the
+    /// types this crate marshals. An exhausted budget is not an error — see this function's own doc above: it
     /// arrives as a tagged `Fault`.
     #[wasm_bindgen(js_name = evaluateWithBudget)]
     pub fn evaluate_with_budget(&self, budget: u32) -> Result<JsValue, JsValue> {
@@ -755,8 +728,8 @@ impl Session {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the result; not expected for this crate's own
-    /// types. A node with no recorded span answers `None` (JS `null`), not a throw.
+    /// Returns `Err` only if `to_value` cannot marshal the result; not expected for the types this
+    /// crate marshals. A node with no recorded span answers `None` (JS `null`), not a throw.
     #[wasm_bindgen(js_name = sourceSpan)]
     pub fn source_span(&self, node: u32) -> Result<JsValue, JsValue> {
         to_value(&self.0.source_span(node))
@@ -877,8 +850,8 @@ impl Session {
 impl LambdaScratch {
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
-    /// crate's own types. Unlike `Session::lambdaStatus`'s neighbours there is no absent-leg case: a
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for the
+    /// types this crate marshals. Unlike `Session::lambdaStatus`'s neighbours there is no absent-leg case: a
     /// `LambdaScratch` exists only for text that parsed.
     #[wasm_bindgen(js_name = lambdaStatus)]
     pub fn lambda_status(&self) -> Result<JsValue, JsValue> {
@@ -895,8 +868,8 @@ impl LambdaScratch {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the frame; not expected for this crate's own
-    /// types.
+    /// Returns `Err` only if `to_value` cannot marshal the frame; not expected for the types this
+    /// crate marshals.
     #[wasm_bindgen(js_name = lambdaState)]
     pub fn lambda_state(&self, byte_budget: usize) -> Result<JsValue, JsValue> {
         to_value(&self.0.lambda_state(byte_budget))
@@ -929,8 +902,8 @@ impl LambdaScratch {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status; not expected for this crate's own
-    /// types. A budget that runs out mid-run is NOT an error — the returned status distinguishes
+    /// Returns `Err` only if `to_value` cannot marshal the status; not expected for the types this
+    /// crate marshals. A budget that runs out mid-run is NOT an error — the returned status distinguishes
     /// `Running` from `Ended`, so the caller knows whether to call again.
     #[wasm_bindgen(js_name = runLambda)]
     pub fn run_lambda(&mut self, budget: u32) -> Result<JsValue, JsValue> {
@@ -945,7 +918,7 @@ impl LambdaScratch {
 /// one tape, and only the scratch knows its own stage list.
 ///
 /// `tmValue` is absent (it reads `ty` + `final_tapes` + `kind`), and so are `sourceSpan` and
-/// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `session::TmScratchStatus`.
+/// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `redextape_wire::TmScratchStatus`.
 /// `tests/browser.rs` pins the absences at compile time.
 ///
 /// Two of the five drop the `Result` `Session`'s carry, `stepTm` and `raiseTmCap`, and so does `rewindTm`, for the
@@ -956,8 +929,8 @@ impl LambdaScratch {
 impl TmScratch {
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for this
-    /// crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the status to a JS value; not expected for the
+    /// types this crate marshals.
     #[wasm_bindgen(js_name = tmStatus)]
     pub fn tm_status(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.tm_status())
@@ -965,8 +938,8 @@ impl TmScratch {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the projection; not expected for this crate's
-    /// own types.
+    /// Returns `Err` only if `to_value` cannot marshal the projection; not expected for the types
+    /// this crate marshals.
     #[wasm_bindgen(js_name = tmProgram)]
     pub fn tm_program(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.tm_program())
@@ -985,8 +958,8 @@ impl TmScratch {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the frame; not expected for this crate's own
-    /// types.
+    /// Returns `Err` only if `to_value` cannot marshal the frame; not expected for the types this
+    /// crate marshals.
     #[wasm_bindgen(js_name = tmState)]
     pub fn tm_state(&self, radius: usize) -> Result<JsValue, JsValue> {
         to_value(&self.0.tm_state(radius))
@@ -1020,7 +993,7 @@ impl TmScratch {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the names; not expected for this crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the names; not expected for the types this crate marshals.
     #[wasm_bindgen(js_name = tapeNames)]
     pub fn tape_names(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.tape_names())
@@ -1035,7 +1008,7 @@ impl TmScratch {
 impl RxmScratch {
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the status; not expected for this crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the status; not expected for the types this crate marshals.
     #[wasm_bindgen(js_name = rxmStatus)]
     pub fn rxm_status(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.rxm_status())
@@ -1043,7 +1016,7 @@ impl RxmScratch {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the listing; not expected for this crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the listing; not expected for the types this crate marshals.
     #[wasm_bindgen(js_name = rxmProgram)]
     pub fn rxm_program(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.rxm_program())
@@ -1083,7 +1056,7 @@ impl RxmScratch {
 
     /// # Errors
     ///
-    /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for this crate's own types.
+    /// Returns `Err` only if `to_value` cannot marshal the `Decoded`; not expected for the types this crate marshals.
     #[wasm_bindgen(js_name = rxmValue)]
     pub fn rxm_value(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.rxm_value())

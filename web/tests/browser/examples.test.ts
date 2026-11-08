@@ -48,9 +48,9 @@ function run(example: Example): Promise<Heard> {
     worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
       const r = e.data
       if (r.kind === 'compiled') compiled = r
-      else if (r.kind === 'lambda-frames') done.lambda = r.done
-      else if (r.kind === 'rxm-frames') done.rxm = r.done
-      else if (r.kind === 'tm-frames') done.tm = r.done
+      else if (r.kind === 'frames' && r.leg === 'lambda') done.lambda = r.done
+      else if (r.kind === 'frames' && r.leg === 'rxm') done.rxm = r.done
+      else if (r.kind === 'frames' && r.leg === 'tm') done.tm = r.done
       else if (r.kind === 'result') {
         const c = compiled
         end(() =>
@@ -75,7 +75,7 @@ function run(example: Example): Promise<Heard> {
 
 /** How a leg's first recording stopped, in the manifest's words, or what it did instead. */
 function stopOf(heard: Heard, leg: Leg): Outcome | string {
-  if (!heard.compiled[leg].available) return 'declined'
+  if (!heard.compiled.statuses[leg].available) return 'declined'
   const done = heard.done[leg]
   if (done === 'ended') return 'ended'
   if (done === 'budget') return 'history-full'
@@ -97,7 +97,7 @@ describe.each(EXAMPLES)('$title', (example) => {
 
   it("carries the manifest's value on every leg with a value to carry", () => {
     for (const leg of LEGS) {
-      const value = heard.result[leg].value
+      const value = heard.result.legs[leg].value
       if (example.outcomes[leg] === 'declined') expect(value, leg).toBeNull()
       // A λ LEG THAT FILLS ITS HISTORY HAS NOTHING TO HOLD: it has not reached its normal form.
       else if (leg === 'lambda' && example.outcomes[leg] === 'history-full') expect(value, leg).toBe('Unfinished')

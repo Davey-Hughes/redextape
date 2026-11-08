@@ -50,16 +50,18 @@ const compiled = (declined: readonly Leg[] = [], gen = GEN): RunReply =>
   ({
     kind: 'compiled',
     gen,
-    lambda: { available: !declined.includes('lambda'), reason: '' },
-    rxm: { available: !declined.includes('rxm'), reason: '' },
-    tm: { available: !declined.includes('tm'), reason: '' },
+    statuses: {
+      lambda: { available: !declined.includes('lambda'), reason: '' },
+      rxm: { available: !declined.includes('rxm'), reason: '' },
+      tm: { available: !declined.includes('tm'), reason: '' },
+    },
   }) as unknown as RunReply
 
 /** Frames for steps `from` to `to` on `leg`, taken in as `replies.ts` takes them, then heard; `done` as the reply says. */
 function record(leg: Leg, from: number, to: number, done: RecordEnd | null, gen = GEN): void {
   for (let step = from; step <= to; step++) legs[leg].hist.push(step, 1)
   legs[leg].done = done
-  positions.onReply({ kind: `${leg}-frames`, gen, frames: [], done } as unknown as RunReply)
+  positions.onReply({ kind: 'frames', leg, gen, frames: [], done } as unknown as RunReply)
 }
 
 const result = (gen = GEN): void => positions.onReply({ kind: 'result', gen } as unknown as RunReply)
