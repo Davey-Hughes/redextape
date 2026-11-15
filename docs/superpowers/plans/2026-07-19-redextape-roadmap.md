@@ -34236,3 +34236,189 @@ run on the PR is not quoted here.
 | 16; 21 | the comment guard's areas; its changed files since `13bc049` | the two lines of `nm-24-comments.log` |
 | 16 of 16 | the scans | the `EXIT` lines of `nm-30-scans.log` and `entry-nm/scans.log` |
 | does not run; only off a pull request | `test:firefox` in `ci.yml`; its Docker image | `grep -c -i firefox .forgejo/workflows/ci.yml`, 0; the `docker` job's `github.event_name != 'pull_request'` (H16) |
+
+#### `main` FAILS ITS 90% COVERAGE FLOOR AT 89.31% WITH NO RUST CHANGE: A CACHED `target` THAT RUST 1.99.1 BUILT KEEPS INSTRUMENTED TEST BINARIES IN CARGO'S OLD LAYOUT, WHICH `cargo-llvm-cov`'S PRE-RUN CLEAN NO LONGER REACHES UNDER CARGO 1.100 AND ITS REPORT STILL READS; EVERY CARGO CACHE KEY NOW CARRIES THE TOOLCHAIN'S VERSION, AND THE `rust` JOB CLEARS `cargo-llvm-cov`'S WHOLE BUILD TREE BEFORE THE COVERAGE RUN (2026-11-15, branch `fix/coverage-stale-cache`, 3 commits on `e65b164`: `d5e9c15`, the clean step; `3efa0ba`, which moves this entry's record to `~/temp`; and the one that keys the caches on the toolchain, which carries this text)
+
+`main` at `e65b164` failed run 668's `rust` job at `Test + coverage`, where `cargo llvm-cov nextest --workspace
+--fail-under-lines 90` measured 89.31% of lines. Run 659, the push of `13bc049`, passed the same step at 95.67%, and
+between the two commits nothing changes outside `web/` and `docs/` but `README.md` and `scripts/check-licences.sh`. Two
+changes mend it. Every cargo cache key in `ci.yml`, and every `restore-keys` prefix, now carries the toolchain's
+version, so no job restores a `target` another toolchain built. And a step before the coverage run, `cargo llvm-cov
+clean --verbose`, deletes all of `target/llvm-cov-target`, as defence in depth; `.forgejo`'s comment budget rises from
+0.4973 to 0.4991 for that step's comment. No code, test or coverage floor changes.
+
+##### WHAT FAILED, AND WHY
+
+- **Run 668 restored a `target` that Rust 1.99.1 built.** Its `rust` job ran on runner `450440e2` and restored
+  `cargo-v2-72c3afe5…` at 2,543,718,768 bytes: the entry that run 654, `main`'s push of `101f1eb` on 2026-11-08, saved
+  on that runner under 1.99.1, the last time `Cargo.lock` changed. Run 659 ran on the other runner, `4360ddec`,
+  restored `cargo-v2-slow-72c3afe5…` through the `cargo-v2-` fallback, and saved a `cargo-v2-72c3afe5…` of its own at
+  3,016,195,101 bytes, which run 668 did not see. A hit on the primary key saves nothing, as `ci.yml`'s header comment
+  on the `v2` salt says, so under the old keys run 654's entry is what a `main` run on runner `450440e2` restores
+  until `Cargo.lock` or the salt changes. Nothing in it was reusable under 1.100.0: run 668's coverage step compiled the same 172 crates
+  as run 659's, which started with no coverage tree at all.
+- **Cargo 1.100 moved where test binaries go.** Its changelog
+  (https://doc.rust-lang.org/nightly/cargo/CHANGELOG.html, Cargo 1.100, 2026-11-12): "Cargo now uses a new directory
+  layout for intermediate build artifacts. … Tools that inspect the build directory may need to use Cargo’s JSON
+  messages to locate build artifacts instead of relying on the build directory layout." In the reproduction below,
+  1.99.1 writes the coverage test binary to `target/llvm-cov-target/debug/deps/stalecov-<hash>` and 1.100.0 to
+  `target/llvm-cov-target/debug/build/stalecov/<hash>/out/stalecov-<hash>`.
+- **`cargo-llvm-cov` 0.8.7's pre-run clean misses the old layout, and its report does not.** Its README
+  (https://github.com/taiki-e/cargo-llvm-cov/blob/v0.8.7/README.md): "`cargo llvm-cov`/`cargo llvm-cov run`/`cargo
+  llvm-cov nextest` cleans some build artifacts by default to avoid false positives/false negatives due to old build
+  artifacts." `src/clean.rs` at v0.8.7 lists them, "build artifacts of crates to be measured for coverage", profdata,
+  profraw, doctest bins and old reports, the first through `cargo clean --package` for each workspace member.
+  `src/report.rs` at v0.8.7 makes the report's object list by walking `<target>/llvm-cov-target/debug` and keeping
+  every executable named like a workspace package or target, hash or not, to "pass all compiled executables". Under
+  Cargo 1.100.0 that `cargo clean --package` leaves a binary at the old layout's path, so the report reads it.
+- **Everything the report gained is missed.** From run 659 to run 668, 85 of 104 files gain lines and none loses any;
+  lines grow by 2,302 and missed lines by 2,302, functions by 117 and missed functions by 117, and the warning "N
+  functions have mismatched data" goes from 1 to 68. `redextape-lsp/src/lib.rs` reads 1,039 lines with 6 missed in
+  run 659 and 1,786 with 753 missed in run 668. A line that only the old binaries map has no counts in this run's
+  profile, so it counts as missed.
+- **A one-file crate reproduces it** with `cargo-llvm-cov` 0.8.7, building under Rust 1.99.1 first, as run 654 did,
+  and then under 1.100.0, as run 668 did. Version B of its `lib.rs`, alone under 1.100.0, measures 13 lines, 0
+  missed. Over a coverage tree that 1.99.1 left from version A, the same functions higher in the file and one with
+  another body, version B measures 30 lines, 17 missed, 43.33%, and `--fail-under-lines 90` exits 1; `cargo llvm-cov
+  report -v` lists both test binaries as `-object`s, and 1.99.1's survives the run's own clean. Over a tree that
+  1.99.1 left from version B itself, version B measures 14 lines, 1 missed, 92.86%: the two compilers map the same
+  source a line apart, so a file need not change to grow. From `101f1eb` to `e65b164` only 4 files under `crates/`
+  change, against run 668's 85 that grew.
+- **`clean --workspace`, the README's advice, would not have fixed it.** The README: "When using these flags, it is
+  recommended to first run `cargo llvm-cov clean --workspace` to remove artifacts that may affect the coverage
+  results." That runs the same per-package `cargo clean` (`src/clean.rs`), and in the reproduction 1.99.1's binary
+  survives it and version B still measures 43.33%. `cargo llvm-cov clean` without `--workspace`, which the README's
+  help gives as "Remove artifacts that cargo-llvm-cov has generated in the past", deletes `<target>/llvm-cov-target`
+  and `<target>/llvm-cov` whole (`src/clean.rs`) and nothing else of `target`; after it version B measures 13 lines,
+  0 missed, exit 0.
+  Neither the README nor the CHANGELOG says anything about caching `target`; the README's CI examples do not cache it.
+
+##### WHAT CHANGED
+
+- **Every cargo cache key carries the toolchain's version, in the primary key and in every `restore-keys` prefix.**
+  The five jobs with a cargo cache, `rust-scoped`, `rust`, `rust-slow`, `rust-llvm` and `rust-browser`, key it as
+  `cargo-v2-<version>-<lockfile hash>`, with the job's tag after the version (`scoped-`, `slow-`, `llvm-`,
+  `browser-`; `rust` has none), and their prefixes as `cargo-v2-<version>-` and `cargo-v2-<version>-<tag>-`.
+  `<version>` is `rustc -V`'s release and commit hash, `1.100.0-0ef1bc386` today. Each job gains a step, "Read the
+  toolchain's version for the cargo cache key", `id: rustc`, which writes it to `$GITHUB_OUTPUT` as `version`, the
+  way `detect` and `docker` pass their outputs; it runs after the job's install step, whose `rustup show` installs
+  the toolchain `rust-toolchain.toml` names, and before its cargo cache, and every step runs from the checkout's root,
+  where that file selects the toolchain. `set -eu` and a separate `rv=$(rustc -V)` fail the step if `rustc` does.
+- **Why the prefixes carry it too, and ahead of the tag.** A key without the version hits exactly on another
+  toolchain's entry, which the cache action then never saves over: run 654's entry is that case. A prefix without it
+  falls back to another toolchain's `target`, as the old `cargo-v2-` prefix did. With the version ahead of the tag,
+  `rust`'s prefix and `rust-scoped`'s second one still fall back across jobs, as before, but only within one
+  toolchain. A new header block in `ci.yml` gives the reason.
+- **The `v2` salt stays.** A new version makes every key new by itself, so a toolchain release needs no bump; the
+  salt is still for a change that alters `target` without changing `Cargo.lock` or the toolchain.
+- **What a toolchain release costs now.** Each job's first run under a new version restores nothing, builds cold and
+  saves under the new key. The build is cold on a release either way: run 668's coverage step, over 1.99.1's tree,
+  compiled the same 172 crates as run 659's over none. What the old fallback did spare is the registry download,
+  which each job now pays once per release. The merge is such a release for all five jobs.
+- **`ci.yml`'s `rust` job gains a step, "Clear cargo-llvm-cov's build tree", `cargo llvm-cov clean --verbose`,**
+  between the feature matrix and `Test + coverage`. `--verbose` prints a `Removing <path>` line for each directory it
+  deletes, so a run's log shows whether its cache carried a coverage tree. The step's comment gives the reason, why
+  not `--workspace`, and the cost.
+- **The clean step is kept as defence in depth, and is redundant for this failure once the keys carry the version.**
+  Within one toolchain, the pre-run clean already removes a test binary left under another hash: in
+  `$S/same-toolchain.log`, a run at another package version leaves its binary, and the next run's report lists only
+  its own. Only a tree another Cargo built escapes that clean, and the keys now keep such a tree out. The step holds
+  the report if one gets in anyway, by a key or restore this change did not foresee. Its cost is the cold
+  instrumented build of the dependencies on every run: run 659's coverage step, with no tree to start from, logged
+  `Finished` at 14.21s on runner `4360ddec`, and run 668's at 48.00s on runner `450440e2`. The workspace members
+  were already rebuilt on every run, since the pre-run clean removes them.
+- **`scripts/comment-budget.json`: `.forgejo` 0.4973 → 0.4991**, the value the comment guard gave for the clean step's
+  comment, 561 comment lines against 563 code lines. The key change adds 6 comment lines and more code lines, and the
+  guard passes at 0.4991 with no new value to write.
+- **Not taken: dropping `target/llvm-cov-target` from the cached paths.** It would also stop carrying the tree in the
+  cache, but it changes the cache's paths and so its version, whose matching on this Forgejo's cache server was not
+  checked.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The entries under the old key forms stay on both runners' cache servers until they are evicted**, run 654's
+  among them. No run restores them: none of the new keys or prefixes is a prefix of an old key.
+- **The cache still carries `target/llvm-cov-target`**, which the new step deletes after each restore; the transfer
+  is unchanged.
+- **This PR's own CI cannot run the failing case.** Run 666, PR #170's `pull_request` run on runner `450440e2` after
+  run 654's save, restored `cargo-v2-slow-72c3afe5…` through the fallback rather than run 654's `cargo-v2-72c3afe5…`,
+  and run 668 did not restore the 3,273,638,517-byte `cargo-v2-72c3afe5…` that run 666 saved, so on that runner
+  `pull_request` runs and `main` pushes do not share these entries. After the merge no run can restore run 654's
+  entry either, so the failing case is gone by construction; the reproduction is what shows the clean step at work.
+  What the PR's run can show is the keys: each job's new step should print its version, its cache step should miss
+  `cargo-v2-1.100.0-0ef1bc386-…` and save under it, and a second push should hit it.
+- **`rust-toolchain.toml` still tracks unpinned `stable`.** A release still changes clippy's and rustfmt's verdicts
+  with no change here; the keys only stop it from mixing toolchains in `target`.
+- **The class search finds no other reader of Cargo's build layout, and no other cache of Rust output.** `git grep`
+  outside `docs/` for `/deps/`, `debug/deps`, `release/deps`, `llvm-cov-target`, `target/debug/build` and
+  `.fingerprint` finds nothing; the paths under `target/release` that `plugin/redextape.lua` and two examples' doc
+  comments name are final artifacts, which Cargo 1.100.0 still writes there. `ci.yml`'s other caches, `apt-llvm-23`,
+  `apt-chrome` and `pnpm-<lockfile hash>`, hold downloaded packages, not a build, and `advisories.yml` caches nothing.
+
+##### VERIFICATION
+
+Run on 2026-11-14, local time, under Cargo 1.100.0 (`3acc79c0c`), with `S=~/temp/redextape-coverage-cache-record`,
+this lane's record, which is kept and holds every script and log named here. The CI figures are the `rust` job logs
+of runs 654, 659, 666 and 668, saved through the Forgejo API as `$S/ci-<run>-rust.log` and read by `$S/figures.sh`,
+whose output is `$S/figures.log` under `### H1` to `### H6`. The reproduction is `$S/repro-toolchain.sh`, run with
+`cargo-llvm-cov` 0.8.7's release binary, CI's pinned version, and rustup's 1.99.1 (`58cf8f9c3`) and 1.100.0
+(`0ef1bc386`), into `$S/repro-toolchain.log`. The one-off checks are `$S/adhoc.sh`'s, in `$S/adhoc.log` under
+`### A1` to `### A3`. The `cargo-llvm-cov` sources and docs quoted are the files at tag `v0.8.7` from
+`raw.githubusercontent.com`, kept in `$S/upstream/` beside the Cargo changelog's page. The clean step's checks ran
+over the branch's tree before its first commit, `d5e9c15`; the key checks, the comment guard, `adhoc.sh` and the
+scans ran again over the final tree and this entry's final text.
+
+**How each key's new form was checked.** `$S/keys-check.py` loads `ci.yml` with PyYAML's `safe_load`, so a file
+that does not parse fails it. For every job whose steps hold a cargo cache, or name `steps.rustc`, it finds the one
+step whose `run` holds `rustup show`, the one with `id: rustc` and the one cargo cache, requires them in that order,
+requires no step between the first and the last to run `rustup` or set `RUSTUP_TOOLCHAIN`, and requires the key
+and every `restore-keys` line to begin `cargo-v2-${{ steps.rustc.outputs.version }}-`. It prints each job's step
+indices and the `ci.yml` lines of the three, which were read against the file. Then it runs the version step's
+script, the same text in all five jobs, from the checkout's root with `GITHUB_OUTPUT` pointing at a file.
+`$S/sabotage.py` writes two broken copies of `ci.yml`, one whose `rust-slow` prefix loses the version and one whose
+`rust-slow` reads the version after its cargo cache, and `keys-check.py` fails each, in `$S/sabotage-a.log` and
+`$S/sabotage-b.log`.
+
+```
+bash $S/repro-toolchain.sh <cargo-llvm-cov 0.8.7>         → exit 0; the results in the table below
+bash $S/same-toolchain.sh <cargo-llvm-cov 0.8.7>          → exit 0; one binary left after each run; the report
+                                                            reads only its own (same-toolchain.log)
+bash $S/adhoc.sh <cargo-llvm-cov 0.8.7> <checkout>        → exit 0; A1: the rust job's last three steps are the
+                                                            feature matrix, the new step, Test + coverage; A2:
+                                                            `clean --verbose` on this workspace removes a planted
+                                                            llvm-cov-target and keeps a sibling file; A3: both
+                                                            changelog sentences, in Cargo 1.100's section
+python3 -I $S/keys-check.py .forgejo/workflows/ci.yml     → exit 0; 5 jobs OK, 0 failing; version=1.100.0-0ef1bc386
+                                                            (keys-check.log)
+python3 -I $S/keys-check.py on sabotage a, then b         → exit 1 each; rust-slow FAIL (sabotage-a.log,
+                                                            sabotage-b.log)
+node scripts/check-comments.mjs --base e65b164, with
+  `.forgejo` at 0.4973, at d5e9c15's tree                 → exit 1, the share 0.4991 (guard-before-raise.log)
+node scripts/check-comments.mjs --self-test, then
+  --base e65b164, over the final tree                     → exit 0 each; 224 cases; 16 areas within budget, 1
+                                                            changed file since e65b164 (guard-keys.log)
+the eight scans of ci.yml's linear-history job,
+  --self-test then alone                                  → 16 of 16 exit 0, over this entry (scans.log)
+```
+
+Not run: `cargo llvm-cov nextest` over the workspace, `scripts/check-all.sh` and the rest of the `rust` job, which CI
+runs on the PR.
+
+| Value | What | Produced by |
+|---|---|---|
+| 89.31%, 34,619, 3,702, 68; 95.67%, 32,317, 1,400, 1 | runs 668 and 659: lines covered, lines, missed, mismatched functions | the `TOTAL` row and the warning in each log (H2, H6) |
+| 1,039 and 6; 1,786 and 753 | `redextape-lsp/src/lib.rs`'s lines and missed lines, run 659, run 668 | its row in each log (H2) |
+| 85 of 104, none; 2,302, 2,302; 117, 117 | files that gain lines, that lose any; line and missed-line growth; function and missed-function growth | `join` of the two logs' file rows (H4) |
+| `450440e2`, `4360ddec`; 1.99.1, 1.100.0 | each run's runner; run 654's toolchain and the others' | each log's first line and its `latest update … for version` line (H6) |
+| 2,543,718,768; 3,016,195,101; 3,273,638,517; 645,309,693 and 904,137,465 | bytes saved by run 654 and restored by run 668; saved by run 659; saved by run 666; restored by 659 and 666 | the `Cache Size` lines beside each `Cache restored from key` and `Cache saved with key` (H1, H6) |
+| 172, identical; 14.21s, 48.00s | crates the coverage step compiled in runs 659 and 668; its `Finished` time in each | `Compiling` lines from the `cfg(coverage)` notice to `Nextest run ID`, sorted and diffed (H3) |
+| `README.md`, `scripts/check-licences.sh`; `101f1eb`, 2026-11-08 | what changes outside `web/` and `docs/` from `13bc049` to `e65b164`; `Cargo.lock`'s last change | `git diff --stat 13bc049 e65b164 -- ':!web' ':!docs'`; `git log -1 -- Cargo.lock` (H5) |
+| 13, 0; 30, 17, 43.33%, exit 1; 13, 0, exit 0; 14, 1, 92.86% | version B alone; over 1.99.1's version-A tree, before and after `clean --workspace`; after `clean`; over 1.99.1's version-B tree | the `### b-…` lines of `$S/repro-toolchain.log` |
+| `debug/deps/stalecov-<hash>`; `debug/build/stalecov/<hash>/out/stalecov-<hash>` | where 1.99.1 and 1.100.0 put the test binary | the `### 1.99.1 test binary` and `-object` lines of `$S/repro-toolchain.log` |
+| 4 | files under `crates/` that change from `101f1eb` to `e65b164` | `git diff --stat 101f1eb e65b164 -- crates` (H5) |
+| 0.4973 → 0.4991; 561, 563 | `.forgejo`'s budget; its comment and code lines | the guard's failure line in `$S/guard-before-raise.log`, run with the budget file set back to 0.4973 and then restored from a saved copy, `cmp` equal |
+| 16 of 16 | the scans | the `EXIT` lines of `$S/scans.log`, written by `$S/scans.sh` |
+| `rust-scoped` 406, 419, 432; `rust` 474, 492, 503; `rust-slow` 560, 562, 573; `rust-llvm` 609, 658, 669; `rust-browser` 734, 776, 787 | each job's `ci.yml` lines of `rustup show`, `id: rustc` and its cargo `key:` | the `### K1` lines of `$S/keys-check.log` |
+| `1.100.0-0ef1bc386` | the version step's output here | the `### K2` line of `$S/keys-check.log` |
+| 6 | comment lines the key change adds, the header block | the block itself; the guard passes at 0.4991 (`$S/guard-keys.log`) |
+| one binary, `6a74bbafbb784998`'s then `c962124dd77daeea`'s | test binaries left under one toolchain after a run at package version 0.0.9 and then 0.1.0 | the `### binaries after` and `-object` lines of `$S/same-toolchain.log` |

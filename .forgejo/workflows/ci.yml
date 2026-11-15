@@ -84,6 +84,13 @@ env:
 # Bump it only for a change that alters what `target` holds without altering Cargo.lock; the cost is
 # one fully cold pipeline, where every job recompiles and re-fetches the registry.
 
+# THE TOOLCHAIN'S VERSION FOLLOWS THE SALT IN EVERY CARGO KEY AND EVERY restore-keys PREFIX. The toolchain
+# tracks `stable`, so a release changes all of `target` without moving Cargo.lock: without the version an
+# exact hit would keep restoring the old toolchain's `target`, never saving over it, and a prefix without it
+# would fall back to another toolchain's `target`. Ahead of the job's tag, it keeps the cross-job fallbacks
+# within one toolchain. Each job reads it from `rustc -V` in a step after its toolchain is installed and
+# before its cargo cache, so a toolchain release needs no salt bump.
+
 jobs:
   # Detect what exists so each tier runs only when its files exist.
   #
@@ -408,18 +415,24 @@ jobs:
       # know before running the script whether it will escalate.
       - name: Install tree-sitter CLI (pinned + checksummed, scripts/check-all.sh's grammar leg)
         run: ./scripts/install-treesitter-ci.sh
-      # Falls back to any other job's `cargo-v2-` cache, so a scoped run on a fresh branch starts warm
-      # rather than compiling the workspace from scratch to run one test binary.
+      - name: Read the toolchain's version for the cargo cache key
+        id: rustc
+        run: |
+          set -eu
+          rv=$(rustc -V)
+          echo "version=$(printf '%s\n' "$rv" | tr -d '()' | awk '{print $2 "-" $3}')" >> "$GITHUB_OUTPUT"
+      # Falls back to any other job's cache of this toolchain, so a scoped run on a fresh branch starts
+      # warm rather than compiling the workspace from scratch to run one test binary.
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v2-scoped-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-v2-${{ steps.rustc.outputs.version }}-scoped-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-v2-scoped-
-            cargo-v2-
+            cargo-v2-${{ steps.rustc.outputs.version }}-scoped-
+            cargo-v2-${{ steps.rustc.outputs.version }}-
       - name: Scoped check (NOT the merge gate)
         env:
           BEFORE: ${{ github.event.before }}
@@ -475,19 +488,33 @@ jobs:
       # the committed grammar on this runner.
       - name: Install tree-sitter CLI (pinned + checksummed, scripts/check-all.sh's grammar leg)
         run: ./scripts/install-treesitter-ci.sh
+      - name: Read the toolchain's version for the cargo cache key
+        id: rustc
+        run: |
+          set -eu
+          rv=$(rustc -V)
+          echo "version=$(printf '%s\n' "$rv" | tr -d '()' | awk '{print $2 "-" $3}')" >> "$GITHUB_OUTPUT"
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v2-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-v2-
+          key: cargo-v2-${{ steps.rustc.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ steps.rustc.outputs.version }}-
       # BOTH opt-outs, not just --no-llvm. A bare --no-llvm runs the browser tier too — which would make
       # this job the only one needing Chrome while `rust-browser` below already installs it. Same
       # union-invariant split as LLVM, one tier wider.
       - name: Feature matrix (non-LLVM, non-browser configs)
         run: ./scripts/check-all.sh --no-llvm --no-browser
+      # ALL OF cargo-llvm-cov's BUILD TREE GOES, NOT ONLY WHAT ITS OWN PRE-RUN CLEAN TAKES. That clean,
+      # which `clean --workspace` repeats, is `cargo clean --package` per member: it looks only where the
+      # running Cargo's layout puts artifacts, yet the report reads every executable in the tree named
+      # like a workspace target, and one this run did not build counts its lines as missed. The toolchain
+      # in the cache key should keep another Cargo's tree out; this step holds the report if one gets in.
+      # The cost is that the instrumented dependencies build cold on every run.
+      - name: Clear cargo-llvm-cov's build tree
+        run: cargo llvm-cov clean --verbose
       # `llvm-cov nextest`, not `llvm-cov --all-targets`, for the same reason the gate above uses nextest.
       #
       # It is NOT bit-identical coverage: `--all-targets` instruments example targets and nextest's
@@ -531,14 +558,20 @@ jobs:
           . "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup show
+      - name: Read the toolchain's version for the cargo cache key
+        id: rustc
+        run: |
+          set -eu
+          rv=$(rustc -V)
+          echo "version=$(printf '%s\n' "$rv" | tr -d '()' | awk '{print $2 "-" $3}')" >> "$GITHUB_OUTPUT"
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v2-slow-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-v2-slow-
+          key: cargo-v2-${{ steps.rustc.outputs.version }}-slow-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ steps.rustc.outputs.version }}-slow-
       - name: Slow tier (exhaustive sweeps)
         run: ./scripts/check-slow.sh
 
@@ -621,14 +654,20 @@ jobs:
           for f in $libs; do
             [ -e "$f" ] || { echo "llvm-config advertises $f but it is not installed"; exit 1; }
           done
+      - name: Read the toolchain's version for the cargo cache key
+        id: rustc
+        run: |
+          set -eu
+          rv=$(rustc -V)
+          echo "version=$(printf '%s\n' "$rv" | tr -d '()' | awk '{print $2 "-" $3}')" >> "$GITHUB_OUTPUT"
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v2-llvm-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-v2-llvm-
+          key: cargo-v2-${{ steps.rustc.outputs.version }}-llvm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ steps.rustc.outputs.version }}-llvm-
       # --llvm-only, NOT the bare invocation. Bare `check-all.sh` is `--no-llvm` plus the LLVM configs
       # by construction, so it would re-run every non-LLVM config the `rust` job has already run, at
       # 50.1s warm (`T_llvm_repeat`). That cost is not compilation: warm, the repeated legs cost
@@ -733,14 +772,20 @@ jobs:
             > /etc/apt/sources.list.d/google-chrome.list
           apt-get update && apt-get install -y --no-install-recommends google-chrome-stable
           google-chrome-stable --version   # fail loudly here rather than inside wasm-pack
+      - name: Read the toolchain's version for the cargo cache key
+        id: rustc
+        run: |
+          set -eu
+          rv=$(rustc -V)
+          echo "version=$(printf '%s\n' "$rv" | tr -d '()' | awk '{print $2 "-" $3}')" >> "$GITHUB_OUTPUT"
       - uses: https://code.forgejo.org/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-v2-browser-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-v2-browser-
+          key: cargo-v2-${{ steps.rustc.outputs.version }}-browser-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-v2-${{ steps.rustc.outputs.version }}-browser-
       # Chrome runs as root in this container, which it refuses to do sandboxed, and the container's
       # /dev/shm is too small for it. Both are handled by `crates/redextape-wasm/webdriver.json`
       # (`goog:chromeOptions.args`), which wasm-bindgen-test reads from the crate root — so this step
