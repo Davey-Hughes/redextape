@@ -491,13 +491,11 @@ impl Server {
         // are one answer about one document.
         let doc = self.documents.get(uri);
         let version = doc.map(|d| d.version);
-        let diagnostics = doc
-            .map(|doc| {
-                doc.language.map_or_else(Vec::new, |lang| {
-                    lang.diagnostics(&doc.text).into_iter().map(|d| to_lsp_diagnostic(&d, doc, self.encoding)).collect()
-                })
+        let diagnostics = doc.map_or_default(|doc| {
+            doc.language.map_or_else(Vec::new, |lang| {
+                lang.diagnostics(&doc.text).into_iter().map(|d| to_lsp_diagnostic(&d, doc, self.encoding)).collect()
             })
-            .unwrap_or_default();
+        });
         Outgoing::Notification(RequestObject::from_notification::<PublishDiagnosticsNotification>(
             PublishDiagnosticsParams { uri: uri.into(), version, diagnostics },
         ))

@@ -60,16 +60,15 @@ export type Package = {
  * What no package manager reports: compiled in by a toolchain rather than resolved by one. Each `dir` under
  * `scripts/toolchain-licences/` holds the texts as published, at the versions that built the shipped files:
  *
- * - the Rust repository's `COPYRIGHT`, `LICENSE-MIT` and `LICENSE-APACHE`, at the commit of Rust 1.99.0
- *   (`b940084d7`);
+ * - the Rust repository's `COPYRIGHT`, `LICENSE-MIT` and `LICENSE-APACHE`, at Rust 1.100.0's release tag;
  * - `compiler-builtins`' `LICENSE.txt`, from the same tree, where the standard library builds it from (0.1.160 in
  *   that release's `library/Cargo.lock`): both builds link its `__multi3` and `memcmp`;
  * - `dlmalloc`'s and `hashbrown`'s licence files, from the crates that lockfile names (0.2.14 and 0.17.1): both
- *   builds carry their source paths, `/rust/deps/dlmalloc-0.2.14` and `/rust/deps/hashbrown-0.17.1`;
+ *   builds carry their source paths, `/cargo/registry/<hash>/dlmalloc-0.2.14` and `.../hashbrown-0.17.1`;
  * - Emscripten's `LICENSE` at 4.0.15, the version `web-tree-sitter` 0.27.1 is built with.
  *
  * No version is shown on the page: the runtimes are whatever the toolchain in use compiles in, under the same
- * licences. `crate` is the name a `/rust/deps/` path gives, for the test that holds this list to the built files.
+ * licences. `crate` is the name a `/cargo/registry/<hash>/` path gives, for the test holding this list to the builds.
  */
 export const TOOLCHAIN: readonly { name: string; spdx: string; url: string; dir: string; crate?: string }[] = [
   {

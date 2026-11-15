@@ -90,12 +90,12 @@ describe('the licences scan', () => {
 
 /**
  * **THE STANDARD LIBRARY'S CRATES THAT A BUILT `.wasm` NAMES ARE THE ONES LISTED.** A panic location keeps its source
- * path. A crate std compiles in from its own lockfile's registry leaves `/rust/deps/<crate>-<version>`, and each one
- * must be in `TOOLCHAIN`; a crate built from the Rust tree leaves `/rustc/<commit>/library/<crate>/`, and those must be
- * only `alloc`, `core` and `std`, which the Rust repository's own licence covers — so `compiler-builtins`, built from
- * that tree too, would fail here the day it panics. **WHAT NEITHER CAN SEE** is a crate that panics nowhere, from
- * either place: `compiler-builtins` is listed from the names in an unstripped build, which `pkg/` is not. Read from the
- * builds `pkg/` and `pkg-lsp/` hold, which CI's web job makes before its tests run.
+ * path. A crate std compiles in from its own lockfile's registry leaves `/cargo/registry/<hash>/<crate>-<version>`,
+ * and each one must be in `TOOLCHAIN`; a crate built from the Rust tree leaves `/rustc/<commit>/library/<crate>/`, and
+ * those must be only `alloc`, `core` and `std`, which the Rust repository's own licence covers — so
+ * `compiler-builtins`, built from that tree too, would fail here the day it panics. **WHAT NEITHER CAN SEE** is a crate
+ * that panics nowhere, from either place: `compiler-builtins` is listed from the names in an unstripped build, which
+ * `pkg/` is not. Read from the builds `pkg/` and `pkg-lsp/` hold, which CI's web job makes before its tests run.
  */
 describe('the toolchain list', () => {
   const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
@@ -103,8 +103,15 @@ describe('the toolchain list', () => {
   const read = (build: string): string => readFileSync(join(ROOT, build)).toString('latin1')
 
   it.each(builds)('names every registry crate of the standard library %s carries', (build) => {
+    /**
+     * The 16-hex `<hash>` segment keeps the project's own dependencies out: cargo leaves theirs under
+     * `<CARGO_HOME>/registry/src/`, which reads `/cargo/registry/` too wherever `CARGO_HOME` ends in `/cargo`, as
+     * `~/.local/share/cargo` and `/usr/local/cargo` do.
+     */
     const carried = [
-      ...new Set([...read(build).matchAll(/\/rust\/deps\/([a-z0-9_-]+?)-\d+\.\d+\.\d+/g)].map((m) => m[1])),
+      ...new Set(
+        [...read(build).matchAll(/\/cargo\/registry\/[0-9a-f]{16}\/([a-z0-9_-]+?)-\d+\.\d+\.\d+/g)].map((m) => m[1]),
+      ),
     ]
     expect(carried.length, 'precondition: the build carries some').toBeGreaterThan(0)
     const listed = TOOLCHAIN.flatMap((t) => (t.crate === undefined ? [] : [t.crate]))

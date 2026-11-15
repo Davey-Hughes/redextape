@@ -217,7 +217,7 @@ impl Prepared {
 /// `build`'s and `build_prepared`'s one body, over a lowering of `core` or `None` for a refused one.
 fn build_over(core: &Core, rxm: Option<&Lowered>, enc: &dyn Encoding) -> SourceMap {
     let tm = rxm.map_or_else(TmHalf::default, |a| tm_half(a, enc));
-    let rxm_owner: Vec<Option<NodeId>> = rxm.map(owners).unwrap_or_default();
+    let rxm_owner: Vec<Option<NodeId>> = rxm.map_or_default(owners);
     let mut node_to_rxm: BTreeMap<NodeId, Vec<usize>> = BTreeMap::new();
     for (i, owner) in rxm_owner.iter().enumerate() {
         if let Some(node) = owner {

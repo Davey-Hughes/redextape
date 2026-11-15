@@ -549,8 +549,7 @@ fn render(spec: &DocSpec) -> String {
     }
     src.push('\n');
 
-    for i in 0..spec.n_states {
-        let st = &spec.states[i];
+    for (i, st) in spec.states[..spec.n_states].iter().enumerate() {
         if st.accept {
             emit(&mut src, &st.slot, "", &format!("state q{i}: accept"));
         } else {

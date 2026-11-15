@@ -559,8 +559,8 @@ impl TmProgram {
             tapes: m.tapes,
             width,
             start: m.start,
-            listing: map.map(|m| m.tm_listing.clone()).unwrap_or_default(),
-            labels: map.map(|m| m.tm_labels.clone()).unwrap_or_default(),
+            listing: map.map_or_default(|m| m.tm_listing.clone()),
+            labels: map.map_or_default(|m| m.tm_labels.clone()),
         }
     }
 }

@@ -33782,3 +33782,186 @@ and after, and `figures.zsh` from 22:35:42 to 22:35:56.
 | about 60, about 20 | §2.4's hand count | `grep -n 'about 60 sites' docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md` (L6) |
 | 1440×1000, 1.5.0; 7 examples; 2,020,001; 35,807, 35,783 | the walkthrough | `$R/walk/A-report.md`, `B1-report.md`, `B2-report.md`, `base-check-report.md`; `grep -o` of the two heights (Z3) |
 | 36,000; 22,794, 75,398, 52,774; about 13 KB | the guard | `$R/tasks/WOPT-report.md`, 3 and 5 |
+
+#### RUST 1.100.0 TURNS `main` RED TWICE WITH NO CHANGE OF ITS OWN: THE STANDARD LIBRARY'S REGISTRY CRATES NOW LEAVE `/cargo/registry/<hash>/` PATHS WHERE THE TOOLCHAIN TEST LOOKED FOR `/rust/deps/`, AND CLIPPY FLAGS FIVE SITES `main` HAD NOT CHANGED; THE TEST READS THE NEW PATHS BY THEIR 16-HEX SEGMENT, THE RUST LICENCE TEXTS, BYTE-IDENTICAL, ARE NAMED AT 1.100.0, AND EACH SITE SATISFIES ITS LINT, ONE WITH A SLICE WHERE CLIPPY OFFERS `.take()` (2026-11-14, branch `fix/toolchain-1-100-licences-scan`, `101f1eb..b8277e3`, 3 commits, plus this entry)
+
+`rust-toolchain.toml` tracks `stable`, and on 2026-11-12 rustup's stable channel moved to 1.100.0 (`0ef1bc386`,
+committed 2026-11-09). `main` at `101f1eb` passed run 654, its push on 2026-11-08 under 1.99.1, and under 1.100.0 it
+fails CI two ways at once: the web job's toolchain test no longer finds the standard library's registry crates in either
+build, and clippy fails `-D warnings` on lines `main` had not changed. Three commits mend it: `4b8dc0f` changes the
+test's regex, `303ff6a` names the Rust licence texts at 1.100.0 once they are compared, and `b8277e3` satisfies each
+lint at five sites, one with a slice where clippy offers `.take()`, and raises one comment budget by 0.0002. No
+behaviour changes, and no licence text or `web/src/third-party-licences.json` changes.
+
+##### WHAT FAILED, AND WHY
+
+- **Run 656, #168's CI on `fc1caba` on 2026-11-14, installed 1.100.0 and failed `rust`, `rust-llvm` and `web`**, and
+  `gate` on them; `detect`, `linear-history`, `rust-slow` and `rust-browser` passed, and `rust-scoped` and `docker` were
+  skipped. `fc1caba` is one commit on `101f1eb` that changes the README, three files under `docs/`, a grammar's README
+  and `scripts/check-doc-figures.sh`, and nothing under `crates/` or `web/`, so the run tested `main`'s code. Run 654,
+  `main`'s push of `101f1eb` and the `ci.yml` run before 656, installed 1.99.1 and passed every job it ran.
+- **`rust` and `rust-llvm` stop at their first clippy leg on the same 3 errors**, all `clippy::map_unwrap_or`, whose
+  message is "called `map(_).unwrap_or_default()` on an `Option` value", all in `redextape-core`'s lib. Those 3 were all
+  CI could see: once a crate fails clippy, no crate built on it is linted. `cargo clippy --workspace --all-targets` on
+  `101f1eb`, without `-D warnings`, reports nothing under 1.99.1 and 6 warnings at 5 sites under 1.100.0:
+  `map_unwrap_or` at those 3 and at 1 in `redextape-lsp`'s lib, which is reported twice, and `needless_range_loop` at 1
+  in `redextape-core`'s `tests/tm_comments.rs`. With `-A clippy::pedantic` added, only the last is left:
+  `map_unwrap_or` comes in through `clippy::pedantic`, which the workspace `Cargo.toml` enables as written, and
+  `needless_range_loop` through `clippy::all`.
+- **`web` fails 2 of its 3,092 tests, in 1 of its 288 files**: `licences-scan.test.ts`'s "names every registry crate of
+  the standard library %s carries", once for each build, `pkg/redextape_wasm_bg.wasm` and
+  `pkg-lsp/redextape_lsp_wasm_bg.wasm`, at its precondition: "the build carries some: expected 0 to be greater than 0".
+  The test read those crates from `/rust/deps/<crate>-<version>` paths, and 1.100.0's standard library leaves none. The
+  registry crates that 1.99.1's `x86_64` std rlibs name, 11 of them, are all under `/rust/deps/` (its `wasm32` std is
+  not installed here); those that 1.100.0's name, `wasm32` and `x86_64` alike, 11 again, are all under one directory,
+  `/cargo/registry/25cdd57fae9f0462/`, and no `/rust/deps/` path is left. The crates did not change: 1.100.0's
+  `library/Cargo.lock` names `compiler_builtins` 0.1.160, `dlmalloc` 0.2.14 and `hashbrown` 0.17.1, the versions
+  `licences.ts` already gave, and both builds carry `dlmalloc-0.2.14` and `hashbrown-0.17.1`, the two crates
+  `TOOLCHAIN` lists.
+
+##### WHAT CHANGED
+
+- **`4b8dc0f`: the test reads `/\/cargo\/registry\/[0-9a-f]{16}\/([a-z0-9_-]+?)-\d+\.\d+\.\d+/g`.** Its one directory
+  between `/cargo/registry/` and the crate, 16 hex digits, keeps the project's own dependencies out. A release build
+  carries their paths too, two directories down, under `<CARGO_HOME>/registry/src/index.crates.io-<hash>/`, and where
+  `CARGO_HOME` ends in `/cargo`, as this machine's `~/.local/share/cargo` does, those read `/cargo/registry/` as well.
+  The census compared it with a loose form that puts any run of directories in the segment's place,
+  `/\/cargo\/registry\/(?:[^/\0]+\/)*?([a-z0-9_-]+?)-\d+\.\d+\.\d+/g`, which finds `console_error_panic_hook`, `js-sys`
+  and `serde-wasm-bindgen` in this machine's `pkg/` build and six such crates in its `pkg-lsp/` build, none of them in
+  `TOOLCHAIN`, so the test would fail here with it. The web job, where the test runs, has `/root/.cargo` for its
+  `CARGO_HOME`: `ci.yml` sets neither `CARGO_HOME` nor `RUSTUP_HOME`, the job's rustup install puts cargo's bin
+  directory under `$HOME/.cargo`, which the job adds to `GITHUB_PATH`, and its `rustup show` prints
+  `rustup home:  /root/.rustup`. `/root/.cargo/registry/` does not read `/cargo/registry/`, so on CI the loose form
+  misses the project's crates by that dot alone. With both crates rebuilt under `--remap-path-prefix` from this
+  machine's `CARGO_HOME` to `/root/.cargo`, and again to `/usr/local/cargo`, the new regex finds `dlmalloc` and
+  `hashbrown` and nothing else in all six builds; the loose form finds only those two under `/root/.cargo`, and the
+  project's crates again under `/usr/local/cargo`.
+- **`/rust/deps/` is dropped, not kept beside the new form.** 1.100.0's std leaves no such path, and CI installs the
+  newest stable on every run, as `rust-toolchain.toml`'s `channel = "stable"` asks, so no CI build leaves one now. A
+  local build with an older stable, whose std leaves no `/cargo/registry/<16 hex>/` path (1.99.1's `x86_64` rlibs leave
+  none), fails the precondition. The test's doc and `licences.ts`'s doc name the new form where they named
+  `/rust/deps/`.
+- **`303ff6a`: the Rust repository's licence texts are named at 1.100.0.** `licences.ts` gave them as at the commit of
+  Rust 1.99.0, under "the versions that built the shipped files". The committed `COPYRIGHT`, `LICENSE-MIT` and
+  `LICENSE-APACHE` are byte-identical to those at the `1.100.0` tag, as they are to those at `1.99.0`, and
+  compiler-builtins' `LICENSE.txt` is byte-identical to the `1.100.0` tag's and to 1.100.0's `rust-src` copy. No text
+  is replaced. The doc now reads "at Rust 1.100.0's release tag" and names no commit, since the comment guard's history
+  rule rejects a commit hash in an added comment.
+- **`b8277e3`: each of the 5 sites satisfies its lint, one with a slice where clippy offers `.take()`**, 4 files under
+  `crates/`, 8 lines in and 11 out.
+  - **`map_unwrap_or`, 4 sites.** `rxm.map(owners).unwrap_or_default()` in `build_over` becomes
+    `rxm.map_or_default(owners)`, and the `listing` and `labels` fields in `TmProgram::of` and the diagnostics in
+    `redextape-lsp`'s `publish` change the same way. `Option::map_or_default` gives `f(x)` for `Some(x)` and the
+    default for `None`, as the chain did, and has been stable since 1.98.0, so the change builds with 1.99 too.
+  - **`needless_range_loop`, 1 site, in `tm_comments`' `render`.** `for i in 0..spec.n_states` with
+    `let st = &spec.states[i]` becomes `for (i, st) in spec.states[..spec.n_states].iter().enumerate()`. Clippy offers
+    `spec.states.iter().enumerate().take(spec.n_states)`, which stops quietly at the vector's end where the index
+    panicked; the slice panics there as the index did, and reads like `&st.rules[..st.rule_count.min(MAX_RULES)]` below
+    it. The generator makes `states` `MAX_STATES` long and draws `n_states` from `1..=MAX_STATES`, so the two forms
+    agree on every generated spec.
+  - **`redextape-lsp`'s comment budget goes from 0.3077 to 0.3079, the user's call on 2026-11-14.** The rewrite of
+    `publish` makes the crate 2 code lines shorter, 2,194 to 2,192, and no comment changes, 975 lines before and after,
+    so the share goes from 975 of 3,169 lines, 0.30767, to 975 of 3,167, 0.30786, which the guard reads at the budget's
+    four places as 0.3077 and 0.3079. At 0.3077 the guard fails the commit.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The sibling case, "carries no crate from the Rust tree but alloc, core and std", is partly blind on this machine.**
+  It reads `/rustc/<40 hex>/library/<crate>/` paths, and on this machine, which has the `rust-src` component
+  installed, a build also names the Rust tree's crates under `<sysroot>/lib/rustlib/src/rust/library/<crate>/`; no
+  build without `rust-src` was compared. Both of this machine's builds name `alloc`, `core` and `std` in each form
+  today, so nothing is hidden now, but a crate named only in the second form would pass here. Neither `ci.yml` nor
+  `rust-toolchain.toml` adds `rust-src`; what CI's builds leave was not measured.
+- **The toolchain test's precondition cannot see a partial move.** It fails only when a build carries no
+  `/cargo/registry/<16 hex>/` path at all, so if a later standard library left some of its registry crates in a third
+  path form while `dlmalloc` and `hashbrown` kept this one, the test would pass without reading the others. Each
+  toolchain leaves one form today: of the `/<crate>-<x.y.z>` strings in 1.99.1's `x86_64` std rlibs, 0 sit anywhere
+  but `/rust/deps/`, and of those in 1.100.0's, `wasm32` and `x86_64`, 0 anywhere but
+  `/cargo/registry/25cdd57fae9f0462/`. The test is unchanged here.
+- **Cargo 1.100.0 warns of an unused dependency** on `redextape-native` built `--no-default-features`, with or without
+  `clif`: `redextape-native-rt`, through `cargo::unused_dependencies`, which is `warn` by default. It fails no gate:
+  each of the five `check-all` legs that print it exits 0. 1.99.1's cargo gives no such warning on the same build of
+  `101f1eb`. Making the dependency optional, or keeping it, is left for its own change.
+- **The class search leaves 9 sites of `map_unwrap_or`'s shape as they are.** A scan of every tracked `.rs` file for
+  `.map(..)` followed by `.unwrap_or`, `.unwrap_or_default` or `.unwrap_or_else` finds 9, each where `clippy::pedantic`
+  is allowed: 4 in 3 of `redextape-core`'s examples and 3 in `redextape-test-support`'s `ts_derive_scan.rs`, each file
+  allowing it at its top, and 1 each in `redextape-core`'s `tm/rxm_syntax.rs` test module and `redextape-native`'s
+  test-only `codegen_snapshots`, under each crate's `cfg_attr(test, allow(clippy::pedantic))`. The scan for
+  `needless_range_loop`'s shape, a `for` over a range that indexes by its variable, finds 14, none in a file that allows
+  the lint and none flagged by 1.100.0's clippy.
+- **`rust-toolchain.toml` still tracks unpinned `stable`**, as its own comment chooses, so the next stable can do this
+  again, as 1.99.0 did on 2026-10-01.
+
+##### VERIFICATION
+
+Run on 2026-11-14 at `b8277e3` under 1.100.0 (`0ef1bc386`), from the checkout's root under zsh, with
+`R=~/temp/redextape-toolchain-1-100-record` and `T=$R/t3`. The gates from the two `check-all` runs to the regex census
+ran as one `systemd-run --user` unit with `MemoryMax=16G` and `MemorySwapMax=0`, `$R/scripts/t3-gates.zsh`, a log per
+step in `$T` and each step's exit status in `$T/gates-summary.log`. Biome, typecheck and the scans ran after the unit,
+and biome's and typecheck's logs kept no exit status, so after review biome, typecheck and the comment guard were run
+at `ae00ef4`, which changes only the roadmap on `b8277e3`, by `$R/scripts/t3-review-fixes.zsh`, each into its own log
+that ends in `EXIT=<n>`, and the eight scans by `$R/scripts/t3-review-scans.zsh` over this entry's final text, into
+`$T/g17-scans.log`. LLVM was 23.1.4 at `/usr`, tree-sitter the pinned 0.25.10 at `.tools/tree-sitter`, and
+cargo-nextest 0.9.149, where CI's run 656 installed 0.9.140. `main`'s tree was linted from a `git archive` of
+`101f1eb` in `$T/base-101f1eb`, with target directories of its own. The figures that need no build are
+`$R/scripts/t3-figures.zsh`'s, in `$T/figures.log` under `### F1` to `### F9`, the one-off checks
+`$R/scripts/t3-adhoc.zsh`'s, in `$T/adhoc.log` under `### A1` to `### A9`, and those added after review
+`$R/scripts/t3-review-fixes.zsh`'s, in `$T/review-fixes.log` under `### R1` to `### R6`.
+
+```
+scripts/check-all.sh --no-llvm --no-browser → exit 0; 42 ==> lines; 8 nextest legs, the workspace's 1942 passed,
+                                               33 skipped; 8 doc-test legs, 3 running 1 test each; 5 unused-dependency
+                                               warnings
+scripts/check-all.sh --llvm-only            → exit 0; nextest 117 and 50 passed; 2 doc-test legs, none with a test
+pnpm run build:wasm; pnpm run build:lsp-wasm → exit 0 each
+pnpm run test:node                          → exit 0; 73 files, 1475 tests; licences-scan.test.ts 128
+../scripts/check-licences.sh --self-test, then alone → exit 0 each
+pnpm exec biome ci --error-on-warnings; pnpm run typecheck, at ae00ef4 → exit 0 each; 446 files
+node scripts/check-comments.mjs --self-test, then --base 101f1eb, at ae00ef4 → exit 0 each
+the eight scans of ci.yml's linear-history job, --self-test then alone → 16 of 16 exit 0, over this entry
+```
+
+The unit's memory peak was 9.3G. Not run for this entry: `cargo llvm-cov nextest`, `scripts/check-slow.sh`,
+`check-all.sh --browser-only`, the web job's `test:coverage` and `build:app`, and the Docker image. CI runs doc tests:
+`check-all.sh` pairs each nextest leg with `cargo test … --doc` at the same flags, in both `rust` and `rust-llvm`, and
+run 656 failed before either reached one; here they ran in both `check-all` runs above.
+
+**Every count this entry quotes, with what produces it.** A row naming `F<n>`, `A<n>` or `R<n>` is that section of
+`$T/figures.log`, `$T/adhoc.log` or `$T/review-fixes.log`; a row naming run 654 or 656 is CI's recorded output, its job
+logs saved in `$T/ci/`, not re-run.
+
+| Value | What | Produced by |
+|---|---|---|
+| 1.100.0, `0ef1bc386`, 2026-11-09; 2026-11-12 | the toolchain, its commit and commit date; when the stable channel moved | the `info: latest update on …` line of run 656's job logs; `rustc -V` here |
+| 1.99.1 | run 654's toolchain | the same line in run 654's `rust` and `web` job logs |
+| 654 on `101f1eb`, 2026-11-08; 656 on `fc1caba`, 2026-11-14, #168 | the two runs | each job log's first line and its fetched or checked-out SHA (F2); the checkout of `refs/remotes/pull/168/head` in run 656's `rust` log (A4); the Forgejo API's run list, runs 654 to 656 |
+| failed, passed, skipped per job | run 656's and run 654's jobs | the Forgejo API's jobs of each run |
+| 1 commit, 6 files, none under `crates/` or `web/` | `fc1caba` | `git rev-list --count 101f1eb..fc1caba`; `git diff --name-only 101f1eb fc1caba`, plain and `-- crates web …` (F1) |
+| 3; `redextape-core` (lib); first clippy leg | each failing Rust job's errors; the crate; where it stopped | `grep -c` of the message and the `could not compile` line (F2), and the last `==>` line (A4), in run 656's `rust` and `rust-llvm` logs |
+| 2 of 3,092; 1 of 288; 3,092 in 288 | run 656's `web` failures; run 654's | the `Tests` and `Test Files` lines in each run's `web` log (F2) |
+| 0; 6 at 5 sites; 1 | warnings on `101f1eb` under 1.99.1; under 1.100.0; under 1.100.0 with `-A clippy::pedantic` | in `$T/base-101f1eb`, `cargo +1.99.1 clippy --workspace --all-targets --message-format=json` into `$T/base-clippy-199.json`; the same without `+1.99.1`, under 1.100.0, into `base-clippy.json`; the same under 1.100.0 followed by `-- -A clippy::pedantic` into `base-clippy-no-pedantic.json`; then `jq` of each message with a lint code, by its lint and first span (R5) |
+| `clippy::all`; `.take(spec.n_states)` | `needless_range_loop`'s group; clippy's suggestion | the `implied by -W clippy::all` note and the `help:` line in `$T/base-clippy.json`'s rendered message (A5) |
+| 11, 0; 11, 0; `25cdd57fae9f0462` | 1.99.1's `x86_64` rlibs' crates under `/rust/deps/` and under `/cargo/registry/<16 hex>/`; 1.100.0's, `wasm32` and `x86_64`, the other way round; the one directory | `grep -a -o` over each toolchain's `lib/rustlib/<target>/lib/*.rlib`, `sort -u` (F3) |
+| 0.1.160, 0.2.14, 0.17.1 | 1.100.0's `library/Cargo.lock` | `grep -A1` of each `name` in the lockfile under `rustc --print sysroot` (F4); the same three in `git show 101f1eb:web/scripts/licences.ts` |
+| `dlmalloc-0.2.14`, `hashbrown-0.17.1` | the registry crates the two builds carry | `grep -a -o '/cargo/registry/<16 hex>/<crate>-<x.y.z>/'` over `pkg/` and `pkg-lsp/`'s `.wasm` after `build:wasm` and `build:lsp-wasm` (A1) |
+| 3 and six; 2 in each of 6 builds; two | crates the census's loose form, any run of directories in the segment's place, adds here, in `pkg/` and `pkg-lsp/`; the new regex's finds; the directories between `registry/` and the project's crates | `$R/scripts/regexes.mjs`, whose `loose` and `new` candidates are the two regexes quoted above, over the two builds and `$R/scripts/ci-shapes.sh`'s four, with each build's `project-dep registry roots` line (`$T/g9-regex-census.log`) |
+| `/root/.cargo`; 0, 0, 0 | the web job's `CARGO_HOME`; `CARGO_HOME`, `RUSTUP_HOME` and `rust-src` in `ci.yml` | in run 656's `web` log, `$T/ci/run656-web.log`, rustup's install notes naming `$HOME/.cargo` (lines 94 to 100) and `rustup show`'s `rustup home:  /root/.rustup` (line 129), with the web job's `echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"` in `ci.yml` (R4); `grep -c CARGO_HOME`, `grep -c RUSTUP_HOME` and `grep -c rust-src` of `.forgejo/workflows/ci.yml` (F6, A4, R4), and `rust-toolchain.toml`'s `components` line (F6, A4) |
+| 0; 0 | `/<crate>-<x.y.z>` strings in 1.99.1's `x86_64` std rlibs outside `/rust/deps/`; in 1.100.0's, `wasm32` and `x86_64`, outside `/cargo/registry/25cdd57fae9f0462/` | `grep -a -o -E '(/[A-Za-z0-9_.-]+)*/[a-z0-9_-]+-[0-9]+\.[0-9]+\.[0-9]+'` over each toolchain's `lib/rustlib/<target>/lib/*.rlib`, `sort -u`, then `grep -c` of those ending in `/rust/deps/<crate>-<x.y.z>` and in `/cargo/registry/<16 hex>/<crate>-<x.y.z>`, against the total, and the one 16-hex directory (R3) |
+| cmp exit 0, 8 times | the licence texts | `cmp` of each committed text against the file fetched at tag `1.100.0` and at `1.99.0`, and `LICENSE.txt` against 1.100.0's `rust-src` (F7) |
+| 1.98.0 | `map_or_default` stable since | the `#[stable(feature = "result_option_map_or_default", since = "1.98.0")]` above it in 1.100.0's `core/src/option.rs` (F5) |
+| 4 files, 8 in, 11 out | `b8277e3` under `crates/` | `git diff --shortstat 303ff6a b8277e3 -- crates` (A2) |
+| `MAX_STATES`, `1..=MAX_STATES` | the generator's states | the `proptest::collection::vec(state_cand(tapes, n_states), MAX_STATES)` and `1usize..=MAX_STATES` lines of `crates/redextape-core/tests/tm_comments.rs` (A6) |
+| 975; 2,194 and 2,192; 0.3077 and 0.3079 | `redextape-lsp`'s comment and code lines at `101f1eb` and `b8277e3`; its share as the guard reads it | `node scripts/check-comments.mjs --base HEAD` in a copy of each tree with the crate's budget set to 0.1000, whose failure line gives the counts (F9) |
+| 0.30767, 0.30786 | the same shares to five places | `awk` of 975 / (975 + 2194) and 975 / (975 + 2192) (A3) |
+| `alloc`, `core`, `std` in each form | the Rust tree's crates in the two builds | `$R/scripts/t3-intree.mjs` over `pkg/` and `pkg-lsp/`'s `.wasm` (`$T/intree.log`) |
+| 0; 1 | `unused dependency` warnings from `cargo build -p redextape-native --no-default-features` on `101f1eb` under 1.99.1; under 1.100.0 | `grep -c` of the warning in `$T/base-native-ndf-1.99.1.log` and `base-native-ndf-1.100.0.log` |
+| 9: 4, 3, 1, 1; 14 | the class search's `map_unwrap_or` shape, by place; its `needless_range_loop` shape | `python3 -I $R/scripts/class_scan.py` on the checkout (`$T/class-scan-head.log`), and each hit file's `#![allow(` line or its `#[cfg(test)]` module (F8, A7) |
+| 42; 8, 1942, 33; 8, 3, 1; 5 | `check-all --no-llvm --no-browser`'s `==>` lines; its nextest legs, the workspace leg's passed and skipped; its doc-test legs, those with a test, and each one's count; the unused-dependency warnings | `grep -c '^==> '`, the `Summary` lines, each `--doc` leg's `test result` lines, and `grep -c` of the warning in `$T/g1-check-all-base.log` (A9) |
+| 117, 50; 2 | the LLVM legs' nextest; their doc-test legs | the `Summary` and `test result` lines in `$T/g2-check-all-llvm.log` (A9) |
+| 73, 1475; 128 | `test:node`'s files and tests; `licences-scan.test.ts`'s | the `Test Files`, `Tests` and file lines of `$T/g5-test-node.log` (A9) |
+| 446 | biome's files | its `Checked` line in `$T/g10-biome.log` (A9), and again in `$T/g13-biome.log` (R2) |
+| exit 0, four times; the roadmap | biome, typecheck, the comment guard's self-test and its `--base 101f1eb` run at `ae00ef4`; the one file `ae00ef4` changes on `b8277e3` | the `EXIT=` line that ends each of `$T/g13-biome.log`, `g14-typecheck.log`, `g15-comments-self-test.log` and `g16-comments.log` (R2); `git diff --name-only b8277e3 HEAD` at `ae00ef4` (R1) |
+| 16 of 16 | the scans | each script's exit status, over this entry's final text (`$T/g17-scans-summary.log`), as over its first (`$T/g12-scans-summary.log`) |
+| 2026-10-01 | when 1.99.0 did the same | the `RUST 1.99's CLIPPY` entry earlier in this file, whose first paragraph reads "on 2026-10-01 rustup's stable channel moved from 1.98.1 to 1.99.0" (R6) |
+| 9.3G | the gate unit's memory peak | `systemd-run`'s `Memory peak` line in `$T/gates-summary.log` |
+| 23.1.4; 0.25.10; 0.9.149, 0.9.140 | LLVM; tree-sitter; cargo-nextest here and in run 656 | `/usr/bin/llvm-config --version`; `.tools/tree-sitter --version`; `cargo nextest --version`; the `installed to` line of run 656's `rust` log |
