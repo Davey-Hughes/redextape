@@ -1,8 +1,8 @@
 /**
  * THE LICENCES THE SITE SHIPS — about pages design §8. Writes `src/third-party-licences.json`, which the licences page
  * renders: redextape's own licence, then every npm package whose code or font reaches the browser, every crate
- * compiled into the two `.wasm` builds, and the toolchains' runtimes compiled in beside them, each with the licence
- * texts its own package carries.
+ * compiled into the two `.wasm` builds, the toolchains' runtimes compiled in beside them, and the colour schemes a
+ * built-in palette's colours are adapted from, each with the licence texts its own package carries.
  *
  *     node scripts/licences.ts            # write src/third-party-licences.json
  *     node scripts/licences.ts --stdout   # print it instead (`scripts/check-licences.sh` diffs this)
@@ -44,7 +44,7 @@ const OUT = join(WEB, 'src', 'third-party-licences.json')
 const WASM_CRATES = ['redextape-wasm', 'redextape-lsp-wasm']
 
 /** Where each shipped package sits on the licences page. */
-export type Group = 'code' | 'wasm' | 'toolchain' | 'font'
+export type Group = 'code' | 'wasm' | 'toolchain' | 'font' | 'palette'
 
 export type Package = {
   readonly name: string
@@ -102,6 +102,19 @@ export const TOOLCHAIN: readonly { name: string; spdx: string; url: string; dir:
     spdx: 'MIT OR NCSA',
     url: 'https://github.com/emscripten-core/emscripten',
     dir: 'emscripten',
+  },
+]
+
+/**
+ * The colour schemes a built-in palette's colours are adapted from: they reach the browser as values in
+ * `src/palettes.ts`, not as a package. Each name says the colours are adapted, as the palette changes some of them.
+ */
+const COLOUR_SCHEMES: readonly { name: string; spdx: string; url: string; dir: string }[] = [
+  {
+    name: "Tinted Theming's base16 schemes (colours adapted for the Material and Grayscale palettes)",
+    spdx: 'MIT',
+    url: 'https://github.com/tinted-theming/schemes',
+    dir: 'tinted-theming',
   },
 ]
 
@@ -326,8 +339,18 @@ export function generate(): string {
       files: licenceFiles(t.name, join(WEB, 'scripts', 'toolchain-licences', t.dir)),
     }))
 
-  const ORDER: Record<Group, number> = { code: 0, wasm: 1, toolchain: 2, font: 3 }
-  const packages = [...npm(), ...crates(), ...toolchain()].sort(
+  const colourSchemes = (): Package[] =>
+    COLOUR_SCHEMES.map((c) => ({
+      name: c.name,
+      version: '',
+      spdx: c.spdx,
+      group: 'palette' as const,
+      url: c.url,
+      files: licenceFiles(c.name, join(WEB, 'scripts', 'palette-licences', c.dir)),
+    }))
+
+  const ORDER: Record<Group, number> = { code: 0, wasm: 1, toolchain: 2, font: 3, palette: 4 }
+  const packages = [...npm(), ...crates(), ...toolchain(), ...colourSchemes()].sort(
     (a, b) => ORDER[a.group] - ORDER[b.group] || byCodeUnit(a.name, b.name) || byCodeUnit(a.version, b.version),
   )
   const own = { spdx: 'GPL-3.0-only', text: store(readFileSync(join(REPO, 'LICENSE.md'), 'utf8')) }

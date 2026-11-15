@@ -33965,3 +33965,274 @@ logs saved in `$T/ci/`, not re-run.
 | 2026-10-01 | when 1.99.0 did the same | the `RUST 1.99's CLIPPY` entry earlier in this file, whose first paragraph reads "on 2026-10-01 rustup's stable channel moved from 1.98.1 to 1.99.0" (R6) |
 | 9.3G | the gate unit's memory peak | `systemd-run`'s `Memory peak` line in `$T/gates-summary.log` |
 | 23.1.4; 0.25.10; 0.9.149, 0.9.140 | LLVM; tree-sitter; cargo-nextest here and in run 656 | `/usr/bin/llvm-config --version`; `.tools/tree-sitter --version`; `cargo nextest --version`; the `installed to` line of run 656's `rust` log |
+
+#### MATERIAL AS THE DEFAULT PALETTE AND GRAYSCALE AS AN OPTION, WITH `match style` REMOVED: TWO BUILT-IN PALETTES FROM TINTED THEMING'S BASE16 SCHEMES, `material`, MATERIAL DARKER DARK AND MATERIAL LIGHTER LIGHT, FIRST AMONG THE BUILT-INS, AND `grayscale`, GRAYSCALE DARK AND GRAYSCALE LIGHT, LAST, EACH ADJUSTED TO THE CONTRAST FLOORS BY THE APP'S OWN `adjustVariant`; MATERIAL IS WHAT A VISITOR WITH NO STORED PALETTE CHOICE GETS AND WHAT `style.css`'S FALLBACK PAINTS, WHILE INSTRUMENT STAYS THE DEFAULT STYLE AND A STORED BUILT-IN CHOICE STILL WINS; `match style` LEAVES THE PALETTE MENU, A STORED `match` READS AS NO CHOICE, AND A CUSTOM PALETTE'S HALF NOT IMPORTED IS MATERIAL'S UNDER EVERY STYLE, SO NO PALETTE FOLLOWS A STYLE CHANGE; THE LICENCES PAGE CREDITS THE SCHEMES, MIT, IN ONE ENTRY UNDER A NEW COLOUR SCHEMES HEADING (2026-11-14, branch `feat/tomorrow-palette`, `13bc049..e2d3fef`, 21 commits, four of them this entry's, `a218f1f`, `c4ddaa1`, `e85c264` and `8b4976a`, plus this update)
+
+The design's intent: Instrument's teal accent and blue-grey surfaces are not a good default, so the site gets a
+classic palette, one built-in palette with a dark and a light half, and a visitor who never chose a palette gets it.
+That palette is Material: the base16 schemes Material Darker for the dark half and Material Lighter for the light, by
+Nate Peterson, from Tinted Theming's `tinted-theming/schemes`. Grayscale, the same repository's Grayscale Dark and
+Grayscale Light by Alexandre Gavioli, joins the menu as an option. With #170 open, the user had `match style` taken
+out of the palette menu, so the style and the palette are two independent choices. The design is
+`docs/superpowers/specs/2026-11-14-tomorrow-palette-design.md`, whose three amendments of 2026-11-14 make the palette
+Material, add Grayscale and remove `match style`, and the plan `docs/superpowers/plans/2026-11-14-tomorrow-palette.md`,
+written for the design's first scheme, Tomorrow; both keep their names. `13bc049` is `main` with #169, the Rust 1.100
+fix, and the branch was rebased onto it. The range counts every commit on the branch, as recent entries do: the
+design's `6c75656`, the plan's `123b797` and the design's three amendments, `2edcbbd`, `b1435b5` and `235bd49`;
+`c9e3bfd` and `383d79f`, which correct the design's first Colours table and the count below it; this entry's four,
+its first draft, `a218f1f` and `c4ddaa1`, its rewrite for Material, `e85c264`, and `8b4976a`, which noted `aedc832`;
+and the ten that change files outside `docs/`, `ce48d88`, `4e7823b`, `ea23ec3`, `4bbe19e`, `f464300`, `59864b8`,
+`dd1bec4`, `e1a22aa`, `aedc832` and `e2d3fef`. Of those, `aedc832` changes only wording, Grayscale's doc comment in
+`palettes.ts` and the design's text on it and on its amendments: from `e1a22aa` to `e2d3fef` no line of `palettes.ts`,
+`contrast.ts` or `style.css` outside a comment changes. The figures below are `e2d3fef`'s.
+
+##### DECISIONS
+
+The user's:
+
+- **Material, in place of Tomorrow.** The design's first scheme was Tomorrow Night Eighties dark and Tomorrow light,
+  which he picked from mockups of published schemes mapped onto the app's slots. On 2026-11-14, with it built and
+  #170 open, he tried its dark half live on the dev server and did not like it. He was shown nine dark base16 schemes
+  as screenshots of the real app, each mapped onto the slots by the same roles and adjusted to the floors,
+  `tomorrow-night`, `default-dark`, `grayscale-dark`, `material-darker`, `darcula`, `gruvbox-dark-medium`, `monokai`,
+  `onedark` and `twilight`; he then tried Material Darker with Material Lighter live and kept them.
+- **Grayscale as an option, not the default**, asked for after he chose Material: "can we actually also add the
+  greyscale one as an option? (not default)". He had seen Grayscale Dark among the nine.
+- **It follows the system's light or dark setting, with each scheme's own light half**, adapted, not Instrument's.
+- **A default palette of its own, not a fourth style.** With nothing stored the palette choice reads as `material`
+  where it read as `match`; `match style` stayed in the menu, meaning the style's own palette, until the decision
+  below removed it. The way not taken, a style made the default, would have put a near-copy of Instrument in the
+  style menu and changed every page's `data-style`.
+- **With nothing stored, a style change keeps the default palette's colours**, which the user accepted with the
+  design; only `match` followed the style, and with it gone no palette does.
+- **2026-11-14, after the whole-branch review: a custom palette's half not imported keeps the style's own palette**,
+  as on `main`. **Superseded the same day** by the next decision, which closes what this ruling left open.
+- **2026-11-14, with #170 open: `match style` is removed.** "I think 'match style' is kinda confusing and we should
+  probably remove it. people can just choose a style and palette that they like." His answers to the three questions
+  it raised: **in #170**, not in a follow-up PR; **a stored `match` resets to Material**, reading as nothing stored,
+  with no migration to the style's own palette; and **a custom palette's half not imported comes from the default
+  palette, Material**, not from the style's own, and so does a token an imported half lacks. The design's third
+  amendment, `235bd49`, records them and names the earlier text they supersede.
+- **2026-11-14: the Rust 1.100 licences-scan failure, which predates this branch, is mended in a PR of its own
+  first.** That is #169, `13bc049`.
+
+The design's and its amendments' own calls, which they leave open to correction: the names and ids, Material and
+`material`, Grayscale and `grayscale`; the menu order, Material, Paper, Terminal, Instrument, Grayscale since the
+third amendment, so the default comes first and the option last; one PR; the one-time flash accepted, with no
+cache versioning; `style.css`'s fallback block standing for the default palette, its test holding
+it to `PALETTES[DEFAULT_PALETTE]` rather than to a palette by name; the slot roles, each slot drawn from one base16
+colour; Material's light text and comment colours, under WHAT CHANGED; and one credit entry for the repository both
+palettes come from, under its one licence.
+
+One ruling made during the build, which the amendments keep: **`tok-binder` is the scheme's green, base0B, not its
+red.** The design's first table gave it red, which is `error` too, and `contrast.ts`'s `binderClashes` holds
+`tok-binder` at least `BINDER_APART`, 24, from every other token in some channel, `error` included. Material's
+mapping keeps base0B for it, and Grayscale takes Material's roles; set to `error`'s value, `tok-binder` is 0 from
+`error` in each Material half. `c9e3bfd` and `383d79f` correct the first table and its count.
+
+##### WHAT CHANGED
+
+- **The palettes, `ce48d88`, `59864b8` and `dd1bec4`.** `ce48d88` added the palette as `tomorrow`, `59864b8` renames
+  it `material` with Material's values, and `dd1bec4` adds `grayscale`. `web/src/palettes.ts`'s `PALETTE_IDS` is now
+  `material`, `paper`, `terminal`, `instrument`, `grayscale`, 19 tokens a half, and `skin.ts` labels the two Material
+  and Grayscale. Each doc comment names the schemes, their author, the repository and MIT, and points at the design's
+  amendment for each slot's source; the values are the amendments' tables'. Each slot takes one base16 colour by the
+  roles the Material amendment lists, then `base16-adjust.ts`'s `adjustVariant`, which a base16 import's
+  `apply adjusted` runs, moved each colour that fell below a floor.
+  - **Material dark** is Material Darker as published but for base03, `#4a4a4a`, which `adjustVariant` moved to
+    `#979797` in its three slots, `fg-dim`, `tok-neutral` and `tok-punct`.
+  - **Material light.** The base16 port's base05 is `#80cbc4`, a teal, so the light half takes `#546e7a` as base05
+    and `#90a4ae` as base03, which the amendment gives as Material Lighter's own text and comment colours;
+    `adjustVariant` then moved 13 slots. `rule` is `#ccd7da`, the port's base03, not base02's teal, `#cceae7`.
+  - **Grayscale** has no hand change; `adjustVariant` moved 8 dark slots and 11 light ones. Its tokens are told apart
+    by brightness, not hue, and the floors leave most of them on one grey: in the light half six of the eight `tok-`
+    slots, neutral, keyword, nat, bool, operator and punct, are `#656565`, with ident `#464646` and binder
+    `#2e2e2e`; in the dark half four, neutral, keyword, operator and punct, sit within one step of `#8c8c8c` in each
+    channel, nat and bool are brighter at `#999999`, ident is `#b9b9b9` and binder `#d1d1d1`. Its accent is its
+    error colour in both halves, `#8c8c8c` dark and `#656565` light.
+  - As committed, no half of either palette falls below any of `contrast.ts`'s 35 floors, and `binderClashes` finds
+    nothing in any; `palettes.test.ts`'s *meets every contrast floor in every variant* and *keeps tok-binder apart
+    from every other token* run over every built-in.
+- **The default, `4bbe19e`, then `59864b8`.** `skin.ts` exports `DEFAULT_PALETTE`, `'material'`, beside
+  `DEFAULT_STYLE`, which stays `'instrument'`, and `readPaletteChoice` returns it where it returned `match`: with no
+  stored choice, with one it cannot read, and with a stored `custom` and no half imported. Removing the last imported
+  half, which turned a `custom` choice into `match`, turns it into `DEFAULT_PALETTE` and stores `material`.
+  `style.css`'s fallback block, the 19 declarations a page paints from when the pre-paint script finds no cached
+  palette it accepts, holds Material's pairs. With nothing stored, a style change keeps Material's colours.
+  Grayscale is offered and never the default.
+- **The credit, `4e7823b`, then `e1a22aa`.** The licences page gains a group, `palette`, last, headed **Colour
+  schemes**, holding one work: "Tinted Theming's base16 schemes (colours adapted for the Material and Grayscale
+  palettes)", MIT, linked to `https://github.com/tinted-theming/schemes`, with no version. One entry, because both
+  palettes come from that repository under its one licence. Its text,
+  `web/scripts/palette-licences/tinted-theming/LICENSE.md`, the only directory under `palette-licences/`, is the
+  repository's `LICENSE` on its `spec-0.11` branch byte for byte, whose copyright line is
+  `Copyright (c) 2022 Tinted Theming (https://github.com/tinted-theming)`; `web/scripts/licences.ts` reads it through
+  a one-entry `COLOUR_SCHEMES` list in `TOOLCHAIN`'s shape.
+- **The prose around it, `ea23ec3` and `f464300`.** `scripts/check-licences.sh`'s header and the README's paragraph
+  on the licence hook name the colour-scheme texts among the generator's inputs, and the repository's `LICENSE.md`,
+  which neither named before; `web/licences.html`'s introduction names "the colours a built-in palette adapts from a
+  published colour scheme". `f464300` also rewords `contrast.ts`'s note on why `binderClashes` is scoped:
+  `tok-punct` is `tok-neutral`, or all but, in every built-in variant, where it said the two sit together in the
+  dark variants; with Material and Grayscale it still holds.
+- **`match style` removed, `e2d3fef`.** `skin.ts`'s `PaletteChoice` is `PaletteId | 'custom'` and `PALETTE_CHOICES`
+  is `PALETTE_IDS`, so the palette menu is Material, Paper, Terminal, Instrument and Grayscale, with `custom` after
+  them while a half is imported. `isPaletteChoice` admits only a `PALETTE_IDS` entry, so `readPaletteChoice` reads a
+  stored `match` as it reads any value it cannot read, as `DEFAULT_PALETTE`: the page, the select and the pre-paint
+  cache are Material's, and the stored `match` stays until a palette is next chosen or imported. `resolvePalette`
+  loses its `style` parameter, `resolvePalette(choice, custom)`: a built-in choice is `PALETTES[choice]`, and
+  `custom` writes each imported half's tokens over `PALETTES[DEFAULT_PALETTE]`'s variant, so a half not imported,
+  and a token an imported half lacks, is Material's under every style. `main.ts` no longer reads the stored style
+  to refresh the pre-paint cache. The import dialog's line for a half the page is not showing ends "its palette is
+  Material until you import a … scheme", from `PALETTE_CHOICE_LABELS[DEFAULT_PALETTE]`, where it said "the style’s
+  own"; the doc comments of `skin.ts` and of `custom-palette.ts`'s `tokens` say the same.
+- **The tests, 10 files, 3 node and 7 browser, one of them new.** `palettes.test.ts`'s *carries Material from the
+  spec, first among the built-ins* and *carries Grayscale from the spec, last among the built-ins* hold each
+  palette's place in `PALETTE_IDS`, its name and four of its values; `skin.test.ts`'s *defaults to the Instrument
+  style and the Material palette* holds both defaults, *offers Grayscale as a choice, not as the default* the option,
+  and *keeps a stored choice over the default* each built-in id over the default; `skin-switcher.test.ts`'s *keeps
+  Material when the style changes with nothing stored* holds the style change, and *applies Grayscale when chosen,
+  without changing the style* the option in a browser; `base16-remove.test.ts`'s *removes the key with the last
+  half, and a custom choice becomes the default palette* the removal; `palettes.test.ts`'s *holds the default palette
+  as its fallback, token for token* the fallback block, with `base16-prepaint.test.ts`'s first case holding the
+  fallback's dark `bg` in a browser; and `pages.test.ts`'s *credits the schemes Material and Grayscale adapt under
+  Colour schemes, as adapted and without a version* the credit. The palette menu's label lists in three browser
+  files name Material and Grayscale, and not `match style`.
+  - **`e2d3fef`'s.** `skin.test.ts`'s *offers the built-in palettes and no match, and reads a stored match as the
+    default palette* holds `PALETTE_CHOICES` to `PALETTE_IDS` and a stored `match`, with and without an imported
+    half, to `material`, and *resolves a named palette to itself* each built-in; the new
+    `skin-stored-match.test.ts`'s *mounts in Material, with the palette control on Material and no match style
+    offered* stores `terminal` and `match` before its one mount and holds the page's `--bg`, the select's value and
+    options, and the pre-paint cache to Material in a browser. `skin-switcher.test.ts`'s *switches the style, and a
+    chosen palette stays*, which was *switches the style, and a matching palette follows it*, keeps Instrument's
+    palette through a change to Paper. The custom fallback is held by `skin.test.ts`'s *writes each stored half over
+    the default palette’s variant, and keeps the default palette’s for a half not stored*, *falls back token by token
+    to the default palette where a stored half lacks one* and *draws the default palette for custom with nothing
+    stored*, and in a browser by `custom-palette-load.test.ts`'s *draws the half not imported in Material, and keeps
+    it through every style change*, which tries every style; `base16-import.test.ts`'s *says, before a half the page
+    is not showing is applied, that the page will be in the default palette* holds the dialog's line. The rest of
+    `e2d3fef`'s test changes move an expected colour from Instrument's or the style's palette to Material's, take
+    `match` out of a label list, a loop or a count, or drop `resolvePalette`'s style argument.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A visitor who had stored `match` sees Material on their next load, by the user's choice.** The stored `match`
+  is not migrated to the style's own palette but read as nothing stored, so a visitor who kept `match` under any
+  style, Instrument included, moves to Material, and chooses that style's palette again to get it back. **And a
+  custom palette no longer follows a style change:** its half not imported is Material's whatever the style, where
+  on `main` it was the style's own.
+- **A one-time flash for a returning visitor.** The pre-paint script applies the palette `main.ts` cached under
+  `redextape.palette.css` on the last load. A visitor with no stored palette choice, or with a stored `match`, has
+  the style's own palette there from before this change, Instrument's under the default style, and one with an
+  imported half has the style's own for the half not imported: their first page after it paints that palette until
+  `main.ts` applies Material and rewrites the cache. The about, help, licences and privacy pages do not run
+  `main.ts`, so they keep the old cache, and its palette, until the app is next opened. The design accepts the flash
+  and versions no cache; its third amendment, which adds the stored-`match` and imported-half cases, does not
+  mention it.
+- **No text or button touching a pane's or the window's edge.** The user asked for this on 2026-11-14, his examples
+  the TM pane's x button and the `source` title; it is a separate PR, not this one.
+- **The view-switcher buttons.** The mockups' bordered source, λ and TM buttons are a separate change, later, as the
+  user asked; the design lists them as a non-goal.
+- **#168's README screenshot shows the old default**, and is to be retaken once this merges.
+- **The deferred minors of the reviews before Material, re-checked at `e2d3fef`:**
+  - `palettes.test.ts` asserts 4 of Material's 38 values and 4 of Grayscale's 38 directly, and no test holds the
+    rest to the amendments' tables: the floor and binder cases hold properties, and the fallback case holds
+    `style.css` to `palettes.ts`. The tables and `palettes.ts` agree at `e2d3fef`.
+  - In `skin-switcher.test.ts` the two nothing-stored cases read the computed `--bg`, which `style.css`'s fallback
+    block now gives alone, so they would pass if `main.ts` applied no palette. Its case that relied on the style an
+    earlier case left, with a stored `match` held only in node, went with `match`: *switches the style, and a chosen
+    palette stays* passes whatever style it starts from, and `skin-stored-match.test.ts` reads a stored `match` back
+    at start-up in a browser.
+  - `skin.test.ts`'s *keeps a stored choice over the default* repeats the loop of *reads a stored palette choice,
+    and anything else as the default palette*, and since `e2d3fef`, which took out its `resolvePalette` assertion
+    and made `PALETTE_CHOICES` `PALETTE_IDS`, adds nothing to it.
+  - `web/scripts/licences.ts`'s `colourSchemes()` repeats `toolchain()` but for its group and directory.
+  - `web/about.html`'s "The libraries and fonts it ships keep their own licences" names neither the colours nor,
+    as before this branch, the toolchain runtimes.
+  - `commitCustom`'s doc comment in `web/src/main.ts` gains a 121-character line, over biome's `lineWidth` of 120,
+    which `biome ci` passes; the file had 11 lines over 120 before this branch and has 12.
+
+##### VERIFICATION
+
+Run on 2026-11-14 at `e2d3fef`, with `R=~/temp/redextape-tomorrow-palette-record`. Each gate step ran by
+`$R/run-logged.sh` into its own log in `$R`, named `nm-*.log`, which ends `### EXIT <n>`, from `web/` unless the
+line says the root; the eight scans ran by `$R/run-scans.sh` into `$R/nm-30-scans.log`, which ends `### OVERALL 0`,
+and again over this entry's text into `$R/entry-nm/scans.log`. The colour and licence checks' `nm-` logs began at
+17:45:39, before `e2d3fef`'s commit time, 17:45:50, so those four ran again at `e2d3fef`, the tree clean, into
+`$R/entry-nm/20-colours-selftest.log` to `$R/entry-nm/23-licences.log`, exit 0 each; every other gate log began
+after it. `test:browser` ran twice into its log: by the implementer's report, as `$R/brief-entry-no-match.md` and
+the lane's ledger, `.superpowers/sdd/2026-11-14-tomorrow-palette/progress.md`, record it, the first run, begun at
+17:42:48, had three TM tests, in `tm-buffer-restore` and `worker`, time out at 15 s while another project's vitest
+held the load average near 29, and the rerun, with nothing changed, passed; the rerun overwrote the first run's
+log, so no log of it is kept. `pnpm install` and the three builds last ran at `f464300`, into
+`$R/01-pnpm-install.log` to `$R/04-build-bindings.log`, exit 0 each; the commits since change no file under
+`crates/`, `Cargo.toml`, `Cargo.lock`, `web/package.json` or `web/pnpm-lock.yaml`. The figures that need no gate are
+`$R/entry-nm/figures.sh`'s, in `$R/entry-nm/figures.log` under `### H1` to `### H24`; H5 fetches the four base16
+files and the `LICENSE` from `raw.githubusercontent.com`'s `tinted-theming/schemes`, branch `spec-0.11`, into
+`$R/entry-nm/upstream/`, and H6 runs `$R/entry-nm/measure.ts` under node over those files and copies of
+`web/src/palettes.ts`, `web/src/contrast.ts`, its import made `./palettes.ts`, and the design, each at `e2d3fef`,
+and prints `### G1` to `### G7`. This entry changes only this file.
+
+```
+pnpm exec biome ci --error-on-warnings               → exit 0; 448 files (nm-10-biome.log)
+pnpm run typecheck                                   → exit 0 (nm-11-typecheck.log)
+pnpm run test:node                                   → exit 0; 73 files, 1480 tests (nm-12-test-node.log)
+pnpm run test:browser                                → exit 0; 216 files, 1621 tests, --project browser, on
+                                                       its second run (nm-13-test-browser.log)
+scripts/check-colours.sh --self-test, then alone     → exit 0 each, from the root (nm-20-colours-selftest.log,
+                                                       nm-21-colours.log), and again at e2d3fef
+                                                       (entry-nm/20-colours-selftest.log, entry-nm/21-colours.log)
+scripts/check-licences.sh --self-test, then alone    → exit 0 each, from the root (nm-22-licences-selftest.log,
+                                                       nm-23-licences.log), and again at e2d3fef
+                                                       (entry-nm/22-licences-selftest.log, entry-nm/23-licences.log)
+node scripts/check-comments.mjs --base 13bc049       → exit 0, from the root; 16 areas within budget, 21 changed
+                                                       files (nm-24-comments.log)
+the eight scans of ci.yml's linear-history job,
+  --self-test then alone                             → 16 of 16 exit 0 (nm-30-scans.log), and again over this
+                                                       entry (entry-nm/scans.log)
+```
+
+Not run for this entry: the rest of what `ci.yml` runs on a pull request, `test:coverage`, `build:app`,
+`scripts/check-all.sh` and `scripts/check-slow.sh` among it, which the user chose on 2026-11-14 to leave to CI on the
+PR; `test:firefox`, which `ci.yml` does not run; and the Docker image, which it builds only off a pull request. CI's
+run on the PR is not quoted here.
+
+**Every count this entry quotes, with what produces it.** A row naming `H<n>` or `G<n>` is that section of
+`$R/entry-nm/figures.log`; a row naming a log is that log in `$R`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 21; `a218f1f`, `c4ddaa1`, `e85c264`, `8b4976a`; the design's, the plan's, the amendments' and the corrections' SHAs | commits in the range; this entry's; the rest by role | `git rev-list --count 13bc049..e2d3fef` and `git log --format='%h %s'` of the range (H1) |
+| ten | commits that change a file outside `docs/` | `git diff-tree --name-only -r` of each commit, less `docs/` (H1) |
+| 0 | lines outside a comment that change in `palettes.ts`, `contrast.ts` and `style.css` from `e1a22aa` to `e2d3fef` | `git diff -U0` of the three, less comment lines; the one file it touches is `palettes.ts` (H22) |
+| `13bc049`, #169 | the range's base and its PR | `git rev-parse --short origin/main`, `git merge-base origin/main e2d3fef`, and the `(#169)` ending `13bc049`'s subject (H12) |
+| nine, and their names | the dark schemes the user was shown | the Material amendment of the design, `2edcbbd`, and the lane's ledger, `.superpowers/sdd/2026-11-14-tomorrow-palette/progress.md` |
+| Nate Peterson; Alexandre Gavioli | the schemes' authors | the `author:` lines of the four base16 files fetched fresh (H5) |
+| two; first, last; Material, …, Grayscale; `'material'`, `'instrument'` | built-in palettes added, three at `13bc049` and five at `e2d3fef`; the two palettes' places; the menu order; `DEFAULT_PALETTE` and `DEFAULT_STYLE` | `PALETTE_IDS` at `e2d3fef` and at `13bc049`, `skin.ts`'s `PALETTE_CHOICES = PALETTE_IDS` at `e2d3fef` where `13bc049` has `['match', ...PALETTE_IDS]`, and both defaults (H4, G1) |
+| `resolvePalette(choice, custom)`; `PALETTES[DEFAULT_PALETTE]`; a stored `match` as `DEFAULT_PALETTE` | the signature; what `custom` writes its halves over; how `readPaletteChoice` reads `match` | `isPaletteChoice`, `readPaletteChoice` and `resolvePalette` at `e2d3fef`, and every `resolvePalette(` and `PALETTES[` in `web/src`, `applySkin`'s call and `main.ts`'s cache refresh (H21); the `PaletteChoice` and `PALETTE_CHOICES` lines (H4) |
+| 0 | `'match'`, `match style` or the style's own left in `web/src` | `git grep` of the five spellings at `e2d3fef` (H20) |
+| Material | the dialog's name for the palette of a half not imported | its line, `PALETTE_CHOICE_LABELS[DEFAULT_PALETTE]`, with the label `material: 'Material'`, and 0 lines of `base16-dialog.ts` saying the style's own (H14) |
+| 19; 35 | tokens a half; contrast floors | `COLOUR_TOKENS.length` and `CONTRAST_FLOORS.length` (G1) |
+| 0 and 0, each half of each palette | floors below, binder clashes | G2, and `palettes.test.ts`'s two cases over `VARIANTS`, every `PALETTE_IDS` entry (H18), among the 1480 that pass in `nm-12-test-node.log` |
+| the amendments' tables' | the two palettes' values | each table's 17 rows, 19 slots, against `PALETTES`, 0 mismatches each (G6) |
+| `#4a4a4a` to `#979797`, three slots; nothing else | Material dark's moved slots | each slot against the base16 colour its role names in the fetched `material-darker.yaml` (G4) |
+| `#80cbc4`; `#546e7a`, `#90a4ae`; 13; `#ccd7da`, `#cceae7` | the port's base05; the hand-set base05 and base03; slots `adjustVariant` moved; `rule` against the port's base03 and base02 | the same over `material-lighter.yaml` with base05 and base03 hand-set: 14 slots differ, `rule` and 13 others (G4) |
+| 8; 11 | Grayscale's moved slots, dark and light | the same over `grayscale-dark.yaml` and `grayscale-light.yaml` (G4) |
+| six of eight, `#656565`, `#464646`, `#2e2e2e`; four within one step of `#8c8c8c`, `#999999`, `#b9b9b9`, `#d1d1d1`; accent = error | Grayscale's `tok-` slots, light and dark; its accent and error | G7, and G5's count of `tok-` slots within 1 per channel of each grey |
+| 24; 0 | `BINDER_APART`; `tok-binder` set to `error`'s value, from `error`, each Material half | `grep` of `BINDER_APART = ` in `contrast.ts` at `e2d3fef` (H11); `binderClashes` with `tok-binder` set to `error` (G3) |
+| or all but | `tok-punct` against `tok-neutral` in the built-in variants | the largest channel difference in each: 0 in Material's and Grayscale's, 7 at most in the others (G2) |
+| 19 | the fallback block's declarations | `awk` of the `light-dark(` lines between `style.css`'s `palette:fallback` markers at `e2d3fef` (H10) |
+| one work; MIT, no version; last | the `palette` group; its licence and version; the group's place | `node` over `third-party-licences.json` at `e2d3fef`, its packages by group, the last package's group and the group's entry (H7) |
+| byte for byte; the copyright line; the only directory | the committed `LICENSE.md` against the repository's; its first line; `palette-licences/` | `curl` of `spec-0.11/LICENSE` from `raw.githubusercontent.com` into `cmp` with the file at `e2d3fef`, exit 0; `grep -n Copyright`; `git ls-tree` of `web/scripts/palette-licences/` (H5) |
+| 10: 3 node, 7 browser; one new; three | test files the range changes; `skin-stored-match.test.ts`, the one it adds; those whose label lists name Material and Grayscale | `git diff --name-only 13bc049 e2d3fef -- web/tests`, by directory and with `--diff-filter=A` (H2); `git grep -c "'Grayscale'"` over the browser tests at `e2d3fef` (H3) |
+| 4 and 4 of 38 | values `palettes.test.ts` asserts directly; both halves' tokens | `grep -c` of `expect(PALETTES.material.dark` or `.light`, and of `grayscale` (H8); 19 × 2 (G1). `git grep -F` of the 40 distinct values over `web/tests` finds them only there and in `base16-adjust.test.ts`'s own `#101010` fixture (H8, H15) |
+| 0 | files under `web/scripts/`, `web/*.html`, `style.css` and `palettes.test.ts` that change from `e1a22aa` to `e2d3fef`, so the deferred minors on them stand as checked at `e1a22aa` | `git diff --name-only e1a22aa e2d3fef` over them (H15) |
+| the about, help, licences and privacy pages | pages with the pre-paint script but not `main.ts` | `prepaint` and `src="/src/main.ts"` counted in each `web/*.html` at `e2d3fef` (H13) |
+| 121; 120; 11 and 12 | `commitCustom`'s new comment line; biome's `lineWidth`; `main.ts`'s lines over 120 at `13bc049` and `e2d3fef` | `awk 'length > 120'` over `main.ts` at each, and `grep -n lineWidth web/biome.json` (H9) |
+| 0 files; exit 0 each | changes since `f464300` under the build inputs named; the earlier install and build logs | `git diff --name-only f464300 e2d3fef` over them, and the last line of each log (H17) |
+| 17:45:39; 17:45:50; at `e2d3fef` | the colour and licence logs' start; `e2d3fef`'s commit time; the gate logs' commit | the `nm-` logs' first lines and birth times against `e2d3fef`'s commit time, `HEAD` and a clean tree (H19): `nm-10` to `nm-13` and `nm-24` begin from 17:46:04 on, `nm-30-scans.log` was created at 17:46:04, and `nm-20` to `nm-23` ran again at `e2d3fef` into `entry-nm/`, whose last lines read `### EXIT 0` |
+| 17:42:48; three, in `tm-buffer-restore` and `worker`; 15 s; near 29 | the first `test:browser` run's start; the tests that timed out, their files and their limit; the load average | `nm-13-test-browser.log`'s birth time (H19); the implementer's report, as `brief-entry-no-match.md` records it; the lane's ledger records the three and the load, not the files or the limit |
+| 448 | biome's files | its `Checked` line in `nm-10-biome.log` |
+| 73, 1480; 216, 1621 | `test:node`'s files and tests; `test:browser`'s | the `Test Files` and `Tests` lines of `nm-12-test-node.log` and `nm-13-test-browser.log` |
+| 16; 21 | the comment guard's areas; its changed files since `13bc049` | the two lines of `nm-24-comments.log` |
+| 16 of 16 | the scans | the `EXIT` lines of `nm-30-scans.log` and `entry-nm/scans.log` |
+| does not run; only off a pull request | `test:firefox` in `ci.yml`; its Docker image | `grep -c -i firefox .forgejo/workflows/ci.yml`, 0; the `docker` job's `github.event_name != 'pull_request'` (H16) |

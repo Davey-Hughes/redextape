@@ -345,7 +345,8 @@ grammar's `src/parser.c` and its `.wasm` against `grammars/wasm-manifest.json` â
 file that goes stale is the `.wasm`, and the file being committed is `grammar.js` or `src/parser.c`,
 on the other side of the same input set `check-lua`'s own scoping already names. The eighth
 regenerates `web/src/third-party-licences.json`, the list the site's licences page draws, from the
-installed npm packages, `cargo tree` and the toolchain texts under `web/scripts/toolchain-licences/`,
+installed npm packages, `cargo tree`, the repository's `LICENSE.md` and the toolchain and
+colour-scheme texts under `web/scripts/toolchain-licences/` and `web/scripts/palette-licences/`,
 and compares it with the committed copy â€” unscoped because what makes it stale is a lockfile, an
 import or a dependency's own licence file, not the file being committed; it needs `web/node_modules`
 in step with `web/pnpm-lock.yaml`, and `cargo`, and took 0.51-0.78 s with its self-test over five

@@ -9,12 +9,12 @@
 #   scripts/check-licences.sh --self-test  # prove the comparison still fires
 #
 # WHY THIS GATE EXISTS. The licences page (`web/licences.html`) renders `web/src/third-party-licences.json`,
-# which `web/scripts/licences.ts` writes from the installed npm packages, `cargo tree` for each wasm build and the
-# toolchain texts under `web/scripts/toolchain-licences/` — every package whose code or font reaches the browser,
-# with the licence texts it carries (about pages design §8). The file
-# is committed so a dependency bump shows up as a reviewable diff and the Docker build needs no cargo; the
-# price is that it can go stale, and a stale one names licences the site no longer ships, or misses one it
-# does. This regenerates it and fails on any difference.
+# which `web/scripts/licences.ts` writes from the installed npm packages, `cargo tree` for each wasm build, the
+# repository's `LICENSE.md` and the toolchain and colour-scheme texts under `web/scripts/toolchain-licences/` and
+# `web/scripts/palette-licences/` — every package whose code, font or colours reach the browser, with the licence
+# texts it carries (about pages design §8). The file is committed so a dependency bump shows up as a reviewable
+# diff and the Docker build needs no cargo; the price is that it can go stale, and a stale one names licences the
+# site no longer ships, or misses one it does. This regenerates it and fails on any difference.
 #
 # IT NEEDS WHAT THE GENERATOR NEEDS: `web/node_modules` installed from `web/pnpm-lock.yaml`, which `installed`
 # checks first, and `cargo` able to read the lockfile; `cargo tree` and `cargo metadata` run `--locked`.

@@ -22,7 +22,7 @@ export type CustomHalf = {
   readonly name: string
   /** The scheme's own sixteen, as read. */
   readonly colours: Readonly<Record<Base16Key, string>>
-  /** What is applied. A token missing here falls back to the style's own palette. */
+  /** What is applied. A token missing here falls back to the default palette's. */
   readonly tokens: Readonly<Partial<Record<ColourToken, string>>>
   /** Whether `apply adjusted` wrote `tokens`. */
   readonly adjusted: boolean

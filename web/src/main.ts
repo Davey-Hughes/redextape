@@ -103,6 +103,7 @@ import { LinkPositions, shortNotice } from './share-positions'
 import {
   applySkin,
   customPaletteLabel,
+  DEFAULT_PALETTE,
   PALETTE_CHOICE_LABELS,
   PALETTE_CHOICES,
   PALETTE_CSS_KEY,
@@ -491,18 +492,14 @@ async function main(): Promise<EditorView> {
   styleSelect.value = style
   listPalettes()
   // EVERY APPLY REFRESHES THE PRE-PAINT CACHE — FROM WHAT A RELOAD READS, NOT FROM WHAT THIS LOAD DRAWS. The page is
-  // drawn from memory; the cache is the palette storage's style, choice and imported palette resolve to, read as
-  // start-up reads them above, so the next load's first frame is the one it goes on to draw. The two differ where
-  // storage refused a write: to the imported palette, which says so and lasts this load (spec §7.1), or, silently, to
-  // the style or the palette choice (§2.3).
+  // drawn from memory; the cache is the palette storage's choice and imported palette resolve to, read as start-up
+  // reads them above, so the next load's first frame is the one it goes on to draw. The two differ where storage
+  // refused a write: to the imported palette, which says so and lasts this load (spec §7.1), or, silently, to the
+  // palette choice (§2.3).
   const applyChosenSkin = (): void => {
     applySkin(document.documentElement, style, paletteChoice, custom)
     const stored = parseCustomPalette(readSkinStorage(CUSTOM_PALETTE_KEY))
-    const reload = resolvePalette(
-      readStyle(readSkinStorage(STYLE_KEY)),
-      readPaletteChoice(readSkinStorage(PALETTE_KEY), stored),
-      stored,
-    )
+    const reload = resolvePalette(readPaletteChoice(readSkinStorage(PALETTE_KEY), stored), stored)
     writeSkinStorage(PALETTE_CSS_KEY, paletteDeclarations(reload))
   }
   applyChosenSkin()
@@ -536,8 +533,8 @@ async function main(): Promise<EditorView> {
   /**
    * Put `next` in force as the imported palette, with `choice` as the palette choice — **THE STORE FIRST, AND THE CHOICE
    * ONLY WHEN IT HELD** (spec §7.1). A reload reads both, so a choice saved over a write that failed would read what
-   * the store lost: `custom` over a built-in choice with an older import behind it, or `match` over a half still
-   * stored. The page is drawn from memory either way, and the pre-paint cache, as every apply writes it, from what
+   * the store lost: `custom` over a built-in choice with an older import behind it, or the default palette over a half
+   * still stored. The page is drawn from memory either way, and the pre-paint cache, as every apply writes it, from what
    * storage holds — so a refused write lasts this load and the reload finds everything as it was; the caller says so.
    */
   const commitCustom = (next: CustomPalette | null, choice: PaletteChoice): boolean => {
@@ -579,7 +576,7 @@ async function main(): Promise<EditorView> {
       if (custom === null || half === undefined) return
       const before = paletteChoice
       const next = withoutHalf(custom, variant)
-      const saved = commitCustom(next, next === null && paletteChoice === 'custom' ? 'match' : paletteChoice)
+      const saved = commitCustom(next, next === null && paletteChoice === 'custom' ? DEFAULT_PALETTE : paletteChoice)
       const picks = palettePicks
       removal = notices.notify(
         saved

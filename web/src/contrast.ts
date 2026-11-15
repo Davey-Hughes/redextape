@@ -90,8 +90,8 @@ export type BinderClash = { readonly token: ColourToken; readonly apart: number 
  * a class drawing a neighbour's exact value — not a poor choice of hue.
  *
  * SCOPED TO `tok-binder` rather than run over every pair, because two pairs are deliberately equal or all but:
- * `tok-nat` and `tok-bool` are one colour on purpose, and `tok-punct` sits on `tok-neutral` in the dark variants.
- * Widening this to all pairs is a palette change, not a rule change.
+ * `tok-nat` and `tok-bool` are one colour on purpose, and `tok-punct` is `tok-neutral`, or all but, in every
+ * built-in variant. Widening this to all pairs is a palette change, not a rule change.
  */
 export function binderClashes(v: Variant): BinderClash[] {
   const binder = rgbChannels(v['tok-binder'])

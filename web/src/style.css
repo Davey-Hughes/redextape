@@ -4,7 +4,7 @@
 
    THE PALETTE IS DATA. `palettes.ts` holds every colour; the app writes the chosen palette onto
    `<html>` as inline custom properties, which win over this block. What this block keeps is
-   the FALLBACK — Instrument's palette, the first-visit default — so a page that has not run `main.ts`
+   the FALLBACK — the default palette, `skin.ts`'s `DEFAULT_PALETTE` — so a page that has not run `main.ts`
    yet, or never will (the startup-failure banner), still has every token. `palettes.test.ts` holds this
    copy equal to `palettes.ts`, and `scripts/check-colours.sh` allows colour literals between the two
    markers below and, outside this file, only in `palettes.ts`.
@@ -44,25 +44,25 @@
   --control-border: 1px;
 
   /* palette:fallback:begin */
-  --bg: light-dark(#e9edf2, #101820);
-  --bg-raised: light-dark(#ffffff, #16202a);
-  --bg-chrome: light-dark(#f4f7fa, #122029);
-  --rule: light-dark(#c8d3de, #273947);
-  --fg: light-dark(#152430, #dbe6ef);
-  --fg-dim: light-dark(#4a5f72, #8ea3b5);
-  --accent: light-dark(#0f766e, #2dd4bf);
-  --on-accent: light-dark(#ffffff, #06201d);
-  --focus-ring: light-dark(#152430, #dbe6ef);
-  --error: light-dark(#b42318, #f97066);
-  --warn: light-dark(#8a5a00, #fdb022);
-  --tok-neutral: light-dark(#4a5f72, #8ea3b5);
-  --tok-keyword: light-dark(#0b5fb3, #5fa8f5);
-  --tok-ident: light-dark(#152430, #dbe6ef);
-  --tok-nat: light-dark(#9a3412, #f0956a);
-  --tok-bool: light-dark(#9a3412, #f0956a);
-  --tok-operator: light-dark(#6d28d9, #c4a8f5);
-  --tok-punct: light-dark(#4f6477, #8ea3b5);
-  --tok-binder: light-dark(#9f1188, #f472dc);
+  --bg: light-dark(#fafafa, #212121);
+  --bg-raised: light-dark(#e7eaec, #303030);
+  --bg-chrome: light-dark(#fafafa, #212121);
+  --rule: light-dark(#ccd7da, #353535);
+  --fg: light-dark(#546d79, #eeffff);
+  --fg-dim: light-dark(#5a6c76, #979797);
+  --accent: light-dark(#4b6a9f, #82aaff);
+  --on-accent: light-dark(#fafafa, #212121);
+  --focus-ring: light-dark(#546e7a, #eeffff);
+  --error: light-dark(#cd1a49, #f07178);
+  --warn: light-dark(#b37b00, #ffcb6b);
+  --tok-neutral: light-dark(#5a6c76, #979797);
+  --tok-keyword: light-dark(#7442f5, #c792ea);
+  --tok-ident: light-dark(#546d79, #eeffff);
+  --tok-nat: light-dark(#c03a0d, #f78c6c);
+  --tok-bool: light-dark(#c03a0d, #f78c6c);
+  --tok-operator: light-dark(#00757c, #89ddff);
+  --tok-punct: light-dark(#5a6c76, #979797);
+  --tok-binder: light-dark(#527407, #c3e88d);
   /* palette:fallback:end */
 
   /* The construct a click linked (`.linked` below). A SEPARATE HUE FROM `--accent`, not a tint of it —

@@ -29,9 +29,9 @@ describe('an imported palette, at first paint', () => {
   it('is drawn by the pre-paint script alone, from the cache the import wrote', () => {
     expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(NIGHT[0]))
     // THE BEFORE STATE, SO THE SCRIPT IS WHAT PUTS IT BACK: with the inline palette gone, the page falls to
-    // `style.css`'s fallback, Instrument.
+    // `style.css`'s fallback, the default palette.
     document.documentElement.removeAttribute('style')
-    expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(PALETTES.instrument.dark.bg))
+    expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(PALETTES.material.dark.bg))
     new Function(PREPAINT)()
     expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(NIGHT[0]))
   })
@@ -45,7 +45,7 @@ describe('an imported palette, at first paint', () => {
     localStorage.setItem(STYLE_KEY, 'paper')
     localStorage.setItem(STORAGE_KEY, 'light')
     try {
-      expect(reloaded()).toBe(rgb(PALETTES.instrument.light.bg))
+      expect(reloaded()).toBe(rgb(PALETTES.material.light.bg))
       expect(['style', 'data-style', 'data-theme'].map((name) => root.getAttribute(name))).toEqual(before)
       expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(NIGHT[0]))
     } finally {
@@ -61,7 +61,7 @@ describe('an imported palette, at first paint', () => {
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     localStorage.removeItem(STORAGE_KEY)
     try {
-      expect(reloaded()).toBe(rgb(PALETTES.instrument.light.bg))
+      expect(reloaded()).toBe(rgb(PALETTES.material.light.bg))
       expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     } finally {
       localStorage.setItem(STORAGE_KEY, 'dark')

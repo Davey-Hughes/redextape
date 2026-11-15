@@ -59,7 +59,7 @@ describe('the pre-paint script', () => {
   // reaches first paint through the same key and the same pattern, the script unchanged.
   it('applies a cached custom palette as it applies a built-in one', () => {
     const css = paletteDeclarations(
-      resolvePalette('paper', 'custom', { light: storedHalf('Day', DAY), dark: storedHalf('Neon', NEON) }),
+      resolvePalette('custom', { light: storedHalf('Day', DAY), dark: storedHalf('Neon', NEON) }),
     )
     expect(PALETTE_CSS_PATTERN.test(css)).toBe(true)
     expect(run({ [PALETTE_CSS_KEY]: css }).get('style')).toBe(css)

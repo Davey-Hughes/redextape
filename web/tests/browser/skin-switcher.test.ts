@@ -28,23 +28,40 @@ describe('the style and palette controls', () => {
     palette = p
   })
 
-  it('mounts as Instrument, matching, with nothing stored', () => {
+  it('mounts as Instrument with the Material palette, with nothing stored', () => {
     expect(root.getAttribute('data-style')).toBe('instrument')
     expect(style.value).toBe('instrument')
-    expect(palette.value).toBe('match')
-    expect(token('bg')).toBe(pair('instrument', 'bg'))
+    expect(palette.value).toBe('material')
+    expect(token('bg')).toBe(pair('material', 'bg'))
   })
 
-  it('offers every style and every palette by name', () => {
+  it('keeps Material when the style changes with nothing stored', () => {
+    choose(style, 'terminal')
+    expect(root.getAttribute('data-style')).toBe('terminal')
+    expect(localStorage.getItem(PALETTE_KEY)).toBeNull()
+    expect(token('bg')).toBe(pair('material', 'bg'))
+  })
+
+  it('offers every style and every palette by name, and no match style', () => {
     expect([...style.options].map((o) => o.textContent)).toEqual(['Paper', 'Terminal', 'Instrument'])
-    expect([...palette.options].map((o) => o.textContent)).toEqual(['match style', 'Paper', 'Terminal', 'Instrument'])
+    expect([...palette.options].map((o) => o.textContent)).toEqual([
+      'Material',
+      'Paper',
+      'Terminal',
+      'Instrument',
+      'Grayscale',
+    ])
+    expect([...palette.options].map((o) => o.value)).not.toContain('match')
   })
 
-  it('switches the style, and a matching palette follows it', () => {
+  it('switches the style, and a chosen palette stays', () => {
+    choose(palette, 'instrument')
+    expect(token('bg')).toBe(pair('instrument', 'bg'))
     choose(style, 'paper')
     expect(root.getAttribute('data-style')).toBe('paper')
-    expect(token('bg')).toBe(pair('paper', 'bg'))
+    expect(token('bg')).toBe(pair('instrument', 'bg'))
     expect(localStorage.getItem(STYLE_KEY)).toBe('paper')
+    expect(localStorage.getItem(PALETTE_KEY)).toBe('instrument')
   })
 
   it('switches the palette without changing the style', () => {
@@ -56,5 +73,13 @@ describe('the style and palette controls', () => {
 
   it('caches what it applied, for the next load’s first paint', () => {
     expect(localStorage.getItem(PALETTE_CSS_KEY)).toContain(`--bg: ${pair('terminal', 'bg')};`)
+  })
+
+  it('applies Grayscale when chosen, without changing the style', () => {
+    choose(palette, 'grayscale')
+    expect(root.getAttribute('data-style')).toBe('paper')
+    expect(token('bg')).toBe(pair('grayscale', 'bg'))
+    expect(token('accent')).toBe(pair('grayscale', 'accent'))
+    expect(localStorage.getItem(PALETTE_KEY)).toBe('grayscale')
   })
 })

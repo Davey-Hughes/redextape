@@ -3,7 +3,7 @@ import { userEvent } from 'vitest/browser'
 import { STORAGE_KEY } from '../../src/appearance'
 import { CUSTOM_PALETTE_KEY, serializeCustomPalette } from '../../src/custom-palette'
 import { PALETTES } from '../../src/palettes'
-import { PALETTE_CSS_KEY, PALETTE_KEY } from '../../src/skin'
+import { PALETTE_CSS_KEY, PALETTE_KEY, STYLE_IDS } from '../../src/skin'
 import { NIGHT, storedHalf } from '../node/base16-fixtures'
 import { bodyStyle, chooseOption, rgb, SHELL } from './harness'
 
@@ -31,10 +31,11 @@ describe('a stored custom palette, at start-up', () => {
   it('lists custom after the built-in choices, under its half’s name, and chosen', () => {
     const select = document.querySelector<HTMLSelectElement>('#palette') as HTMLSelectElement
     expect([...select.options].map((o) => o.textContent)).toEqual([
-      'match style',
+      'Material',
       'Paper',
       'Terminal',
       'Instrument',
+      'Grayscale',
       'custom — dark: Night',
     ])
     expect(select.value).toBe('custom')
@@ -42,15 +43,21 @@ describe('a stored custom palette, at start-up', () => {
 
   it('caches what it applied, for the next load’s first paint', () => {
     expect(localStorage.getItem(PALETTE_CSS_KEY)).toContain(
-      `--bg: light-dark(${PALETTES.instrument.light.bg}, ${NIGHT[0]});`,
+      `--bg: light-dark(${PALETTES.material.light.bg}, ${NIGHT[0]});`,
     )
   })
 
-  it('draws the half not imported in the style’s own palette, and follows a style change', () => {
+  // THE HALF NOT IMPORTED IS THE DEFAULT PALETTE'S, WHATEVER THE STYLE (tomorrow-palette design, its `match style`
+  // amendment): every style is tried, so a fallback to the style's own palette would show under each.
+  it('draws the half not imported in Material, and keeps it through every style change', () => {
     chooseOption('#appearance-choice', 'light')
-    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.instrument.light.bg))
+    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.material.light.bg))
+    for (const style of STYLE_IDS) {
+      chooseOption('#style', style)
+      expect(document.documentElement.getAttribute('data-style')).toBe(style)
+      expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.material.light.bg))
+    }
     chooseOption('#style', 'paper')
-    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.paper.light.bg))
     chooseOption('#appearance-choice', 'dark')
     expect(bodyStyle().backgroundColor).toBe(rgb(NIGHT[0]))
   })

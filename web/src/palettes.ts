@@ -7,14 +7,14 @@
  * recolours everything. The `Variant` type makes a palette missing a token a compile error rather than a
  * blank colour.
  *
- * `style.css` keeps one copy of Instrument's values as the first-paint fallback, between its
- * `palette:fallback` markers; `palettes.test.ts` holds that copy equal to this one.
+ * `style.css` keeps one copy of the default palette (`skin.ts`'s `DEFAULT_PALETTE`) as the first-paint
+ * fallback, between its `palette:fallback` markers; `palettes.test.ts` holds that copy equal to this one.
  *
  * Not every token has a consumer: `on-accent` is defined so its contrast is held.
  *
  * `tok-binder` IS THE ONE CLASS OUTSIDE THE MINI-LANGUAGE'S OWN THAT GETS A COLOUR RATHER THAN
  * `tok-neutral`, AND THE λ GRAMMAR IS WHY. `REDEXTAPE_LAMBDA` in `capture_map.rs` maps its captures to
- * exactly three classes — `Binder`, `Ident` and `Punct`. `tok-ident` is `fg` in all six variants and
+ * exactly three classes — `Binder`, `Ident` and `Punct`. `tok-ident` is `fg` in every built-in variant and
  * `tok-punct` is `tok-neutral` or all but indistinguishable from it, so a λ editor whose binder also
  * drew `tok-neutral` would have two colours for three classes, with `λf` and `(` the same pixels. The
  * classes the TM and rxm forms add keep sharing `tok-neutral`: they arrive in editors that already colour
@@ -47,7 +47,7 @@ export type ColourToken = (typeof COLOUR_TOKENS)[number]
 
 export type Variant = Readonly<Record<ColourToken, string>>
 
-export const PALETTE_IDS = ['paper', 'terminal', 'instrument'] as const
+export const PALETTE_IDS = ['material', 'paper', 'terminal', 'instrument', 'grayscale'] as const
 
 export type PaletteId = (typeof PALETTE_IDS)[number]
 
@@ -60,6 +60,62 @@ export type Palette = {
 }
 
 export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
+  /**
+   * The base16 schemes Material Darker (dark) and Material Lighter (light) by Nate Peterson, ports of Mattia
+   * Astorino's Material Theme, from tinted-theming/schemes, MIT. The first amendment in
+   * `docs/superpowers/specs/2026-11-14-tomorrow-palette-design.md` lists each slot's source. `base16-adjust.ts`'s
+   * `adjustVariant` moved what fell below `CONTRAST_FLOORS`, keeping its hue. The light port's base05 is the
+   * theme's teal selection colour, which reads teal as text, so the light half takes Material Lighter's own text
+   * (`#546e7a`) and comment (`#90a4ae`) colours as base05 and base03, and its `rule` is the port's base03 rather
+   * than base02's teal. `tok-binder` is green, base0B, not red: red is `error`, and `contrast.ts`'s
+   * `binderClashes` holds `tok-binder` apart from every other token, `error` included.
+   */
+  material: {
+    id: 'material',
+    name: 'Material',
+    light: {
+      bg: '#fafafa',
+      'bg-raised': '#e7eaec',
+      'bg-chrome': '#fafafa',
+      rule: '#ccd7da',
+      fg: '#546d79',
+      'fg-dim': '#5a6c76',
+      accent: '#4b6a9f',
+      'on-accent': '#fafafa',
+      'focus-ring': '#546e7a',
+      error: '#cd1a49',
+      warn: '#b37b00',
+      'tok-neutral': '#5a6c76',
+      'tok-keyword': '#7442f5',
+      'tok-ident': '#546d79',
+      'tok-nat': '#c03a0d',
+      'tok-bool': '#c03a0d',
+      'tok-operator': '#00757c',
+      'tok-punct': '#5a6c76',
+      'tok-binder': '#527407',
+    },
+    dark: {
+      bg: '#212121',
+      'bg-raised': '#303030',
+      'bg-chrome': '#212121',
+      rule: '#353535',
+      fg: '#eeffff',
+      'fg-dim': '#979797',
+      accent: '#82aaff',
+      'on-accent': '#212121',
+      'focus-ring': '#eeffff',
+      error: '#f07178',
+      warn: '#ffcb6b',
+      'tok-neutral': '#979797',
+      'tok-keyword': '#c792ea',
+      'tok-ident': '#eeffff',
+      'tok-nat': '#f78c6c',
+      'tok-bool': '#f78c6c',
+      'tok-operator': '#89ddff',
+      'tok-punct': '#979797',
+      'tok-binder': '#c3e88d',
+    },
+  },
   paper: {
     id: 'paper',
     name: 'Paper',
@@ -196,6 +252,59 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#c4a8f5',
       'tok-punct': '#8ea3b5',
       'tok-binder': '#f472dc',
+    },
+  },
+  /**
+   * The base16 schemes Grayscale Dark and Grayscale Light by Alexandre Gavioli, from tinted-theming/schemes, MIT,
+   * in Material's slot roles with no hand change; `2026-11-14-tomorrow-palette-design.md`'s second amendment lists
+   * each slot's source. `adjustVariant` moved what fell below `CONTRAST_FLOORS`, so the tokens read apart by
+   * brightness rather than hue, and `accent` and `error` share a grey. That is the scheme's nature, not a fault in
+   * the mapping.
+   */
+  grayscale: {
+    id: 'grayscale',
+    name: 'Grayscale',
+    light: {
+      bg: '#f7f7f7',
+      'bg-raised': '#e3e3e3',
+      'bg-chrome': '#f7f7f7',
+      rule: '#b9b9b9',
+      fg: '#464646',
+      'fg-dim': '#656565',
+      accent: '#656565',
+      'on-accent': '#f7f7f7',
+      'focus-ring': '#464646',
+      error: '#656565',
+      warn: '#818181',
+      'tok-neutral': '#656565',
+      'tok-keyword': '#656565',
+      'tok-ident': '#464646',
+      'tok-nat': '#656565',
+      'tok-bool': '#656565',
+      'tok-operator': '#656565',
+      'tok-punct': '#656565',
+      'tok-binder': '#2e2e2e',
+    },
+    dark: {
+      bg: '#101010',
+      'bg-raised': '#252525',
+      'bg-chrome': '#101010',
+      rule: '#464646',
+      fg: '#b9b9b9',
+      'fg-dim': '#8c8b8b',
+      accent: '#8c8c8c',
+      'on-accent': '#101010',
+      'focus-ring': '#b9b9b9',
+      error: '#8c8c8c',
+      warn: '#a0a0a0',
+      'tok-neutral': '#8c8b8b',
+      'tok-keyword': '#8c8c8b',
+      'tok-ident': '#b9b9b9',
+      'tok-nat': '#999999',
+      'tok-bool': '#999999',
+      'tok-operator': '#8c8c8b',
+      'tok-punct': '#8c8b8b',
+      'tok-binder': '#d1d1d1',
     },
   },
 }

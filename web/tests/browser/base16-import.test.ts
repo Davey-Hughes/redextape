@@ -148,22 +148,22 @@ describe('the base16 import dialog', () => {
 
   /**
    * **THE HALF NOT ON SCREEN, APPLIED, STILL CHOOSES `custom`** (the user's decision), and a half not imported is the
-   * style's own (umbrella §7): a light import on a dark page switches the page from the palette chosen before, Paper
-   * here, to the style's own dark palette. The line says so before `apply`.
+   * default palette's: a light import on a dark page switches the page from the palette chosen before, Paper here, to
+   * Material's dark half. The line says so before `apply`.
    */
-  it('says, before a half the page is not showing is applied, that the page will be in the style’s own palette', async () => {
+  it('says, before a half the page is not showing is applied, that the page will be in the default palette', async () => {
     await choosePalette('paper')
     expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.paper.dark.bg))
     await openWith(legacyLayout('Day', DAY))
     await userEvent.click(inDialog('button.base16-check'))
     expect(said('.base16-elsewhere')).toEqual([
-      'fills the light palette; the page is dark now, so its palette is the style’s own until you import a dark scheme',
+      'fills the light palette; the page is dark now, so its palette is Material until you import a dark scheme',
     ])
     await userEvent.click(applyButton())
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — light: Day')
-    expect(PALETTES.instrument.dark.bg).not.toBe(PALETTES.paper.dark.bg)
-    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.instrument.dark.bg))
+    expect(PALETTES.material.dark.bg).not.toBe(PALETTES.paper.dark.bg)
+    expect(bodyStyle().backgroundColor).toBe(rgb(PALETTES.material.dark.bg))
   })
 
   it('applies a passing scheme: the page is drawn in it, and the palette select names it', async () => {

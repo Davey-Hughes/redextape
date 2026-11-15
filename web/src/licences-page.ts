@@ -10,7 +10,7 @@ import data from './third-party-licences.json'
  */
 
 /** Where a package ships, as `scripts/licences.ts` records it. */
-export type Group = 'code' | 'wasm' | 'toolchain' | 'font'
+export type Group = 'code' | 'wasm' | 'toolchain' | 'font' | 'palette'
 
 /** The shape `scripts/licences.ts` writes. A text is stored once and named by its id wherever it is carried. */
 export type Licences = {
@@ -32,6 +32,7 @@ export const GROUPS: readonly (readonly [Group, string])[] = [
   ['wasm', 'In the WebAssembly'],
   ['toolchain', 'From the toolchains'],
   ['font', 'Fonts'],
+  ['palette', 'Colour schemes'],
 ]
 
 function textOf(licences: Licences, id: string): string {
@@ -78,7 +79,8 @@ export function renderLicences(root: ParentNode = document, licences: Licences =
           const d = document.createElement('details')
           d.dataset.package = `${p.name}@${p.version}`
           const s = document.createElement('summary')
-          // A TOOLCHAIN'S RUNTIME HAS NO VERSION: it is whatever the toolchain in use compiles in.
+          // A TOOLCHAIN'S RUNTIME HAS NO VERSION: it is whatever the toolchain in use compiles in. Nor does a colour
+          // scheme: what ships is its colours, adapted, not a release of it.
           s.textContent = p.version === '' ? `${p.name} — ${p.spdx}` : `${p.name} ${p.version} — ${p.spdx}`
           const meta = document.createElement('p')
           meta.className = 'meta'

@@ -12,6 +12,7 @@ import {
 } from './base16-check'
 import type { CustomHalf, CustomPalette } from './custom-palette'
 import { createPanel } from './panel'
+import { DEFAULT_PALETTE, PALETTE_CHOICE_LABELS } from './skin'
 
 /**
  * THE BASE16 IMPORT DIALOG (Plan 7 part 6b spec §8): a native modal `<dialog>` the settings menu's `import base16…`
@@ -162,14 +163,14 @@ export function createBase16Dialog(deps: Base16DialogDeps): Base16Dialog {
     const adjusting = adjustLine(c)
     if (adjusting !== null) lines.push(element('p', 'base16-adjusts', adjusting))
     // THE HALF NOT ON SCREEN STILL CHOOSES `custom`, SO THE PAGE CHANGES, AND THIS SAYS TO WHAT: the half on screen is
-    // then the one stored for it, or, with none, the style's own (umbrella §7), whatever palette was chosen before.
+    // then the one stored for it, or, with none, the default palette's, whatever palette was chosen before.
     const shown = deps.shown()
     const { variant } = reading.scheme
     if (variant !== shown) {
       const onScreen = deps.stored()?.[shown]
       const then =
         onScreen === undefined
-          ? `its palette is the style’s own until you import a ${shown} scheme`
+          ? `its palette is ${PALETTE_CHOICE_LABELS[DEFAULT_PALETTE]} until you import a ${shown} scheme`
           : `its palette is the ${shown} import, ${schemeName(onScreen.name)}, until the appearance is ${variant}`
       lines.push(element('p', 'base16-elsewhere', `fills the ${variant} palette; the page is ${shown} now, so ${then}`))
     }

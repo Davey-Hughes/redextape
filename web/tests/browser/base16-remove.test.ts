@@ -150,7 +150,7 @@ describe('a stored half, in the import dialog', () => {
 })
 
 describe('removing a half', () => {
-  it('deletes it and keeps the other: the choice stays custom, and the page falls back where it was', async () => {
+  it('deletes it and keeps the other: the choice stays custom, and the page falls back to the default palette', async () => {
     expect(bodyBackground()).toBe(rgb(EMBER[0]))
     await remove('remove the dark palette, Ember')
     expect(base16Dialog().open).toBe(false)
@@ -158,7 +158,7 @@ describe('removing a half', () => {
     expect(JSON.parse(storedPalette() ?? '{}')).toEqual({ version: 1, light: storedHalf('Day', DAY) })
     expect(paletteSelect().value).toBe('custom')
     expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — light: Day')
-    expect(bodyBackground()).toBe(rgb(PALETTES.instrument.dark.bg))
+    expect(bodyBackground()).toBe(rgb(PALETTES.material.dark.bg))
     expect(noticeText()).toBe('dark palette Ember removed')
   })
 
@@ -191,29 +191,29 @@ describe('removing a half', () => {
     expect(bodyBackground()).toBe(rgb(EMBER[0]))
   })
 
-  it('removes the key with the last half, and a custom choice becomes match', async () => {
+  it('removes the key with the last half, and a custom choice becomes the default palette', async () => {
     await remove('remove the light palette, Day')
     await remove('remove the dark palette, Ember')
     expect(storedPalette()).toBeNull()
-    expect(options()).toEqual(['match style', 'Paper', 'Terminal', 'Instrument'])
-    expect(paletteSelect().value).toBe('match')
-    expect(localStorage.getItem(PALETTE_KEY)).toBe('match')
-    expect(bodyBackground()).toBe(rgb(PALETTES.instrument.dark.bg))
+    expect(options()).toEqual(['Material', 'Paper', 'Terminal', 'Instrument', 'Grayscale'])
+    expect(paletteSelect().value).toBe('material')
+    expect(localStorage.getItem(PALETTE_KEY)).toBe('material')
+    expect(bodyBackground()).toBe(rgb(PALETTES.material.dark.bg))
     await open()
     expect(base16Dialog().querySelector<HTMLElement>('.base16-now')?.hidden).toBe(true)
     await userEvent.keyboard('{Escape}')
   })
 
-  it('puts back a custom choice the last half’s removal made match, on undo', async () => {
+  it('puts back a custom choice the last half’s removal made the default, on undo', async () => {
     await userEvent.click(undoButton() as HTMLElement)
     expect(paletteSelect().value).toBe('custom')
     expect(paletteSelect().selectedOptions[0]?.textContent).toBe('custom — dark: Ember (adjusted)')
     expect(bodyBackground()).toBe(rgb(EMBER[0]))
   })
 
-  it('leaves a choice made after the last half’s removal made it match, on undo', async () => {
+  it('leaves a choice made after the last half’s removal made it the default, on undo', async () => {
     await remove('remove the dark palette, Ember')
-    expect(paletteSelect().value).toBe('match')
+    expect(paletteSelect().value).toBe('material')
     await choosePalette('terminal')
     await userEvent.click(undoButton() as HTMLElement)
     expect(paletteSelect().value).toBe('terminal')
@@ -226,14 +226,14 @@ describe('removing a half', () => {
   // BY THE GESTURE, NOT BY THE VALUE: a user who picks another palette and then the one the removal left has chosen it.
   it('keeps the choice the removal left when the user picked it back, on undo', async () => {
     await remove('remove the dark palette, Ember')
-    expect(paletteSelect().value).toBe('match')
+    expect(paletteSelect().value).toBe('material')
     await choosePalette('terminal')
-    await choosePalette('match')
+    await choosePalette('material')
     await userEvent.click(undoButton() as HTMLElement)
-    expect(paletteSelect().value).toBe('match')
-    expect(localStorage.getItem(PALETTE_KEY)).toBe('match')
+    expect(paletteSelect().value).toBe('material')
+    expect(localStorage.getItem(PALETTE_KEY)).toBe('material')
     expect(options().at(-1)).toBe('custom — dark: Ember (adjusted)')
-    expect(bodyBackground()).toBe(rgb(PALETTES.instrument.dark.bg))
+    expect(bodyBackground()).toBe(rgb(PALETTES.material.dark.bg))
     await choosePalette('custom')
     expect(bodyBackground()).toBe(rgb(EMBER[0]))
   })
@@ -284,7 +284,7 @@ describe('removing a half', () => {
         'the notice',
       )
       expect(storage.refused).toEqual({ setItem: 1, removeItem: 0 })
-      expect(options()).toHaveLength(5)
+      expect(options()).toHaveLength(6)
       expect(storedPalette()).toBeNull()
       expect(localStorage.getItem(PALETTE_KEY)).toBe('terminal')
       expect(localStorage.getItem(PALETTE_CSS_KEY)).toBe(cache)
@@ -313,15 +313,15 @@ describe('removing a half', () => {
       )
       expect(storage.refused).toEqual({ setItem: 1, removeItem: 0 })
       expect(undoButton()).not.toBeNull()
-      expect(bodyBackground()).toBe(rgb(PALETTES.instrument.dark.bg))
+      expect(bodyBackground()).toBe(rgb(PALETTES.material.dark.bg))
       expect(storedPalette()).toBe(before)
       expect(localStorage.getItem(PALETTE_KEY)).toBe('custom')
       expect(localStorage.getItem(PALETTE_CSS_KEY)).toBe(cache)
       expect(reloaded()).toBe(rgb(NIGHT[0]))
       // A LATER GESTURE REWRITES THE CACHE FROM WHAT STORAGE HOLDS, NOT FROM THIS LOAD'S MEMORY: after a style change the
-      // page's dark half is the new style's own, and a reload still starts in the half storage kept.
+      // page's dark half is still the default palette's, and a reload still starts in the half storage kept.
       await chooseStyle('paper')
-      expect(bodyBackground()).toBe(rgb(PALETTES.paper.dark.bg))
+      expect(bodyBackground()).toBe(rgb(PALETTES.material.dark.bg))
       expect(reloaded()).toBe(rgb(NIGHT[0]))
     } finally {
       storage.restore()
@@ -346,8 +346,8 @@ describe('removing a half', () => {
       )
       expect(storage.refused).toEqual({ setItem: 0, removeItem: 1 })
       expect(undoButton()).not.toBeNull()
-      expect(options()).toHaveLength(4)
-      expect(paletteSelect().value).toBe('match')
+      expect(options()).toHaveLength(5)
+      expect(paletteSelect().value).toBe('material')
       expect(storedPalette()).toBe(before)
       expect(localStorage.getItem(PALETTE_KEY)).toBe('custom')
       expect(localStorage.getItem(PALETTE_CSS_KEY)).toBe(cache)

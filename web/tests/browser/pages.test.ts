@@ -106,6 +106,21 @@ describe('renderLicences', () => {
     expect(d?.textContent).toBe('The Rust standard library — MIT OR Apache-2.0')
   })
 
+  it('credits the schemes Material and Grayscale adapt under Colour schemes, as adapted and without a version', () => {
+    const section = page().querySelector<HTMLElement>('#notices > section[data-group="palette"]')
+    expect(section?.querySelector('h3')?.textContent).toBe('Colour schemes (1)')
+    expect([...(section?.querySelectorAll<HTMLElement>('details') ?? [])].map((d) => d.dataset.package)).toEqual([
+      "Tinted Theming's base16 schemes (colours adapted for the Material and Grayscale palettes)@",
+    ])
+    expect(section?.querySelector('summary')?.textContent).toBe(
+      "Tinted Theming's base16 schemes (colours adapted for the Material and Grayscale palettes) — MIT",
+    )
+    expect(section?.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe(
+      'https://github.com/tinted-theming/schemes',
+    )
+    expect(section?.querySelector('pre')?.textContent).toContain('Copyright (c) 2022 Tinted Theming')
+  })
+
   it('refuses a package in a group it has no section for, rather than dropping it', () => {
     const stray = { ...licences, packages: [{ ...(licences.packages[0] as Licences['packages'][number]), group: 'x' }] }
     expect(() => renderLicences(fixture('<div id="notices"></div>'), stray as unknown as Licences)).toThrow(

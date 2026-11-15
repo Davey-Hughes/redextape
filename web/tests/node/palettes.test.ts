@@ -10,6 +10,7 @@ import {
   paletteDeclarations,
   type Variant,
 } from '../../src/palettes'
+import { DEFAULT_PALETTE } from '../../src/skin'
 
 const VARIANTS: [string, Variant][] = PALETTE_IDS.flatMap((id): [string, Variant][] => [
   [`${id} light`, PALETTES[id].light],
@@ -19,6 +20,24 @@ const VARIANTS: [string, Variant][] = PALETTE_IDS.flatMap((id): [string, Variant
 describe('palettes', () => {
   it('has one palette per id, each carrying its own id', () => {
     for (const id of PALETTE_IDS) expect(PALETTES[id].id).toBe(id)
+  })
+
+  it('carries Material from the spec, first among the built-ins', () => {
+    expect(PALETTE_IDS[0]).toBe('material')
+    expect(PALETTES.material.name).toBe('Material')
+    expect(PALETTES.material.dark.bg).toBe('#212121')
+    expect(PALETTES.material.dark['fg-dim']).toBe('#979797')
+    expect(PALETTES.material.light.fg).toBe('#546d79')
+    expect(PALETTES.material.light.rule).toBe('#ccd7da')
+  })
+
+  it('carries Grayscale from the spec, last among the built-ins', () => {
+    expect(PALETTE_IDS.at(-1)).toBe('grayscale')
+    expect(PALETTES.grayscale.name).toBe('Grayscale')
+    expect(PALETTES.grayscale.dark.bg).toBe('#101010')
+    expect(PALETTES.grayscale.dark['tok-binder']).toBe('#d1d1d1')
+    expect(PALETTES.grayscale.light.fg).toBe('#464646')
+    expect(PALETTES.grayscale.light['tok-binder']).toBe('#2e2e2e')
   })
 
   it('writes every value as lowercase #rrggbb', () => {
@@ -81,18 +100,17 @@ const css = readFileSync(fileURLToPath(new URL('../../src/style.css', import.met
 
 describe('style.css against the palettes', () => {
   // The fallback is what a page shows before `main.ts` applies a palette, and on the startup-failure path
-  // where it never does. It is Instrument, the first-visit default — and a second copy, so this holds
-  // the two equal.
-  it('holds Instrument as its fallback, token for token', () => {
+  // where it never does. It is the default palette, what a visitor with nothing stored gets — and a second
+  // copy, so this holds the two equal.
+  it('holds the default palette as its fallback, token for token', () => {
     const block = /\/\* palette:fallback:begin \*\/([\s\S]*?)\/\* palette:fallback:end \*\//.exec(css)?.[1]
     expect(block, 'the fallback markers').toBeDefined()
     const found = new Map<string, string>()
     for (const m of (block ?? '').matchAll(/--([a-z0-9-]+): light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\);/g)) {
       found.set(m[1] ?? '', `${m[2]} ${m[3]}`)
     }
-    const want = new Map(
-      COLOUR_TOKENS.map((t) => [t, `${PALETTES.instrument.light[t]} ${PALETTES.instrument.dark[t]}`] as const),
-    )
+    const { light, dark } = PALETTES[DEFAULT_PALETTE]
+    const want = new Map(COLOUR_TOKENS.map((t) => [t, `${light[t]} ${dark[t]}`] as const))
     expect(found).toEqual(want)
   })
 

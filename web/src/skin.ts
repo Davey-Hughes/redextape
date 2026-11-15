@@ -6,10 +6,11 @@ import { COLOUR_TOKENS, PALETTE_IDS, PALETTES, type Palette, type PaletteId } fr
  * The style and palette a page is drawn in (Plan 7 part 1, spec §4 and §6).
  *
  * TWO CHOICES, NOT ONE. A style is shape — fonts, radius, label case — and lives in `style.css`'s
- * `[data-style]` blocks; a palette is colour and lives in `palettes.ts`. `match` means "the style's own
- * palette", which is what a visitor who never touches the palette control gets. The appearance toggle
- * (`appearance.ts`) is a third, independent choice and is untouched: every token is a `light-dark()` pair,
- * so light and dark follow `color-scheme` whichever palette is applied.
+ * `[data-style]` blocks; a palette is colour and lives in `palettes.ts`. People choose each to their liking, so
+ * neither moves the other: a style change keeps the palette, `DEFAULT_PALETTE` (Material) for a visitor who never
+ * touches the palette control. The appearance toggle (`appearance.ts`) is a third,
+ * independent choice and is untouched: every token is a `light-dark()` pair, so light and dark follow
+ * `color-scheme` whichever palette is applied.
  */
 export const STYLE_IDS = ['paper', 'terminal', 'instrument'] as const
 
@@ -19,13 +20,19 @@ export type StyleId = (typeof STYLE_IDS)[number]
  * `custom` is the imported palette (Plan 7 part 6b spec §7.2), a choice only while one is stored: it is not in
  * `PALETTE_CHOICES`, and the palette select lists it after them when `custom-palette.ts`'s store holds a half.
  */
-export type PaletteChoice = 'match' | PaletteId | 'custom'
+export type PaletteChoice = PaletteId | 'custom'
 
 /** The choices every page offers, in the select's order. */
-export const PALETTE_CHOICES: readonly PaletteChoice[] = ['match', ...PALETTE_IDS]
+export const PALETTE_CHOICES: readonly PaletteChoice[] = PALETTE_IDS
 
 /** The first-visit style — the umbrella design's first-load decision. */
 export const DEFAULT_STYLE: StyleId = 'instrument'
+
+/**
+ * The palette a visitor with no stored choice gets, the one a custom palette's half not imported is drawn in, and the
+ * one `style.css`'s fallback block copies.
+ */
+export const DEFAULT_PALETTE: PaletteId = 'material'
 
 export const STYLE_KEY = 'redextape.style'
 export const PALETTE_KEY = 'redextape.palette'
@@ -44,10 +51,11 @@ export const STYLE_LABELS: Readonly<Record<StyleId, string>> = {
 }
 
 export const PALETTE_CHOICE_LABELS: Readonly<Record<PaletteChoice, string>> = {
-  match: 'match style',
+  material: 'Material',
   paper: 'Paper',
   terminal: 'Terminal',
   instrument: 'Instrument',
+  grayscale: 'Grayscale',
   custom: 'custom',
 }
 
@@ -67,8 +75,8 @@ function isStyle(raw: string | null): raw is StyleId {
   return raw !== null && (STYLE_IDS as readonly string[]).includes(raw)
 }
 
-function isPaletteChoice(raw: string | null): raw is PaletteChoice {
-  return raw === 'match' || (raw !== null && (PALETTE_IDS as readonly string[]).includes(raw))
+function isPaletteChoice(raw: string | null): raw is PaletteId {
+  return raw !== null && (PALETTE_IDS as readonly string[]).includes(raw)
 }
 
 /** A stored style, or the default for anything that is not one — including a value from a later version. */
@@ -77,26 +85,26 @@ export function readStyle(raw: string | null): StyleId {
 }
 
 /**
- * A stored palette choice, or `match` for anything that is not one — and for `custom` when nothing is imported, so a
- * store cleared or refused under a stored `custom` shows the style's own palette, with the select agreeing.
+ * A stored palette choice, or the default palette for anything that is not one — and for `custom` when nothing is
+ * imported, so a store cleared or refused under a stored `custom` shows the default palette, with the select agreeing.
  */
 export function readPaletteChoice(raw: string | null, custom: CustomPalette | null): PaletteChoice {
-  if (raw === 'custom') return custom === null ? 'match' : 'custom'
-  return isPaletteChoice(raw) ? raw : 'match'
+  if (raw === 'custom') return custom === null ? DEFAULT_PALETTE : 'custom'
+  return isPaletteChoice(raw) ? raw : DEFAULT_PALETTE
 }
 
 /**
- * The palette a choice draws. For `custom`, each half is the style's own variant with that half's tokens written over
- * it, and a half not imported is the style's own (umbrella §7) — so it follows a style change.
+ * The palette a choice draws. For `custom`, each half is the default palette's variant with that half's tokens written
+ * over it, and a half not imported is the default palette's, since a palette never depends on the style.
  */
-export function resolvePalette(style: StyleId, choice: PaletteChoice, custom: CustomPalette | null): Palette {
-  if (choice !== 'custom') return PALETTES[choice === 'match' ? style : choice]
-  const own = PALETTES[style]
+export function resolvePalette(choice: PaletteChoice, custom: CustomPalette | null): Palette {
+  if (choice !== 'custom') return PALETTES[choice]
+  const base = PALETTES[DEFAULT_PALETTE]
   return {
     id: 'custom',
     name: PALETTE_CHOICE_LABELS.custom,
-    light: { ...own.light, ...custom?.light?.tokens },
-    dark: { ...own.dark, ...custom?.dark?.tokens },
+    light: { ...base.light, ...custom?.light?.tokens },
+    dark: { ...base.dark, ...custom?.dark?.tokens },
   }
 }
 
@@ -112,10 +120,10 @@ export type SkinRoot = {
  *
  * It returns nothing for the pre-paint cache: `main.ts` caches the palette storage resolves to,
  * `paletteDeclarations(resolvePalette(…))`, rather than the one drawn here. The two differ where storage refused a
- * write, to the imported palette or, silently, to the style or the palette choice.
+ * write, to the imported palette or, silently, to the palette choice.
  */
 export function applySkin(root: SkinRoot, style: StyleId, choice: PaletteChoice, custom: CustomPalette | null): void {
-  const palette = resolvePalette(style, choice, custom)
+  const palette = resolvePalette(choice, custom)
   root.setAttribute('data-style', style)
   for (const t of COLOUR_TOKENS) {
     root.style.setProperty(`--${t}`, `light-dark(${palette.light[t]}, ${palette.dark[t]})`)
