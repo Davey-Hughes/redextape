@@ -7,6 +7,7 @@
 ;;           is_odd(n - 1)
 ;;       }
 ;;   }
+;;
 ;;   fn is_odd(n) {
 ;;       if n == 0 {
 ;;           false
@@ -14,6 +15,7 @@
 ;;           is_even(n - 1)
 ;;       }
 ;;   }
+;;
 ;;   is_even(6)
 ;; ==== built: O0 O1 O2 O3 ====
 ; ModuleID = 'redextape'

@@ -6,4 +6,5 @@ fn sum_to(n) {
     }
     acc
 }
+
 sum_to(5)

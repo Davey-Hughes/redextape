@@ -162,12 +162,17 @@ fn writing() -> bool {
     std::env::var_os("REDEXTAPE_WRITE_SNAPSHOTS").is_some_and(|value| value == "1")
 }
 
-/// A snapshot file's opening lines: its key and the program's source.
+/// A snapshot file's opening lines: its key and the program's source. A blank source line is the
+/// marker alone, so that no snapshot line ends in whitespace.
 fn file_header(key: &str, src: &str) -> String {
     let mut out = format!(";; {key}\n;; source:\n");
     for line in src.lines() {
-        out.push_str(";;   ");
-        out.push_str(line);
+        if line.trim().is_empty() {
+            out.push_str(";;");
+        } else {
+            out.push_str(";;   ");
+            out.push_str(line);
+        }
         out.push('\n');
     }
     out

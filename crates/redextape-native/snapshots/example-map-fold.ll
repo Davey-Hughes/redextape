@@ -7,6 +7,7 @@
 ;;           cons(f(head(xs)), map(tail(xs), f))
 ;;       }
 ;;   }
+;;
 ;;   fn fold(xs, acc, f) {
 ;;       if is_empty(xs) {
 ;;           acc
@@ -14,12 +15,15 @@
 ;;           fold(tail(xs), f(acc, head(xs)), f)
 ;;       }
 ;;   }
+;;
 ;;   fn add(a, b) {
 ;;       a + b
 ;;   }
+;;
 ;;   fn add1(x) {
 ;;       x + 1
 ;;   }
+;;
 ;;   fold([3, 1, 2].map(add1), 0, add)
 ;; ==== built: O0 O1 O2 O3 ====
 ; ModuleID = 'redextape'

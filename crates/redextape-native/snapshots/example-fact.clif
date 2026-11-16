@@ -7,6 +7,7 @@
 ;;           n * fact(n - 1)
 ;;       }
 ;;   }
+;;
 ;;   fact(4)
 ;; ==== built ====
 function u0:11(i64) -> i64 system_v {
