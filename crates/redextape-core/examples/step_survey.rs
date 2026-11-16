@@ -309,7 +309,7 @@ const SUPPLEMENTARY_PROBES: &[(&str, &str, &str, &str)] = &[
 
 fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
-    println!(" Redextape — the step survey");
+    println!(" redextape — the step survey");
     println!(" where TM steps go (Part A), and what each candidate optimizer pass");
     println!(" could recover (Part B). Evidence for choosing which pass to write next.");
     println!("════════════════════════════════════════════════════════════════════");

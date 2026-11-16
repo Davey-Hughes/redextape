@@ -1,13 +1,18 @@
 # tree-sitter-redextape-tm
 
-A tree-sitter grammar for the **Redextape TM text form** — the flat, line-oriented, human-readable
+A tree-sitter grammar for the **redextape TM text form** — the flat, line-oriented, human-readable
 language a `Machine` prints to and `parse_tm` reads back. One of four grammars in this repository,
 alongside `tree-sitter-redextape` (the mini-language), `tree-sitter-redextape-lambda` (the λ form), and
 `tree-sitter-redextape-rxm` (the rxm form).
 
-**It is for highlighting in external editors and it is not authoritative.** The hand-written parser in
+**It is for highlighting and it is not authoritative.** The hand-written parser in
 `redextape_core::tm::syntax` is the semantic source of truth and owns the canonical printer. This
 grammar produces a CST and never lowers it into anything.
+
+It colours two kinds of editor. `web/src/colour.ts` loads its committed
+`tree-sitter-redextape-tm.wasm` and `queries/highlights.scm` through `web-tree-sitter`, and the
+editor in the web app's TM view, where a TM copy is edited, is coloured from them. External editors
+take it as *Installing it in an editor* describes.
 
 ## The form, in one page
 
@@ -29,10 +34,12 @@ before doing anything else.
 
 Four things about it shaped this grammar:
 
-**1. State names are extremely permissive.** The rule is "no whitespace or reserved `; * : [ ]`", so
-`wl1s2.s.sk0` and `add4.a.c.cwb` are single names — dots and digits are ordinary characters anywhere.
-Nothing like λ's `[_$A-Za-z][_$A-Za-z0-9]*` or the mini-language's identifier rule applies. A grammar
-that reused either would reject most of every machine this compiler emits.
+**1. State names are extremely permissive.** The rule for a name that round-trips is "no whitespace
+or reserved `; * : [ ]`" (`syntax.rs`'s module doc), so `wl1s2.s.sk0` and `add4.a.c.cwb` are single
+names — dots and digits are ordinary characters anywhere. That rule is the printer's, and this
+grammar's `identifier` follows it; `parse_tm_full` is looser still, as the accept-less divergences
+below show. Nothing like λ's `[_$A-Za-z][_$A-Za-z0-9]*` or the mini-language's identifier rule
+applies. A grammar that reused either would reject most of every machine this compiler emits.
 
 **2. There is really only one bare-word lexical class.** A state name, an encoding name (`unary`), a
 result type (`List<Nat>`) and a packed tape run (`#0000#0000#`) all fall inside it. They are one
@@ -53,7 +60,8 @@ and the header `Option` is the only difference between the entry points:
 | `print_tm_mapped` | `None` | 7 — `Keyword`, `Label`, `Move`, `Nat`, `Punct`, `StateName`, `TapeSymbol` |
 | `print_tm_with_mapped` | `Some(h)` | 9 — those, plus `Comment` and `Ident` |
 
-Measured on `1 + 2` lowered at `Unary::at(8)`: 3,163 spans header-less, 3,177 headered.
+Measured on `1 + 2`: 3,163 spans header-less, as `tm::printed_machine` lowers it at `Unary::at(8)`,
+and 3,177 headered, as `run_tm_described` prints it under its own `width 4` header.
 
 **A reduced header's `fold` needs a token `identifier` cannot swallow.** `identifier` is
 `[^\s;*:\[\]]+` — it admits `,` and stops only at whitespace, so a stage name survives exactly when
@@ -73,12 +81,11 @@ and `/fold\r?/` stays out because it matches a string `identifier` cannot, so `w
 it. A regex token is extracted under a generated `aux_sym_*` name, so `/fold/` reads as absent to a
 grep for `anon_sym_fold`. Being all letters neither causes nor prevents extraction — this grammar's
 keyword lexer holds `head_move`, which is `/[LRS]/`, and omits the all-letter `version`, `encoding`
-and `result`, all three of which this same grammar's keyword lexer on `main` holds. The cost is that
-this grammar admits a stage name
-ending in `\r` MID-line, which `parse_tm_full` refuses: that parser strips a `\r` only from a line's
-end, so `reduced fold\r, single-tape 5` reaches `parse_stages` as the item `fold\r` and is a
-diagnostic. It is one of the five accept-more divergences `grammar.js`'s module doc lists, and like the
-others it is unreachable from printed output.
+and `result`. The cost is that this grammar admits a stage name ending in `\r` MID-line, which
+`parse_tm_full` refuses: that parser strips a `\r` only from a line's end, so
+`reduced fold\r, single-tape 5` reaches `parse_stages` as the item `fold\r` and is a diagnostic. It
+is one of the five accept-more divergences `grammar.js`'s module doc lists, and like the others it is
+unreachable from printed output.
 
 ## What it is NOT, and may never become
 
@@ -87,11 +94,14 @@ others it is unreachable from printed output.
 - **No `locals.scm`.** A state name resolves against the machine's own state table, which
   `parse_tm_full` already does and `Machine::validate()` already checks. A query-language
   reimplementation would be a semantic claim inside a lane defined as cosmetic.
-- **No indents.** `print_tm_inner` indents rule lines by exactly two spaces and nothing else, and
-  there is no `redextape fmt` for this form, so an `indent` setting would be an opinion with nothing
-  in the Rust tree to check it against.
-- **No injections, no folds, no editor-extension packaging, and nothing in `web/`** — the TM pane
-  there draws over the printer's own spans and has no use for a CST.
+- **No indents.** The tree-sitter grammars design
+  (`docs/superpowers/specs/2026-08-20-tree-sitter-grammars-design.md` §12) left indents and folds
+  out because nothing in the Rust tree had an opinion about either to check one against. That
+  reason does not hold for this form: `redextape fmt` formats `.tm` files by reading them with
+  `parse_tm_full` and writing them back through `print_tm_doc`, which shares `print_tm_inner` and
+  indents each rule line by exactly two spaces and nothing else. No indent query has been written
+  against that layout; §12 calls indents addable later if an editor user asks.
+- **No injections and no folds.**
 
 ## How it is checked
 
@@ -115,24 +125,34 @@ other file carries:
 | corpus | printer | how it is built | size |
 |---|---|---|---|
 | generated | `print_tm_mapped` | `parse` → `desugar` → `lower_rxm` → `lower_tm` | 32 proptest cases |
-| headered | `print_tm_with_mapped` | `parse` → `result_type` → `desugar` → `run_tm_described` | 5 fixed programs |
+| headered | `print_tm_with_mapped` | `parse` → `result_type` → `desugar` → `run_tm_described` | 5 fixed (program, encoding) pairs over 4 programs |
 | reduced | `print_tm_with_mapped` | the headered path, then `reduce` | 4 fixed reductions of `3 - 5` |
 
 **The reduced row reuses the headered printer** and is there for the text only a reduced header
 carries: a `reduced` line's stage names, its tape counts, its commas and its symbols. One of the four
 reductions lists two stages, so a comma is compared too.
 
-**32 is a measurement, not a default.** A printed TM machine averages 18,905 bytes and 6,865 spans
-against λ's 912 and 637, so proptest's default 256 would have this leg parsing ~4.8 MB and comparing
-~2.0M spans every run. At 32 it compares 282,006 spans in 0.74 s — already 1.7× what λ's 256-case leg
-compares.
+**32 is a measurement, not a default.** A printed TM machine is large, and the leg prints its span
+total on every run (`tm generated leg: … spans compared`, shown with `--no-capture`). The total
+moves with the seed. Proptest's default of 256 cases would compare eight times as many on every run.
 
-**The headered leg simulates, and that is bounded on purpose.** `run_tm_described` is the production
-header path (`examples/tm_emit.rs` and `examples/regen_fixtures.rs` both call it, and the two
-checked-in `.tm` fixtures are its output), so its header is one the rest of the project already agrees
+**The headered leg simulates, and that is bounded on purpose.** `run_tm_described` is the
+production header path (`crates/redextape-core/examples/tm_emit.rs` and `examples/regen_fixtures.rs`
+both call it, and the two fixtures `regen_fixtures.rs` writes, `tests/fixtures/list_1_2.tm` and
+`list_1_2_binary.tm`, are its output), so its header is one the rest of the project already agrees
 is correct. It is held to `TM_DEFAULT_CAPS`, a fixed hand-chosen program list, and small programs
-only — `examples/state_cost_probe.rs` records the same function building an 8.6-million-state machine
-costing 6.0 GB on an unlucky input.
+only. `MAX_MACHINE_STATES` in `tm/build.rs` caps the states a lowering builds at 1,000,000;
+`docs/superpowers/notes/2026-10-17-code-history-probes.md` (under `state_cost_probe.rs`) records
+what an uncapped lowering cost.
+
+**A browser leg checks the artefact `web/` loads.** This crate compiles `parser.c` through `cc` and
+has no wasm build, so the two sides meet in a file: `tests/golden.rs` prints one headered fixture,
+the program `1` lowered in unary through `printed_machine_with_header`, holds it to the printer's
+classification, and holds `grammars/capture-golden.json` equal to the captures this crate computes
+for it. `web/tests/browser/grammar-differential.test.ts` loads the committed
+`tree-sitter-redextape-tm.wasm` under `web-tree-sitter`, collapses its captures with the app's own
+`colourSpans`, and compares them with that file. Of the legs here, it is the only one that loads the
+`.wasm`.
 
 ### What the differential does NOT reach
 
@@ -150,10 +170,16 @@ parses under both descriptions, not that any capture agrees with a classificatio
 Closing these properly means a `classify_tm` over *authored* text, which is LSP-shaped work and
 deferred.
 
-### Five accept-more divergences, stated
+### Divergences from `parse_tm_full`, stated
 
-This grammar accepts input `parse_tm_full` rejects, in five places, all deliberate and all the right
-direction for an editor — where a half-typed buffer is not an error worth underlining:
+The inputs below were each run through both `parse_tm_full` and this grammar on 2026-11-15. They are
+the divergences a probe found, not a proof that there are no others. The differential sees none of
+them: `compare_classified` fails on any `ERROR` or `MISSING` node, so no corpus that passes holds
+an accept-less spelling, and the accept-more ones are text the printer does not write.
+
+**Accept-more: this grammar parses clean text `parse_tm_full` rejects.** Five are deliberate, the
+five `grammar.js`'s module doc lists, and all are the right direction for an editor — where a
+half-typed buffer is not an error worth underlining:
 
 1. **One construct per line is not enforced.** The authority splits on `\n` and dispatches on the
    leading token; here the newline is in `extras`.
@@ -165,15 +191,40 @@ direction for an editor — where a half-typed buffer is not an error worth unde
    properties, and a CST is the wrong place to check them.
 4. **A `reduced` line's stages need not be strictly ascending**, which `header.rs`'s `is_stage_list`
    demands. `reduced fold, fold, fold` and `reduced single-tape 5, fold` both parse here and are
-   diagnostics there. The one arrangement that `ERROR`s here is a `two-symbol` followed by a comma,
-   whose `symbols` is one `identifier` and swallows it — an accident of the token, not a check.
+   diagnostics there.
 5. **A stage name may end in a `\r` mid-line**, because `fold` is `/fold\r?/`. The authority strips a
    `\r` only from a line's end, so `reduced fold\r, single-tape 5` reaches `parse_stages` as the item
    `fold\r`, matches no stage name, and is a diagnostic.
 
-None of the five is reachable from printed output, so none can reach the differential. The opposite
-divergence — a rule *rejecting* input the real parser accepts — is what PR 1 of this slice recorded as
-a defect, and nothing here does that.
+The others are checks the authority makes on a directive's value or across the file, which this
+grammar's rules do not make:
+
+- a tape count outside `1..=64`, `tapes 0` or `tapes 65`: `` expected `tapes <1..=64>` ``.
+- `version 7`: `` unsupported header version `7` (this build reads versions 1 and 2) ``.
+- an encoding name other than `unary` or `binary`, such as `encoding banana`.
+- a `result` type that is not a value type, such as `result Banana`.
+- a directive given twice, such as a second `width`: `` duplicate `width` directive ``.
+- a `goto` that names no state: `` unknown goto target `nowhere` ``.
+
+**Accept-less: this grammar ERRORs on text `parse_tm_full` accepts with no diagnostic.** In each,
+the authority reads more loosely than the printed form. They run against an editor's interest,
+since a file the authority reads shows an `ERROR`, and `grammar.js`'s module doc calls this
+direction a defect:
+
+- a state name with a space or a `*` in it: `state foo bar: accept` with `start foo bar`, or
+  `state a*b: accept` with `start a*b`. The authority takes a state's name as the trimmed text
+  before its `:`, and `start`'s as the rest of the line; this grammar's `identifier` stops at
+  whitespace and at `; * : [ ]`.
+- spaces inside a type, `result List< Nat >`. `ty::parse_ty` trims inside each `List<…>`.
+- whitespace other than space, tab, CR and LF, such as a form feed before a line or a no-break space
+  after `tapes 1`, `state a:` or `state b: accept`. The authority trims with `str::trim_start` and
+  `str::trim`, which take any Unicode whitespace; this grammar's `extras` are those four characters
+  only. After a line that ends in an `identifier`, such as `start a` or `goto b`, a no-break space
+  parses clean, because the `identifier` token takes it in.
+- a comma after a `two-symbol` stage's symbols, `reduced two-symbol _#, fold`. `two-symbol` is
+  always the last stage, so the authority reads the rest of the line, `_#, fold`, as its symbols.
+  Here `symbols` is one `identifier`, which takes `_#,` and stops at the space, so what follows is
+  an `ERROR` — an accident of the token, not a check.
 
 Two shapes are deliberately **not** accepted, for the same reason in reverse: `<state 7>`
 (`write_state_name`'s fallback for an out-of-range `next`, which `Machine::validate()` rejects) and
@@ -194,9 +245,10 @@ deliberately: 0.26+ Linux binaries need glibc 2.39 and CI's runner has 2.35, so 
 there at all. `scripts/check-all.sh`'s `grammar` leg regenerates every directory under `grammars/` and
 fails on any diff, so a stale committed `parser.c` is caught rather than trusted.
 
-`tree-sitter.json` is required. Without it the CLI warns and silently generates **ABI 14**, which the
-Rust crate refuses to load — `abi_version_is_pinned` in `src/tm.rs` is what turns that into a message
-naming the real cause.
+`tree-sitter.json` is required. Without it the CLI warns and silently generates **ABI 14**. The
+`tree-sitter` Rust crate would load that parser without complaint — `Cargo.lock` pins it at 0.27.1,
+which accepts ABI 13 to 15 — so the unit test `tm::tests::abi_version_is_pinned` in `src/tm.rs`
+asserts 15, and the drift fails by name.
 
 ## Installing it in an editor
 
@@ -236,13 +288,13 @@ an editor has something to fetch. If you have a key on the instance,
 `ssh://git@git.daveynet.xyz/davey/redextape.git` is the same tree and works too.
 <!-- END shared: mirror-preamble -->
 
-### `.tm` collides with TeXmacs
+### `.tm` collides with Tcl
 
 `tree-sitter.json` claims the `tm` extension, because that is what this project's architecture doc and
-`examples/tm_emit.rs` call these files. TeXmacs also uses `.tm`, and several editors ship a mapping
-for it. **If your editor already knows `.tm`, you have to say which wins** — with
-`vim.filetype.add` in Neovim, `file-types` in Helix, or `path_suffixes` in Zed, all shown below. There
-is no way for this grammar to resolve that for you.
+`crates/redextape-core/examples/tm_emit.rs` call these files. Stock Neovim already maps `.tm` to
+`tcl`; Helix ships no mapping for it. **If your editor already knows `.tm`, you have to say which
+wins** — with `vim.filetype.add` in Neovim, `file-types` in Helix, or `path_suffixes` in Zed, all
+shown below. There is no way for this grammar to resolve that for you.
 
 ### The name is `redextape_tm`
 
@@ -279,11 +331,16 @@ loads that plugin:
 
 That registers all four grammars, claims the four extensions, **and starts the highlighter** — which
 is a separate thing that nothing else does. Neovim auto-starts treesitter only for its own bundled
-filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
-filetype set and the buffer still open with no colour at all.
+filetypes, and nvim-treesitter's `main` branch ships no `FileType` autocmd, so a parser can be
+installed and a filetype set and the buffer still open with no colour at all.
+
+It also starts the language server when it finds a `redextape-lsp` binary, in the checkout's
+`target/release/` or on `PATH`. When it finds neither, it shows a warning at every startup naming
+the commands that build one. Highlighting works either way.
 
 `.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
-buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+buffer**, because Neovim already maps it to `tcl`: a `.tm` file becomes `redextape_tm` when its text
+looks like a TM machine or its path has a directory named `redextape`, and otherwise keeps the
 filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
@@ -300,10 +357,11 @@ four extensions claimed with nothing to parse them. **If you are on `master`, sk
 use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
-driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
-which is simpler and takes every such file on your machine away from `tcl`, and they do not start
-the highlighter. If you want colour you need a `FileType` autocmd calling
+driven by hand. It is close to what `plugin/redextape.lua` does but not the same, and the
+differences worth knowing before you copy it are these: no block starts the highlighter or the
+language server, the `master` blocks use filetype names of their own, and the TM grammar's blocks
+claim `.tm` **unconditionally by extension**, which is simpler and takes every such file on your
+machine away from `tcl`. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -312,10 +370,10 @@ archive to expand to a directory named `<repo>-<revision>`. GitHub's archive end
 shape exactly — including stripping a leading `v` from a tag — which is why the snippets below work.
 It also means each of the four grammars downloads the whole repository separately.
 
-nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
-current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one you
-have installed — the `install_info` field sets are different, and fields from one are silently ignored by
-the other.
+nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is
+the current rewrite and needs Neovim 0.12+; `master` is frozen and supports Neovim 0.10 and 0.11.
+Pick the one you have installed — the `install_info` field sets are different, and fields from one
+are silently ignored by the other.
 <!-- END shared: neovim-intro -->
 
 **`main` branch:**
@@ -345,7 +403,7 @@ to the clone directory while `location` is applied separately to the compile dir
 `queries = "queries"` points at a `queries/` that does not exist at this repository's root, and the
 failure is silent: highlights simply do not get installed.
 
-That `vim.filetype.add` line is also what takes `.tm` from TeXmacs, if you have a plugin claiming it.
+That `vim.filetype.add` line is also what takes `.tm` from `tcl`, stock Neovim's mapping for it.
 
 **`master` branch:**
 
@@ -356,12 +414,17 @@ parser_config.redextape_tm = {
     url = "https://github.com/Davey-Hughes/redextape",
     files = { "src/parser.c" },
     location = "grammars/tree-sitter-redextape-tm",
+    branch = "main",
   },
   filetype = "tm",
 }
 
 vim.filetype.add({ extension = { tm = "tm" } })
 ```
+
+**`branch = "main"` is required.** Without it `master` asks GitHub for `archive/master.tar.gz`,
+which GitHub redirects to `main`, and the install then fails because the archive has no
+`redextape-master` directory to move.
 
 `master` has no `queries` field and `:TSInstall` does not copy query files, so copy
 `queries/highlights.scm` to `queries/redextape_tm/highlights.scm` somewhere on your `runtimepath`
@@ -370,18 +433,23 @@ yourself.
 <!-- BEGIN shared: filetype-autocmd -->
 **One more step the snippets above do not include.** Installing a parser does not turn highlighting
 on. Neovim auto-starts treesitter only for its own bundled filetypes — lua, markdown, help, query —
-and nvim-treesitter ships no `FileType` autocmd of its own, so without something like this the buffer
-opens with the right filetype, a working parser, and no colour:
+and nvim-treesitter's `main` branch ships no `FileType` autocmd of its own, so without something
+like this the buffer opens with the right filetype, a working parser, and no colour. (`master` has
+one, in its `highlight` module, which runs only once you enable that module.) The pattern names the
+filetypes of both branches' blocks:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
+  pattern = {
+    "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm", -- the `main` blocks
+    "rxt", "rxm", "rxlambda", "tm", -- the `master` blocks
+  },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```
 
-This was measured rather than assumed, and it was measured only after a review pointed out that every
-earlier check had supplied this autocmd itself and was therefore testing the harness.
+This was measured rather than assumed, by a check that does not supply this autocmd itself: a check
+that does is testing the harness.
 <!-- END shared: filetype-autocmd -->
 
 ### Helix
@@ -408,7 +476,8 @@ hx --grammar fetch && hx --grammar build
 
 `grammar` is omitted from `[[language]]` on purpose — it defaults to `name`, and both are
 `redextape_tm`. `comment-tokens` is the modern key; older Helix called it `comment-token`, singular.
-No `indent` here, for the reason given under *What it is NOT*.
+No `indent` here. `redextape fmt` indents each rule line by two spaces (see *What it is NOT*), so
+add `indent = { tab-width = 2, unit = "  " }` if you want Helix to agree with it.
 
 Helix looks for queries in its runtime directory, so copy `queries/highlights.scm` to
 `~/.config/helix/runtime/queries/redextape_tm/highlights.scm`. `hx --health redextape_tm` reports
@@ -431,8 +500,9 @@ pub struct GrammarManifestEntry {
 ```
 
 `extension_builder.rs` clones the repository and joins `path` before looking for `src/parser.c`. Two
-shipped extensions rely on it; `zed-extensions/ocaml` uses two `path` values from one repository,
-which is exactly the shape this repository is in — now with **four** grammars in one clone.
+shipped extensions rely on it: `zed-extensions/php` uses `path = "php"`, and `zed-extensions/ocaml`
+uses two `path` values from one repository, which is exactly the shape this repository is in:
+**four** grammars in one clone.
 
 ```
 redextape-tm-zed/
@@ -447,8 +517,8 @@ redextape-tm-zed/
 
 ```toml
 id = "redextape-tm"
-name = "Redextape TM"
-description = "Redextape TM text form support."
+name = "redextape TM"
+description = "redextape TM text form support."
 version = "0.1.0"
 schema_version = 1
 authors = ["davey"]
@@ -463,7 +533,7 @@ path = "grammars/tree-sitter-redextape-tm"
 `languages/redextape_tm/config.toml`:
 
 ```toml
-name = "Redextape TM"
+name = "redextape TM"
 grammar = "redextape_tm"
 path_suffixes = ["tm"]
 line_comments = [";"]
@@ -473,9 +543,10 @@ Install it with `zed: install dev extension` from the command palette, pointed a
 
 Three things worth knowing before taking the Zed route:
 
-- **`commit` is an alias for `rev`, and it must be a full 40-character SHA.** Zed fetches it with
-  `git fetch --depth 1 origin <rev>`, which needs the server to serve an unadvertised object by SHA.
-  If your host refuses, give a branch or tag name instead.
+- **`commit` is an alias for `rev`, which takes a full 40-character commit SHA or a branch name,
+  not a tag.** Zed runs `git fetch --depth 1 origin <rev>` and then `git checkout <rev>`; fetching a
+  tag by name stores no tag ref, so the checkout fails. Fetching by SHA needs the server to serve an
+  unadvertised object. If your host refuses, give a branch name.
 - **The queries live in the extension, not in the grammar.** Zed reads
   `languages/redextape_tm/highlights.scm` from the *extension* repository, so this grammar's copy has
   to be duplicated across and will drift unless someone keeps it in step. Nothing in this
@@ -526,9 +597,9 @@ nesting is what the authority already means, and it gives an editor something to
 state carries no rules — `print_tm` drops them and `Machine::validate()` rejects any that survive — so
 the choice between `accept` and a rule list is exclusive here too.
 
-**Every field name is load-bearing**, so renaming one means editing `queries/highlights.scm` and
-rerunning the differential: `state` `name:`, `start`/`rule` `target:`, `encoding` `name:`, `result`
-`type:`, `tape` `index:`/`cells:`, `two_symbol` `symbols:`, and `rule` `read:`/`write:`/`move:`.
-Unlike the mini-language
-grammar, which defines several fields no query reads, there are no spare fields here — telling one
-bare-word token apart by position is the whole mechanism.
+**The fields the queries read are load-bearing**, so renaming one means editing
+`queries/highlights.scm` and rerunning the differential: `state` `name:`, `start`/`rule` `target:`,
+`encoding` `name:`, `result` `type:`, `tape` `cells:` and `two_symbol` `symbols:`. Telling one
+bare-word token apart by its field is the whole mechanism for those. Four more are spare, as in the
+mini-language grammar: `tape`'s `index:` and `rule`'s `read:`, `write:` and `move:` are defined in
+`grammar.js` and read by no query.

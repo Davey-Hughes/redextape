@@ -15,6 +15,7 @@
 //! One bad input does not stop the others, the same reason `fmt` gives for the same shape: a
 //! repo-wide invocation that aborts on the first unreadable file is useless.
 
+use crate::form::Form;
 use crate::input::Input;
 use crate::report::render;
 use redextape_core::{Diagnostic, Severity};
@@ -32,7 +33,7 @@ pub enum Outcome {
     Warned,
     /// At least one error-severity diagnostic.
     Errored,
-    /// At least one input could not be read.
+    /// At least one input could not be read, or was compiled output rather than source.
     Failed,
 }
 
@@ -54,6 +55,20 @@ pub fn run(
     let mut worst = Outcome::Clean;
     for input in inputs {
         let label = input.label();
+        // Before the read, for the reason `emit` gives: a machine or a λ term read as `.rxt` fails
+        // as a broken program at exit 1, which blames the program for what is the input's kind.
+        if let Input::Path(p) = input
+            && let Some(noun) = Form::compiled_noun(p)
+        {
+            writeln!(
+                err,
+                "error: `{label}` is {noun}, which `lint` does not check\n  \
+                 `lint` checks `.rxt` source, and this file is compiled output\n  \
+                 lint the `.rxt` program it was compiled from instead"
+            )?;
+            worst = worst.max(Outcome::Failed);
+            continue;
+        }
         let src = match input.read() {
             Ok(s) => s,
             Err(e) => {
@@ -241,5 +256,45 @@ mod tests {
             "THE FILE AFTER THE FAILING ONE MUST STILL BE CHECKED, not skipped: {text}"
         );
         assert_eq!(out, [] as [u8; 0]);
+    }
+
+    /// **COMPILED OUTPUT IS REFUSED FOR WHAT IT IS, IN EITHER CASE.** Read as `.rxt`, each of these
+    /// files raises parse errors at exit 1, which blames a valid file on the program. Each is followed
+    /// by a `.rxt` file whose own warning must still come out, so a refusal does not end the run; a
+    /// missing `.tm` gets the same refusal, which is what shows the check comes before the read.
+    #[test]
+    fn a_compiled_file_is_refused_before_it_is_parsed() {
+        let tm = "tapes 1\nstart q0\n\nstate q0:\n  [a] -> write [b], move [R], goto q1\nstate q1: accept\n";
+        let rxm = "result Nat\n    li\trr, #7\n    halt\n";
+        let lambda = "(λm. λn. λf. λx. m f (n f x)) (λf. λx. f x) (λf. λx. f (f x))\n";
+        let d = tmpdir("compiled");
+        let good = d.join("good.rxt");
+        std::fs::write(&good, "let mut y = 1;\ny + 1").unwrap();
+        let cases = [
+            ("m.tm", Some(tm), "a Turing machine"),
+            ("M.TM", Some(tm), "a Turing machine"),
+            ("r.rxm", Some(rxm), "a register-machine program"),
+            ("R.RXM", Some(rxm), "a register-machine program"),
+            ("q.rxlambda", Some(lambda), "a λ term"),
+            ("Q.RxLambda", Some(lambda), "a λ term"),
+            ("nope.tm", None, "a Turing machine"),
+        ];
+        for (filename, src, noun) in cases {
+            let p = d.join(filename);
+            if let Some(src) = src {
+                std::fs::write(&p, src).unwrap();
+            }
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let got = run(&[Input::from_arg(&p), Input::from_arg(&good)], &mut out, &mut err, false).unwrap();
+            let text = String::from_utf8(err).unwrap();
+            assert!(text.contains(&format!("is {noun}, which `lint` does not check")), "{filename}: {text}");
+            assert!(!text.contains("Error"), "{filename} was parsed as a program: {text}");
+            assert!(
+                text.contains("does not need to be mutable"),
+                "{filename}: the next file must still be checked: {text}"
+            );
+            assert!(matches!(got, Outcome::Failed), "{filename}: the tool cannot answer, exit 2: {got:?}");
+            assert_eq!(out, [] as [u8; 0]);
+        }
     }
 }

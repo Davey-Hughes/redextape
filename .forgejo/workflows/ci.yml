@@ -1,4 +1,4 @@
-# Forgejo Actions CI for Redextape (self-hosted runner on git.daveynet.xyz).
+# Forgejo Actions CI for redextape (self-hosted runner on git.daveynet.xyz).
 # Adapted from the ws-sim setup for a Rust -> WASM static site + CLI (no server process).
 #
 # The `detect` job checks what exists and gates the rest: the Rust jobs run when there is a

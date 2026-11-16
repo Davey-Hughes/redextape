@@ -1,0 +1,3 @@
+error: `p.rxlambda` is a λ term, which `run` does not take
+  a bare λ term carries no result type, and the λ backend decodes its result by type, so there is nothing to decode it against
+  run the program it was emitted from with `--backend lambda` instead

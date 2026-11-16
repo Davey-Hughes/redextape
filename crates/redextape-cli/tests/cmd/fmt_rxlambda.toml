@@ -1,0 +1,4 @@
+bin.name = "redextape"
+args = ["fmt", "p.rxlambda"]
+fs.sandbox = true
+status.code = 2

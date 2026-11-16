@@ -1,4 +1,4 @@
-# Redextape — a static browser app served by nginx. Bring it up with:  docker compose up -d
+# redextape — a static browser app served by nginx. Bring it up with:  docker compose up -d
 # Then open http://<host>:8085 . Front it with your reverse proxy / Cloudflare Tunnel for HTTPS.
 #
 # To build from this repo instead of pulling the published image, replace the `image:` line with:

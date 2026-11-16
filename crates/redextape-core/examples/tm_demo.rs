@@ -30,7 +30,7 @@ mod allocator;
 #[allow(clippy::print_literal)]
 fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
-    println!(" Redextape — Turing-machine backend demo");
+    println!(" redextape — Turing-machine backend demo");
     println!(" mini-language  →  rxm  →  multi-tape TM  →  simulate  →  decode,");
     println!(" checked against the reference interpreter AND the λ normal form");
     println!(" (the three-way oracle:  reference == λ == TM).");

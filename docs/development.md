@@ -3,22 +3,24 @@
 ## Development & CI
 
 - **Forgejo Actions** (`.forgejo/workflows/ci.yml`) — a `detect` job gates each build job on what
-  exists in the tree. **Live:** `linear-history` (unconditional), `rust` (fmt, clippy,
-  `scripts/check-all.sh --no-llvm`, then `cargo llvm-cov nextest` against a 90% line floor),
-  `rust-llvm` (installs LLVM 23, runs `scripts/check-all.sh --llvm-only`, then an informational
-  optimization report), `rust-slow` (the exhaustive sweeps), `rust-scoped` (the cheap path for a
-  change that touches one crate), `rust-browser` (the wasm boundary under headless Chrome), `gate`
-  (the required check — it fails loudly rather than letting a skipped tier pass quietly), and — now
-  that `web/package.json` has landed — `web` (biome, typecheck, both Vitest projects under a
-  coverage gate, build) and the `docker` build-and-push to `forge.daveynet.xyz`. **Every push to
-  `main` now builds and pushes an image**; there is no way to land `web/` changes without arming
-  that job. The same build runs every Sunday and on a manual dispatch, because nothing else rebuilds
+  exists in the tree. **Live:** `linear-history` (unconditional), `rust`
+  (`scripts/check-all.sh --no-llvm --no-browser`, whose legs include fmt and clippy, then `cargo
+  llvm-cov nextest` against a 90% line floor), `rust-llvm` (installs LLVM 23, runs
+  `scripts/check-all.sh --llvm-only`, then an informational optimization report), `rust-slow` (the
+  slow tier), `rust-scoped` (a draft PR's cheap path in place of the full jobs, scoped to the
+  branch's whole diff against `main`), `rust-browser` (the wasm boundary under headless Chrome),
+  `gate` (the required check — it fails loudly rather than letting a skipped tier pass quietly),
+  `web` (biome, typecheck, both Vitest projects under a coverage gate, build) and the `docker`
+  build-and-push to `forge.daveynet.xyz`. **Every push to `main` that
+  changes anything outside `docs/` builds and pushes an image** once the jobs it needs pass; a
+  docs-only push starts no run at all. There is no way to land `web/` changes without arming that
+  job. The same build runs every Sunday and on a manual dispatch, because nothing else rebuilds
   `:latest` without a merge: on `main` it re-pushes `:latest` and main's `sha-` tag; a dispatch on a
   branch publishes a new `sha-` tag for that unmerged commit, and one on a `v*` tag re-pushes that
   tag's `sha-` and version tags.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
   `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
-  stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
+  stage 1 builds `crates/redextape-wasm` and `crates/redextape-lsp-wasm`, stage 2 builds `web/`.
 - **Advisories** (`.forgejo/workflows/advisories.yml`) — `cargo deny check advisories` against
   `Cargo.lock`, configured by `deny.toml`, on pushes to `main`, a dispatch, Mondays 15:00 UTC, and PRs
   that touch `Cargo.lock`, a manifest or its config. A workflow of its own, outside `gate`, so a newly
@@ -26,23 +28,27 @@
   `ADVISORIES_MODE` switch for all of them at once.
 - **Toolchain** — `rust-toolchain.toml` (stable), `rustfmt.toml` (`max_width = 120`),
   `.pre-commit-config.yaml`. `scripts/setup-dev.sh` is the once-per-clone setup — it installs
-  cargo-nextest, the pre-commit hooks, and the git config the [conventions](conventions.md) depend on.
+  cargo-nextest, the wasm32 target, `wasm-pack`, the pinned tree-sitter CLI, the pre-commit hooks,
+  and the git config the [conventions](conventions.md) depend on.
 - **Web toolchain** — `web/` is a pnpm project (`packageManager: pnpm@11.20.0` in
-  `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root `pkg/`
-  directory it writes to (gitignored, imported from `web/src/` as `../pkg/redextape_wasm.js`) does not
-  exist — and `tsc` resolves that import against a `.d.ts` `wasm-pack` has not produced yet either. Run
-  once, in order, before anything else in `web/` works:
+  `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root
+  `pkg/` and `pkg-lsp/` directories it writes to (gitignored, imported from `web/src/` as
+  `../../pkg/redextape_wasm.js` and, by the LSP worker, `../../pkg-lsp/redextape_lsp_wasm.js`) do
+  not exist — and `tsc` resolves those imports against `.d.ts` files `wasm-pack` has not produced
+  yet either. Run once, in order, before anything else in `web/` works:
 
-      cd web && pnpm install && pnpm run build:wasm
+      cd web && pnpm install && pnpm run build:wasm && pnpm run build:lsp-wasm
 
   Only after that will `pnpm run dev`, `pnpm run typecheck`, or `pnpm test` succeed.
 
 ## Checks
 
 `scripts/check-all.sh` runs the full feature matrix — `cargo fmt` once, then clippy *and* tests for
-each of the four configurations: the default (`cranelift`), `--no-default-features`, `--features
-llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
-skip the LLVM configurations when no LLVM 23 toolchain is installed.
+each configuration in its leg table, among them the workspace at default features (`cranelift`),
+`redextape-native` at `--no-default-features`, `--features llvm` and `--no-default-features
+--features llvm`, plus wasm32 builds, the grammars and a browser leg; `scripts/check-all.sh --list`
+prints every leg. CI runs this same script. Pass `--no-llvm` to skip the LLVM configurations when no
+LLVM 23 toolchain is installed, and `--no-browser` to skip the browser leg.
 
 That gate covered **1,156 tests** at default features **when counted on 2026-08-24**
 (`redextape-core` 890, `redextape-cli` 78, `redextape-wasm` 67, `redextape-native` 66,
@@ -51,23 +57,15 @@ own) — 8 are skipped, so 1,148 run — and `--features llvm` takes `redextape-
 last measured.
 
 **These are dated observations rather than current facts, and the tense is deliberate.** Recovering
-them costs `cargo nextest list --workspace`, measured at **218 s warm** — roughly **800x** the
-figure gate's own ~270 ms (its self-test and scan), and roughly **38x** the ~5.7 s the six unscoped
-pre-commit hooks cost together — so no gate holds them and none can. **THAT COMPARISON READ "150x"
-AND "the ~1.5 s the three unscoped hooks" UNTIL `check-attributions` LANDED**, and it was already
-wrong before that: there were four unscoped hooks, not three, and re-measuring all of them in one
-minute gives 1,127 + 494 + 253 + 181 + 2,603 ms. It then read **47x** against "the ~4.7 s the five
-unscoped hooks" until `check-colours` made six, beside the **1,450x** against "~150 ms" it had carried
-since the figure gate landed; both were re-measured then, and the figure gate had grown too. A ratio between two figures goes stale
-when EITHER moves, which is twice the exposure of the figures it compares. The
-figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and lost three crates
-from the breakdown entirely. Recount rather than trust them.
+them costs `cargo nextest list --workspace`, which builds every test binary in the workspace, so no
+gate holds them. The figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and
+lost three crates from the breakdown entirely. Recount rather than trust them.
 
 **Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
 has **34** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
-`rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
-pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
-under the coverage gate. Recount with `pnpm test`. `pnpm test:firefox` runs the browser tier in
+`rust-browser` job. `web/` has tests of its own across two Vitest projects — Node for the pure
+modules, real Chromium for the worker and the app end to end — run by CI's `web` job under the
+coverage gate. Count them with `pnpm test`. `pnpm test:firefox` runs the browser tier in
 Playwright's Firefox (install it once with `pnpm exec playwright install firefox`), where each test
 that needs what only Chromium has is skipped with its reason. `pnpm test:firefox --reporter=verbose`
 prints every reason, where the default reporter leaves some out. `pnpm test:firefox` runs two
@@ -80,10 +78,10 @@ and with more tabs on a loaded machine its clicks come late enough to time cases
 `firefox` with a message naming the list: add it to `CAPTURE_FILES`. The run still has known
 failures, which later PRs fix, and nothing else runs it, CI included.
 
-All three numbers in the last two paragraphs were stale when measured on 2026-08-09, and the web one
-badly: it read **48** from PR 3c while the suite grew fivefold underneath it. That is what the
-recount instructions are for — a test count in prose has no mechanism keeping it honest, so treat
-every figure here as a claim with a date rather than a fact.
+This section gives no count of the web tests because one went badly stale: it read **48** from PR 3c
+while the suite grew fivefold underneath it. A test count in prose has no mechanism keeping it
+honest unless `scripts/check-doc-figures.sh` holds it, as it holds the 34 above, so treat every
+other figure here as a claim with a date rather than a fact.
 
 The test runner is [`cargo-nextest`](https://nexte.st), not `cargo test`: `cargo test` runs the test
 binaries one at a time and only shares threads within a binary, which on this suite left 12 cores
@@ -101,8 +99,9 @@ nine — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc
 `check-shared-docs`, `check-colours`, `check-grammar-wasm`, `check-licences` and `check-comments` — are
 unscoped and run on every commit whatever is staged: the first eight because they catch things that
 arrive in a path nobody thought to list, the ninth because it reads the whole branch rather than the
-staged set. The first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every
-marked region in a document to the single copy under `grammars/shared/`, the sixth scans tracked
+staged set. The first three walk `git ls-files`, the fourth reads the files its table names, the
+fifth holds every marked region in a document to the single copy under `grammars/shared/`, the
+sixth scans tracked
 `.css` and `.ts` files under `web/src/` for colour literals outside the palette, skipping
 `palettes.ts` itself and the marked fallback block in `style.css`, and the seventh hashes each
 grammar's `src/parser.c` and its `.wasm` against `grammars/wasm-manifest.json` — unscoped because the
@@ -131,7 +130,7 @@ went first, after one untimed warm-up of each), the unscoped six ran 5.867-5.955
 plus `check-grammar-wasm` ran 6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is
 the seventh hook's own cost and not run-to-run noise. Run `scripts/check-all.sh` before merging.
 
-`scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
-`#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI
+`scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps and other long-running tests
+marked `#[ignore = "slow tier: ..."]`, which `cargo test` skips by default and CI
 runs in its own job. The marker is deliberate: `cargo test` prints the ignored count, so a skipped
 sweep stays visible rather than looking like a passing one.

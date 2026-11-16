@@ -24,7 +24,7 @@ pub enum Outcome {
     Rewritten,
     /// `--check` only: at least one file would be rewritten.
     WouldChange,
-    /// At least one input could not be read, or did not parse.
+    /// At least one input could not be read, did not parse, or was a λ term.
     Failed,
 }
 
@@ -82,6 +82,22 @@ fn one(
     color: bool,
 ) -> std::io::Result<Outcome> {
     let label = input.label();
+    // Before the read, for the reason `emit` and `lint` give: read as `.rxt`, a λ term raises a lexer
+    // error for every `λ`, which blames the file's content for what is its kind. `.tm` and `.rxm`
+    // are not refused because `fmt` has a printer for each. Skipped under `--form`, which overrides
+    // the extension this judgement is made from.
+    if explicit_form.is_none()
+        && let Input::Path(p) = input
+        && Form::is_lambda_term(p)
+    {
+        writeln!(
+            err,
+            "error: `{label}` is a λ term, which `fmt` does not format\n  \
+             `fmt` formats `.rxt`, `.tm` and `.rxm` files, and has no printer for a λ term\n  \
+             format the `.rxt` program it was emitted from instead"
+        )?;
+        return Ok(Outcome::Failed);
+    }
     let src = match input.read() {
         Ok(s) => s,
         Err(e) => {
@@ -99,7 +115,7 @@ fn one(
     if explicit_width.is_some() && form.is_artifact() {
         let noun = match form {
             Form::Tm => "a `.tm` file, which the printer lays out from its own content",
-            Form::Rxm => "an `.rxm` file, which the printer lays out from its own content",
+            Form::Rxm => "a `.rxm` file, which the printer lays out from its own content",
             Form::Rxt => unreachable!("is_artifact() is false for Rxt"),
         };
         writeln!(err, "error: `--width` does not apply to {noun}")?;
@@ -690,5 +706,49 @@ mod tests {
         let (outcome, _, _) = run_fmt(&[Input::from_arg(&p)], false, 80);
         assert_eq!(outcome, Outcome::Rewritten);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), TM_OUT);
+    }
+
+    /// **A λ TERM IS REFUSED FOR WHAT IT IS, IN EITHER CASE AND UNDER `--check`.** Read as `.rxt`, a
+    /// λ term raises a lexer error for every `λ`, which blames a valid file on its content. A missing
+    /// `.rxlambda` gets the same refusal, which is what shows the check comes before the read, and
+    /// the `.rxt` file after each refused one must still be processed.
+    #[test]
+    fn a_lambda_term_is_refused_before_it_is_parsed() {
+        let term = "(λm. λn. λf. λx. m f (n f x)) (λf. λx. f x) (λf. λx. f (f x))\n";
+        let messy = "let   x=1;\nx+1";
+        let d = tmpdir("lambda");
+        let good = d.join("good.rxt");
+        for (filename, written, check) in [
+            ("q.rxlambda", true, false),
+            ("Q.RxLambda", true, false),
+            ("q.rxlambda", true, true),
+            ("nope.rxlambda", false, false),
+        ] {
+            let p = d.join(filename);
+            if written {
+                std::fs::write(&p, term).unwrap();
+            }
+            std::fs::write(&good, messy).unwrap();
+            let (got, _, err) = run_fmt(&[Input::from_arg(&p), Input::from_arg(&good)], check, MAX_WIDTH);
+            let text = String::from_utf8(err).unwrap();
+            let refusal = format!("error: `{}` is a λ term, which `fmt` does not format\n", p.display());
+            assert!(text.contains(&refusal), "{filename} check={check}: {text}");
+            assert!(!text.contains("Error"), "{filename} check={check} was lexed as a program: {text}");
+            assert_eq!(got, Outcome::Failed, "{filename} check={check}: the tool cannot answer, exit 2");
+            if written {
+                assert_eq!(std::fs::read_to_string(&p).unwrap(), term, "{filename}: refused means untouched");
+            }
+            let want = if check { messy.to_string() } else { redextape_core::format(messy).unwrap() };
+            assert_eq!(std::fs::read_to_string(&good).unwrap(), want, "{filename} check={check}: the next file");
+        }
+
+        // `--form` overrides the extension the refusal is judged from, as it does everywhere else.
+        let named = d.join("named.rxlambda");
+        std::fs::write(&named, messy).unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let got = run(&[Input::from_arg(&named)], false, None, Some(Form::Rxt), MAX_WIDTH, &mut out, &mut err, false)
+            .unwrap();
+        assert_eq!(got, Outcome::Rewritten, "stderr: {}", String::from_utf8_lossy(&err));
+        assert_eq!(std::fs::read_to_string(&named).unwrap(), redextape_core::format(messy).unwrap());
     }
 }

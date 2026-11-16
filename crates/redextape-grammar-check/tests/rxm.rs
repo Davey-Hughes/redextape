@@ -118,7 +118,7 @@ fn a_conflicting_query_is_rejected() {
 /// The headered leg — **the only corpus in this crate that reaches `Keyword` and `Ident` for rxm**,
 /// and the one that reaches every mnemonic. `FIXED_CORPUS` is fixed rather than generated because
 /// `arb_expr_over` is five arms over numeric leaves: it never produces a list operation, a call or
-/// a mutable capture, so it reaches nine of the twenty-four mnemonics and no more.
+/// a mutable capture, so it reaches eight of the twenty-four mnemonics and no more.
 #[test]
 fn the_rxm_grammar_agrees_with_the_headered_printer() {
     let mut keywords = 0;

@@ -1,0 +1,6 @@
+error: `p.rxm` is a register-machine program, which `lint` does not check
+  `lint` checks `.rxt` source, and this file is compiled output
+  lint the `.rxt` program it was compiled from instead
+error: `Q.RXLAMBDA` is a λ term, which `lint` does not check
+  `lint` checks `.rxt` source, and this file is compiled output
+  lint the `.rxt` program it was compiled from instead

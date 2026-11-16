@@ -10,11 +10,16 @@ loads that plugin:
 
 That registers all four grammars, claims the four extensions, **and starts the highlighter** — which
 is a separate thing that nothing else does. Neovim auto-starts treesitter only for its own bundled
-filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
-filetype set and the buffer still open with no colour at all.
+filetypes, and nvim-treesitter's `main` branch ships no `FileType` autocmd, so a parser can be
+installed and a filetype set and the buffer still open with no colour at all.
+
+It also starts the language server when it finds a `redextape-lsp` binary, in the checkout's
+`target/release/` or on `PATH`. When it finds neither, it shows a warning at every startup naming
+the commands that build one. Highlighting works either way.
 
 `.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
-buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+buffer**, because Neovim already maps it to `tcl`: a `.tm` file becomes `redextape_tm` when its text
+looks like a TM machine or its path has a directory named `redextape`, and otherwise keeps the
 filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
@@ -31,10 +36,11 @@ four extensions claimed with nothing to parse them. **If you are on `master`, sk
 use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
-driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
-which is simpler and takes every such file on your machine away from `tcl`, and they do not start
-the highlighter. If you want colour you need a `FileType` autocmd calling
+driven by hand. It is close to what `plugin/redextape.lua` does but not the same, and the
+differences worth knowing before you copy it are these: no block starts the highlighter or the
+language server, the `master` blocks use filetype names of their own, and the TM grammar's blocks
+claim `.tm` **unconditionally by extension**, which is simpler and takes every such file on your
+machine away from `tcl`. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -43,7 +49,7 @@ archive to expand to a directory named `<repo>-<revision>`. GitHub's archive end
 shape exactly — including stripping a leading `v` from a tag — which is why the snippets below work.
 It also means each of the four grammars downloads the whole repository separately.
 
-nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
-current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one you
-have installed — the `install_info` field sets are different, and fields from one are silently ignored by
-the other.
+nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is
+the current rewrite and needs Neovim 0.12+; `master` is frozen and supports Neovim 0.10 and 0.11.
+Pick the one you have installed — the `install_info` field sets are different, and fields from one
+are silently ignored by the other.

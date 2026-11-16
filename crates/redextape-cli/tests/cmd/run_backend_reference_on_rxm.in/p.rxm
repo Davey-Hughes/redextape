@@ -1,0 +1,4 @@
+result Nat
+
+    li	rr, #7
+    halt

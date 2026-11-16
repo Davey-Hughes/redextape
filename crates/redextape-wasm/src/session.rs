@@ -1772,6 +1772,12 @@ impl TmValueRun {
                 let name = self.cursor.machine().states.get(s as usize).map_or("?", |st| st.name.as_str());
                 Decoded::Fault { message: format!("halted in `{name}`, which is not an accept state") }
             }
+            tm::RunFailure::Overflow => Decoded::Fault {
+                message: format!(
+                    "a value outgrew the {}-cell tape field its header records; this is the encoding's limit",
+                    self.header.width
+                ),
+            },
             tm::RunFailure::Decode(tm::DecodeFailure::Mismatch) => Decoded::Undecodable,
             tm::RunFailure::Decode(tm::DecodeFailure::BudgetExhausted) => Decoded::Fault {
                 message: "ran out of decode budget; the value may be fine, and this is the tool's limit".to_owned(),
@@ -3838,6 +3844,21 @@ state halt: accept
                     reduced single-tape 5\nsteps 1\n\nstate stuck:\n";
         let (_end, got) = run_out(&mut tm_scratch(text).value.expect("header"));
         assert_eq!(got, Decoded::Fault { message: "halted in `stuck`, which is not an accept state".into() });
+    }
+
+    /// A lowered file built at a width too narrow for its value halts in `overflow`, and its truncated
+    /// tapes are a `Fault` rather than the value they would decode to.
+    #[test]
+    fn a_lowered_run_that_overflows_its_field_is_a_fault() {
+        let program = parser::parse("40 + 2").0.expect("the fixture parses");
+        let core = redextape_core::desugar::desugar(&program);
+        let nat = redextape_core::ty::Ty::Nat;
+        let d = tm::run_tm_described_at(&core, EncodingKind::Unary, nat, tm::TM_DEFAULT_CAPS, tm::MIN_FIELD_WIDTH)
+            .expect("the fixture lays out");
+        assert!(matches!(d.run, tm::TmRun::Overflow), "the premise: {:?}", d.run);
+        let (_end, got) = run_out(&mut tm_scratch(&tm::print_tm_with(&d.machine, &d.header)).value.expect("header"));
+        let message = "a value outgrew the 4-cell tape field its header records; this is the encoding's limit";
+        assert_eq!(got, Decoded::Fault { message: message.into() });
     }
 
     /// A decode that runs out of budget is a `Fault`, the tool's limit, where tapes that do not decode are

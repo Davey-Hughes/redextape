@@ -48,37 +48,46 @@ legitimate is being refused here.
 **Whitespace is Unicode, not ASCII, and that is the one place this grammar's `extras` is deliberately
 wider than its sibling's.** λ's `skip_ws` tests `char::is_whitespace()` — the Unicode `White_Space`
 property — while the mini-language's lexer tests `is_ascii_whitespace()`. The natural `/\s/` in an
-`extras` list is **ASCII-only in tree-sitter's regex engine**: it *nearly* matched the mini-language's
-ASCII-only lexer — the two diverged on exactly one code point, U+000B VERTICAL TAB, which `/\s/`
+`extras` list is **ASCII-only in tree-sitter's regex engine**: it *nearly* matches the mini-language's
+ASCII-only lexer — the two differ on exactly one code point, U+000B VERTICAL TAB, which `/\s/`
 accepts and `is_ascii_whitespace()` rejects — and it is wrong here regardless, where U+2009 THIN SPACE
 separates two atoms as far as `parse_lambda` is concerned. `grammar.js`
 therefore spells the class out — the exact 25 code points in 10 ranges that `char::is_whitespace()`
 accepts.
 
-**The mini-language's own gap is CLOSED.** Its `extras` now spells out `is_ascii_whitespace()`'s five
-code points instead of `/\s/`, and `the_grammar_and_the_lexer_agree_on_every_ascii_whitespace_candidate`
-in `redextape-grammar-check`'s `tests/captures.rs` pins it. That test asks `parser::parse` rather than
-comparing spans, because `classify_source` skips a byte the lexer rejects and emits no span for it — so
-the span differential returned the same answer either way and could not see the defect at all.
+**The mini-language grammar's `extras` matches its own lexer.** It spells out
+`is_ascii_whitespace()`'s five code points instead of `/\s/`, and
+`the_grammar_and_the_lexer_agree_on_every_ascii_whitespace_candidate` in `redextape-grammar-check`'s
+`tests/captures.rs` pins it. That test asks `parser::parse` rather than comparing spans, because
+`classify_source` skips a byte the lexer rejects and emits no span for it — so the span differential
+returns the same spans whether or not the grammar accepts U+000B, and cannot see that mismatch.
 
-**Do not "harmonise" the two grammars' `extras`.** Each is now exactly right for its own authority, and
+**Do not "harmonise" the two grammars' `extras`.** Each is exactly right for its own authority, and
 they answer to different ones — copying either class into the other would break it.
 
 ## What this is for
 
-**External editors, and only external editors** — the same lane the mini-language grammar occupies,
-for the same reason. Inside this project, λ text is already coloured without a grammar:
-`web/src/lambda-pane.ts` takes `print_lambda_mapped`'s spans straight through `spans.ts`'s
-`decorationRanges`, so the web λ pane draws over the printer's own classification and has no use for a
-CST. Neovim, Helix, Zed and Emacs cannot call a Rust function, and `redextape-lsp` — which does now
-serve Neovim — advertises no semantic tokens, deliberately, for the reason the mini-language grammar's
-README gives. For colour, a grammar is still the only thing that reaches them.
+**The web app's λ copy editor, and external editors** — the same two lanes the mini-language grammar
+occupies. `web/src/colour.ts` loads this grammar's committed `tree-sitter-redextape-lambda.wasm` and
+`queries/highlights.scm` through `web-tree-sitter`, and the editor in the λ pane, where a λ copy is
+edited, is coloured from them. The Plan 7 part 3 design
+(`docs/superpowers/specs/2026-09-20-plan7-part3-editor-intelligence-design.md` §6.1) gives the
+reasons. The term the λ pane displays is not coloured by this grammar: `web/src/lambda-body.ts`
+colours the tree the worker serves by token kind, as `lambda-layout.ts` lays it out, and a frame's
+flat text through `spans.ts`'s `decorationRanges`, over spans the worker's printer computed from the
+term it holds.
 
-Worth stating plainly, because it changes what "installing" means here: **no file in this repository
-has a `.rxlambda` extension**, and nothing writes one. The λ form appears as web-pane text, as
-`examples/lambda_demo.rs` output, and as strings inside tests. The extension is declared in
-`tree-sitter.json` so an editor has something to bind to when a user *does* save a term to a file,
-which is the case this grammar exists to serve.
+Neovim, Helix, Zed and Emacs cannot call a Rust function, and `redextape-lsp` — which serves
+Neovim — advertises no semantic tokens, deliberately, for the reason the mini-language grammar's
+README gives. For colour there, a grammar is still the only thing that reaches them.
+
+Worth stating plainly, because it changes what "installing" means here: **the only `.rxlambda` files
+committed to this repository are CLI test fixtures under `crates/redextape-cli/tests/cmd/`.** Any
+other exists only when a user writes it, for instance with
+`redextape emit p.rxt --lang lambda -o p.rxlambda`, and `redextape-lsp` serves such a file when an
+editor opens it. Otherwise the λ form appears as web-pane text, as
+`crates/redextape-core/examples/lambda_demo.rs` output, and as strings inside tests. The extension
+is declared in `tree-sitter.json` so an editor has something to bind to when it opens one.
 
 ## What it is NOT, and may never become
 
@@ -100,7 +109,6 @@ Deliberately absent, each for a stated reason
 - **no folds, no indents** — `print_lambda_mapped` emits a **single line**; there is no `redextape fmt`
   for this form and nothing in the Rust tree has an opinion about either, so there would be nothing to
   check an opinion against.
-- **nothing in `web/`** — settled in the other direction above, and not reopened.
 
 ## How it is checked
 
@@ -121,11 +129,14 @@ So a λ comparison entry cannot be hand-typed and then classified — it has to 
 `parser::parse → desugar::desugar → lambda::lower → print_lambda_mapped`, which is what
 `lambda::printed_term` is.
 
-Nothing in that pipeline reduces, and nothing in this crate may: it stops at `lower`, which builds a
-term, and at the printer, which writes one. A λ measurement that reduces has previously cost this
-machine 60 GiB of RAM and all of swap. Treat any `reduce` in this crate as a defect.
+Nothing in that pipeline reduces, and no λ code in this crate may: it stops at `lower`, which builds
+a term, and at the printer, which writes one. A λ measurement that reduces can take 60 GiB of RAM and
+all of swap. Treat any λ reduction in this crate as a defect. The TM leg's
+call to `redextape_core::tm::reduce` (`src/tm.rs`'s `printed_reduced`) is a different operation, on
+a Turing machine rather than a λ term, and is there on purpose.
 
-Four layers, none of which is the same evidence twice:
+Four layers, none of which is the same evidence twice: `tree-sitter test`, which
+`scripts/check-all.sh` runs, and three in this crate.
 
 | layer | what it does |
 |---|---|
@@ -139,16 +150,25 @@ are in the roadmap entry for this branch (`docs/superpowers/plans/2026-07-19-red
 The `12` and the `1270` matter together: the smallest entry contributes **7** spans, so no comparison
 here can pass by being handed an empty expectation.
 
-Two guards sit under the comparison, and both were added because something had slipped past
-everything else:
+A fifth runs in a browser, against the artefact `web/` loads. The crate above compiles `parser.c`
+through `cc` and has no wasm build, so the two sides meet in a file: `tests/golden.rs` prints one λ
+fixture through `lambda::printed_term`, holds it to `print_lambda_mapped`'s classification, and
+holds `grammars/capture-golden.json` equal to the captures this crate computes for it (it rewrites
+the file only under `REDEXTAPE_WRITE_GOLDEN=1`). `web/tests/browser/grammar-differential.test.ts`
+loads the committed `tree-sitter-redextape-lambda.wasm` under `web-tree-sitter`, collapses its
+captures with the app's own `colourSpans`, and compares them with that file. Of the five layers, it
+is the only one that reads the `.wasm` itself.
+
+Two guards sit under the comparison, each for something that slips past everything else:
 
 - **`every_query_pattern_fires`** — `Query::pattern_count` against the set of pattern indices actually
-  seen over a corpus. `(parenthesized_term (identifier) @variable)` had **zero coverage anywhere in
-  the pipeline**: no corpus entry reached it, and `print_lambda_mapped` can never emit `(x)` at all,
-  since `parens` is reached only for an `Abs` in function position and for a non-`Var` atom. The
-  pattern is *correct* and stays — an editor's user can type `(x)` — and what was missing was proof
-  that anything exercised it. The guard is on `Grammar`, so every grammar in this repository carries
-  it — the TM and rxm grammars inherited it when they arrived.
+  seen over a corpus. `(parenthesized_term (identifier) @variable)` gets **no coverage from the
+  printed pipeline**: `print_lambda_mapped` can never emit `(x)` at all, since `parens` is reached
+  only for an `Abs` in function position and for a non-`Var` atom. The pattern is *correct* and
+  stays — an editor's user can type `(x)` — and the hand-written `lambda::CORPUS` entry `f (x)`
+  exercises it, which this guard proves.
+  The guard is on `Grammar`, so every grammar in this repository carries it, the TM and rxm grammars
+  included.
 - **`every_corpus_program_parses_without_error_nodes`** — `Grammar::parse` **succeeds on a syntax
   error**, returning a tree that contains `ERROR`/`MISSING` nodes, and `captures` never inspects them.
   Without this, a corpus entry that stopped parsing cleanly would still pass every capture test with a
@@ -166,14 +186,11 @@ no `@function.call`, those five names project onto three `TokenClass` values —
 and `@variable.parameter` are both `Binder`, and `@punctuation.bracket` and `@punctuation.delimiter`
 are both `Punct`.
 
-**This sentence read *"the only names that collapse to one `TokenClass` are `@punctuation.bracket`
-and `@punctuation.delimiter`"* until the branch that added `scripts/check-doc-figures.sh`, and it was
-wrong: `@keyword.function` and `@variable.parameter` project to `Binder` together, so TWO pairs
-collapse rather than one.** Found by that gate's `map_classes` derivation rather than by reading —
-five rows over three classes, where a single collapsing pair would have left four. The claim was
-UNQUANTIFIED, which is exactly why nothing could check it: a gate can hold a number to the tree and
-cannot hold the word "only" to anything. It now names a number, and a row in that script's table
-holds that number to `lambda::CAPTURE_CLASSES`.
+**The three is a number so that a gate can hold it.** A gate can hold a number to the tree and cannot
+hold the word "only" to anything: a claim that only one pair collapses would be wrong here, since TWO
+pairs do, and nothing would notice. A row in `scripts/check-doc-figures.sh`'s table derives the
+three from `lambda::CAPTURE_CLASSES` with `map_classes`: five rows over three classes, where a single
+collapsing pair would leave four.
 
 `@variable.parameter` (`Binder`) and `@variable` (`Ident`) are
 genuinely distinguished by the comparison — which is exactly why the occurrence patterns in
@@ -186,7 +203,7 @@ that.
 
 `src/parser.c`, `src/grammar.json` and `src/node-types.json` are **committed**, and
 `scripts/check-all.sh` regenerates every grammar on every run and fails if what is committed differs
-from what `grammar.js` produces — and now also runs `tree-sitter test` for each. So a `grammar.js` edit
+from what `grammar.js` produces — and runs `tree-sitter test` for each. So a `grammar.js` edit
 is not finished until the regenerated `src/` is staged alongside it.
 
 ```bash
@@ -197,17 +214,18 @@ cd grammars/tree-sitter-redextape-lambda
 ```
 
 **The CLI version is pinned to v0.25.10, and it sits below the newest release on purpose.** Binaries
-from 0.26.0 on need **GLIBC_2.39** and this project's CI runner has **2.35**; every published Linux
-asset for those releases is the same glibc build and no musl variant exists. Building 0.26 from source
-is not a way around it either — the CLI vendors QuickJS through `bindgen`, which needs libclang, also
-absent on the runner. v0.25.10 needs only GLIBC_2.34 and generates this grammar at **ABI 15**. **Do
-not bump this until the runner image has glibc 2.39+.** The full story, including the version that was
-pinned first and never existed, is in `grammars/tree-sitter-redextape/README.md` and design §8.1.
+from v0.26.1, the first 0.26 release, on need **GLIBC_2.39** and this project's CI runner has
+**2.35**; every published Linux asset for those releases is the same glibc build and no musl variant
+exists. Building 0.26 from source is not a way around it either — the CLI vendors QuickJS through
+`bindgen`, which needs libclang, also absent on the runner. v0.25.10 needs only GLIBC_2.34 and
+generates this grammar at **ABI 15**. **Do not bump this until the runner image has glibc 2.39+.**
+The rest of the pin's reasoning, including why a `tree-sitter-cli-git` build's reported version cannot
+choose it, is in `grammars/tree-sitter-redextape/README.md` and design §8.1.
 
 **`tree-sitter.json` must be present.** Without it the released CLI prints a warning and *silently*
-generates ABI 14, which the `tree-sitter` Rust crate then refuses to load. `lambda::abi_version_is_pinned`
-asserts 15 on load so that failure names its cause instead of surfacing as an opaque `set_language`
-error.
+generates ABI 14. The `tree-sitter` Rust crate would load that parser without complaint —
+`Cargo.lock` pins it at 0.27.1, which accepts ABI 13 to 15 — so the unit test
+`lambda::tests::abi_version_is_pinned` asserts 15, and the drift fails by name.
 
 Do not use a `tree-sitter` from `$PATH`. On this machine that resolves to Arch's `tree-sitter-cli-git`,
 a `master` build that reports a version number no release ever carried; regenerating with it emits
@@ -274,9 +292,10 @@ Helix's `comment-tokens` rename) were verified against upstream source. Re-check
 to the **clone root** while applying `location` only to the compile directory, and Zed's
 `GrammarManifestEntry` still carries `path` with `commit` as a serde alias for `rev`.
 
-Values that change from the sibling's snippets, and nothing else does: the language name, the
-subdirectory, the scope, the file extension, and **the removal of every comment setting** — the λ form
-has no comment syntax, so an editor configured with one would comment code out into a parse error.
+What changes from the sibling's snippets is names — the language, the filetypes, the subdirectory,
+the scope, the file extension and the Zed extension's metadata — plus two removals: **every comment
+setting**, because the λ form has no comment syntax and an editor configured with one would comment
+code out into a parse error, and Helix's `indent`, for the reason given under Helix.
 
 <!-- BEGIN shared: neovim-intro -->
 ### Neovim — nvim-treesitter
@@ -291,11 +310,16 @@ loads that plugin:
 
 That registers all four grammars, claims the four extensions, **and starts the highlighter** — which
 is a separate thing that nothing else does. Neovim auto-starts treesitter only for its own bundled
-filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
-filetype set and the buffer still open with no colour at all.
+filetypes, and nvim-treesitter's `main` branch ships no `FileType` autocmd, so a parser can be
+installed and a filetype set and the buffer still open with no colour at all.
+
+It also starts the language server when it finds a `redextape-lsp` binary, in the checkout's
+`target/release/` or on `PATH`. When it finds neither, it shows a warning at every startup naming
+the commands that build one. Highlighting works either way.
 
 `.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
-buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+buffer**, because Neovim already maps it to `tcl`: a `.tm` file becomes `redextape_tm` when its text
+looks like a TM machine or its path has a directory named `redextape`, and otherwise keeps the
 filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
@@ -312,10 +336,11 @@ four extensions claimed with nothing to parse them. **If you are on `master`, sk
 use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
-driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
-which is simpler and takes every such file on your machine away from `tcl`, and they do not start
-the highlighter. If you want colour you need a `FileType` autocmd calling
+driven by hand. It is close to what `plugin/redextape.lua` does but not the same, and the
+differences worth knowing before you copy it are these: no block starts the highlighter or the
+language server, the `master` blocks use filetype names of their own, and the TM grammar's blocks
+claim `.tm` **unconditionally by extension**, which is simpler and takes every such file on your
+machine away from `tcl`. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -324,10 +349,10 @@ archive to expand to a directory named `<repo>-<revision>`. GitHub's archive end
 shape exactly — including stripping a leading `v` from a tag — which is why the snippets below work.
 It also means each of the four grammars downloads the whole repository separately.
 
-nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
-current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one you
-have installed — the `install_info` field sets are different, and fields from one are silently ignored by
-the other.
+nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is
+the current rewrite and needs Neovim 0.12+; `master` is frozen and supports Neovim 0.10 and 0.11.
+Pick the one you have installed — the `install_info` field sets are different, and fields from one
+are silently ignored by the other.
 <!-- END shared: neovim-intro -->
 
 **`main` branch:**
@@ -370,12 +395,17 @@ parser_config.redextape_lambda = {
     url = "https://github.com/Davey-Hughes/redextape",
     files = { "src/parser.c" },
     location = "grammars/tree-sitter-redextape-lambda",
+    branch = "main",
   },
   filetype = "rxlambda",
 }
 
 vim.filetype.add({ extension = { rxlambda = "rxlambda" } })
 ```
+
+**`branch = "main"` is required.** Without it `master` asks GitHub for `archive/master.tar.gz`,
+which GitHub redirects to `main`, and the install then fails because the archive has no
+`redextape-master` directory to move.
 
 `master` has no `queries` field and `:TSInstall` does not copy query files, so copy
 `queries/highlights.scm` to `queries/redextape_lambda/highlights.scm` somewhere on your `runtimepath`
@@ -384,18 +414,23 @@ yourself.
 <!-- BEGIN shared: filetype-autocmd -->
 **One more step the snippets above do not include.** Installing a parser does not turn highlighting
 on. Neovim auto-starts treesitter only for its own bundled filetypes — lua, markdown, help, query —
-and nvim-treesitter ships no `FileType` autocmd of its own, so without something like this the buffer
-opens with the right filetype, a working parser, and no colour:
+and nvim-treesitter's `main` branch ships no `FileType` autocmd of its own, so without something
+like this the buffer opens with the right filetype, a working parser, and no colour. (`master` has
+one, in its `highlight` module, which runs only once you enable that module.) The pattern names the
+filetypes of both branches' blocks:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
+  pattern = {
+    "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm", -- the `main` blocks
+    "rxt", "rxm", "rxlambda", "tm", -- the `master` blocks
+  },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```
 
-This was measured rather than assumed, and it was measured only after a review pointed out that every
-earlier check had supplied this autocmd itself and was therefore testing the harness.
+This was measured rather than assumed, by a check that does not supply this autocmd itself: a check
+that does is testing the harness.
 <!-- END shared: filetype-autocmd -->
 
 ### Helix
@@ -470,8 +505,8 @@ redextape-lambda-zed/
 
 ```toml
 id = "redextape-lambda"
-name = "Redextape λ"
-description = "Redextape λ text form support."
+name = "redextape λ"
+description = "redextape λ text form support."
 version = "0.1.0"
 schema_version = 1
 authors = ["davey"]
@@ -486,7 +521,7 @@ path = "grammars/tree-sitter-redextape-lambda"
 `languages/redextape_lambda/config.toml`:
 
 ```toml
-name = "Redextape λ"
+name = "redextape λ"
 grammar = "redextape_lambda"
 path_suffixes = ["rxlambda"]
 ```
@@ -497,9 +532,10 @@ Install it with `zed: install dev extension` from the command palette, pointed a
 
 Three things about the Zed route that are worth knowing before you take it:
 
-- **`commit` is an alias for `rev`, and it must be a full 40-character SHA.** Zed fetches it with
-  `git fetch --depth 1 origin <rev>`, which requires the server to serve an unadvertised object by SHA.
-  If your host refuses, give a branch or tag name instead.
+- **`commit` is an alias for `rev`, which takes a full 40-character commit SHA or a branch name,
+  not a tag.** Zed runs `git fetch --depth 1 origin <rev>` and then `git checkout <rev>`; fetching a
+  tag by name stores no tag ref, so the checkout fails. Fetching by SHA needs the server to serve an
+  unadvertised object. If your host refuses, give a branch name.
 - **The queries live in the extension, not in the grammar.** Zed reads
   `languages/redextape_lambda/highlights.scm` from the *extension* repository, so
   `grammars/tree-sitter-redextape-lambda/queries/highlights.scm` has to be copied across — and it will
@@ -534,13 +570,12 @@ shifting: `f λx. x y` is `f (λx. x y)`.
 
 **A bare abstraction is a legal argument** — `f λx. x` parses as `f (λx. x)`, because
 `parse_application`'s loop tests for `'\\' | 'λ' | '(' | is_ident_start` before calling `parse_atom`,
-whose first arm on `\`/`λ` is `parse_abstraction`. An earlier draft of this grammar excluded
-`abstraction` from `_atom` and from `argument`, which turned that input into an ERROR node **and
-mis-parented the abstraction as a sibling of `source_file`**. Nothing downstream could have caught it:
-`print_lambda` always parenthesizes an abstraction in argument position, so the printed corpus never
-contains the shape, and the differential compares spans and is blind to tree shape regardless. It was
-found by reading `parse_application` and `parse_atom` *together*. `test/corpus/terms.txt` now pins
-both it and the follow-on shape `λx. x λy. y`.
+whose first arm on `\`/`λ` is `parse_abstraction`. Narrowing `argument` to `_atom`, which has no
+`abstraction`, would turn that input into an ERROR node holding `f` next to a bare abstraction under
+`source_file`. The printed corpus never contains the shape, because `print_lambda` always
+parenthesizes an abstraction in argument position, and the differential compares spans and cannot
+see tree shape. So only hand-written input catches it: `test/corpus/terms.txt` and `lambda::CORPUS`
+both pin it and the follow-on shape `λx. x λy. y`.
 
 `function` stays `choice($.application, $._atom)` — deliberately **not** widened the same way. An
 unparenthesized abstraction always swallows everything to its right, so it can never be a function

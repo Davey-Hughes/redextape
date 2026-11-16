@@ -1,4 +1,4 @@
-# RustSec advisory check for Redextape: `cargo deny check advisories` against Cargo.lock, configured by
+# RustSec advisory check for redextape: `cargo deny check advisories` against Cargo.lock, configured by
 # deny.toml, which gives the command to run it locally. ADVISORIES ONLY — not licenses, bans or sources.
 #
 # A WORKFLOW OF ITS OWN, NOT A JOB IN ci.yml, AND THAT IS THE WHOLE DESIGN. Its result moves without a

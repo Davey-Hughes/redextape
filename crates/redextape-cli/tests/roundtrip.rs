@@ -90,3 +90,39 @@ fn emit_then_run_rxm_reproduces_the_reference_answer() {
         .success()
         .stdout("[1, 2, 3]\n");
 }
+
+/// The rxm oracle on a higher-order program: a closure over `n` passed to `map` as a value.
+/// `lower_rxm` alone refuses it, so it emits only because `emit --lang rxm` lowers through the
+/// defunctionalising fallback `emit --lang tm` and `run --backend tm` use, and the file it writes must
+/// still run to the answer the program itself gives.
+#[test]
+fn emit_then_run_rxm_of_a_higher_order_program_reproduces_the_reference_answer() {
+    let dir = redextape_test_support::ScratchDir::new("roundtrip-rxm-higher-order").unwrap();
+    let src = dir.join("p.rxt");
+    let art = dir.join("p.rxm");
+    std::fs::write(
+        &src,
+        "fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } }\n\
+         let n = 2;\n\
+         map([1, 2, 3], |x| x + n)\n",
+    )
+    .unwrap();
+
+    assert_cmd::Command::cargo_bin("redextape")
+        .unwrap()
+        .args(["emit", src.to_str().unwrap(), "--lang", "rxm", "-o", art.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let run = |path: &std::path::Path| {
+        let done = assert_cmd::Command::cargo_bin("redextape")
+            .unwrap()
+            .args(["run", path.to_str().unwrap()])
+            .assert()
+            .success();
+        String::from_utf8(done.get_output().stdout.clone()).unwrap()
+    };
+    let reference = run(&src);
+    assert_eq!(reference, "[3, 4, 5]\n", "the reference answer");
+    assert_eq!(run(&art), reference);
+}

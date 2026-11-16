@@ -1,4 +1,4 @@
-; Highlight queries for the Redextape rxm text form.
+; Highlight queries for the redextape rxm text form.
 ;
 ; THESE MUST BE TOTAL OVER THE GRAMMAR'S OWN TOKENS. `print_rxm_mapped` pushes a span for EVERY
 ; non-whitespace byte it writes — the `:` after a label and the `,` between operands included — so a

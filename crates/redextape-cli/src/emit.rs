@@ -6,6 +6,7 @@
 //! `.rxlambda` file carries no result type to decode against, so it stays read-only from the command
 //! line. The rxm target writes a header comment naming the function that reads it back.
 
+use crate::form::Form;
 use crate::input::{Input, write_atomic};
 use crate::report;
 use redextape_core::tm::{EncodingKind, ReduceError, StageKind};
@@ -133,6 +134,20 @@ pub fn run(
     err: &mut impl std::io::Write,
     color: bool,
 ) -> std::io::Result<Outcome> {
+    // Before the read, so the answer does not depend on the file's content: compiled output is
+    // refused for what it is, not for the lexer errors it would raise as a program at exit 1.
+    if let Input::Path(p) = input
+        && let Some(noun) = Form::compiled_noun(p)
+    {
+        writeln!(
+            err,
+            "error: `{}` is already {noun}, which `emit` does not take\n  \
+             `emit` takes `.rxt` source, and a machine or a λ term has nothing left to compile\n  \
+             to emit another target, pass `emit` the `.rxt` program this file was compiled from",
+            input.label()
+        )?;
+        return Ok(Outcome::ToolFailed);
+    }
     // **`Option`, NOT A `default_value_t`, AND THAT IS THE WHOLE POINT.** Once clap fills a default
     // in, an explicitly passed `--encoding unary` and an omitted flag arrive here as the same value,
     // so only an `Option` can tell them apart.
@@ -213,29 +228,72 @@ pub fn run(
                 return Ok(Outcome::ToolFailed);
             }
         },
-        Lang::Rxm => match redextape_core::tm::lower_rxm(&core) {
-            // A header only when the result type is one the directive can express, a free type variable
-            // written as `Nat` — `RxmHeader::for_type`, the function the wasm session's `rxm_text` calls
-            // too, so the file written here and the text a copy runs agree on which programs get one.
-            Ok(prog) => {
-                let header = redextape_core::tm::RxmHeader::for_type(&ty);
-                let listing = match &header {
-                    Some(h) => redextape_core::tm::print_rxm_with(&prog, h),
-                    None => redextape_core::tm::print_rxm(&prog),
-                };
-                format!("{RXM_PREAMBLE}{listing}")
-            }
-            Err(e) => {
-                writeln!(err, "error: this program has no rxm lowering: {e:?}")?;
+        // `lower_program`, not bare `lower_rxm`: it defunctionalises a higher-order program `lower_rxm`
+        // refuses, the same lowering `emit --lang tm` and `run --backend tm` build their machines
+        // from, so a program those accept emits as rxm too.
+        Lang::Rxm => {
+            // Refused before lowering, as `--lang tm` refuses: `run` will not read a listing with no
+            // `result` line, so a file without one is not worth writing. `RxmHeader::for_type` is the
+            // check because it is the function the wasm session's `rxm_text` calls too, so the file
+            // written here and the text a copy runs agree on which types get a header; the copy shows
+            // a listing with none, since it is a view rather than a file `run` reads.
+            let Some(header) = redextape_core::tm::RxmHeader::for_type(&ty) else {
+                write_undecodable_result(err, "rxm", "an rxm file's", &redextape_core::ty::ground(ty))?;
                 return Ok(Outcome::ToolFailed);
+            };
+            match redextape_core::tm::lower_program(&core) {
+                Ok(prog) => format!("{RXM_PREAMBLE}{}", redextape_core::tm::print_rxm_with(&prog, &header)),
+                Err(e) => {
+                    writeln!(err, "error: this program has no rxm lowering: {e:?}")?;
+                    return Ok(Outcome::ToolFailed);
+                }
             }
-        },
+        }
     };
     match dest {
         Some(p) => write_atomic(p, &text)?,
         None => write!(out, "{text}")?,
     }
     Ok(Outcome::Emitted)
+}
+
+/// The refusal `--lang tm` and `--lang rxm` share for a result type no `result` line can name: `run`
+/// decodes either file's result by that line, so the two targets refuse the same types in one shape.
+///
+/// **`grounded` IS PRINTED, NOT THE RAW TYPE.** `ty::show` alone would print a free type variable as
+/// `t0` (`ty::show`'s own doc), where `RxmHeader::for_type` and a `.tm` header's own `describe_at`
+/// both name the GROUND type. A function's own free variables are grounded too (`ty::ground`'s "a
+/// `Fun` stays a `Fun`, its variables grounded like any other"), so a program like `|x| x` would
+/// otherwise be the one place the tool shows a bare `t0`.
+fn write_undecodable_result(
+    err: &mut impl std::io::Write,
+    lang: &str,
+    file: &str,
+    grounded: &redextape_core::ty::Ty,
+) -> std::io::Result<()> {
+    use redextape_core::ty::{MAX_TY_DEPTH, Ty};
+    // `parse_ty` peels only `List<…>`, so a ground type it refuses has a function at the bottom of that
+    // spine or a spine past `MAX_TY_DEPTH`. Depth is the `result` line's limit, not the encodings', so it
+    // gets its own reason; a function under a deep spine keeps the function's, which no depth would fix.
+    let (mut base, mut depth) = (grounded, 0usize);
+    while let Ty::List(t) = base {
+        (base, depth) = (t, depth + 1);
+    }
+    let shown = redextape_core::ty::show(grounded);
+    if depth > MAX_TY_DEPTH && !matches!(base, Ty::Fun(..)) {
+        return writeln!(
+            err,
+            "error: `--lang {lang}` cannot emit a result of type `{shown}`\n  \
+             {file} `result` line must name a type `run` can decode, which nests lists at most \
+             {MAX_TY_DEPTH} deep; this type nests them {depth} deep"
+        );
+    }
+    writeln!(
+        err,
+        "error: `--lang {lang}` cannot emit a result of type `{shown}`\n  \
+         {file} `result` line must name a type `run` can decode; the encodings cover Nat, Bool, Unit \
+         and List<T>, and this type has none"
+    )
 }
 
 /// `run_tm_described` rather than `lower_tm`, because only it produces a `TmHeader` — and a `.tm`
@@ -261,29 +319,16 @@ fn emit_tm(
 ) -> std::io::Result<Option<String>> {
     // REFUSED BEFORE ANY LOWERING OR SIMULATION — a fact about `ty` alone, knowable before `core` is
     // even touched. A `.tm` file's `result` line names the type `run` will decode the final tapes
-    // against, and a function has no decoding (`ty::is_decodable`'s own doc). `RxmHeader::for_type`
-    // answers the identical question for the rxm leg by simply omitting its header, which is optional;
-    // a TM header is never optional (it also carries the initial tapes, `TmHeader`'s own doc), so there
-    // is no headerless fallback here and the whole file is refused instead.
+    // against, and a function has no decoding (`ty::is_decodable`'s own doc). A TM header is never
+    // optional (it also carries the initial tapes, `TmHeader`'s own doc), so the whole file is refused,
+    // the same answer the rxm leg gives through `RxmHeader::for_type`.
     //
     // GROUNDED ONCE: `RxmHeader::for_type` grounds once and asks `ty::is_decodable_ground` of the
     // result it already holds; this does the same. Cloned, not moved: `ty` itself still has to reach
     // the simulation below, ungrounded.
     let grounded = redextape_core::ty::ground(ty.clone());
     if !redextape_core::ty::is_decodable_ground(&grounded) {
-        // GROUNDED, LIKE EVERY OTHER `result`-LINE MESSAGE: `ty::show(&ty)` alone would print a free
-        // type variable as `t0` (`ty::show`'s own doc), where `RxmHeader::for_type` and a `.tm`
-        // header's own `describe_at` both name the GROUND type. A function's own free variables are
-        // grounded too (`ty::ground`'s "a `Fun` stays a `Fun`, its variables grounded like any other"),
-        // so this is the one sentence naming a bare `t0` that this refusal could otherwise print for a
-        // program like `|x| x`.
-        writeln!(
-            err,
-            "error: `--lang tm` cannot emit a result of type `{}`\n  \
-             a TM file's `result` line must name a type `run` can decode; the encodings cover Nat, \
-             Bool, Unit and List<T>, and this type has none",
-            redextape_core::ty::show(&grounded)
-        )?;
+        write_undecodable_result(err, "tm", "a TM file's", &grounded)?;
         return Ok(None);
     }
     // `AutoFit` is the fitting search. A pin skips the search, which can refuse a program the search
@@ -343,8 +388,8 @@ fn emit_tm(
 /// * `HitCap` — emit, and say so. The file describes exactly the machine that was built at the width
 ///   that was fitted, so it is faithful; it will simply meet the same cap when `run` simulates it.
 /// * `Overflow` — REFUSE. A value did not fit the field the machine was actually built with, so the
-///   machine halts on truncated fields and `decode_tape_ty` reads them without complaining: the file
-///   would report a wrong answer at exit 0. Exit 2 under the whose-fault-is-it rule either way — the
+///   machine halts in its `overflow` state on truncated fields, which `value_of_run` refuses to read:
+///   the file could never give an answer. Exit 2 under the whose-fault-is-it rule either way — the
 ///   program is fine — but the two width paths overflow for DIFFERENT reasons and must say so.
 ///
 /// **THE PINNED PATH DOES NOT SPEAK THE AUTO-FIT PATH'S SENTENCE.** Under auto-fit the search really
@@ -406,8 +451,8 @@ fn emit_described(
             writeln!(
                 err,
                 "error: no machine was written: a value does not fit {what}\n  \
-                 the program is fine — but the machine would HALT on truncated fields, and `redextape run` \
-                 would decode them and print a wrong answer at exit 0\n  \
+                 the program is fine — but the machine would halt in its `overflow` state, and `redextape run` \
+                 would find no value on its tapes and exit 2\n  \
                  {remedy}"
             )?;
             Ok(None)
@@ -765,8 +810,8 @@ mod tests {
 
     /// A program whose values do not fit the widest tape field unary has. **THE FILE MUST NOT BE
     /// WRITTEN.** `run_tm_described` still returns `Ok` here — it built a valid header for a run
-    /// that started — and emitting it would produce a machine that HALTS on truncated fields, so
-    /// `run` would decode them, print `0` for a program whose answer is 300, and exit 0.
+    /// that started — and emitting it would produce a machine that halts in its `overflow` state, a
+    /// file `run` can only refuse.
     #[test]
     fn a_program_that_overflows_the_widest_field_is_refused_not_emitted() {
         let (out, err, outcome) = emit_case("overflow", OVERFLOW_SRC, Lang::Tm, Some(EncodingArg::Unary));
@@ -990,14 +1035,8 @@ mod tests {
     /// `List<t>` holds no `t`, so reading it as `List<Nat>` reads the same value. `[[]]` nests the variable
     /// a level deeper. Each file starts with its header and runs to the program's value.
     ///
-    /// **NOT a function-typed fixture — `Fun` is unreachable here, and that is a real structural
-    /// fact, not a shortcut.** `lower_rxm` has no register representation for a function value: a bare
-    /// lambda in value position (`Core::Lambda`) errors unconditionally, and a bare function name
-    /// (`Core::Var` naming an `fn`) resolves against `ctx.resolve`, which only tracks local variable
-    /// registers — function names live in `fn_scopes` instead, so the lookup misses and reports
-    /// "unbound". Every fixture tried (`|x| x + 1`, a bare `fn` name, a `let`-bound closure) fails at
-    /// `lower_rxm` itself with `Unsupported`, so `Outcome::Emitted` is never reached for `Fun`, and
-    /// `for_type`'s unit test is where a type holding a function is shown to get no header.
+    /// Not a function-typed fixture: a type holding a function gets no header and no file, which
+    /// `a_function_typed_result_is_refused_not_emitted_as_rxm` pins.
     #[test]
     fn a_polymorphic_result_type_is_headered_with_nat() {
         for (case, src, header, value) in [
@@ -1019,5 +1058,98 @@ mod tests {
             let got = redextape_core::tm::decode_rxm_ty(&outcome, &header.result).expect("decodes");
             assert_eq!(redextape_core::value::format_value(&got), value, "{src}");
         }
+    }
+
+    /// **A FUNCTION-TYPED RESULT IS REFUSED, AS `--lang tm` REFUSES IT.** `lower_program` would lower
+    /// it, but `RxmHeader::for_type` names no type holding a function, and `redextape run` refuses a
+    /// listing with no `result` line, so the file would be one this tool cannot read back. The message
+    /// names the grounded type (`|x| x` is `(t1) -> t1` raw) and differs from tm's only in the target.
+    #[test]
+    fn a_function_typed_result_is_refused_not_emitted_as_rxm() {
+        for src in ["|x| x + 1", "|x| x"] {
+            let (out, err, outcome) = emit_case("rxm-fun", src, Lang::Rxm, None);
+            assert_eq!(out, "", "{src}: no listing may be written");
+            assert_eq!(
+                err,
+                "error: `--lang rxm` cannot emit a result of type `(Nat) -> Nat`\n  an rxm file's `result` \
+                 line must name a type `run` can decode; the encodings cover Nat, Bool, Unit and List<T>, \
+                 and this type has none\n",
+                "{src}"
+            );
+            assert!(matches!(outcome, Outcome::ToolFailed), "{src}: the program is fine; this tool cannot express it");
+            let (_, tm_err, _) = emit_case("rxm-fun-tm", src, Lang::Tm, None);
+            let as_tm = err.replace("`--lang rxm`", "`--lang tm`").replace("an rxm file's", "a TM file's");
+            assert_eq!(tm_err, as_tm, "{src}: the same shape as tm's refusal");
+        }
+    }
+
+    /// **A LIST NESTED PAST `MAX_TY_DEPTH` IS REFUSED FOR ITS DEPTH.** The encodings cover it; only the
+    /// `result` line cannot name it, so the message names the limit. A function at the bottom of as deep a
+    /// list is still refused for the function, which no depth would fix.
+    #[test]
+    fn a_list_nested_past_the_depth_limit_is_refused_for_its_depth() {
+        let max = redextape_core::ty::MAX_TY_DEPTH;
+        let depth = max + 2;
+        let nested = |inner: &str| format!("{}{inner}{}", "[".repeat(depth), "]".repeat(depth));
+        let ty = format!("{}Nat{}", "List<".repeat(depth), ">".repeat(depth));
+        for (lang, file) in [(Lang::Rxm, "an rxm file's"), (Lang::Tm, "a TM file's")] {
+            let (out, err, outcome) = emit_case("deep-list", &nested("1"), lang, None);
+            assert_eq!(out, "", "{lang:?}: nothing may be written");
+            assert_eq!(
+                err,
+                format!(
+                    "error: `--lang {}` cannot emit a result of type `{ty}`\n  {file} `result` line must name \
+                     a type `run` can decode, which nests lists at most {max} deep; this type nests them {depth} deep\n",
+                    if lang == Lang::Rxm { "rxm" } else { "tm" }
+                ),
+                "{lang:?}"
+            );
+            assert!(matches!(outcome, Outcome::ToolFailed), "{lang:?}");
+            let (_, err, _) = emit_case("deep-fun", &nested("|x| x + 1"), lang, None);
+            assert!(err.contains("and this type has none"), "{lang:?}: a function's reason comes first: {err}");
+        }
+    }
+
+    /// **COMPILED OUTPUT IS REFUSED FOR WHAT IT IS, IN EITHER CASE AND FOR EVERY TARGET.** Read as
+    /// `.rxt`, each file `emit` writes for `1 + 2` raises parse errors at exit 1, which blames a valid
+    /// file on the program. A missing `.tm` gets the same refusal, which is what shows the check comes
+    /// before the read.
+    #[test]
+    fn a_compiled_file_is_refused_before_it_is_parsed() {
+        let emitted = |lang| emit_case(&format!("compiled-src-{lang:?}"), "1 + 2", lang, None).0;
+        let (tm, rxm, lambda) = (emitted(Lang::Tm), emitted(Lang::Rxm), emitted(Lang::Lambda));
+        let cases = [
+            ("m.tm", tm.as_str(), "a Turing machine"),
+            ("M.TM", tm.as_str(), "a Turing machine"),
+            ("r.rxm", rxm.as_str(), "a register-machine program"),
+            ("R.RXM", rxm.as_str(), "a register-machine program"),
+            ("q.rxlambda", lambda.as_str(), "a λ term"),
+            ("Q.RxLambda", lambda.as_str(), "a λ term"),
+        ];
+        let dir = redextape_test_support::ScratchDir::new("emit-compiled").unwrap();
+        for (filename, src, noun) in cases {
+            let p = dir.join(filename);
+            std::fs::write(&p, src).unwrap();
+            for lang in [Lang::Tm, Lang::Lambda, Lang::Rxm] {
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let outcome =
+                    run(&Input::from_arg(&p), lang, Options::default(), None, &mut out, &mut err, false).unwrap();
+                let err = String::from_utf8(err).unwrap();
+                assert!(out.is_empty(), "{filename} {lang:?}");
+                assert!(
+                    err.contains(&format!("is already {noun}, which `emit` does not take")),
+                    "{filename} {lang:?}: {err}"
+                );
+                assert!(!err.contains("Error"), "{filename} {lang:?} was parsed as a program: {err}");
+                assert!(matches!(outcome, Outcome::ToolFailed), "{filename} {lang:?}: the tool cannot answer, exit 2");
+            }
+        }
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let missing = dir.join("nope.tm");
+        let outcome =
+            run(&Input::from_arg(&missing), Lang::Tm, Options::default(), None, &mut out, &mut err, false).unwrap();
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.contains("is already a Turing machine"), "refused before the read: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed));
     }
 }

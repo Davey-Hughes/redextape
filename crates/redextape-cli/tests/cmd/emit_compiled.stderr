@@ -1,0 +1,3 @@
+error: `p.tm` is already a Turing machine, which `emit` does not take
+  `emit` takes `.rxt` source, and a machine or a λ term has nothing left to compile
+  to emit another target, pass `emit` the `.rxt` program this file was compiled from

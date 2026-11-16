@@ -57,12 +57,14 @@ pub enum Command {
         /// The file to run. `.rxt` is a program; `.tm` is a machine and `.rxm` is a register-machine
         /// listing, both already compiled. `-` reads standard input as a program.
         path: PathBuf,
-        /// Which backend evaluates a `.rxt` program. All three agree on any program all three can
-        /// answer for; `lambda` and `tm` decode their result by type, so a function-typed result
-        /// exits 2 there and prints as `<non-value>` under `reference`. Rejected for a `.tm` or `.rxm`
-        /// file, which is already compiled.
-        #[arg(long, value_enum, default_value_t = crate::run::Backend::Reference)]
-        backend: crate::run::Backend,
+        /// Which backend evaluates a `.rxt` program, `reference` when omitted. All three agree on any
+        /// program all three can answer for; `lambda` and `tm` decode their result by type, so a
+        /// function-typed result exits 2 there and prints as `<non-value>` under `reference`. Rejected
+        /// with any value, `reference` included, for a `.tm` or `.rxm` file, which is already compiled.
+        // An `Option` with no `default_value_t`: a default would make a typed `--backend reference`
+        // indistinguishable from an omitted flag, and `run` could not refuse it on an artifact.
+        #[arg(long, value_enum)]
+        backend: Option<crate::run::Backend>,
     },
     /// Compile a program to a backend text form.
     Emit {

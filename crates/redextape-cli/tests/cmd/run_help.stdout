@@ -8,14 +8,12 @@ Arguments:
 
 Options:
       --backend <BACKEND>
-          Which backend evaluates a `.rxt` program. All three agree on any program all three can answer for; `lambda` and `tm` decode their result by type, so a function-typed result exits 2 there and prints as `<non-value>` under `reference`. Rejected for a `.tm` or `.rxm` file, which is already compiled
+          Which backend evaluates a `.rxt` program, `reference` when omitted. All three agree on any program all three can answer for; `lambda` and `tm` decode their result by type, so a function-typed result exits 2 there and prints as `<non-value>` under `reference`. Rejected with any value, `reference` included, for a `.tm` or `.rxm` file, which is already compiled
 
           Possible values:
           - reference: The tree-walking interpreter, and the only backend that can answer for every program that evaluates — a program whose value is a function prints as `<non-value>` rather than failing
           - lambda:    Lower to the λ-calculus, reduce, and decode the normal form back to a value. The decode is directed by the program's type and covers Nat, Bool, Unit and List<T>; a function-typed result has no encoding at all and exits 2 (the program is fine — use `reference`)
           - tm:        Lower to a Turing machine, simulate it, and decode the final tapes. Same type-directed limit as `lambda`: a tape encodes Nat, Bool, Unit and List<T>, and a function-typed result exits 2
-          
-          [default: reference]
 
       --config <PATH>
           Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not

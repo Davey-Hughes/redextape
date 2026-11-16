@@ -1,0 +1,4 @@
+bin.name = "redextape"
+args = ["emit", "p.tm", "--lang", "rxm"]
+fs.sandbox = true
+status.code = 2

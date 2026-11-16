@@ -1,4 +1,4 @@
-//! Redextape core: the mini-language front end, the λ and TM backends, and the shared analysis
+//! redextape core: the mini-language front end, the λ and TM backends, and the shared analysis
 //! layer. This crate is compiled to WASM for the web UI and reused by the CLI and LSP.
 //!
 //! Pipeline: lexer -> parser -> typecheck -> desugar -> Core AST, from which the reference

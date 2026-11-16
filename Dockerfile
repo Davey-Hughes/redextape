@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Redextape — a Rust -> WASM static site. The transpiler and the Turing-machine / lambda simulators
+# redextape — a Rust -> WASM static site. The transpiler and the Turing-machine / lambda simulators
 # all run in the browser, so the image is just the built static assets served by nginx: no server
 # process, no runtime data, no volumes. Three stages: compile the WASM crates, bundle the web app,
 # serve the output.

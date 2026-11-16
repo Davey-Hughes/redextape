@@ -1,14 +1,20 @@
 # tree-sitter-redextape-rxm
 
-A tree-sitter grammar for the Redextape rxm text form — the flat, line-oriented listing
+A tree-sitter grammar for the redextape rxm text form — the flat, line-oriented listing
 `redextape_core::tm::rxm_syntax`'s `parse_rxm_full` reads and `redextape_core::tm::print_rxm_mapped`
-(through `print_rxm_with_mapped`) writes and classifies. One of four grammars in this repository,
-alongside `tree-sitter-redextape` (the mini-language), `tree-sitter-redextape-lambda` (the λ form) and
+and `print_rxm_with_mapped` write and classify. One of four grammars in this repository, alongside
+`tree-sitter-redextape` (the mini-language), `tree-sitter-redextape-lambda` (the λ form) and
 `tree-sitter-redextape-tm` (the TM text form). Scope `source.rxm`, file extension `.rxm`.
 
-**It is for highlighting in external editors and it is not authoritative.** `parse_rxm_full` is the
-parser; `print_rxm_mapped` is the printer AND the classifier, in one function — there is no separate
-`classify_rxm`. This grammar produces a CST and never lowers it into anything.
+**It is for highlighting and it is not authoritative.** `parse_rxm_full` is the parser. One printer,
+`print_rxm_with_inner`, writes the text and classifies it in the same pass, and both mapped entry
+points call it — there is no separate `classify_rxm`. This grammar produces a CST and never lowers
+it into anything.
+
+It colours two kinds of editor. `web/src/colour.ts` loads its committed
+`tree-sitter-redextape-rxm.wasm` and `queries/highlights.scm` through `web-tree-sitter`, and the
+editor in the web app's rxm view, where an rxm copy is edited, is coloured from them. External
+editors take it as *Installing it in an editor* describes.
 
 ## The form, in one page
 
@@ -25,6 +31,11 @@ IMMEDIATE   := '#' NAT
 TYPE        := 'Nat' | 'Bool' | 'Unit' | 'List<' TYPE '>'      — `ty::show`, no spaces
 NAME        := any non-empty run with no whitespace and no `;` `:` `,`
 ```
+
+The box is the form as the printer writes it. `parse_rxm_full` reads a wider one: it trims each
+line, so it also reads an instruction at column 0, an indented label, a space before a label's `:`
+and a space in place of the tab, as this grammar does. *Divergences* lists the spellings it takes
+that this grammar does not.
 
 Every line kind also accepts a trailing `;` comment: `parse_rxm_full` splits each line at its **first**
 `;` before doing anything else, exactly as `parse_tm_full` does.
@@ -57,21 +68,21 @@ everywhere the text `add` appears — including in label position, turning `add:
 see *Divergences* below.
 
 **What the printers classify.** TWO PRINTER ENTRY POINTS, ONE PRINTER, as `src/rxm.rs`'s module doc
-puts it. There is no `Option` on either: `print_rxm_mapped(prog)` writes the listing, and
-`print_rxm_with_mapped(prog, h)` writes the header, calls `print_rxm_mapped` and shifts its spans by
-the header's byte length — so the listing's bytes are identical either way:
+puts it. `print_rxm_mapped(prog)` and `print_rxm_with_mapped(prog, h)` both call
+`print_rxm_with_inner`, and the header `Option` is the only difference between them, as with TM's
+`print_tm_inner`. The header is written first, and the listing's bytes are identical either way:
 
 | printer | header | classes emitted |
 |---|---|---|
 | `print_rxm_mapped` | none | 5 — `Label`, `Mnemonic`, `Nat`, `Punct`, `Register` |
 | `print_rxm_with_mapped` | `RxmHeader` | 7 — those, plus `Keyword` and `Ident` |
 
-**A header always adds exactly two spans.** `print_rxm_with_mapped`'s own code pushes one `Keyword`
-span for `result` and one `Ident` span for the type that follows it, then appends the header-less
-listing shifted by the header's byte length — nothing else in the header carries a span. The two
-generated-corpus and fixed-corpus averages quoted below are for two *different* corpora (one
-proptest-generated and header-less, one hand-picked and headered), so they are not directly
-comparable to each other; the "+2 spans" relationship holds only within one corpus printed both ways.
+**A header always adds exactly two spans.** Given a header, `print_rxm_with_inner` pushes one
+`Keyword` span for `result` and one `Ident` span for the type that follows it, then writes the same
+listing it writes without one — nothing else in the header carries a span. The fixed corpus below
+is printed headered and the generated one header-less, so the figures quoted for them are not
+comparable to each other; the "+2 spans" relationship holds only within one corpus printed both
+ways.
 
 ## What it is NOT, and may never become
 
@@ -80,10 +91,15 @@ comparable to each other; the "+2 spans" relationship holds only within one corp
 - **No `locals.scm`.** A label reference resolves against the program's own label table, which
   `parse_rxm` builds and `Program::validate()` checks. Name resolution has an owner and it is not this
   grammar.
-- **No indents.** There is no `redextape fmt` for this form — design §12 puts folds and indents
-  explicitly out of scope for every grammar in this slice, for the same reason each time: nothing in
-  the Rust tree has an opinion about either to check one against.
-- **No injections, no folds, no editor-extension packaging, and nothing in `web/`.**
+- **No indents.** The asm-reader design (`docs/superpowers/specs/2026-08-24-asm-reader-design.md`,
+  which calls the form "asm") keeps indents and folds out of scope by citing the
+  tree-sitter grammars design's §12, whose reason was that nothing in the Rust tree had an opinion
+  about either to check one against. That reason does not hold for this form: `redextape fmt`
+  formats `.rxm` files by reading them with `parse_rxm_full` and writing them back through
+  `print_rxm_doc`, which puts each instruction four spaces in with a tab before its operands. No
+  indent query has been written against that layout; §12 calls indents addable later if an editor
+  user asks.
+- **No injections and no folds.**
 
 ## How it is checked
 
@@ -124,25 +140,30 @@ Three corpora, because three different things need checking:
 | `rxm::FIXED_CORPUS`, headered | the differential, `print_rxm_with_mapped` | 12 of `rxm_roundtrip.rs`'s own `DEMOS`, plus a mutable-capture closure, plus four comparison programs, lowered through `lower_program` | 17 entries |
 | generated, header-less | the differential, `print_rxm_mapped` | `arb_expr_over` through the same lowering | 256 proptest cases |
 
-**17 is a measurement.** The fixed corpus averages 198 bytes and 47 spans per headered listing —
-3,374 bytes and 810 spans in total — and reaches all 24 mnemonics; `FIXED_CORPUS` is fixed rather than
-generated because `arb_expr_over` is five arms over numeric leaves and reaches only nine of them.
+**17 is a measurement.** The fixed corpus prints 3,374 bytes and 810 spans over its 17 headered
+listings, about 198 bytes and 48 spans each, and reaches all 24 mnemonics; `FIXED_CORPUS` is fixed
+rather than generated because `arb_expr_over` is five arms over numeric leaves and reaches only
+eight of them: `li`, `add`, `sub`, `cmpgt`, `cmpeq`, `jz`, `jmp` and `halt`.
 
-**256 is a measurement too.** A header-less listing averages 146 bytes and 36 spans, and both are
-FLOORS of a measured 256-case total rather than figures a total can be derived from — multiplying
-either out undercounts, so no total is computed from them here. The span total is quoted from runs
-instead: roughly 9,000, and it moves with the seed, with fifteen runs observed on 2026-08-26 ranging
-from 8,384 to 9,620. The leg prints its own live total on every run. Even at the top of that range it
-is the cheapest of the four corpora across all four grammars in this repository, against λ's 256-case
-leg (163K spans) and TM's 32-case leg (282,006 spans). An earlier figure of 297 bytes / 73 spans for
-this same average came from a probe that hand-rolled a generator approximating `arb_expr_over` and
-ignored `prop_recursive`'s own `desired_size = 8`; the corrected numbers above are what
-`tests/rxm.rs`'s doc comment on the generated leg actually measures.
+**256 is a measurement too.** The leg prints its span total on every run
+(`rxm generated leg: … spans compared`, shown with `--no-capture`), and the total moves with the
+seed.
+
+**A browser leg checks the artefact `web/` loads.** This crate compiles `parser.c` through `cc` and
+has no wasm build, so the two sides meet in a file: `tests/golden.rs` prints one headered fixture
+through `printed_program_with_header`, holds it to the printer's classification, and holds
+`grammars/capture-golden.json` equal to the captures this crate computes for it.
+`web/tests/browser/grammar-differential.test.ts` loads the committed
+`tree-sitter-redextape-rxm.wasm` under `web-tree-sitter`, collapses its captures with the app's own
+`colourSpans`, and compares them with that file. Of the legs here, it is the only one that loads
+the `.wasm`.
 
 ### What the differential does NOT reach
 
 **The whole `Comment` class.** Neither `print_rxm_mapped` nor `print_rxm_with_mapped` ever writes a
-`;` — `TokenClass::Comment` has no printer at all for this form. That is a wider gap than TM's, where
+`;`: both hand `print_rxm_with_inner` an empty comment list, so no *mapped* printer emits a comment.
+`print_rxm_doc`, which `redextape fmt` uses, does write comments back, but it returns only the text,
+so no classification of a comment exists to compare against. That is a wider gap than TM's, where
 the headered printer does emit comments and only three comment *positions* sit outside the check. It
 is not theoretical either: `redextape emit --lang rxm` prepends a preamble line — "; rxm listing,
 read back by `parse_rxm` and run by `redextape run`." — to every file it writes, so the most
@@ -161,22 +182,51 @@ and every other test in this crate's rxm suite still passes.
 
 ## Divergences
 
-**One accept-more divergence.** `parse_rxm_full` walks `src.split_inclusive('\n')` and decides each
-line's kind from its own text, so a newline is structural to the authority; here it sits in `extras`,
-so this grammar accepts `halt jmp foo` on one line where `parse_rxm_full` rejects the whole line
-(`` `halt` takes 0 operand(s), found 1 `` — everything after the first mnemonic reads as one operand
-list, comma-split). That is the right direction for an editor, where a half-typed buffer is not an
-error worth underlining, and it is unreachable by the differential, whose corpus is always printed
-output — one construct per line, by construction.
+The inputs below were each run through both `parse_rxm_full` and this grammar on 2026-11-15. They
+are the divergences a probe found, not a proof that there are no others. The differential sees none
+of them: `compare_classified` fails on any `ERROR` or `MISSING` node, so no corpus that passes
+holds an accept-less spelling, and the accept-more ones are text the printer does not write.
 
-**No accept-less divergence.** Without `_label_name`'s aliases, `word: $ => $.identifier` would make
-`add:` an `ERROR` node while `parse_rxm_full` accepts it, since its `strip_suffix(':')` check
-deliberately runs before mnemonic dispatch. Aliasing every reserved word (all 24 mnemonics plus
-`result`, 25 spellings) to `$.identifier` inside `_label_name` closes it. Verified directly rather than
-assumed: every one of the 25 reserved spellings, written as `<word>:` followed by an instruction, parses
-with no `ERROR` or `MISSING` node under the pinned CLI, and regenerating from `grammar.js` from scratch
-reproduces the committed `src/parser.c` byte for byte with no LR-conflict warning from the 25-word alias
-list.
+**Accept-more: this grammar parses clean text `parse_rxm_full` rejects.** The main one is the line.
+`parse_rxm_full` walks `src.split_inclusive('\n')` and decides each line's kind from its own text,
+so a newline is structural to the authority; here it sits in `extras`, so this grammar accepts
+`halt jmp foo` on one line where `parse_rxm_full` rejects the whole line
+(`` `halt` takes 0 operand(s), found 1 `` — everything after the first mnemonic reads as one
+operand list, comma-split). That is the right direction for an editor, where a half-typed buffer is
+not an error worth underlining. The others are checks the authority makes on a line's place or a
+token's value, which this grammar's rules do not make:
+
+- `result` after an instruction: `` `result` must precede the first instruction or label
+  (header directives come first) ``.
+- a second `result`: `` duplicate `result` directive ``.
+- a `result` type that is not a value type, such as `result Banana`:
+  `` `result` must be a value type (Nat | Bool | Unit | List<T>), found `Banana` ``.
+- an immediate or a register number too large for a `u64`: `#99999999999999999999999` is not an
+  immediate, and `r99999999999999999999999` is not a register.
+
+**Accept-less: this grammar puts an `ERROR` or `MISSING` node in text `parse_rxm_full` accepts with
+no diagnostic.** In each, the authority reads more loosely than the printed form. They run against
+an editor's interest, since a file the authority reads shows a parse error:
+
+- a label name with a space or a comma in it, `foo bar:` or `a,b:`, and a jump to one,
+  `jmp foo bar`. The authority takes whatever precedes a line's final `:` as the label, and an
+  operand is whatever lies between commas, trimmed; this grammar's names stop at whitespace and `,`.
+- a signed number, `mov r+1, r0` or `li r0, #+5`. `parse_reg` and `parse_imm` read the digits with
+  `str::parse`, which takes a leading `+`.
+- spaces inside a type, `result List< Nat >`. `ty::parse_ty` trims inside each `List<…>`.
+- whitespace other than space, tab, CR and LF, such as a form feed before an instruction or a
+  no-break space after one. The authority trims each line with `str::trim`, which takes any Unicode
+  whitespace; this grammar's `extras` are those four characters only. The form feed gives an
+  `ERROR`; a no-break space after `halt` gives a `MISSING ":"` instead, because the line parses as
+  a label whose name is `halt` and the no-break space.
+
+**Labels spelled like a reserved word are not among them.** Without `_label_name`'s aliases,
+`word: $ => $.identifier` would make `add:` an `ERROR` node while `parse_rxm_full` accepts it,
+since its `strip_suffix(':')` check deliberately runs before mnemonic dispatch. Aliasing every
+reserved word (all 24 mnemonics plus `result`, 25 spellings) to `$.identifier` inside `_label_name`
+closes it. Each of the 25 reserved spellings, written as `<word>:` followed by an instruction,
+parses with no `ERROR` or `MISSING` node, and regenerating from `grammar.js` from scratch reproduces
+the committed `src/parser.c` byte for byte with no LR-conflict warning from the 25-word alias list.
 
 ## Regenerating
 
@@ -192,9 +242,10 @@ deliberately: 0.26+ Linux binaries need glibc 2.39 and CI's runner has 2.35, so 
 there at all. `scripts/check-all.sh`'s `grammar` leg regenerates every directory under `grammars/` and
 fails on any diff, so a stale committed `parser.c` is caught rather than trusted.
 
-`tree-sitter.json` is required. Without it the CLI warns and silently generates **ABI 14**, which the
-Rust crate refuses to load — `abi_version_is_pinned` in `src/rxm.rs` is what turns that into a message
-naming the real cause rather than an opaque `set_language` failure.
+`tree-sitter.json` is required. Without it the CLI warns and silently generates **ABI 14**. The
+`tree-sitter` Rust crate would load that parser without complaint — `Cargo.lock` pins it at 0.27.1,
+which accepts ABI 13 to 15 — so the unit test `rxm::tests::abi_version_is_pinned` in `src/rxm.rs`
+asserts 15, and the drift fails by name.
 
 ## Installing it in an editor
 
@@ -237,10 +288,11 @@ an editor has something to fetch. If you have a key on the instance,
 ### An uppercase `.RXM` runs but is not coloured
 
 `tree-sitter.json` claims the `rxm` extension, because that is what `redextape emit --lang rxm` and
-`redextape run` call these files. `crates/redextape-cli/src/run.rs` dispatches on a file's extension
-ASCII-case-insensitively — the same mechanism that `an_uppercase_tm_extension_is_still_an_artifact`
-pins for `.TM` applies unchanged to `.rxm` — so `P.RXM` is a file this project runs. Tree-sitter's own
-`file-types` extension matching is not case-insensitive, so an uppercase `.RXM` file is one this
+`redextape run` call these files. `run` picks the form by `Form::from_extension` in
+`crates/redextape-cli/src/form.rs`, which folds the extension to ASCII lowercase first — the same
+mechanism that `an_uppercase_tm_extension_is_still_an_artifact` in `run.rs` pins for `.TM` applies
+unchanged to `.rxm` — so `P.RXM` is a file this project runs. Tree-sitter's own `file-types`
+extension matching is not case-insensitive, so an uppercase `.RXM` file is one this
 project executes and this grammar does not colour.
 
 ### The name is `redextape_rxm`
@@ -278,11 +330,16 @@ loads that plugin:
 
 That registers all four grammars, claims the four extensions, **and starts the highlighter** — which
 is a separate thing that nothing else does. Neovim auto-starts treesitter only for its own bundled
-filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
-filetype set and the buffer still open with no colour at all.
+filetypes, and nvim-treesitter's `main` branch ships no `FileType` autocmd, so a parser can be
+installed and a filetype set and the buffer still open with no colour at all.
+
+It also starts the language server when it finds a `redextape-lsp` binary, in the checkout's
+`target/release/` or on `PATH`. When it finds neither, it shows a warning at every startup naming
+the commands that build one. Highlighting works either way.
 
 `.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
-buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+buffer**, because Neovim already maps it to `tcl`: a `.tm` file becomes `redextape_tm` when its text
+looks like a TM machine or its path has a directory named `redextape`, and otherwise keeps the
 filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
@@ -299,10 +356,11 @@ four extensions claimed with nothing to parse them. **If you are on `master`, sk
 use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
-driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
-which is simpler and takes every such file on your machine away from `tcl`, and they do not start
-the highlighter. If you want colour you need a `FileType` autocmd calling
+driven by hand. It is close to what `plugin/redextape.lua` does but not the same, and the
+differences worth knowing before you copy it are these: no block starts the highlighter or the
+language server, the `master` blocks use filetype names of their own, and the TM grammar's blocks
+claim `.tm` **unconditionally by extension**, which is simpler and takes every such file on your
+machine away from `tcl`. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -311,10 +369,10 @@ archive to expand to a directory named `<repo>-<revision>`. GitHub's archive end
 shape exactly — including stripping a leading `v` from a tag — which is why the snippets below work.
 It also means each of the four grammars downloads the whole repository separately.
 
-nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
-current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one you
-have installed — the `install_info` field sets are different, and fields from one are silently ignored by
-the other.
+nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is
+the current rewrite and needs Neovim 0.12+; `master` is frozen and supports Neovim 0.10 and 0.11.
+Pick the one you have installed — the `install_info` field sets are different, and fields from one
+are silently ignored by the other.
 <!-- END shared: neovim-intro -->
 
 **`main` branch:**
@@ -353,12 +411,17 @@ parser_config.redextape_rxm = {
     url = "https://github.com/Davey-Hughes/redextape",
     files = { "src/parser.c" },
     location = "grammars/tree-sitter-redextape-rxm",
+    branch = "main",
   },
   filetype = "rxm",
 }
 
 vim.filetype.add({ extension = { rxm = "rxm" } })
 ```
+
+**`branch = "main"` is required.** Without it `master` asks GitHub for `archive/master.tar.gz`,
+which GitHub redirects to `main`, and the install then fails because the archive has no
+`redextape-master` directory to move.
 
 `master` has no `queries` field and `:TSInstall` does not copy query files, so copy
 `queries/highlights.scm` to `queries/redextape_rxm/highlights.scm` somewhere on your `runtimepath`
@@ -367,18 +430,23 @@ yourself.
 <!-- BEGIN shared: filetype-autocmd -->
 **One more step the snippets above do not include.** Installing a parser does not turn highlighting
 on. Neovim auto-starts treesitter only for its own bundled filetypes — lua, markdown, help, query —
-and nvim-treesitter ships no `FileType` autocmd of its own, so without something like this the buffer
-opens with the right filetype, a working parser, and no colour:
+and nvim-treesitter's `main` branch ships no `FileType` autocmd of its own, so without something
+like this the buffer opens with the right filetype, a working parser, and no colour. (`master` has
+one, in its `highlight` module, which runs only once you enable that module.) The pattern names the
+filetypes of both branches' blocks:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
+  pattern = {
+    "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm", -- the `main` blocks
+    "rxt", "rxm", "rxlambda", "tm", -- the `master` blocks
+  },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```
 
-This was measured rather than assumed, and it was measured only after a review pointed out that every
-earlier check had supplied this autocmd itself and was therefore testing the harness.
+This was measured rather than assumed, by a check that does not supply this autocmd itself: a check
+that does is testing the harness.
 <!-- END shared: filetype-autocmd -->
 
 ### Helix
@@ -405,7 +473,8 @@ hx --grammar fetch && hx --grammar build
 
 `grammar` is omitted from `[[language]]` on purpose — it defaults to `name`, and both are
 `redextape_rxm`. `comment-tokens` is the modern key; older Helix called it `comment-token`, singular.
-No `indent` here, for the reason given under *What it is NOT*.
+No `indent` here. `redextape fmt` puts each instruction four spaces in (see *What it is NOT*), so
+add `indent = { tab-width = 4, unit = "    " }` if you want Helix to agree with it.
 
 Helix looks for queries in its runtime directory, so copy `queries/highlights.scm` to
 `~/.config/helix/runtime/queries/redextape_rxm/highlights.scm`. `hx --health redextape_rxm` reports
@@ -428,8 +497,9 @@ pub struct GrammarManifestEntry {
 ```
 
 `extension_builder.rs` clones the repository and joins `path` before looking for `src/parser.c`. Two
-shipped extensions rely on it; `zed-extensions/ocaml` uses two `path` values from one repository,
-which is the shape this repository is in — now with **four** grammars in one clone.
+shipped extensions rely on it: `zed-extensions/php` uses `path = "php"`, and `zed-extensions/ocaml`
+uses two `path` values from one repository, which is the shape this repository is in: **four**
+grammars in one clone.
 
 ```
 redextape-rxm-zed/
@@ -444,8 +514,8 @@ redextape-rxm-zed/
 
 ```toml
 id = "redextape-rxm"
-name = "Redextape rxm"
-description = "Redextape rxm text form support."
+name = "redextape rxm"
+description = "redextape rxm text form support."
 version = "0.1.0"
 schema_version = 1
 authors = ["davey"]
@@ -460,7 +530,7 @@ path = "grammars/tree-sitter-redextape-rxm"
 `languages/redextape_rxm/config.toml`:
 
 ```toml
-name = "Redextape rxm"
+name = "redextape rxm"
 grammar = "redextape_rxm"
 path_suffixes = ["rxm"]
 line_comments = [";"]
@@ -470,9 +540,10 @@ Install it with `zed: install dev extension` from the command palette, pointed a
 
 Three things worth knowing before taking the Zed route:
 
-- **`commit` is an alias for `rev`, and it must be a full 40-character SHA.** Zed fetches it with
-  `git fetch --depth 1 origin <rev>`, which needs the server to serve an unadvertised object by SHA.
-  If your host refuses, give a branch or tag name instead.
+- **`commit` is an alias for `rev`, which takes a full 40-character commit SHA or a branch name,
+  not a tag.** Zed runs `git fetch --depth 1 origin <rev>` and then `git checkout <rev>`; fetching a
+  tag by name stores no tag ref, so the checkout fails. Fetching by SHA needs the server to serve an
+  unadvertised object. If your host refuses, give a branch name.
 - **The queries live in the extension, not in the grammar.** Zed reads
   `languages/redextape_rxm/highlights.scm` from the *extension* repository, so this grammar's copy has
   to be duplicated across and will drift unless someone keeps it in step. Nothing in this
@@ -497,9 +568,10 @@ the map is still a function, and `each_label_capture_lands_on_its_own_positions`
 actually holds the two apart, since the projection being many-to-one means `compare_classified`
 cannot.
 
-**`@comment` has no printer at all**, unlike every other row in this table: it is in the map only
-because `queries/highlights.scm` uses it and `capture_map_is_total` requires a row for every capture a
-query names. `TokenClass::Comment` never appears on the authority side of this grammar's differential.
+**`@comment` has no mapped printer**, unlike every other row in this table: `print_rxm_doc` writes
+comments, but neither mapped entry point does. It is in the map only because
+`queries/highlights.scm` uses it and `capture_map_is_total` requires a row for every capture a query
+names. `TokenClass::Comment` never appears on the authority side of this grammar's differential.
 
 **There is no `@punctuation.bracket` row and no `@operator` row.** This form has no brackets and its
 printer never emits `TokenClass::Operator`, so either row would fail `every_capture_row_is_used` —

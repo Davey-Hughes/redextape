@@ -1,8 +1,8 @@
 //! Rxm's grammar: its generated parser, its highlight queries, its capture table, and the thin
 //! wrappers over `print_rxm_mapped`/`print_rxm_with_mapped` that make them rxm's authority.
 //!
-//! **TWO PRINTER ENTRY POINTS, ONE PRINTER.** `print_rxm_with_mapped` prepends the header and
-//! shifts the listing's spans by its byte length; the listing's bytes are identical either way.
+//! **TWO PRINTER ENTRY POINTS, ONE PRINTER.** Both call `print_rxm_with_inner`, and the header
+//! `Option` is the only difference between them, which keeps their listings byte-identical.
 //!
 //! | printer | header | classes |
 //! |---|---|---|
@@ -175,7 +175,7 @@ pub fn printed_program_with_header(src: &str) -> Option<(String, Vec<(Span, Toke
 }
 
 /// The FIXED list the headered corpus is built from. Fixed rather than generated because
-/// `arb_expr_over` is five arms over numeric leaves and reaches nine of the twenty-four mnemonics;
+/// `arb_expr_over` is five arms over numeric leaves and reaches eight of the twenty-four mnemonics;
 /// everything structurally interesting in this form is here.
 ///
 /// **THE FIRST TWELVE ARE `rxm_roundtrip.rs`'s `DEMOS`, IN ORDER**, reused because they were
@@ -211,9 +211,9 @@ pub const FIXED_CORPUS: &[&str] = &[
 mod tests {
     use super::*;
 
-    /// A toolchain bump that changes the generated ABI past what the Rust crate reads presents as a
-    /// bare `set_language` failure, which reads like a build error rather than a version error.
-    /// Pinning it here makes the message name the real cause.
+    /// The `tree-sitter` crate loads ABI 14, what the CLI writes when it misses `tree-sitter.json`,
+    /// so only this assertion notices that drift. Above the crate's range it names the cause of what
+    /// would otherwise be a bare `set_language` failure, which reads like a build error.
     #[test]
     fn abi_version_is_pinned() {
         assert_eq!(

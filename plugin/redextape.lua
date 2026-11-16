@@ -102,8 +102,7 @@ vim.api.nvim_create_autocmd("User", {
 --
 -- `.rxt`, `.rxlambda` and `.rxm` are unique to this project, so a plain extension mapping is right.
 --
--- `.tm` is not. Neovim already maps `.tm` to `tcl` — TeXmacs is the collision the TM README names,
--- but Neovim's own answer is `tcl`, a second one.
+-- `.tm` is not. Neovim already maps `.tm` to `tcl`, the collision the TM README names.
 --
 -- SO IT IS CLAIMED BY A PATTERN-KEYED FUNCTION THAT SNIFFS THE BUFFER, AND THE DIFFERENCE BETWEEN
 -- THE TWO KEYS IS THE WHOLE DESIGN. A function under `extension` REPLACES the built-in mapping, and

@@ -9,7 +9,7 @@
 
 use crate::tm::DescribedRun;
 use crate::tm::TmRun;
-use crate::tm::build::MAX_MACHINE_STATES;
+use crate::tm::build::{MAX_MACHINE_STATES, OVERFLOW_STATE};
 use crate::tm::decode::decode_tape_ty_reason;
 use crate::tm::header::{MAX_REDUCED_STEPS, Reduction, Stage, StageKind, TmHeader, is_stage_list};
 use crate::tm::machine::{Machine, StateId, Symbol};
@@ -192,20 +192,26 @@ pub enum RunFailure {
     /// The state always exists in the machine, because [`value_of_run`] produces this only when `states.get` finds
     /// it, so a caller may index the machine's states by it, as `redextape run` does.
     NotAccept(StateId),
+    /// A lowered run halted in a non-accept state named [`OVERFLOW_STATE`]: a value outgrew the field width the header records. The
+    /// tapes then hold truncated fields that decode without complaint to a wrong value, so they are not read.
+    /// Never produced under a reduced header, whose final state `NotAccept` judges.
+    Overflow,
     /// [`decode_reduced`] refused the tapes, for either of `DecodeFailure`'s causes.
     Decode(DecodeFailure),
 }
 
-/// The value a finished run's tapes hold under `h`: a capped run first, then a reduced run halting outside an
-/// accept state, then [`decode_reduced`].
+/// The value a finished run's tapes hold under `h`: a capped run first, then a lowered run halting in its
+/// overflow state, then a reduced run halting outside an accept state, then [`decode_reduced`].
 ///
 /// **THE ONE DECISION `redextape run` AND THE WEB APP'S TM BUFFERS BOTH READ A VALUE WITH.** Neither restates
 /// these checks; each words the failures for its own surface.
 ///
 /// # Errors
 ///
-/// [`RunFailure`]: `HitCap` for a capped run, `NotAccept` for a reduced run whose final state exists and is not
-/// an accept state, and `Decode` when [`decode_reduced`] refuses.
+/// [`RunFailure`]: `HitCap` for a capped run, `Overflow` for a lowered run that halted in a non-accept state
+/// named [`OVERFLOW_STATE`],
+/// `NotAccept` for a reduced run whose final state exists and is not an accept state, and `Decode` when
+/// [`decode_reduced`] refuses.
 pub fn value_of_run(
     m: &Machine,
     h: &TmHeader,
@@ -215,6 +221,12 @@ pub fn value_of_run(
 ) -> Result<Value, RunFailure> {
     if status == Status::HitCap {
         return Err(RunFailure::HitCap);
+    }
+    // The guard `Builder::overflow` allocates is never an accept state, so a hand-written file's accept state
+    // that happens to be called `overflow` still holds a value. A non-accept halt with that name cannot be
+    // told from the guard, because the header does not record which state the guard is.
+    if h.reduction.is_none() && m.states.get(state as usize).is_some_and(|s| !s.accept && s.name == OVERFLOW_STATE) {
+        return Err(RunFailure::Overflow);
     }
     if h.reduction.is_some() && m.states.get(state as usize).is_some_and(|s| !s.accept) {
         return Err(RunFailure::NotAccept(state));
@@ -463,6 +475,48 @@ mod tests {
         let d = finished();
         let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
         assert_eq!(value_of_run(&d.machine, &d.header, tapes, WALKING, Status::Halted), Ok(Value::Nat(1)));
+    }
+
+    /// The tapes decode; only the final state's name says a value outgrew its field. A reduced header leaves
+    /// that state to the accept check, which refuses it too.
+    #[test]
+    fn a_lowered_run_that_halts_in_its_overflow_state_has_no_value() {
+        let mut d = finished();
+        d.machine.states[WALKING as usize].name = OVERFLOW_STATE.into();
+        let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
+        assert_eq!(value_of_run(&d.machine, &d.header, tapes, WALKING, Status::Halted), Err(RunFailure::Overflow));
+        let (h, bits) = bits_of(&d);
+        assert_eq!(value_of_run(&d.machine, &h, &bits, WALKING, Status::Halted), Err(RunFailure::NotAccept(WALKING)));
+    }
+
+    /// The guard `Builder::overflow` allocates is never an accept state, so an accept state that a hand-written
+    /// file happens to call `overflow` is a finished run.
+    #[test]
+    fn an_accept_state_named_overflow_is_not_the_overflow_guard() {
+        let mut d = finished();
+        assert!(d.machine.states[DONE as usize].accept, "the premise: `DONE` accepts");
+        d.machine.states[DONE as usize].name = OVERFLOW_STATE.into();
+        let TmRun::Ran { tapes } = &d.run else { panic!("run_of always runs") };
+        assert_eq!(value_of_run(&d.machine, &d.header, tapes, DONE, Status::Halted), Ok(Value::Nat(1)));
+    }
+
+    /// A real lowering at a width too narrow for its value: the machine `run_tm_described_at` built halts in the
+    /// state `Builder::overflow` named, and its truncated tapes are not read as the program's value.
+    #[test]
+    fn a_lowered_machine_that_overflows_its_field_has_no_value() {
+        let core = crate::desugar::desugar(&crate::parser::parse("40 + 2").0.unwrap());
+        let d = crate::tm::run_tm_described_at(
+            &core,
+            EncodingKind::Unary,
+            Ty::Nat,
+            crate::tm::TM_DEFAULT_CAPS,
+            crate::tm::MIN_FIELD_WIDTH,
+        )
+        .unwrap();
+        assert!(matches!(d.run, TmRun::Overflow), "the premise: {:?}", d.run);
+        let (tapes, state, status, _) =
+            simulate_final(&d.machine, &d.header.init(d.machine.tapes), run_caps(&d.header));
+        assert_eq!(value_of_run(&d.machine, &d.header, &tapes, state, status), Err(RunFailure::Overflow));
     }
 
     #[test]

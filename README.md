@@ -1,52 +1,64 @@
-# Redextape
+# redextape
 
-A small programming language that compiles to both lambda calculus and Turing machines, so you can
-run the same program both ways and step through them side by side. It runs in the browser at
-[redextape.com](https://redextape.com).
+redextape is a small programming language that compiles to both the lambda calculus and Turing
+machines. You can run a program both ways at [redextape.com](https://redextape.com) and step through
+the λ-term and the machine side by side.
 
 [![One program on redextape.com, open as source, a λ-term and a Turing machine side by side](https://daveyhughes.com/readme/redextape/demo.webp)](https://redextape.com)
 
-You write a program in `.rxt`, a small typed language. The compiler turns it into a λ-term, and
-also into a Turing machine by way of a register machine called rxm, and the site shows them next to
-each other. You can step each one forwards and backwards, and clicking part of one view highlights
-the matching part in the others. The λ-term really is reduced one step at a time and the machine
-really does follow its rules one move at a time, so the views show the actual runs.
+Programs are written in `.rxt`, a small typed language. The compiler turns a program into a single
+λ-term, and separately into a multi-tape Turing machine by way of a register machine called rxm. A
+step in the λ view is one β-reduction of the term, and a step in the Turing machine view is one move
+of the machine.
 
 ## What it does
 
-- `.rxt` has functions, `let` and `mut` bindings, `if`, `while`, natural numbers, booleans, lists
-  and closures. The examples menu has a few programs to start from.
-- A program can be viewed as source, as a λ-term (drawn as a tree you can fold), as rxm, and as a
-  Turing machine with its tapes, rules and state diagram. Clicking a token, part of the term, an rxm
-  instruction or a machine rule marks the same place in the other views.
-- Each view steps forwards and backwards through a recorded history, plays at a speed you pick and
-  can go back to step 0. A run too long to record stops at a step budget and asks before going on.
-- A view's λ-term, rxm program or Turing machine can be copied out as text, edited and run on its
-  own.
-- Share links keep the program, the open views and the step each one is at. It all goes in the
-  URL's fragment, which the browser doesn't send to the server.
-- The tests run one set of programs through a reference interpreter, the λ reducer, the Turing
-  machine on unary and binary tapes, and native code from Cranelift or LLVM, and fail if any two
-  disagree.
-- `redextape-lsp` is a language server with diagnostics, formatting, hover, go to definition, find
-  references and an outline for `.rxt` and for rxm's and the Turing machine's text formats, plus
-  diagnostics and formatting for λ files. The site runs the same server in a web worker. There are
-  tree-sitter grammars for highlighting, and a Neovim plugin that sets up the filetypes, parsers and
-  server.
-- `redextape` is the command-line tool. It formats, lints, runs and emits programs: `run` picks the
-  reference, λ or Turing machine backend, and `emit` prints the λ-term, rxm program or Turing
-  machine as text, optionally reduced to a single tape or to two symbols.
+- `.rxt` has functions, closures, `let` and `mut` bindings, `if`, `while`, natural numbers, booleans
+  and lists. The site has a few example programs to start from.
+- A program can be opened as source, as a λ-term drawn as a tree you can fold, as an rxm program, and
+  as a Turing machine with its tapes, rules and state diagram. Clicking part of one view marks the
+  matching parts of the others.
+- The λ, rxm and Turing machine views each step forwards and backwards, play at a speed you pick and
+  go back to step 0. A long run pauses when it reaches the step cap or fills the recording, and you
+  can tell it to carry on.
+- You can copy the λ-term, rxm program or Turing machine out as text, edit it and run the copy.
+- A share link holds the program, the layout of the views and the step shown for each machine. It's
+  kept in the URL's fragment, which the browser doesn't send to the server.
+- The tests run the same programs through a reference interpreter, the λ reducer, the Turing machine
+  with unary and binary tapes, and native code, and fail if any two disagree.
+- `redextape-lsp` is a language server for `.rxt` and for the λ, rxm and Turing machine text formats.
+  There are tree-sitter grammars for all four and a Neovim plugin that sets them up. The site uses
+  the same server and grammars.
+- `redextape` is the command-line tool. It formats, lints and runs programs, and writes out a
+  program's λ-term, rxm program or Turing machine.
 
-## How it's built
+## How it works
 
-It's a Rust workspace. `redextape-core` has the parser, the type checker and all the backends, and
-wasm-pack compiles it to WebAssembly, so everything runs in the browser and the server only serves
-static files. The web app is TypeScript with CodeMirror 6 and Vite, and the language server runs in
-a worker as a second WebAssembly build. Native code uses Cranelift by default, with LLVM (through
-`inkwell`) behind a feature flag. The site is deployed as a Docker image with nginx serving the
-static build. CI runs on Forgejo: formatting and clippy, the Rust tests with a 90% line-coverage
-minimum, the WebAssembly and web tests in a real browser, and a RustSec advisory check. It publishes
-the image from `main`.
+The compiler is written in Rust. It parses `.rxt`, infers types with Hindley–Milner and lowers the
+program to a small core language. From there it goes two ways.
+
+The λ backend builds one term for the whole program. Numbers are Church numerals, booleans and lists
+are Scott-encoded, recursion goes through the Y combinator, and `mut` and `while` are compiled in
+store-passing style. The term has to be reduced in normal order, because under call-by-value the Y
+combinator never stops unfolding and an `if` evaluates both of its branches. The answer is read back
+from the normal form using the program's type. A few programs that use `mut` have no λ-term,
+such as one where a closure changes a variable it captured. For those, the λ view shows the reason
+in place of a term.
+
+The Turing machine backend first compiles the program to rxm, a register machine with instructions
+for arithmetic, jumps, calls, pairs and mutable cells. A function used as a value becomes a tagged
+pair on the heap, and calls to it go through a dispatcher. Each rxm instruction then becomes a block
+of states on a five-tape machine, with tapes for the registers, scratch work, the call stack, the
+heap and mutable cells. Numbers are stored in fixed-width fields, in unary or binary. The finished
+machine can be folded onto one-way tapes, merged onto a single tape and cut down to two symbols.
+
+Every node of the core program has an ID, and a source map records which part of the λ-term, which
+rxm instructions and which Turing machine states came from it. That's how a click in one view finds
+the matching parts of the others. The views step independently of each other.
+
+The site runs all of this in the browser. The Rust code is compiled to WebAssembly, a web worker
+runs the machines, and the page keeps the recent steps so that ◀ can go backwards. The editor is
+CodeMirror 6.
 
 ## Docs
 

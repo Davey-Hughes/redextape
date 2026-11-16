@@ -37,7 +37,8 @@ pub enum Outcome {
     ToolFailed,
 }
 
-/// Run `input` on `backend` and print the value to `out`.
+/// Run `input` on `backend` and print the value to `out`. `None` is an omitted `--backend`, which
+/// runs a `.rxt` program on `Backend::Reference`; any `Some` on a `.tm` or `.rxm` file is refused.
 ///
 /// # Errors
 ///
@@ -46,11 +47,26 @@ pub enum Outcome {
 /// error, so `main` has one place that decides exit codes.
 pub fn run(
     input: &Input,
-    backend: Backend,
+    backend: Option<Backend>,
     out: &mut impl std::io::Write,
     err: &mut impl std::io::Write,
     color: bool,
 ) -> std::io::Result<Outcome> {
+    // Before the read, so the answer does not depend on the file's content: a λ term is refused for
+    // what it is, not for the lexer errors it would raise as a program.
+    if let Input::Path(p) = input
+        && Form::is_lambda_term(p)
+    {
+        writeln!(
+            err,
+            "error: `{}` is a λ term, which `run` does not take\n  \
+             a bare λ term carries no result type, and the λ backend decodes its result by type, so \
+             there is nothing to decode it against\n  \
+             run the program it was emitted from with `--backend lambda` instead",
+            input.label()
+        )?;
+        return Ok(Outcome::ToolFailed);
+    }
     let src = match input.read() {
         Ok(s) => s,
         Err(e) => {
@@ -81,7 +97,7 @@ pub fn run(
         Input::Path(p) => Form::from_extension(p).unwrap_or(Form::Rxt),
         Input::Stdin => Form::Rxt,
     };
-    if form.is_artifact() && backend != Backend::Reference {
+    if form.is_artifact() && backend.is_some() {
         let noun = match form {
             Form::Tm => "a `.tm` file, which is already a machine",
             Form::Rxm => "a `.rxm` file, which is already a program",
@@ -96,7 +112,7 @@ pub fn run(
     match form {
         Form::Tm => run_artifact_text(&src, &label, out, err, color),
         Form::Rxm => run_rxm_artifact(&src, &label, out, err, color),
-        Form::Rxt => match backend {
+        Form::Rxt => match backend.unwrap_or_default() {
             Backend::Reference => run_reference(&src, &label, out, err, color),
             Backend::Lambda => run_lambda_backend(&src, &label, out, err, color),
             Backend::Tm => run_tm_backend(&src, &label, out, err, color),
@@ -172,6 +188,20 @@ fn run_artifact_text(
                 machine.states[halted_in as usize].name
             )?;
             return Ok(Outcome::ProgramFailed);
+        }
+        // Exit 2, as `emit` gives the same overflow: the machine ran faithfully and reported that its
+        // field was too narrow, so the tool has no answer, not a fault to blame on the file.
+        Err(redextape_core::tm::RunFailure::Overflow) => {
+            writeln!(
+                err,
+                "error: `{label}`'s machine halted in its `overflow` state: a value outgrew the {}-cell tape \
+                 field its header records\n  \
+                 the tapes hold truncated fields, so there is no value to print\n  \
+                 re-emit it with `redextape emit --lang tm`, which widens the field until the values fit \
+                 or writes no file",
+                header.width
+            )?;
+            return Ok(Outcome::ToolFailed);
         }
         Err(redextape_core::tm::RunFailure::Decode(failure)) => Err(failure),
         Ok(v) => Ok(v),
@@ -554,9 +584,18 @@ fn run_tm_backend(
             )?;
             Ok(Outcome::ProgramFailed)
         }
+        // The tool's limit, not the program's fault: the reference backend evaluates the same program,
+        // and `emit` answers 2 on this overflow too.
         redextape_core::tm::TmRun::Overflow => {
-            writeln!(err, "error: a value exceeded the widest tape field this encoding has")?;
-            Ok(Outcome::ProgramFailed)
+            writeln!(
+                err,
+                "error: a value exceeded the widest tape field this encoding has ({} cells, `MAX_FIELD_WIDTH`)\n  \
+                 the program is fine; `--backend tm` runs it under unary\n  \
+                 `redextape emit --lang tm --encoding binary` packs a far larger value into the same field, \
+                 and `redextape run` runs the file it writes",
+                redextape_core::tm::MAX_FIELD_WIDTH
+            )?;
+            Ok(Outcome::ToolFailed)
         }
         // Design §9.1. The ceiling is `MAX_MACHINE_STATES`.
         redextape_core::tm::TmRun::TooLarge => {
@@ -634,7 +673,7 @@ mod tests {
     /// is worse than a broken test. `filename` carries the extension, because that is what is dispatched
     /// on. The directory is done with (its content already read into `out`/`err`/`outcome`) by the time
     /// this function returns, so it is safe to remove it right here.
-    fn run_case(case: &str, filename: &str, src: &str, backend: Backend) -> (String, String, Outcome) {
+    fn run_case(case: &str, filename: &str, src: &str, backend: Option<Backend>) -> (String, String, Outcome) {
         let dir = redextape_test_support::ScratchDir::new(&format!("cli-{case}")).unwrap();
         let p = dir.join(filename);
         std::fs::write(&p, src).unwrap();
@@ -645,7 +684,7 @@ mod tests {
 
     #[test]
     fn a_value_program_prints_its_value_and_reports_ran() {
-        let (out, err, outcome) = run_case("value", "p.rxt", "1 + 2", Backend::Reference);
+        let (out, err, outcome) = run_case("value", "p.rxt", "1 + 2", None);
         assert_eq!(out, "3\n");
         assert_eq!(err, "");
         assert!(matches!(outcome, Outcome::Ran));
@@ -653,7 +692,7 @@ mod tests {
 
     #[test]
     fn a_type_error_is_the_programs_fault() {
-        let (out, err, outcome) = run_case("type-error", "p.rxt", "1 + true", Backend::Reference);
+        let (out, err, outcome) = run_case("type-error", "p.rxt", "1 + true", None);
         assert_eq!(out, "");
         assert!(!err.is_empty(), "a static failure must explain itself on stderr");
         assert!(matches!(outcome, Outcome::ProgramFailed));
@@ -661,7 +700,7 @@ mod tests {
 
     #[test]
     fn a_runtime_fault_is_also_the_programs_fault() {
-        let (out, err, outcome) = run_case("fault", "p.rxt", "head(nil)", Backend::Reference);
+        let (out, err, outcome) = run_case("fault", "p.rxt", "head(nil)", None);
         assert_eq!(out, "");
         assert_ne!(err, "");
         assert!(matches!(outcome, Outcome::ProgramFailed));
@@ -671,7 +710,7 @@ mod tests {
     /// the program evaluated, and the mini-language can produce a value no text form encodes.
     #[test]
     fn a_function_typed_program_runs_and_prints_non_value() {
-        let (out, _err, outcome) = run_case("closure", "p.rxt", "|x| x + 1", Backend::Reference);
+        let (out, _err, outcome) = run_case("closure", "p.rxt", "|x| x + 1", None);
         assert_eq!(out, "<non-value>\n");
         assert!(matches!(outcome, Outcome::Ran));
     }
@@ -681,7 +720,7 @@ mod tests {
     #[test]
     fn all_three_backends_agree_on_a_value_program() {
         for backend in [Backend::Reference, Backend::Lambda, Backend::Tm] {
-            let (out, err, outcome) = run_case(&format!("agree-nat-{backend:?}"), "p.rxt", "1 + 2", backend);
+            let (out, err, outcome) = run_case(&format!("agree-nat-{backend:?}"), "p.rxt", "1 + 2", Some(backend));
             assert_eq!(out, "3\n", "{backend:?} disagreed; stderr was: {err}");
             assert!(matches!(outcome, Outcome::Ran), "{backend:?} did not run");
         }
@@ -690,7 +729,7 @@ mod tests {
     #[test]
     fn all_three_backends_agree_on_a_list_program() {
         for backend in [Backend::Reference, Backend::Lambda, Backend::Tm] {
-            let (out, err, outcome) = run_case(&format!("agree-list-{backend:?}"), "p.rxt", "[1, 2, 3]", backend);
+            let (out, err, outcome) = run_case(&format!("agree-list-{backend:?}"), "p.rxt", "[1, 2, 3]", Some(backend));
             assert_eq!(out, "[1, 2, 3]\n", "{backend:?} disagreed; stderr was: {err}");
             assert!(matches!(outcome, Outcome::Ran));
         }
@@ -702,7 +741,7 @@ mod tests {
     #[test]
     fn a_function_typed_result_is_the_tools_limit_not_the_programs_fault() {
         for backend in [Backend::Lambda, Backend::Tm] {
-            let (out, err, outcome) = run_case(&format!("closure-{backend:?}"), "p.rxt", "|x| x + 1", backend);
+            let (out, err, outcome) = run_case(&format!("closure-{backend:?}"), "p.rxt", "|x| x + 1", Some(backend));
             assert_eq!(out, "", "{backend:?} must print no value");
             assert!(err.contains("decode"), "{backend:?} must say it cannot decode, got: {err}");
             assert!(matches!(outcome, Outcome::ToolFailed), "{backend:?} must be ToolFailed");
@@ -715,7 +754,7 @@ mod tests {
     #[test]
     fn a_checked_in_tm_fixture_runs_to_its_value() {
         let text = include_str!("../../redextape-core/tests/fixtures/list_1_2.tm");
-        let (out, err, outcome) = run_case("fixture", "m.tm", text, Backend::Reference);
+        let (out, err, outcome) = run_case("fixture", "m.tm", text, None);
         assert_eq!(out, "[1, 2]\n", "stderr: {err}");
         assert!(matches!(outcome, Outcome::Ran));
     }
@@ -729,7 +768,7 @@ mod tests {
         let text = "tapes 1\nstart loop\nversion 1\nencoding unary\nwidth 1\nslots 0\nresult Nat\n\n\
                     state loop:\n  \
                     [*] -> write [*], move [S], goto loop\n";
-        let (out, err, outcome) = run_case("hitcap", "m.tm", text, Backend::Reference);
+        let (out, err, outcome) = run_case("hitcap", "m.tm", text, None);
         assert_eq!(out, "", "a capped run must print no value");
         assert!(err.contains("did not halt"), "stderr must name the cap, not the result type, got: {err}");
         assert!(!err.contains("decode"), "stderr must not blame decoding, got: {err}");
@@ -742,9 +781,32 @@ mod tests {
     #[test]
     fn an_uppercase_tm_extension_is_still_an_artifact() {
         let text = include_str!("../../redextape-core/tests/fixtures/list_1_2.tm");
-        let (out, err, outcome) = run_case("uppercase-ext", "M.TM", text, Backend::Reference);
+        let (out, err, outcome) = run_case("uppercase-ext", "M.TM", text, None);
         assert_eq!(out, "[1, 2]\n", "stderr: {err}");
         assert!(matches!(outcome, Outcome::Ran));
+    }
+
+    /// **A λ TERM IS REFUSED FOR WHAT IT IS, IN EITHER CASE AND UNDER ANY BACKEND.** Read as `.rxt`, the
+    /// term `emit --lang lambda` writes for `1 + 2` raises a lexer error at every `λ` and exits 1, which
+    /// blames a valid file on the program. The extension is matched the way `M.TM`'s is above.
+    #[test]
+    fn an_rxlambda_file_is_refused_before_it_is_parsed() {
+        let term = "(λm. λn. λf. λx. m f (n f x)) (λf. λx. f x) (λf. λx. f (f x))\n";
+        for (filename, backend) in [("q.rxlambda", None), ("Q.RXLAMBDA", None), ("q.rxlambda", Some(Backend::Lambda))] {
+            let (out, err, outcome) = run_case(&format!("rxlambda-{filename}-{backend:?}"), filename, term, backend);
+            assert_eq!(out, "", "{filename} {backend:?}");
+            assert!(err.contains("is a λ term, which `run` does not take"), "{filename} {backend:?} got: {err}");
+            assert!(!err.contains("unexpected character"), "{filename} {backend:?} was lexed: {err}");
+            assert!(matches!(outcome, Outcome::ToolFailed), "{filename} {backend:?}: the tool cannot answer, exit 2");
+        }
+        // A file that does not exist gets the λ refusal, not the read error, so the refusal comes first.
+        let dir = redextape_test_support::ScratchDir::new("cli-rxlambda-missing").unwrap();
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let outcome = run(&Input::from_arg(&dir.join("nope.rxlambda")), None, &mut out, &mut err, false).unwrap();
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.contains("is a λ term, which `run` does not take"), "refused before the read: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed));
+        assert_eq!(out, [] as [u8; 0]);
     }
 
     /// **THE FILE'S FAULT, NOT THE TOOL'S.** A header's `result` is a promise about the tapes, and
@@ -756,7 +818,7 @@ mod tests {
     fn tapes_that_contradict_the_headers_own_result_type_are_the_files_fault() {
         let text = "tapes 1\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 0\nresult Nat\n\n\
                     state s: accept\n";
-        let (out, err, outcome) = run_case("decode-mismatch", "m.tm", text, Backend::Reference);
+        let (out, err, outcome) = run_case("decode-mismatch", "m.tm", text, None);
         assert_eq!(out, "");
         assert!(err.contains("its header declares"), "the message must blame the file, got: {err}");
         assert!(matches!(outcome, Outcome::ProgramFailed), "a self-contradicting file is exit 1, not 2");
@@ -776,7 +838,7 @@ mod tests {
             writeln!(text, "state w{i}:\n  [*] -> write [*], move [R], goto {next}").unwrap();
         }
         text.push_str("state done: accept\n");
-        let (out, err, outcome) = run_case("reduced-hitcap", "m.tm", &text, Backend::Reference);
+        let (out, err, outcome) = run_case("reduced-hitcap", "m.tm", &text, None);
         assert_eq!(out, "");
         assert!(err.contains("did not halt within the 5 steps its header records"), "got: {err}");
         assert!(matches!(outcome, Outcome::ProgramFailed));
@@ -789,17 +851,64 @@ mod tests {
         let text = "tapes 1\nstart stuck\nversion 2\nencoding unary\nwidth 4\nslots 0\nresult Nat\n\
                     reduced single-tape 5\nsteps 1\n\n\
                     state stuck:\n";
-        let (out, err, outcome) = run_case("reduced-stuck", "m.tm", text, Backend::Reference);
+        let (out, err, outcome) = run_case("reduced-stuck", "m.tm", text, None);
         assert_eq!(out, "");
         assert!(err.contains("halted in `stuck`, which is not an accept state"), "got: {err}");
         assert!(matches!(outcome, Outcome::ProgramFailed));
+    }
+
+    /// A file built at a width too narrow for `40 + 2` halts in `overflow`, and its truncated tapes decode
+    /// to a wrong value without complaint, so printing nothing at exit 2 is the only honest answer.
+    #[test]
+    fn a_tm_artifact_that_overflows_its_field_is_the_tools_limit() {
+        let core = redextape_core::desugar::desugar(&redextape_core::parser::parse("40 + 2").0.unwrap());
+        let d = redextape_core::tm::run_tm_described_at(
+            &core,
+            redextape_core::tm::EncodingKind::Unary,
+            redextape_core::ty::Ty::Nat,
+            redextape_core::tm::TM_DEFAULT_CAPS,
+            redextape_core::tm::MIN_FIELD_WIDTH,
+        )
+        .unwrap();
+        assert!(matches!(d.run, redextape_core::tm::TmRun::Overflow), "the premise: {:?}", d.run);
+        let text = redextape_core::tm::print_tm_with(&d.machine, &d.header);
+        let (out, err, outcome) = run_case("tm-overflow", "m.tm", &text, None);
+        assert_eq!(out, "", "no value may be printed from truncated fields");
+        assert!(err.contains("halted in its `overflow` state"), "got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the file's: exit 2");
+    }
+
+    /// The overflow guard is never an accept state, so a hand-written file is free to call its accept state
+    /// `overflow`: the same machine as the fixture, with only its state names swapped, runs to the same value.
+    #[test]
+    fn an_accept_state_named_overflow_is_not_the_overflow_guard() {
+        let fixture = include_str!("../../redextape-core/tests/fixtures/list_1_2.tm");
+        assert_eq!(fixture.matches("state halt: accept").count(), 1, "the premise: `halt` is the accept state");
+        let text = fixture.replace("overflow", "ovf").replace("halt", "overflow");
+        assert!(text.contains("state overflow: accept"), "the premise: the accept state is now `overflow`");
+        let (out, err, outcome) = run_case("accept-named-overflow", "m.tm", &text, None);
+        assert_eq!(out, "[1, 2]\n", "stderr: {err}");
+        assert!(matches!(outcome, Outcome::Ran));
+    }
+
+    /// `run --backend tm` on a program whose count outgrows unary's widest field: the program is fine and
+    /// `reference` answers it, so the overflow is the tool's limit.
+    #[test]
+    fn a_tm_run_that_overflows_the_widest_field_is_the_tools_limit() {
+        let src = "let mut i = 0; let mut n = 0; while i < 300 { n = n + 1; i = i + 1; } n";
+        let (out, err, outcome) = run_case("tm-run-overflow", "p.rxt", src, Some(Backend::Tm));
+        assert_eq!(out, "");
+        assert!(err.contains("exceeded the widest tape field"), "got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the program's: exit 2");
+        let (out, _, _) = run_case("tm-run-overflow-reference", "p.rxt", src, None);
+        assert_eq!(out, "300\n", "the reference backend answers the same program");
     }
 
     #[test]
     fn a_header_less_tm_cannot_be_run_and_says_why() {
         // `print_tm` (no header) records the transition function and start state and no tapes.
         let text = "tapes 1\nstart s\n\nstate s: accept\n";
-        let (out, err, outcome) = run_case("headerless", "m.tm", text, Backend::Reference);
+        let (out, err, outcome) = run_case("headerless", "m.tm", text, None);
         assert_eq!(out, "");
         assert!(err.contains("header"), "the message must name the missing header, got: {err}");
         assert!(matches!(outcome, Outcome::ToolFailed));
@@ -807,8 +916,7 @@ mod tests {
 
     #[test]
     fn an_rxm_artifact_runs_and_prints_its_value() {
-        let (out, err, outcome) =
-            run_case("rxm-ok", "p.rxm", "result Nat\n\n    li\trr, #7\n    halt\n", Backend::Reference);
+        let (out, err, outcome) = run_case("rxm-ok", "p.rxm", "result Nat\n\n    li\trr, #7\n    halt\n", None);
         assert!(err.is_empty(), "no stderr: {err}");
         assert!(matches!(outcome, Outcome::Ran));
         assert_eq!(out.trim(), "7");
@@ -816,23 +924,37 @@ mod tests {
 
     #[test]
     fn a_header_less_rxm_artifact_is_refused_before_it_runs() {
-        let (out, err, outcome) = run_case("rxm-nohdr", "p.rxm", "    li\trr, #7\n    halt\n", Backend::Reference);
+        let (out, err, outcome) = run_case("rxm-nohdr", "p.rxm", "    li\trr, #7\n    halt\n", None);
         assert!(out.is_empty(), "nothing is printed: {out}");
         assert!(matches!(outcome, Outcome::ToolFailed), "exit 2 — the tool cannot answer");
         assert!(err.contains("result"), "the message names what is missing: {err}");
         assert!(err.contains("emit --lang rxm"), "and how to get one: {err}");
     }
 
+    /// **EVERY VALUE, `reference` INCLUDED, ON BOTH ARTIFACT FORMS.** A default on the flag would make
+    /// a typed `--backend reference` indistinguishable from an omitted one, so it would run at exit 0,
+    /// and a test that passed only `lambda` would assert a third of what its name claims. The same
+    /// files run with the flag omitted, so the refusal is the flag's and not the file's.
     #[test]
-    fn backend_does_not_apply_to_an_rxm_artifact() {
-        let (_, err, outcome) = run_case("rxm-backend", "p.rxm", "result Nat\n\n    halt\n", Backend::Lambda);
-        assert!(matches!(outcome, Outcome::ToolFailed));
-        assert!(err.contains("--backend"), "{err}");
+    fn backend_does_not_apply_to_an_artifact_whatever_its_value() {
+        let tm = include_str!("../../redextape-core/tests/fixtures/list_1_2.tm");
+        let rxm = "result Nat\n\n    li\trr, #7\n    halt\n";
+        for (filename, src) in [("m.tm", tm), ("p.rxm", rxm)] {
+            for backend in [Backend::Reference, Backend::Lambda, Backend::Tm] {
+                let (out, err, outcome) =
+                    run_case(&format!("backend-on-{filename}-{backend:?}"), filename, src, Some(backend));
+                assert_eq!(out, "", "{filename} {backend:?} must print no value");
+                assert!(err.contains("`--backend` does not apply"), "{filename} {backend:?} got: {err}");
+                assert!(matches!(outcome, Outcome::ToolFailed), "{filename} {backend:?} must be ToolFailed");
+            }
+            let (_, err, outcome) = run_case(&format!("no-backend-on-{filename}"), filename, src, None);
+            assert!(matches!(outcome, Outcome::Ran), "{filename} runs with the flag omitted: {err}");
+        }
     }
 
     #[test]
     fn an_invalid_rxm_artifact_reports_validation_rather_than_running() {
-        let (_, err, outcome) = run_case("rxm-bad", "p.rxm", "result Nat\n\n    jmp\tnowhere\n", Backend::Reference);
+        let (_, err, outcome) = run_case("rxm-bad", "p.rxm", "result Nat\n\n    jmp\tnowhere\n", None);
         assert!(matches!(outcome, Outcome::ProgramFailed), "the FILE is at fault: exit 1");
         assert!(err.contains("nowhere"), "the message names the undefined label: {err}");
     }
@@ -848,7 +970,7 @@ mod tests {
     #[test]
     fn an_rxm_artifact_with_a_lying_header_is_the_files_fault() {
         let (out, err, outcome) =
-            run_case("rxm-lying-header", "p.rxm", "result Bool\n\n    li\trr, #7\n    halt\n", Backend::Reference);
+            run_case("rxm-lying-header", "p.rxm", "result Bool\n\n    li\trr, #7\n    halt\n", None);
         assert!(out.is_empty(), "a mismatched decode must print no value: {out}");
         assert!(matches!(outcome, Outcome::ProgramFailed), "the file's fault: exit 1");
         assert!(err.contains("does not decode"), "{err}");
@@ -934,7 +1056,7 @@ mod tests {
     fn a_tm_artifact_with_a_lying_bool_header_is_the_files_fault() {
         let text = "tapes 5\nstart s\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Bool\n\
                      tape 0 #1111111#\n\nstate s: accept\n";
-        let (out, err, outcome) = run_case("tm-lying-bool", "m.tm", text, Backend::Reference);
+        let (out, err, outcome) = run_case("tm-lying-bool", "m.tm", text, None);
         assert!(out.is_empty(), "a mismatched decode must print no value: {out}");
         assert!(matches!(outcome, Outcome::ProgramFailed), "the file's fault: exit 1");
         assert!(err.contains("its header declares"), "the message must blame the file, got: {err}");

@@ -1,5 +1,5 @@
 /**
- * The Redextape rxm text form — HIGHLIGHTING ONLY.
+ * The redextape rxm text form — HIGHLIGHTING ONLY.
  *
  * Not authoritative. `redextape_core::tm::rxm_syntax`'s `parse_rxm_full` is the parser, and
  * `print_rxm_mapped` and `print_rxm_with_mapped` are the printer AND the classifier. This

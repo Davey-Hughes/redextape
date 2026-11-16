@@ -1,4 +1,4 @@
-; Highlight queries for the Redextape TM text form.
+; Highlight queries for the redextape TM text form.
 ;
 ; THESE MUST BE TOTAL OVER THE GRAMMAR'S OWN TOKENS. `print_tm_inner` pushes a span for EVERY
 ; non-whitespace byte it writes — separators included — so a token this file leaves uncaptured

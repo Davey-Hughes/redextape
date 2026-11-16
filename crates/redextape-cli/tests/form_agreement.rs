@@ -17,7 +17,7 @@
 //! `("p.rxm", "tm")` the same test: a defect mapping `.rxm` onto `Form::Tm` would leave every row
 //! green, because both forms are equally "an artifact". Both commands print a noun
 //! that names the form outright — `run` says "a `.tm` file, which is already a machine" against "a
-//! `.rxm` file, which is already a program", `fmt` says "a `.tm` file, …" against "an `.rxm` file,
+//! `.rxm` file, which is already a program", `fmt` says "a `.tm` file, …" against "a `.rxm` file,
 //! …" — so the form is observable, and the column is compared against it rather than against a
 //! boolean derived from it.
 //!

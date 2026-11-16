@@ -34830,3 +34830,282 @@ kept, among them task 1's and task 2's temporary prints, the fix wave's `fw-prob
 | the sweep table; 51 and 20; 0 either way | items / rows / px by category; B's split; 4a's rows against the final's | `$R/final/gate/three-way.log`, lines 2 to 21; `task-4b-i-report.md`, C; `task-4a-report.md`, C1 |
 | 8; 1280 × 800 | the view panels `tm-view-narrow.test.ts` pins at `toBe(33)`; where | its `PANELS` and the 1280 px case that reads them, at `3883831` |
 | the Firefox table | | `task-4a-report.md`, B; `task-4a-ii-report.md`, sections 5 and R26's Firefox counts; `final-fix-wave-report.md`, its commands; `task-4b-i-report.md`, B; `$R/ci-fix-2/firefox-guard.log` for `1066622`; `$R/ci-fix-3/firefox-guard.log` for `68bf7c9` |
+
+#### README ACCURACY: THE README READS AS AN INTRODUCTION, WITH "HOW IT WORKS" IN PLACE OF THE BUILD TOOLING, THE PROJECT'S NAME IS LOWERCASE IN PROSE, THE ARCHITECTURE, DEVELOPMENT AND CONVENTIONS DOCS AND THE CLI AND GRAMMAR READMES SAY WHAT THE CODE DOES, AND THE CLI REFUSES WHAT IT CANNOT RUN, AMONG IT A `.tm` THAT HALTS IN ITS `overflow` STATE, WHICH IT DECODED TO A WRONG VALUE AT EXIT 0 (2026-11-15, branch `docs/readme-accuracy`, `9e0c229..75f0f6c`, 26 commits, plus this entry)
+
+The user, 2026-11-15: review every README against the code for accuracy. The top README should read
+less like AI and more like a good introduction, and its "How it's built" was padded with what does
+not matter to its reader, CI, nginx and Docker; the CLI and grammar READMEs may stay technical; and
+nothing is edited until he has seen the findings. Five read-only agents fact-checked, at `85b987f`,
+the top README, the CLI README, the mini-language and λ grammar READMEs, the rxm and TM grammar
+READMEs, and the four grammar READMEs' editor-install sections, and found 75 problems; among them
+were three bugs in the CLI, not mistakes in its README. The lane's record is
+`~/temp/redextape-readme-review-record/`, `$R` below: `ledger.md` holds the user's decisions and the
+order of the work, `top.md`, `cli.md` and the three `grammars-*.md` the fact-check, and the
+`*-report.md` files beside them the work, the review and the fixes. The CLI commits were made on a
+branch of their own, `fix/cli-readme-bugs`, in a second worktree, and cherry-picked onto this one in
+the order `ledger.md` lists their first SHAs; they are `c0f0f36..63bac76` here, and the review's
+grammar fixes, made on `fix/readme-review-grammars`, are `a3f5fdd`. The reports name commits by the
+SHAs they had where they were made, before the branch was rebased onto `9e0c229`; `sha-map.txt`
+pairs each of the branch's SHAs from before the rebase with its SHA now.
+
+##### DECISIONS
+
+The user's, all on 2026-11-15:
+
+- **The CLI's bugs and the stale `docs/architecture.md` and `docs/development.md` are fixed here, in
+  one PR**, so that he can read the README rendered on the forge and on GitHub. The leftover
+  `grammars/tree-sitter-redextape-asm/parser.so`, which no commit tracked, was deleted.
+- **The README draft is "pretty good", and the name is lowercase in all prose in this PR:** the
+  READMEs, the `tree-sitter.json` descriptions, the header comments of the CI, Docker, nginx and
+  compose files and of the rxm and TM `grammar.js` and `highlights.scm`, core's crate doc and the
+  example programs' banners. `Language::Redextape`, the lines that name it, and the `"camelcase"`
+  fields stay.
+- **The overflow fix keeps its reach into core and the web app**, and `emit` and `lint` refuse a
+  `.tm`, `.rxm` or `.rxlambda` file up front at exit 2, as `run` refuses a `.rxlambda`.
+- **`emit --lang rxm` refuses a function-typed result at exit 2, as `--lang tm` does**, where the
+  first fix wrote a listing with no `result` line at exit 0 that `run` then refused. Asked whether
+  such a result is "categorically wrong" or could be shown in "a more interesting way", he kept the
+  second as a follow-up, below.
+
+The controller's:
+
+- **`fmt --form <form> q.rxlambda` skips the refusal**, because `--form` overrides the extension
+  wherever `fmt` reads one; the CLI README says so since the review.
+- **`docs/conventions.md`'s four wrong statements about CI**, found while the development doc was
+  corrected, went in with the lowercase pass as a commit of their own, `f085cbc`.
+- **The rxm and TM READMEs' seed-dependent span ranges were deleted, not widened**, once four more
+  runs of the TM leg put three totals outside the ten-run range the README quoted.
+
+##### WHAT CHANGED
+
+- **The top README, `9c2f3b3`, then `3c0a2d2` and `f3deb33`.** It opens with what the language
+  compiles to and the link to redextape.com, then the screenshot. "What it does" is corrected: the
+  λ, rxm and Turing machine views step, and the source view does not; a long run pauses at the step
+  cap or when its recording fills, two stops, either of which it can be told to carry on past; a
+  share link holds the program, the layout of the views and the step shown for each machine. "How it
+  works" replaces "How it's built", which described CI, nginx and Docker, and said that
+  `redextape-core` holds all the backends and that wasm-pack compiles it: the front end, the λ
+  backend's encodings and why its term must reduce in normal order, readback by the program's type,
+  rxm and the dispatcher for functions used as values, the five tapes and their fixed-width fields,
+  the reductions, the source map behind linking, and the web worker. Since the review it says the
+  compiler turns *a* program into a λ-term, and that a few programs that use `mut` have none, for
+  which the λ view shows the reason.
+- **The name, `2fc8e56`.** 35 lines in 24 files go from `Redextape` to `redextape`. The 24 lines
+  outside `docs/superpowers/` that still say `Redextape` are the ones the decision keeps: 18 in
+  `crates/redextape-lsp/src/language.rs`, the four `tree-sitter.json` `"camelcase"` fields,
+  `scripts/check-lua.sh` and `web/tests/browser/lsp-diagnostics.test.ts`. Regenerated with the
+  pinned tree-sitter 0.25.10, each grammar's `src/parser.c`, `grammar.json` and `node-types.json`
+  are byte-identical, since `generate` writes neither the description nor `grammar.js`'s comments.
+- **The docs, `0de5a6b` and `f085cbc`, then `3c0a2d2`.**
+  - `docs/architecture.md` describes four kinds of pane, with the λ tree, linking, the copy editors
+    and the state diagram built, where it said the λ pane had no tree and lacked click-linking; LSP
+    hover served; the TM reductions, the universal machine and the counter machines; "ten exported
+    functions", the module's `start` function, `init`, not among them; and a core with no
+    dependencies at default features, `serde` and `ts-rs` being optional dependencies behind the
+    `serde` and `ts` features. Its three 2026-08 measurements are dated.
+  - `docs/development.md`'s web setup runs `pnpm run build:lsp-wasm` beside `build:wasm`. Followed
+    as written in a fresh worktree, the old setup left `typecheck` failing with TS2307 on
+    `../../pkg-lsp/redextape_lsp_wasm.js`, `test:node` failing 2 of 1,482, and the dev server
+    answering the LSP worker with a 500. The CI jobs are described as `ci.yml` has them, and
+    `rust-scoped` as scoped to the branch's whole diff against `main`.
+  - `docs/conventions.md`: `rust-browser` joins `rust` and `rust-llvm` in covering every
+    configuration and in skipping a draft PR; an edit to a PR's title or body re-runs CI; and
+    `linear-history` never sees a push to `main` that changed only `docs/`.
+- **The CLI.** Each fix and refusal has a test, and each report says its new tests failed with the
+  fix reverted:
+  - `c0f0f36`: `emit --lang rxm` lowers through `tm::lower_program`, which falls back to
+    defunctionalising, where it called `lower_rxm` alone. `closure.rxt` and `map-fold.rxt`, which
+    `emit --lang tm` and `run --backend tm` took, failed with "no rxm lowering" at exit 2; they now
+    emit and run back to 42 and 9.
+  - `85d66e7`: `--backend` is an `Option` with no default, so `--backend reference` on a `.tm` or
+    `.rxm` file is refused at exit 2, as `lambda` and `tm` were, where it was accepted silently.
+    Omitted, it still means `reference` for a `.rxt` program.
+  - `be5abeb`, then `92f89ae`: every overflow under `run` exits 2. `run --backend tm` answered 1.
+    Worse, a `.tm` that halted in its non-accept `overflow` state had its truncated tapes decoded:
+    `40 + 2` built at width 4 printed `0` at exit 0. The check is in core, where `value_of_run`
+    returns a new `RunFailure::Overflow` keyed on `build::OVERFLOW_STATE`, because that function is
+    the one decision the CLI and the web app's TM buffers share; so a TM copy in the web app that
+    halts in `overflow` shows a fault where it showed a wrong value, through a new arm in the wasm
+    crate's `failure_value`. `emit`'s overflow refusal says `run` would find no value and exit 2,
+    where it said `run` would print a wrong answer at exit 0.
+  - `a0cbde4`, `3f8aa36` and `ddf7aaa`: `run`, `emit`, `lint` and `fmt` read a file's kind from its
+    extension in any letter case and refuse one they do not take before reading it, at exit 2,
+    naming what the file is: `run` a `.rxlambda`; `emit` and `lint` a `.tm`, `.rxm` or `.rxlambda`;
+    `fmt` a `.rxlambda`, unless `--form` names a form. Each lexed the file as `.rxt` and blamed the
+    program, at exit 1, or at exit 2 under `fmt`. `Form::is_lambda_term` matches as
+    `Form::from_extension` does, and `Form::compiled_noun` builds on both, so there is still one
+    extension table.
+  - `2baf2b5`: `emit --lang rxm` refuses a result type no `result` line can name, a function's, at
+    exit 2 with `--lang tm`'s message, where `c0f0f36` wrote a listing with no `result` line.
+  - From the review: `54f9b26`, `6d5eab2` and `1982f9d`, below. The last refuses a list nested past
+    `MAX_TY_DEPTH`, 64, by naming that limit, "which nests lists at most 64 deep; this type nests
+    them 66 deep", under `--lang tm` and `--lang rxm`, where both said the encodings cover no part
+    of the type.
+- **The CLI README, `63bac76`, then `3c0a2d2` and `aba3c20`.** It is rewritten against the CLI after
+  those commits: a paragraph on how a file's kind is read, which kinds each command takes and the
+  refusals before the read; `--backend` as `reference` when omitted and refused on an artifact
+  whatever its value; `run --backend tm` through `run_tm_fitted` and `lower_program`, unary only,
+  with `emit --encoding binary` and then `run` as the route to binary; the overflow messages as the
+  CLI prints them; one `fmt` converting a CRLF file, `--check` failing again only while something
+  writes CRLF back; a config error naming the key when the error is about one; `print_tm_with` and
+  `print_rxm_with` as the printers `emit` uses; the rxm `mem` cap; and only `let` bindings reported
+  unused. Every `$` example was run, and the 9 that quote output match the CLI character for
+  character, apart from the `/repo/` placeholder and the README's own `…`.
+- **The grammar READMEs.**
+  - What uses them, `711f304` and `bd6281a`: the web app colours its source editor and each copy
+    editor with the matching grammar through web-tree-sitter, `web/src/colour.ts`, so the "nothing
+    in `web/`" bullets go; `classify_source` colours nothing in `web/` and stays the differential's
+    authority; `redextape-lsp` serves hover and navigation besides diagnostics and formatting; and
+    `redextape emit --lang lambda` writes `.rxlambda` files, the only committed ones being CLI test
+    fixtures.
+  - The ABI note, in all four READMEs, `711f304` and `bd6281a`, and in each grammar's
+    `abi_version_is_pinned` doc comment, `9a81c49`: regenerating without `tree-sitter.json` gives
+    ABI 14, which the `tree-sitter` crate in `Cargo.lock`, 0.27.1, loads, since it takes ABI 13 to
+    15, so only the `abi_version_is_pinned` tests fail. The READMEs said the crate refuses to load
+    it. The mini-language and λ READMEs date the binaries that need GLIBC_2.39 from v0.26.1, the
+    first 0.26 release, where they said 0.26.0.
+  - The divergence lists, `bd6281a`, then `a3f5fdd`. The rxm README said it had no accept-less
+    divergence and one accept-more; a probe through `parse_rxm_full` and the grammar reproduced 8
+    accept-less and 6 accept-more, which it now lists. The TM README gains 6 accept-less and 7
+    accept-more beyond the five `grammar.js` lists. `compare_classified` fails on a `MISSING` node
+    as on an `ERROR` one. With them: both rxm printer entry points call one inner printer; `fmt`
+    formats `.rxm` and `.tm`, with the indent it writes; `arb_expr_over` reaches eight rxm
+    mnemonics, not nine, in the README, `FIXED_CORPUS`'s doc and `tests/rxm.rs`; and four TM fields
+    no query reads. The seed-dependent averages and span ranges are gone, and with the rxm
+    README's "cheapest across all four grammars", never measured against the others, its row in
+    `scripts/check-doc-figures.sh`, which pins 45 figures, where it pinned 46.
+  - The editor sections, `a220feb`, then `a3f5fdd`. The nvim-treesitter `master` blocks set
+    `branch = "main"`: without it `master` fetches `archive/master.tar.gz`, which GitHub redirects
+    to `main`, and the install fails at its `mv` of `redextape-master`. In a headless Neovim with
+    every XDG directory in a scratch tree, the mini-language block as written failed, and with the
+    branch it installed and highlighted; the other three blocks, given the branch, installed and
+    parsed their files without an error node. The shared FileType autocmd names
+    `master`'s four filetypes too and says it is for `main`, which ships none; the shared intro says
+    the plugin's one-liner also starts `redextape-lsp` and warns at each startup when it finds no
+    binary, and that `master` supports Neovim 0.10 and 0.11. Zed's `rev` takes a full 40-character
+    SHA or a branch name, not a tag. The TM README's `.tm` collision is with Tcl, which stock Neovim
+    maps `.tm` to, not with TeXmacs. The rxm and TM Helix sections give the `indent` that matches
+    `fmt`, four spaces and two.
+  - History phrasing, `aba3c20`, then `97a720c` and `75f0f6c`: sentences in the CLI and grammar
+    READMEs and the shared autocmd note that told how something came to hold say what holds, 19 of
+    them in the λ README.
+
+##### WHAT THE REVIEW CAUGHT
+
+Three reviewers read the branch at `a220feb`, one the code and two the prose, and a fourth read the
+history pass at `aba3c20`; they found 28 problems, and every one was fixed.
+
+- **The overflow fix's own false positive.** `be5abeb` keyed the overflow on the state's name alone,
+  so a `.tm` whose accept state is named `overflow` was refused at exit 2: `list_1_2.tm` with
+  `overflow` renamed `ovf` and `halt` renamed `overflow` printed `[1, 2]` on `main` and was refused
+  on the branch. `54f9b26` adds `!s.accept`; `Builder::state` always makes the guard non-accept.
+- **An order no test held.** `run`'s `.rxlambda` refusal test used only files that exist, so a
+  refusal moved after the read stayed green; `6d5eab2` adds a missing file, as the other three
+  commands' tests have.
+- **A wrong reason.** A list nested past `MAX_TY_DEPTH` was refused with "this type has none", which
+  `1982f9d` replaces.
+- **A claim the branch made wrong.** The λ README said no committed file has a `.rxlambda`
+  extension, and the branch's own CLI fixtures added four.
+- **A correction that was wrong.** The first editor pass said Zed's `rev` takes a tag. Zed runs
+  `git fetch --depth 1 origin <rev>` and then `git checkout <rev>`, and a tag fetched by name stores
+  no tag ref, so the checkout fails; replayed with git 2.56.1 against a `file://` remote.
+- **A tense that made a claim false.** The history pass turned "nothing downstream could have caught
+  it" into "nothing downstream would catch it", which a test over `lambda::CORPUS`, holding
+  `f λx. x`, disproves.
+- **The rest:** `rust-scoped`'s scope in `docs/development.md`; the CLI README's `--form` exception;
+  the TM span range; `tree-sitter test` counted as a layer of the crate when `check-all.sh` runs
+  it; and imprecisions and history phrasing in the README, the docs and the grammar READMEs.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Function-typed results**, the follow-up the user kept. `emit --lang tm` and `--lang rxm` refuse
+  them; the λ backend could print the normal form, and every backend could agree on an opaque
+  `<fn>`.
+- **A hand-written `.tm` whose non-accept halt is named `overflow`** is still read as an overflow
+  and refused at exit 2, since the header does not record which state is the guard.
+- **A reduced, `version 2`, `.tm` that halts in a state named `overflow`** goes through `NotAccept`,
+  exit 1, "not an accept state". An emitted reduced file cannot reach it, since `reduce` refuses a
+  reduced run that does not halt in an accept state.
+- **Stdin, `-`, has no extension**, so `emit -`, `lint -` and `run -` read it as `.rxt`, and a
+  machine or a λ term on stdin is blamed as a program at exit 1.
+- **`--help` for `emit`, `lint` and `fmt` names none of the refusals.** `run`'s message for a
+  `.rxm` with no `result` line, `crates/redextape-cli/src/run.rs:327`, says `emit --lang rxm`
+  "writes a header whenever the program's result type can be expressed", and not that it refuses
+  otherwise; and the CLI README's `--field-width` sentence, line 239, still says "today's
+  behaviour".
+- **`fmt --form rxt q.rxlambda`** reads the term as `.rxt` and prints a lexer error for each `λ`,
+  exit 2, as `--form` is meant to override the extension.
+- **`fmt` has no printer for a λ term**; it could format `.rxlambda` the way the LSP does.
+- **The editor checks that did not run:** the `master` proof ran on Neovim 0.13.0-dev, outside
+  `master`'s 0.10 and 0.11, and on no supported version; a Zed tag `rev` was reasoned from Zed's
+  source and replayed with git, not run in Zed; and the Helix `indent` values were not run in Helix.
+- **The rxm and TM `grammar.js` header comments still call an accept-less divergence "a defect"**,
+  though both READMEs now list accept-less divergences that reproduce, and the TM one's item 4
+  still describes the `two-symbol` comma ERROR that the README lists as accept-less.
+- **`plugin/redextape.lua`'s comment on `.tm` sniffing** names a TeXmacs document in its measured
+  corpus, history in a comment.
+- **The λ backend's limitations:** the 4 programs of `LAMBDA_LIMITATION_DEMOS` in
+  `crates/redextape-core/tests/three_way_oracle.rs`, each with a `let mut`, still have no λ-term;
+  the README now says so.
+- **`docs/architecture.md`'s dated figures**, the 1,156-test count, 7.48 s, 105,607 steps and the
+  Firefox run's known failures, were not measured again.
+
+##### VERIFICATION
+
+The branch was rebased onto `9e0c229` before this entry was committed; main brought only #174, a
+one-line change to `web/privacy.html`. Run on 2026-11-15 in this branch's worktree, `$R/wt`, at
+`75f0f6c` with only this entry staged, each into its log in `$R/logs-entry2/`:
+
+```
+cargo nextest run -p redextape-cli
+  -p redextape-core -p redextape-wasm        → exit 0; "1640 tests run: 1640 passed, 33 skipped"
+                                               (nextest.log)
+bash scripts/check-doc-figures.sh            → exit 0; "45 documented figures match the tree."
+                                               (gates.log)
+bash scripts/check-shared-docs.sh            → exit 0; "12 shared region(s) in 4 file(s) match
+                                               their 3 source(s)." (gates.log)
+```
+
+Not run here: `scripts/check-all.sh`, the LLVM tier and coverage, `scripts/check-slow.sh`, the web
+suites and the browser tests, and the Docker image. The branch was last pushed before the rebase,
+at `f7d67bf`, whose CI run 697 `ledger.md` records with its browser, LLVM and slow jobs green while
+it ran. Nothing has been pushed since: not the rebase, and not the 10 commits after `63bac76`, which
+is `f7d67bf` rebased. Among them `54f9b26` changes `value_of_run`, which the web app's TM copy
+reads; the wasm crate's tests above run natively, not in a browser.
+
+**Every count this entry quotes, with what produces it.** A command ran in `$R/wt` unless the row
+says `$R`, and its output is in the log the row names, in `$R/logs-entry2/`. A row naming a report
+gives the figure as that report, in `$R`, states it, from the probe or run it describes.
+
+| Value | What | Produced by |
+|---|---|---|
+| 26; `75f0f6c` | commits in the range; its last | `git rev-list --count 9e0c229..HEAD`; `git rev-parse --short HEAD` (figures.log) |
+| 76, 1,534, 690 | files changed, insertions and deletions in the range | `git diff --stat 9e0c229..HEAD`, its last line (figures.log) |
+| 1; `web/privacy.html`, one line | commits main brought from `0d41bc6`, the base before the rebase, to `9e0c229`; what they change | `git rev-list --count 0d41bc6..9e0c229`; `git diff --stat 0d41bc6 9e0c229` (figures.log) |
+| 75: 8, 14, 14, 26, 13 | the fact-check's findings: the top README, the CLI README, the mini-language and λ READMEs, the rxm and TM READMEs, the editor sections | in `$R`, `grep -c '^\*\*F[0-9]' top.md cli.md grammars-editors.md`, `grep -cE '^[0-9]+\. \*\*:' grammars-rxt-lambda.md` and `grep -cE '^- \*\*:' grammars-rxm-tm.md` (findings.log). Each pattern matches the line that opens a finding in that report's layout, and the sum is by hand. A problem met in more than one place counts once for each place a report lists it: the ABI note is four findings, one per grammar README, and the `emit --lang rxm` bug two, the top README's F6 and the CLI README's F4 |
+| three | the CLI bugs among the fact-check's findings | `ledger.md`, its "Code bugs found" line |
+| 28: 4, 9, 11, 4 | the review's findings: the code at `a220feb`, the top README, docs and CLI README, the grammar READMEs, the history pass at `aba3c20` | in `$R`, `grep -cE '^[0-9]+\. ' r1-report.md r2a-report.md r2b-report.md rs-report.md` (findings.log) |
+| 1640, 33 | tests run and passed; skipped | `cargo nextest run -p redextape-cli -p redextape-core -p redextape-wasm`, its `Summary` line (nextest.log) |
+| 45; 46 | the figures `check-doc-figures.sh` pins at `75f0f6c`; at `85b987f` | `bash scripts/check-doc-figures.sh` (gates.log); the runs of it in `cli.md`, `grammars-rxt-lambda.md` and `grammars-rxm-tm.md` |
+| 12, 4, 3 | shared regions, files and sources | `bash scripts/check-shared-docs.sh` (gates.log) |
+| 35, 24 | lines and files the lowercase commit changes | `git show --stat 2fc8e56`, its last line; `git show 2fc8e56 \| grep '^-' \| grep -o Redextape \| wc -l` prints 35 (figures.log) |
+| 24: 18, four, one, one | lines outside `docs/superpowers/` that keep `Redextape`: `language.rs`, the `tree-sitter.json` files, `check-lua.sh`, `lsp-diagnostics.test.ts` | `git grep -n Redextape -- ':!docs/superpowers' \| wc -l` (figures.log); `git grep -c Redextape -- ':!docs/superpowers'` (kept-and-demos.log) |
+| four | committed `.rxlambda` files | `git ls-files \| grep -ci '\.rxlambda$'` (figures.log) |
+| 4 | the programs of `LAMBDA_LIMITATION_DEMOS`, each with a `let mut` | `sed -n '335,370p' crates/redextape-core/tests/three_way_oracle.rs` (kept-and-demos.log) |
+| 10; `f7d67bf`; `63bac76` | commits after the pushed head, rebased; the pushed head, from before the rebase; that head rebased | `git rev-list --count 63bac76..HEAD`; `git ls-remote origin refs/heads/docs/readme-accuracy`; `sha-map.txt`, its `f7d67bf` line (pushed.log) |
+| 64; 66 | `MAX_TY_DEPTH`; the nesting the review tried | `git grep -n 'const MAX_TY_DEPTH' crates`, `crates/redextape-core/src/ty.rs:35`; `r1-report.md`, finding 3, and `f1-report.md`, 3 |
+| `0` for `40 + 2` at width 4 | the wrong value a `.tm` halting in `overflow` printed | `c1-report.md`, fix 3 |
+| 42, 9 | `closure.rxt`'s and `map-fold.rxt`'s answers, emitted as rxm and run | `c1-report.md`, fix 1 |
+| `[1, 2]` | `list_1_2.tm` with its accept state renamed `overflow`, on `main` and after `54f9b26` | `r1-report.md`, finding 1; `f1-report.md`, 1 |
+| 8, 6; 6, 7; five | rxm accept-less and accept-more divergences; TM accept-less and accept-more beyond `grammar.js`'s; the ones `grammar.js` lists | `d2b-report.md`, "Divergences that reproduced" |
+| eight, nine; 8 × 256 | rxm mnemonics `arb_expr_over` reaches, and the old claim; the cases it ran | `grammars-rxm-tm.md`, the rxm `:129` finding; `d2b-report.md` |
+| four | TM rule fields no query reads | `grammars-rxm-tm.md`, the TM `:529-534` finding; `d2b-report.md` |
+| 0.27.1; 13 to 15; v0.26.1; 14 | the `tree-sitter` crate in `Cargo.lock`; the ABIs it loads; the first 0.26 release; the ABI generated without `tree-sitter.json` | `d2a-report.md`, "Figures written" |
+| 2 of 1,482; 500 | `test:node`'s failures and the LSP worker's status without `build:lsp-wasm` | `d1-report.md`, "Setup steps" |
+| 9 | the CLI README's examples that quote output, all matching | `c2-report.md`, "Examples" |
+| 0.13.0-dev; 0.10 and 0.11 | the Neovim the `master` proof ran on; the versions `master` supports | `d3-report.md`, "Headless-Neovim proof" |
+| four, three | further runs of the TM leg, and those outside the ten-run range | `r2b-report.md`, finding 3 |
+| 2.56.1 | the git that replayed Zed's fetch and checkout | `r2b-report.md`, finding 2; `f2-report.md`, 2 |
+| 19 | λ README sentences the history pass rewrote | `s-report.md` |
+| four | the `conventions.md` statements about CI that were wrong | `d1-report.md`, "conventions.md (not edited)" |

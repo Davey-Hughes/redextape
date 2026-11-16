@@ -5,23 +5,27 @@ A tree-sitter grammar for the redextape mini-language — the `.rxt` source form
 
 ## What this is for
 
-**External editors, and only external editors.** Everywhere this project already highlights source, it
-does so by calling `redextape_core::analysis::classify_source` — `web/` renders CodeMirror decorations
-straight over that function's spans, which is why Plan 5 considered a grammar for its own panes and
-chose not to. Neovim, Helix, Zed and Emacs cannot make that call at all. `redextape-lsp` now reaches
-Neovim over those same front ends — but with diagnostics and formatting, and it advertises **no
-semantic tokens**, deliberately: these grammars already colour all four forms there, and a server
-answering the same question would compete with them rather than complete them. So colour in an
-external editor is still a grammar or nothing. That is the whole motivation.
+**The web app's source editor, and external editors.** `web/src/colour.ts` loads this grammar's
+committed `tree-sitter-redextape.wasm` and `queries/highlights.scm` through `web-tree-sitter`, and
+the source editor is coloured from them. The Plan 7 part 3 design
+(`docs/superpowers/specs/2026-09-20-plan7-part3-editor-intelligence-design.md` §6.1) gives the
+reasons. `redextape_core::analysis::classify_source` colours nothing in `web/`; it stays the
+authority the differential below holds this grammar to.
+
+Neovim, Helix, Zed and Emacs cannot call into `redextape-core` at all. `redextape-lsp` reaches
+Neovim over those same front ends — but with diagnostics, formatting, hover and navigation, and it
+advertises **no semantic tokens**, deliberately: these grammars already colour all four forms there,
+and a server answering the same question would compete with them rather than complete them. So
+colour in an external editor is still a grammar or nothing.
 
 ## What it is NOT, and may never become
 
 **This grammar is not authoritative, and it may never lower a CST into Core.** The hand-written front
 end in `crates/redextape-core` — lexer, Pratt parser, Hindley–Milner inference — stays the semantic
 source of truth, and since 2026-08-19 it owns the canonical printer as well
-(`redextape_core::format`, which `redextape fmt` calls). Any disagreement this grammar introduces is
-therefore **cosmetic by construction**: it can produce a wrong colour and it cannot produce a wrong
-program.
+(`redextape_core::format` and `format_with_width`; `redextape fmt` calls the second). Any
+disagreement this grammar introduces is therefore **cosmetic by construction**: it can produce a
+wrong colour and it cannot produce a wrong program.
 
 That constraint is the roadmap's, not this file's — *never maintain two authoritative grammars*. The
 lane it fixes is highlighting. Deliberately absent, each for a stated reason
@@ -31,9 +35,10 @@ lane it fixes is highlighting. Deliberately absent, each for a stated reason
   `typeck`. A second would be the closest thing here to the two authoritative grammars the roadmap
   forbids.
 - **no `injections.scm`** — no form embeds another.
-- **no folds, no indents** — nothing in the Rust tree has an opinion about either, so there would be
-  nothing to check them against.
-- **nothing in `web/`** — settled in the other direction by Plan 5 and not reopened.
+- **no folds, no indents** — §12's reason is that nothing in the Rust tree has an opinion about
+  either to check one against. That reason does not hold for indents: `redextape fmt` indents a
+  block's body four spaces (see the Helix section). No indent query has been written against that
+  layout; §12 calls indents addable later if an editor user asks.
 
 "Cosmetic by construction" is a claim rather than a guarantee, which is why the next section exists.
 
@@ -48,13 +53,22 @@ is the authority and the check has no opinion of its own, so a divergence is alw
 cargo nextest run -p redextape-grammar-check
 ```
 
-Three layers, none of which is the same evidence twice:
+Three layers, none of which is the same evidence twice: `tree-sitter test`, which
+`scripts/check-all.sh` runs, and two in this crate.
 
 | layer | what it does |
 |---|---|
 | `tree-sitter test` | eight tree-shape cases under `test/corpus/`, for structure the differential cannot see |
-| `CORPUS` in `src/lib.rs` | thirteen hand-written programs — `fn`, `while`, closures, UFCS chains, comments, `mut` — compared span for span |
+| `mini::CORPUS` in `src/mini.rs` | thirteen hand-written programs — `fn`, `while`, closures, UFCS chains, comments, `mut` — compared span for span |
 | `tests/generated.rs` | proptest over `arb_expr_over`, 256 generated programs per run, same comparison |
+
+A fourth runs in a browser, against the artefact `web/` loads. The crate above compiles `parser.c`
+through `cc` and has no wasm build, so the two sides meet in a file: `tests/golden.rs` checks this
+grammar's fixtures against `classify_source`, and holds `grammars/capture-golden.json` equal to the
+captures this crate computes for them (it rewrites the file only under `REDEXTAPE_WRITE_GOLDEN=1`).
+`web/tests/browser/grammar-differential.test.ts` loads the committed `tree-sitter-redextape.wasm`
+under `web-tree-sitter`, collapses its captures with the app's own `colourSpans`, and compares them
+with that file. Of the four layers, it is the only one that reads the `.wasm` itself.
 
 Malformed input is refused before comparison rather than compared leniently: `compare()` fails on any
 source whose tree contains an ERROR node. That guard is load-bearing and not tidiness. `classify_source`
@@ -84,18 +98,21 @@ cd grammars/tree-sitter-redextape
 
 **The CLI version is pinned to v0.25.10 and the pin is load-bearing in three directions.**
 
-- It is deliberately **not** the newest release. Binaries from 0.26.0 on need **GLIBC_2.39** and this
-  project's CI runner has **2.35**; every published Linux asset for those releases is the same glibc
-  build and no musl variant exists, so none of them can run there. Building 0.26 from source is not a
-  way around it either — the CLI vendors QuickJS through `bindgen`, which needs libclang, also absent.
-  v0.25.10 needs only GLIBC_2.34 and produces byte-identical `grammar.json` and `node-types.json` at
-  ABI 15. **Do not bump this until the runner image has glibc 2.39+.**
-- An earlier pin to "0.27.0" was read off a locally installed
-  `tree-sitter-cli-git` build, which reports the version it is heading toward; no such release existed yet
-  (0.27.0 came out on 2026-08-30), so CI would have failed to download it.
+- It is deliberately **not** the newest release. Binaries from v0.26.1, the first 0.26 release, on
+  need **GLIBC_2.39** and this project's CI runner has **2.35**; every published Linux asset for
+  those releases is the same glibc build and no musl variant exists, so none of them can run there.
+  Building 0.26 from source is not a way around it either — the CLI vendors QuickJS through
+  `bindgen`, which needs libclang, also absent. v0.25.10 needs only GLIBC_2.34 and produces
+  byte-identical `grammar.json` and `node-types.json` at ABI 15. **Do not bump this until the runner
+  image has glibc 2.39+.**
+- It is not read off a locally installed `tree-sitter-cli-git` build, which reports the version it is
+  heading toward rather than a released one; CI downloads a released binary, so a version with no
+  release yet would fail there.
 - **`tree-sitter.json` must be present.** Without it the released CLI prints a warning and *silently*
-  generates ABI 14 instead of 15, which the `tree-sitter` Rust crate then refuses to load. The file is
-  not decoration — it is what makes the pin reproducible.
+  generates ABI 14 instead of 15. The `tree-sitter` Rust crate would still load that parser —
+  `Cargo.lock` pins it at 0.27.1, which accepts ABI 13 to 15 — so what fails is the unit test
+  `mini::tests::abi_version_is_pinned`, which asserts 15 and says ABI 14 means `tree-sitter.json`
+  was not picked up. The file is not decoration — it is what makes the pin reproducible.
 
 `scripts/setup-dev.sh` installs the pinned binary into a repository-local `.tools/` rather than trusting
 whatever `tree-sitter` is on `$PATH`, and `check-all.sh` prefers it and asserts `--version` reads
@@ -153,11 +170,16 @@ loads that plugin:
 
 That registers all four grammars, claims the four extensions, **and starts the highlighter** — which
 is a separate thing that nothing else does. Neovim auto-starts treesitter only for its own bundled
-filetypes, and nvim-treesitter ships no `FileType` autocmd, so a parser can be installed and a
-filetype set and the buffer still open with no colour at all.
+filetypes, and nvim-treesitter's `main` branch ships no `FileType` autocmd, so a parser can be
+installed and a filetype set and the buffer still open with no colour at all.
+
+It also starts the language server when it finds a `redextape-lsp` binary, in the checkout's
+`target/release/` or on `PATH`. When it finds neither, it shows a warning at every startup naming
+the commands that build one. Highlighting works either way.
 
 `.rxt`, `.rxlambda` and `.rxm` are claimed by extension. `.tm` is claimed by **sniffing the
-buffer**, because Neovim already maps it to `tcl`: a file that is not this project's keeps the
+buffer**, because Neovim already maps it to `tcl`: a `.tm` file becomes `redextape_tm` when its text
+looks like a TM machine or its path has a directory named `redextape`, and otherwise keeps the
 filetype it had. `lazy = false` is required — filetype registration has to happen at
 startup, and a lazy-loaded spec would not register this project's extensions until something had
 already loaded it. Then, once:
@@ -174,10 +196,11 @@ four extensions claimed with nothing to parse them. **If you are on `master`, sk
 use the hand-written block below.**
 
 **Everything below is for everyone else** — `master`, a different plugin manager, or nvim-treesitter
-driven by hand. It is close to what `plugin/redextape.lua` does, with two deliberate differences
-worth knowing before you copy it: the blocks below claim `.tm` **unconditionally by extension**,
-which is simpler and takes every such file on your machine away from `tcl`, and they do not start
-the highlighter. If you want colour you need a `FileType` autocmd calling
+driven by hand. It is close to what `plugin/redextape.lua` does but not the same, and the
+differences worth knowing before you copy it are these: no block starts the highlighter or the
+language server, the `master` blocks use filetype names of their own, and the TM grammar's blocks
+claim `.tm` **unconditionally by extension**, which is simpler and takes every such file on your
+machine away from `tcl`. If you want colour you need a `FileType` autocmd calling
 `vim.treesitter.start()` as well — see the end of this section.
 
 **nvim-treesitter's `main` branch does not clone.** Its installer strips a trailing `.git` from
@@ -186,10 +209,10 @@ archive to expand to a directory named `<repo>-<revision>`. GitHub's archive end
 shape exactly — including stripping a leading `v` from a tag — which is why the snippets below work.
 It also means each of the four grammars downloads the whole repository separately.
 
-nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is the
-current rewrite and needs Neovim 0.12+; `master` is frozen and works with Neovim ≤ 0.11. Pick the one you
-have installed — the `install_info` field sets are different, and fields from one are silently ignored by
-the other.
+nvim-treesitter has **two live branches that are incompatible plugins sharing a name.** `main` is
+the current rewrite and needs Neovim 0.12+; `master` is frozen and supports Neovim 0.10 and 0.11.
+Pick the one you have installed — the `install_info` field sets are different, and fields from one
+are silently ignored by the other.
 <!-- END shared: neovim-intro -->
 
 **`main` branch:**
@@ -231,6 +254,7 @@ parser_config.redextape = {
     url = "https://github.com/Davey-Hughes/redextape",
     files = { "src/parser.c" },
     location = "grammars/tree-sitter-redextape",
+    branch = "main",
   },
   filetype = "rxt",
 }
@@ -238,24 +262,33 @@ parser_config.redextape = {
 vim.filetype.add({ extension = { rxt = "rxt" } })
 ```
 
+**`branch = "main"` is required.** Without it `master` asks GitHub for `archive/master.tar.gz`,
+which GitHub redirects to `main`, and the install then fails because the archive has no
+`redextape-master` directory to move.
+
 `master` has no `queries` field and `:TSInstall` does not copy query files, so copy
 `queries/highlights.scm` to `queries/redextape/highlights.scm` somewhere on your `runtimepath` yourself.
 
 <!-- BEGIN shared: filetype-autocmd -->
 **One more step the snippets above do not include.** Installing a parser does not turn highlighting
 on. Neovim auto-starts treesitter only for its own bundled filetypes — lua, markdown, help, query —
-and nvim-treesitter ships no `FileType` autocmd of its own, so without something like this the buffer
-opens with the right filetype, a working parser, and no colour:
+and nvim-treesitter's `main` branch ships no `FileType` autocmd of its own, so without something
+like this the buffer opens with the right filetype, a working parser, and no colour. (`master` has
+one, in its `highlight` module, which runs only once you enable that module.) The pattern names the
+filetypes of both branches' blocks:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm" },
+  pattern = {
+    "redextape", "redextape_rxm", "redextape_lambda", "redextape_tm", -- the `main` blocks
+    "rxt", "rxm", "rxlambda", "tm", -- the `master` blocks
+  },
   callback = function(args) pcall(vim.treesitter.start, args.buf) end,
 })
 ```
 
-This was measured rather than assumed, and it was measured only after a review pointed out that every
-earlier check had supplied this autocmd itself and was therefore testing the harness.
+This was measured rather than assumed, by a check that does not supply this autocmd itself: a check
+that does is testing the harness.
 <!-- END shared: filetype-autocmd -->
 
 ### Helix
@@ -330,8 +363,8 @@ redextape-zed/
 
 ```toml
 id = "redextape"
-name = "Redextape"
-description = "Redextape mini-language support."
+name = "redextape"
+description = "redextape mini-language support."
 version = "0.1.0"
 schema_version = 1
 authors = ["davey"]
@@ -346,7 +379,7 @@ path = "grammars/tree-sitter-redextape"
 `languages/redextape/config.toml`:
 
 ```toml
-name = "Redextape"
+name = "redextape"
 grammar = "redextape"
 path_suffixes = ["rxt"]
 line_comments = ["// "]
@@ -356,9 +389,10 @@ Install it with `zed: install dev extension` from the command palette, pointed a
 
 Three things about the Zed route that are worth knowing before you take it:
 
-- **`commit` is an alias for `rev`, and it must be a full 40-character SHA.** Zed fetches it with
-  `git fetch --depth 1 origin <rev>`, which requires the server to serve an unadvertised object by SHA.
-  If your host refuses, give a branch or tag name instead.
+- **`commit` is an alias for `rev`, which takes a full 40-character commit SHA or a branch name,
+  not a tag.** Zed runs `git fetch --depth 1 origin <rev>` and then `git checkout <rev>`; fetching a
+  tag by name stores no tag ref, so the checkout fails. Fetching by SHA needs the server to serve an
+  unadvertised object. If your host refuses, give a branch name.
 - **The queries live in the extension, not in the grammar.** Zed reads
   `languages/redextape/highlights.scm` from the *extension* repository, so
   `grammars/tree-sitter-redextape/queries/highlights.scm` has to be copied across — and it will drift
@@ -381,15 +415,15 @@ numbers, booleans. `//` line comments are `extras`, so they may appear anywhere.
 `tree-sitter parse` rather than assumed.
 
 A **bare block is a legal callee, receiver and while-condition** — `{ f }(1)`, `{ f }.m(1)` and
-`while { a } { b }` all parse, because `parse_postfix` in the hand-written parser accepts them. An
-earlier draft of this grammar excluded blocks from those positions and turned all three into ERROR
-nodes; the differential's ERROR-node guard means such input never reaches a comparison at all, so the
-restriction was invisible to every test and only fell out of reading `parser.rs`.
+`while { a } { b }` all parse, because `parse_postfix` in the hand-written parser accepts them.
+Excluding blocks from those positions would turn all three into ERROR nodes, and the differential
+would not see it, because no program in `mini::CORPUS` puts a block in those positions.
+`test/corpus/expressions.txt` pins all three.
 
 **Four field names are load-bearing for `queries/highlights.scm`**, so renaming one means editing both
 files and rerunning the differential: `call_expression` `function:`, `method_call` `method:`,
 `function_definition` `name:`, `parameters` `parameter:`. The grammar defines more fields than that —
-`let_statement` `name:`/`value:`, `assignment` `target:`/`value:`, `while_statement`
-`condition:`/`body:`, `if_expression` `condition:`/`consequence:`/`alternative:`, `method_call`
-`receiver:`, `closure` `body:` — and no query reads them today. They exist for a consumer that walks the
-tree rather than colours it, which is not one this repository ships.
+`let_statement` `name:`/`value:`, `function_definition` `body:`, `assignment` `target:`/`value:`,
+`while_statement` `condition:`/`body:`, `if_expression` `condition:`/`consequence:`/`alternative:`,
+`method_call` `receiver:`, `closure` `body:` — and no query reads them today. They exist for a
+consumer that walks the tree rather than colours it, which is not one this repository ships.

@@ -2,30 +2,28 @@
 
 ## Status
 
-**The compiler is built, and the thing you watch it run in now has three panes.** The front end
-and three backends — λ, Turing machine, and native — all work, and each is checked against the others
-on every commit. `crates/redextape-wasm` compiles the compiler to WASM through **ten exports** — the
-tenth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
-(`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
-`web/` is a real app: a source pane with lint diagnostics and syntax highlighting driven by a committed
-tree-sitter grammar — the same colourer the λ, TM and rxm copy editors take, whose grammar loads
-asynchronously so only the first paint waits on it, while every reparse and rebuild after that runs
-inside the same `ViewUpdate` as the keystroke that triggered it — a λ pane, and a
-Turing-machine pane showing all five tapes, a status line, and — Plan 5a-ii — a virtualized δ-table
-beside them: current state and the rule about to fire highlighted, following the machine by default and
+**The compiler is built, and the thing you watch it run in has four kinds of pane: source, λ, rxm
+and Turing machine.** The front end and three backends — λ, Turing machine, and native — all work,
+and each is checked against the others on every commit. `crates/redextape-wasm` compiles the
+compiler to WASM through **ten exported functions** — the tenth, `tapeNames()`, labels the five
+Turing-machine tape rows from the lowering's own constants (`build.rs`) rather than a hand-copied
+list, so it can only speak for machines this compiler produced. The module's `start` function,
+`init`, runs when the module loads and is not among the ten. `web/` is a real app: a source pane
+with lint diagnostics and syntax highlighting driven by a committed tree-sitter grammar — the same
+colourer the λ, TM and rxm copy editors take, whose grammar loads asynchronously so only the first
+paint waits on it, while every reparse and rebuild after that runs inside the same `ViewUpdate` as
+the keystroke that triggered it — a λ pane that draws the term as a tree you can fold, an rxm pane,
+and a Turing-machine pane showing all five tapes, a status line, a state diagram and a virtualized
+δ-table: current state and the rule about to fire highlighted, following the machine by default and
 a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
-viewport's worth of rows — 24 of `map_fold`'s 25,852 at CI's window size, counting the overscan —
-side by side, the first thing in this project a human can click. **All three legs — λ, Turing machine and
-rxm — are steppable forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
-affordance (`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
-**The λ pane has no structural tree, and that is a decision, not a gap**: Plan 5a-ii measured one and cut
-it — a per-frame tree costs 850 MB against a 32 MB history ring, and most steps have no tree to draw at
-any budget that is still affordable
-(`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2). What the visualizer the
-project is *for* still lacks: click-linking between the panes, dual-focus highlight while running,
-editable λ/TM panes with detach-on-edit, and the λ pane's structural tree (deliberately, see above).
-See [Development](development.md) to build and run it, or still `cargo run --example` for the raw backends
-without a browser.
+viewport's worth of rows. **All three legs — λ, Turing machine and rxm — are steppable forward and
+backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps affordance
+(`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
+Clicking a construct in one pane marks the same construct in the others, a running step underlines
+the source construct it came from, and the λ, rxm and TM text can be copied into an editor and the
+copy run.
+What is left is under [Not built yet](#not-built-yet). See [Development](development.md) to build
+and run it, or still `cargo run --example` for the raw backends without a browser.
 
 Design spec:
 [`docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md`](superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md).
@@ -36,8 +34,9 @@ The plan sequence, and the running log of what implementation falsified:
 
 Ten crates under `crates/`.
 
-**`redextape-core`** — the whole language, with **no dependencies** (`cargo tree -p redextape-core
---edges normal` lists only itself), which is what keeps it WASM-clean:
+**`redextape-core`** — the whole language, with **no dependencies** at default features (`cargo tree
+-p redextape-core --edges normal` lists only itself; `serde` and `ts-rs` are optional dependencies,
+behind the `serde` and `ts` features), which is what keeps it WASM-clean:
 
 - **Front end:** lexer → hand-written Pratt parser → Hindley–Milner inference (Algorithm W) →
   desugar to the **Core AST** → a reference tree-walking interpreter. Every Core node carries a
@@ -53,8 +52,11 @@ Ten crates under `crates/`.
   with defunctionalization for higher-order programs, two interchangeable numeric encodings
   (`Unary` and `Binary`), a simulator, and a **self-describing** `.tm` text form whose optional
   header records the initial tapes, so a foreign simulator can run the file knowing nothing about
-  this project.
-- **Shared layers:** `sourcemap` (`NodeId` → λ-subterm path, `NodeId` → TM state block), `trace`
+  this project. Beside them sit reductions of a machine to a one-way tape (`one_way.rs`), to one
+  tape (`single_tape.rs`) and to two symbols (`two_symbol.rs`), and a universal machine that runs
+  any guest machine (`universal.rs`); `src/counter/` reduces a Turing machine to a counter machine.
+- **Shared layers:** `sourcemap` (`NodeId` → λ-subterm path, `NodeId` → rxm instructions, `NodeId` →
+  TM state block), `trace`
   (one step-event vocabulary over both backends, stepped lazily — a renderer never holds the whole
   run), and `analysis` (token classification for all four languages; classes only, never colours).
 
@@ -74,8 +76,8 @@ apart, where either alone looks right.
 
 **`redextape-lsp`** is the eighth, and the count above already included it before this paragraph
 did — the same drift named just above, one crate later. It is a stdio language server — diagnostics
-and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.rxm`), navigation for three
-of them (`.tm`, `.rxm` and `.rxt`), served over the Language
+and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.rxm`), navigation and hover
+for three of them (`.tm`, `.rxm` and `.rxt`), served over the Language
 Server Protocol to Neovim from the same `redextape-core` front ends the CLI and the web UI already
 call. `lsp-server` (the transport) is confined to its `main.rs`; every other file in the crate is a
 pure function of one client message to the messages that go back, which is what holds the crate to
@@ -84,7 +86,8 @@ the workspace's coverage floor and is checked mechanically —
 `cargo build --release -p redextape-lsp`; `plugin/redextape.lua` finds the binary there (or on
 `PATH`) and registers it with `vim.lsp.enable` automatically, so a lazy.nvim spec of
 `{ "Davey-Hughes/redextape", lazy = false }` needs no change to pick it up — no binary just means no
-diagnostics or formatting, with a warning naming both remedies, and highlighting is unaffected
+diagnostics, formatting, navigation or hover, with a warning naming both remedies, and highlighting
+is unaffected
 either way. For `conform.nvim` users who route formatting through it rather than
 `vim.lsp.buf.format()` directly, `formatters_by_ft` is keyed by FILETYPE and this server serves four
 of them, so opting in takes four entries rather than one — `redextape`, `redextape_rxm`,
@@ -124,13 +127,13 @@ Every backend is checked against every other on a shared 46-program corpus, whic
 Two known limits, recorded rather than hidden. **The first is a refusal and stands; the second was a
 hang and is closed — the difference between them is the whole point, and the history is kept because
 four designs died against the second.** The λ backend **declines** a handful of programs the other legs
-run — a closure over a `let mut` binding — and
-answers a `LowerError` rather than risk a silent miscompile; they live in
+run — an immutable `let` shadowing a mutable one, a `fn` inside a mutation region, and a closure
+over a `let mut` binding — and answers a `LowerError` rather than risk a silent miscompile; they live in
 `LAMBDA_LIMITATION_DEMOS` and are asserted TM-only. Separately, **nested mutually recursive `fn`
 groups** blow the λ term up exponentially through structural sharing, because `lower_group` clones the
 whole group term once per member and the factor nests. 512 bytes of ordinary source used to reach a
 β-step that did not finish. **CLOSED 2026-08-01, at the root rather than by refusing anything** — that
-program now reduces in 7.48 s, and the two-list counterexample below went from 19.0 s in its first
+program then reduced in 7.48 s, and the two-list counterexample below went from 19.0 s in its first
 β-step to under a millisecond.
 
 **Nothing guards it, and nothing needs to.** `term.rs`'s `shift` rebuilt every node it visited
@@ -153,9 +156,10 @@ it was most likely to help it is a 0.99x regression.
 `|body| + Abs(body) × |arg|` was true of a `subst` whose `Abs` arm copied the argument once per binder
 *whether or not the variable occurred below it*. The `maxfree` short-circuit means it no longer does —
 `subst` descends only along paths to an occurrence, and `shift(1, 0, arg)` is a refcount bump for the
-88.4% of β-steps whose argument is closed. Measured, the model over-reports the cost it names by
-~1,584x. The probe that carried it could not detect this on its own, because its counters *modelled* the
-functions instead of measuring them; that is repaired, and it is the lesson the record is built around.
+88.4% of the corpus's β-steps whose argument was closed when measured on 2026-08-02. Measured, the
+model over-reports the cost it names by ~1,584x. The probe that carried it could not detect this on
+its own, because its counters *modelled* the functions instead of measuring them; that is repaired,
+and it is the lesson the record is built around.
 
 `examples/shift_cost_probe.rs` is the instrument (it carries its own memory-cap rules — read them
 first), with `examples/lambda_sharing_probe.rs`, `examples/blowup_probe.rs`,
@@ -166,36 +170,22 @@ withdrawn designs retained deliberately.
 
 **Divergence is a separate matter and is untouched** — the family has no base case, so "terminates"
 means it reaches a cap in bounded time. The cap it reaches is **`MAX_TERM_DEPTH`, not
-`MAX_REDUCTION_STEPS`** (105,607 steps against a step cap of 5,000,000), because the family grows deep
-as it diverges. Both are reachable only because control now returns from each β-step.
+`MAX_REDUCTION_STEPS`** (105,607 steps at the close, against a step cap of 5,000,000), because the
+family grows deep as it diverges. Both are reachable only because control now returns from each
+β-step.
 
 ### Not built yet
 
-- **The full visualizer** — `crates/redextape-wasm` (cdylib) and `web/` (Vite + CodeMirror 6, no
-  framework) now ship three panes (Roadmap Plan 5a-i) plus a virtualized δ-table in the TM pane (Plan
-  5a-ii): an editable source pane with live syntax highlighting and lint diagnostics, a λ pane, and a
-  Turing-machine pane with all five tapes, a status line, and a state table that follows the machine,
-  highlights the current state and the rule about to fire, and renders only the rows on screen — tested
-  against a viewport-derived bound, which is 24 rows of `map_fold`'s 25,852 at CI's window size, and a
-  flat ceiling of 200 that a whole-table renderer would miss by two orders of magnitude — both legs
-  independently steppable forward and backward
-  through a recorded history with a caps affordance for a run that exceeds it. Click-linking between
-  the panes (Plan 5b, 2026-08-09), dual-focus highlight while running (Plan 5c plus region-path
-  tagging, 2026-08-10), and editable λ / TM panes with detach-on-edit and recompile-from-source
-  (through Plan 5d-iv, 2026-08-18) have all since shipped — an earlier version of this bullet still
-  listed the three as missing after each had landed. What is left is Plan 5's own accessibility pass:
-  deliberately deferred to one pass once the pane set stopped changing shape, and unblocked but not yet
-  run now that 5d-iv has landed. **The λ pane's structural tree is a deliberate cut, not part of that
-  remaining work** — Plan 5a-ii measured it and cut it rather than leaving it unscheduled: a per-frame
-  tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no tree to draw at any
-  budget that is still affordable
-  (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
+- **The visualizer's accessibility pass** — `crates/redextape-wasm` (cdylib) and `web/` (Vite +
+  CodeMirror 6, no framework) ship the panes the Status section above describes. What is left is
+  the accessibility pass, deferred to one pass once the controls stop changing shape and now the
+  last part of the roadmap's Plan 7; it has not been run.
 - **LSP** — `crates/redextape-lsp` now serves diagnostics and formatting for all four text forms,
-  plus **go-to-definition, find-references and document symbols for `.tm`, `.rxm` and `.rxt`**
-  (Architecture, above); `.rxt`'s names are scoped, so its pass resolves against a binder rather
-  than the flat lookup the other two share, and it landed in `binder`, not `analysis`. Still not
-  built: navigation for `.rxlambda`, whose de Bruijn terms carry no source positions at all; hover;
-  rename; and semantic tokens — the four tree-sitter
+  plus **go-to-definition, find-references, document symbols and hover for `.tm`, `.rxm` and
+  `.rxt`** (Architecture, above); `.rxt`'s names are scoped, so its pass resolves against a binder
+  rather than the flat lookup the other two share, and it lives in `binder`, not `analysis`. Still
+  not built: navigation and hover for `.rxlambda`, whose de Bruijn terms carry no source positions
+  at all; rename; and semantic tokens — the four tree-sitter
   grammars already highlight all four forms in Neovim, so tokens are not needed for that editor and
   stay deliberately out of this slice.
 

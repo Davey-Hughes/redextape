@@ -71,6 +71,11 @@ pub const MIN_FIELD_WIDTH: usize = 4;
 /// overflow guard (see `Builder::overflow`), for either encoding.
 pub const MAX_FIELD_WIDTH: usize = 64;
 
+/// The name of the state the overflow guard halts in. A parsed `.tm` file has state names but no state
+/// ids from a lowering, so `value_of_run` knows a lowered machine's overflow halt by this name on a
+/// non-accept state, which is what `Builder::state` always allocates.
+pub const OVERFLOW_STATE: &str = "overflow";
+
 /// The most states any one `Machine` may contain. Reaching it makes `Builder` stop allocating and
 /// raise `overflowed`; `lower_tm_all` then refuses the program rather than laying out the rest. The three
 /// machine-model reductions enforce the same ceiling through `reduction.rs`'s `StateTable`, and refuse
@@ -182,7 +187,7 @@ impl Builder {
         if let Some(s) = self.overflow {
             return s;
         }
-        let s = self.state("overflow");
+        let s = self.state(OVERFLOW_STATE);
         // DO NOT CACHE A REFUSED ALLOCATION. Past `MAX_MACHINE_STATES`, `state` returns the state-0
         // sentinel without allocating, so caching here would pin `overflow` to whatever state 0
         // happens to be — `halt`, under `lower_tm_all` — and every later `overflow()`/`overflow_state()`

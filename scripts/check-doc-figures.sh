@@ -92,7 +92,7 @@
 #
 # **ONE ROW'S DOCUMENT IS A SOURCE FILE, NOT A README, AND THAT IS A DELIBERATE WIDENING.**
 # `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The TENTH export" in a doc comment, and
-# `docs/architecture.md` states the same fact twice more — "ten exports" and "the tenth, `tapeNames()`". An ORDINAL
+# `docs/architecture.md` states the same fact twice more — "ten exported functions" and "the tenth, `tapeNames()`". An ORDINAL
 # that moves whenever any export is added, with no gate behind it, goes stale with nothing to say so.
 # The scan reads any path it is given — `normalize` just flattens a file — so the widening costs one row
 # and no machinery.
@@ -310,8 +310,8 @@ docs/architecture.md|.|workspace_crates|workspace crates under crates/|([0-9,]+|
 docs/development.md|.|precommit_hooks|pre-commit hooks (1 of 2: "There are N")|There are \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} pre-commit hooks
 docs/development.md|.|precommit_hooks|pre-commit hooks (2 of 2: "All N are fast enough")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are fast enough
 docs/development.md|.|wasm_browser_tests|wasm browser tests|has \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} browser tests
-docs/architecture.md|.|wasm_exports|redextape-wasm free exports|to WASM through \*{0,2}([0-9,]+|[A-Za-z]+) exports
-docs/architecture.md|.|wasm_tapenames_ordinal|tapeNames' position among them (1 of 2: docs/architecture.md)|exports\*{0,2} — the ([0-9,]+|[A-Za-z]+), `tapeNames\(\)`
+docs/architecture.md|.|wasm_exports|redextape-wasm free exports|to WASM through \*{0,2}([0-9,]+|[A-Za-z]+) exported functions
+docs/architecture.md|.|wasm_tapenames_ordinal|tapeNames' position among them (1 of 2: docs/architecture.md)|exported functions\*{0,2} — the ([0-9,]+|[A-Za-z]+), `tapeNames\(\)`
 crates/redextape-wasm/src/lib.rs|.|wasm_tapenames_ordinal|tapeNames' position among them (2 of 2: its own doc comment)|in tape order\. The ([0-9,]+|[A-Za-z]+) export\.
 grammars/tree-sitter-redextape/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
@@ -338,7 +338,7 @@ grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|pa
 grammars/tree-sitter-redextape-tm/README.md|grammars/tree-sitter-redextape-tm|corpus_cases|tm tree-sitter test cases|`test/corpus/` holds \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} `tree-sitter test` cases
 grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (1 of 3: "One of N grammars in this repository")|One of \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
 grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (2 of 3: "All N install from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} install from the same clone
-grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (3 of 3: "now with N grammars in one clone")|now with \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in one clone
+grammars/tree-sitter-redextape-tm/README.md|.|grammar_count|grammar count (3 of 3: "the shape this repository is in: N grammars in one clone")|shape this repository is in: \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in one clone
 grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape-rxm|grammar_js_lines|rxm grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines (CROSS-REF from rxm)|under the mini-language's \*{0,2}([0-9,]+|[A-Za-z]+)
 grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines (CROSS-REF from rxm)|over twice λ's \*{0,2}([0-9,]+|[A-Za-z]+)
@@ -348,10 +348,9 @@ grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape-rxm|
 grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape-rxm|map_classes|rxm distinct capture classes|onto \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} distinct `TokenClass`
 grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape-rxm|parser_c_bytes|rxm parser.c bytes|`src/parser\.c` is \*{0,2}([0-9,]+|[A-Za-z]+) bytes
 grammars/tree-sitter-redextape-rxm/README.md|grammars/tree-sitter-redextape-rxm|corpus_cases|rxm tree-sitter test cases|`test/corpus/` holds \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} `tree-sitter test` cases
-grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (1 of 4: "One of N grammars in this repository")|One of \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
-grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (2 of 4: "across all N grammars in this repository")|across all \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
-grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (3 of 4: "All N install from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} install from the same clone
-grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (4 of 4: "now with N grammars in one clone")|now with \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in one clone
+grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (1 of 3: "One of N grammars in this repository")|One of \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in this repository
+grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (2 of 3: "All N install from the same clone")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} install from the same clone
+grammars/tree-sitter-redextape-rxm/README.md|.|grammar_count|grammar count (3 of 3: "the shape this repository is in: N grammars in one clone")|shape this repository is in: \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} grammars in one clone
 ROWS
 }
 

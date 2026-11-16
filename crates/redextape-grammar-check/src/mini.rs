@@ -99,9 +99,9 @@ pub fn compare_with(query_src: &str, src: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// A toolchain bump that changes the generated ABI past what the Rust crate reads presents as a
-    /// bare `set_language` failure, which reads like a build error rather than a version error.
-    /// Pinning it here makes the message name the real cause.
+    /// The `tree-sitter` crate loads ABI 14, what the CLI writes when it misses `tree-sitter.json`,
+    /// so only this assertion notices that drift. Above the crate's range it names the cause of what
+    /// would otherwise be a bare `set_language` failure, which reads like a build error.
     #[test]
     fn abi_version_is_pinned() {
         assert_eq!(

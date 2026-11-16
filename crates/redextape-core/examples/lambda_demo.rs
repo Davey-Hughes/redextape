@@ -20,7 +20,7 @@ mod allocator;
 #[allow(clippy::print_literal)]
 fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
-    println!(" Redextape — lambda backend demo");
+    println!(" redextape — lambda backend demo");
     println!(" mini-language  →  λ-calculus  →  reduce  →  decode, checked against");
     println!(" the reference interpreter (the two-way oracle).");
     println!("════════════════════════════════════════════════════════════════════");

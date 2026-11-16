@@ -51,6 +51,36 @@ impl Form {
         }
     }
 
+    /// Whether a path's extension is `.rxlambda`, the λ term `emit --lang lambda` writes, matched
+    /// ASCII-case-insensitively for the reason `from_extension` is.
+    ///
+    /// Not a `Form`: neither `fmt` nor `run` has a front end for it. It is named here, beside the
+    /// table, so that `run`, `emit`, `lint` and `fmt` can refuse it rather than let the `.rxt`
+    /// fallback lex a λ term and blame the program for the cascade of errors.
+    #[must_use]
+    pub fn is_lambda_term(path: &Path) -> bool {
+        path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rxlambda"))
+    }
+
+    /// What compiled output a path's extension names, as the noun a refusal prints, or `None` when
+    /// the path is read as `.rxt` source.
+    ///
+    /// `emit` and `lint` read source only, and through the `.rxt` fallback a machine or a λ term
+    /// fails as a broken program at exit 1, so they refuse one by its extension instead. Built on
+    /// `from_extension` and `is_lambda_term` so that the extensions stay written once, with the same
+    /// case-insensitive match.
+    #[must_use]
+    pub fn compiled_noun(path: &Path) -> Option<&'static str> {
+        if Form::is_lambda_term(path) {
+            return Some("a λ term");
+        }
+        match Form::from_extension(path)? {
+            Form::Tm => Some("a Turing machine"),
+            Form::Rxm => Some("a register-machine program"),
+            Form::Rxt => None,
+        }
+    }
+
     /// Whether this form is already-compiled output rather than source.
     ///
     /// `run` uses it to refuse `--backend`, which is meaningless for a file that is already a
@@ -207,6 +237,24 @@ mod tests {
         assert!(Form::Tm.is_artifact());
         assert!(Form::Rxm.is_artifact());
         assert!(!Form::Rxt.is_artifact());
+    }
+
+    #[test]
+    fn every_compiled_extension_has_a_noun_in_any_case_and_source_has_none() {
+        for (name, noun) in [
+            ("m.tm", "a Turing machine"),
+            ("M.Tm", "a Turing machine"),
+            ("r.rxm", "a register-machine program"),
+            ("R.RXM", "a register-machine program"),
+            ("q.rxlambda", "a λ term"),
+            ("Q.RXLAMBDA", "a λ term"),
+        ] {
+            assert_eq!(Form::compiled_noun(Path::new(name)), Some(noun), "{name}");
+        }
+        // The `.rxt` fallback, which `emit` and `lint` read.
+        for name in ["p.rxt", "P.RXT", "p.txt", "noextension", "rxlambda"] {
+            assert_eq!(Form::compiled_noun(Path::new(name)), None, "{name}");
+        }
     }
 
     #[test]

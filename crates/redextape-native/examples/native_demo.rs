@@ -34,7 +34,7 @@ use redextape_native::{NativeRun, run_native};
 #[allow(clippy::print_literal)]
 fn main() {
     println!("\n════════════════════════════════════════════════════════════════════");
-    println!(" Redextape — native backend demo");
+    println!(" redextape — native backend demo");
     println!(" mini-language  →  rxm  →  Cranelift JIT  →  real machine code  →  decode,");
     println!(" checked against the reference interpreter (reference == native).");
     println!("════════════════════════════════════════════════════════════════════");

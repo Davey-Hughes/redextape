@@ -10,16 +10,18 @@ a PR, and once CI has run, squash-merge it in the Forgejo web UI:
     git push -u origin my-branch
     # open a PR at forge.daveynet.xyz, squash-merge once CI is green
 
-CI runs against the PR head on every push to a **non-draft** PR, so its result is visible on the PR
-before anyone merges it: `rust` and `rust-llvm` run `scripts/check-all.sh` (`--no-llvm` and
-`--llvm-only` respectively, which together cover every config), and `rust-slow` runs
+CI runs against the PR head on every push to a **non-draft** PR and whenever the PR's title or body
+is edited, so its result is visible on the PR before anyone merges it: `rust`, `rust-llvm` and
+`rust-browser` run `scripts/check-all.sh` (`--no-llvm --no-browser`, `--llvm-only` and
+`--browser-only` respectively, which together cover every config), and `rust-slow` runs
 `scripts/check-slow.sh`.
 
 A **draft** PR gets `rust-scoped` instead: a fast check that escalates rather than skips; on CI it
 always covers the whole branch diff — see the `rust-scoped` job header for what it actually buys.
-It is explicitly non-gating — its own banner says so. `rust`, `rust-llvm` and `rust-slow` do not run on a
-draft PR, and `gate` deliberately stays red until the PR leaves draft; that is expected, not a
-failure to investigate. `ci / gate (pull_request)` is the single required status check either way.
+It is explicitly non-gating — its own banner says so. `rust`, `rust-llvm`, `rust-browser` and
+`rust-slow` do not run on a draft PR, and `gate` deliberately stays red until the PR leaves draft;
+that is expected, not a failure to investigate. `ci / gate (pull_request)` is the single required
+status check either way.
 
 What a web-UI merge does **not** do by itself, the way the retired `scripts/land.sh` did, is check the
 merged tree. `land.sh` ran the gate **on the merged tree, before the commit existed**, and refused to
@@ -79,7 +81,8 @@ Three layers keep this true, none of which trusts the other two:
   `.git/config` is untracked and cannot bind anyone.
 - The **remote** allows only squash and fast-forward merges; merge commits and rebase-merge are
   disabled, so a PR merged in the web UI cannot produce a shape CI rejects.
-- CI's **`linear-history`** job rejects a merge commit on `main` however it arrived. This is the gate.
+- CI's **`linear-history`** job rejects a merge commit on `main` however it arrived, unless the push
+  changed only `docs/`, which starts no CI run. This is the gate.
 
 Object-size baselines live in `crates/redextape-native/baselines/<target-triple>.txt` and gate the
 `size_baseline` test with a 10% band. Regenerate after an intentional codegen change:

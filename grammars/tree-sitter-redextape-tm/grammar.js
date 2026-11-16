@@ -1,5 +1,5 @@
 /**
- * The Redextape TM text form — HIGHLIGHTING ONLY.
+ * The redextape TM text form — HIGHLIGHTING ONLY.
  *
  * Not authoritative. `redextape_core::tm::syntax`'s `parse_tm_full` is the parser, and
  * `print_tm_inner` (through `print_tm_mapped` and `print_tm_with_mapped`) is the printer AND the
