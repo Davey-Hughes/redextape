@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { LambdaPane } from '../../src/lambda-pane'
+import { Tree } from '../../src/lambda-tree'
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { PaneOption } from '../../src/sessions'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
@@ -136,6 +137,8 @@ describe('a λ view’s display settings', () => {
     await userEvent.tab()
     expect(document.activeElement, 'Tab reaches the next group on its checked choice').toBe(choice(el, 'names'))
     await userEvent.tab()
+    expect(document.activeElement).toBe(el.querySelector('button.expand-all'))
+    await userEvent.tab()
     expect(document.activeElement).toBe(el.querySelector('button.reset-folds'))
 
     await userEvent.keyboard('{Escape}')
@@ -199,6 +202,114 @@ describe('a λ view’s display settings', () => {
     el.querySelector<HTMLButtonElement>('button.reset-folds')?.click()
     expect(lines()).toBe(auto)
     expect(folded(), 'folded again by the policy').toBe(1)
+  })
+})
+
+/** `(h c0 … c109)`: 221 nodes, over `AUTO_FOLD_NODES`, so the policy folds it wherever no redex is inside it. */
+const big = (c: string) => `(h ${Array.from({ length: 110 }, (_, i) => `${c}${i}`).join(' ')})`
+
+/**
+ * EXPAND ALL (the expand-all spec), through the real menu: a mode, so it holds through a step, a click still folds
+ * one node under it, and "reset folds" turns it off. `.term-fold` counts the folded rows drawn and `.term-spacer`'s
+ * height is the whole layout's, drawn or not — the body draws only the rows in view, so a count of `.term-line`
+ * could not tell 40 open rows from 400.
+ */
+describe('a λ view’s expand all', () => {
+  const more = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
+  const expand = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('button.expand-all') as HTMLButtonElement
+  const folded = (el: HTMLElement) => el.querySelectorAll('.term-fold').length
+  const height = (el: HTMLElement) => el.querySelector('.term-spacer')?.getBoundingClientRect().height ?? 0
+
+  it('opens what the policy folds and what a step builds, still folds a node on a click, and reset turns it off', async () => {
+    const el = host()
+    const pane = new LambdaPane(el, events())
+    pane.render(frame, CONTROLS)
+    pane.renderTree({ kind: 'tree', tree: wireOf(`g ${big('c')} ((\\y. y) z)`, { step: 1 }) })
+    const menu = el.querySelector<HTMLElement>('.view-menu')
+    expect(folded(el), 'the policy folds the big subterm').toBe(1)
+    const auto = height(el)
+    expect(expand(el).getAttribute('role')).toBe('checkbox')
+    expect(expand(el).getAttribute('aria-checked')).toBe('false')
+    const weightOff = Number(getComputedStyle(expand(el)).fontWeight)
+
+    await userEvent.click(more(el))
+    await userEvent.click(expand(el))
+    expect(expand(el).getAttribute('aria-checked')).toBe('true')
+    expect(menu?.matches(':popover-open'), 'a setting leaves the menu open').toBe(true)
+    expect(Number(getComputedStyle(expand(el)).fontWeight), 'drawn checked').toBeGreaterThan(weightOff)
+    expect(folded(el)).toBe(0)
+    const open = height(el)
+    expect(open).toBeGreaterThan(auto * 3)
+
+    // STEP 2 BUILDS A SECOND BIG SUBTERM where the redex was: the policy would fold it, the mode keeps it open.
+    const wire2 = wireOf(`g ${big('c')} ${big('d')}`, { step: 2 })
+    const built = new Tree(wire2).right(0)
+    pane.renderTree({ kind: 'tree', tree: { ...wire2, contractum: built } })
+    const both = height(el)
+    expect(folded(el)).toBe(0)
+    expect(both, 'what the step built is open too').toBeGreaterThan(open * 1.5)
+
+    // THE VIEW FOLLOWS THE STEP TO ITS CONTRACTUM, so that is the row in view to click.
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(el.querySelector<HTMLElement>(`.term-gutter[data-node="${built}"]`) as HTMLElement)
+    expect(folded(el), 'a click folds the node it lands on').toBe(1)
+    expect(height(el)).toBeLessThan(both)
+    expect(height(el), 'and only that one').toBeGreaterThan(auto * 3)
+
+    await userEvent.click(more(el))
+    await userEvent.click(el.querySelector<HTMLButtonElement>('button.reset-folds') as HTMLButtonElement)
+    expect(menu?.matches(':popover-open'), 'reset is an action, and closes the menu').toBe(false)
+    expect(folded(el), 'both big subterms folded by the policy again').toBe(2)
+    expect(height(el)).toBe(auto)
+    await userEvent.click(more(el))
+    expect(expand(el).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('is reached by Tab and toggled by Space, as the menu’s other items are', async () => {
+    const el = host()
+    const pane = new LambdaPane(el, events())
+    pane.render(frame, CONTROLS)
+    pane.renderTree({ kind: 'tree', tree: wireOf(`g ${big('c')} z`) })
+    await userEvent.click(more(el))
+    expect(document.activeElement).toBe(choice(el, 'code'))
+    await userEvent.tab()
+    await userEvent.tab()
+    expect(document.activeElement).toBe(expand(el))
+    await userEvent.keyboard(' ')
+    expect(expand(el).getAttribute('aria-checked')).toBe('true')
+    expect(folded(el)).toBe(0)
+    expect(document.activeElement, 'the focus stays on it').toBe(expand(el))
+    await userEvent.keyboard(' ')
+    expect(expand(el).getAttribute('aria-checked')).toBe('false')
+    expect(folded(el), 'turned off, the policy folds it again').toBe(1)
+  })
+
+  it('outlives a new build and a new binding, which clear only the folds made by hand', async () => {
+    const el = host()
+    const pane = new LambdaPane(el, events())
+    const bind = (session: string) => pane.setBindings([option('source'), option('copy')], { leg: 'lambda', session })
+    bind('source')
+    pane.setBuild(1)
+    pane.render(frame, CONTROLS)
+    const wire = wireOf(`g ${big('c')} z`)
+    pane.renderTree({ kind: 'tree', tree: wire })
+    await userEvent.click(more(el))
+    await userEvent.click(expand(el))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(el.querySelector<HTMLElement>('.term-gutter[data-node="3"]') as HTMLElement)
+    expect(folded(el), 'folded by hand under the mode').toBe(1)
+
+    pane.setBuild(2)
+    pane.renderTree({ kind: 'tree', tree: wireOf(`g ${big('c')} z`) })
+    expect(folded(el), 'a new build: the fold made by hand is gone, the mode is not').toBe(0)
+    await userEvent.click(el.querySelector<HTMLElement>('.term-gutter[data-node="3"]') as HTMLElement)
+    expect(folded(el)).toBe(1)
+
+    bind('copy')
+    pane.renderTree({ kind: 'tree', tree: wireOf(`g ${big('c')} z`) })
+    expect(folded(el), 'another session’s term: the same').toBe(0)
+    await userEvent.click(more(el))
+    expect(expand(el).getAttribute('aria-checked')).toBe('true')
   })
 })
 

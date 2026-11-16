@@ -1342,8 +1342,10 @@ button.view-title[aria-expanded="true"] {
 /* A SETTING'S CHECKED CHOICE (`view-header.ts`'s `radioGroup`), DRAWN WITHOUT RELYING ON COLOUR: heavier
    than its siblings, with a bar at its leading edge. The bar takes `--accent`, a palette token; the weight is
    what still shows in a palette whose colours a reader cannot tell apart. `lambda-display.test.ts` compares
-   the computed weights of a checked and an unchecked choice. */
-.view-menu-choice[aria-checked="true"] {
+   the computed weights of a checked and an unchecked choice. "expand all" is a setting in force the same way,
+   so it is drawn checked with the same cue. */
+.view-menu-choice[aria-checked="true"],
+.expand-all[aria-checked="true"] {
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--accent);
 }

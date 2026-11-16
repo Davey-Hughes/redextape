@@ -69,6 +69,7 @@ const PROBE_FILES = [
   'tests/browser/pane-floor.test.ts',
   'tests/browser/tm-buffer-cost.test.ts',
   'tests/browser/lambda-tree-cost.test.ts',
+  'tests/browser/lambda-expand-all-cost.test.ts',
   'tests/browser/rxm-copy-cost.test.ts',
   'tests/browser/rxm-copy-memory.test.ts',
   'tests/browser/record-cost.test.ts',

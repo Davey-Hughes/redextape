@@ -278,6 +278,14 @@ export class LambdaPane implements EditablePane {
             pick: (v) => this.#setDisplay({ ...this.#display, vars: v === 'debruijn' ? 'debruijn' : 'names' }),
           },
         ],
+        expandAll: {
+          on: () => this.#folds.expandAll,
+          set: (on) => {
+            this.#folds.setExpandAll(on)
+            this.#unlaid = null
+            this.#redraw()
+          },
+        },
         reset: () => {
           this.#folds.reset()
           this.#unlaid = null
@@ -693,8 +701,8 @@ export class LambdaPane implements EditablePane {
    * frame type is what pins its renderer; this parameter pins nothing.
    *
    * NOT A PURE SETTER. The selector is chrome on the `<h2>`'s row and is unaffected by which text the body
-   * is showing, but a binding to another session is another term, so that change also starts the folds
-   * over and has the body follow the new term's redex.
+   * is showing, but a binding to another session is another term, so that change also starts the folds made
+   * by hand over (expand all stays, `Folds.newTerm`) and has the body follow the new term's redex.
    */
   setBindings(options: PaneOption[], current: Binding<Leg>): void {
     this.#header.setBindings(options, current)
@@ -703,7 +711,7 @@ export class LambdaPane implements EditablePane {
     // every frame, so it acts only when the binding actually changed.
     if (current.session !== this.#bound) {
       this.#bound = current.session
-      this.#folds.reset()
+      this.#folds.newTerm()
       this.#laidOut = null
       this.#body.attach()
     }
@@ -712,13 +720,13 @@ export class LambdaPane implements EditablePane {
   /**
    * The build this view's trees come from (`LambdaTrees.buildOf`). A new build is a new program behind the
    * same session, so `setBindings` sees nothing change — and a path in the old program's term names nothing
-   * in the new one's, so the folds start over (spec §5.2's "and so does a new compile"). Called every
-   * frame, before `renderTree`; it acts only when the build changed.
+   * in the new one's, so the folds made by hand start over (spec §5.2's "and so does a new compile"; expand all
+   * stays, `Folds.newTerm`). Called every frame, before `renderTree`; it acts only when the build changed.
    */
   setBuild(build: number | null): void {
     if (build === this.#build) return
     this.#build = build
-    this.#folds.reset()
+    this.#folds.newTerm()
     this.#laidOut = null
   }
 

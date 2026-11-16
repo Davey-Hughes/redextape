@@ -35109,3 +35109,145 @@ gives the figure as that report, in `$R`, states it, from the probe or run it de
 | 2.56.1 | the git that replayed Zed's fetch and checkout | `r2b-report.md`, finding 2; `f2-report.md`, 2 |
 | 19 | λ README sentences the history pass rewrote | `s-report.md` |
 | four | the `conventions.md` statements about CI that were wrong | `d1-report.md`, "conventions.md (not edited)" |
+
+#### λ EXPAND ALL: THE λ VIEW'S `⋯` DISPLAY MENU HAS *expand all*, A CHECKBOX BEFORE *reset folds* THAT TURNS ON A MODE IN WHICH EVERY SUBTERM BUT A NUMERAL OR BOOLEAN CHIP OPENS, WHAT A LATER STEP BUILDS OPENS TOO, AND THE MODE HOLDS THROUGH STEPS, JUMPS, REBUILDS AND REBINDS; A CLICK STILL FOLDS ONE NODE, AND *reset folds*, OR THE ITEM AGAIN, TURNS IT OFF; THE FOLDS LOOK UP NO PATH WHILE NONE IS MADE BY HAND, SO A STEP UNDER THE MODE ON A DEEP TERM NO LONGER PAYS THE SUM OF ITS NODES' DEPTHS (2026-11-16, branch `lambda-expand-all`, `1d40a4e..42a0436`, 9 commits, plus three docs commits: this entry, then the fact-check's corrections to it and the design, then a last touch-up to this entry)
+
+The user, 2026-11-06: an "expand all" control for the λ view, where a subterm over `AUTO_FOLD_NODES`, 200 nodes,
+starts folded unless the next redex is inside it, and the only bulk action on folds was *reset folds*. The design is
+`docs/superpowers/specs/2026-11-16-lambda-expand-all-design.md`: the decisions, each call with its reason, and the
+cost figures. The lane's record is `~/temp/redextape-lambda-expand-all-record/`, `$R` below: `brief.md` holds the
+decisions as the controller passed them on, `progress.md` the work, `review-1.md` the review, and the logs named
+below sit beside them.
+
+##### DECISIONS
+
+The user's, 2026-11-16:
+
+- **It lives in the λ view's `⋯` display menu, next to *reset folds*.** No new header button.
+- **It is a mode, not a one-time action:** everything opens and stays open as the run steps, including the
+  subterms a step creates. A click on a node still folds that node, and *reset folds* turns the mode off.
+
+The controller's:
+
+- **A chip, a Church numeral or boolean, stays closed under the mode**, since its value is its readable form; a
+  click still opens one.
+- **The item is a toggle:** choosing it again turns the mode off, as *reset folds* does.
+- **The mode survives a jump, a rebuild after an edit (`setBuild`) and a rebind (`setBindings`)**, and the
+  folds made by hand still clear where they cleared before. It is not saved to the workspace or a share link.
+
+The implementer's, each with its reason in the design:
+
+- **Turning the mode on clears the folds made by hand**, or a node folded before the choice would stay folded.
+- **The item is a `button` with `role="checkbox"` and `aria-checked`, not a `menuitemcheckbox`:** the popover is
+  not a `role="menu"`, which is why the display settings are `radio`s.
+- **It is drawn checked with a checked choice's cue**, heavier and with the `--accent` bar at its leading edge,
+  **and choosing it leaves the menu open**, as a setting's choice does; *reset folds* stays an action that closes
+  it. It sits directly before *reset folds*.
+- **A view made by a split starts with the mode off**, as it starts with no folds made by hand: folds are per view.
+
+The fix round's:
+
+- **The cost probe times each turn-on on a new `Tree`**, the first turn-on a user meets on a step. It had toggled
+  on one `Tree`, so every turn-on sample but the first reused the paths the first had built.
+- **`Folds.isOpen` looks up no path while there is no fold made by hand**, below.
+
+##### WHAT CHANGED
+
+- **`Folds` holds the mode, `480561c`.** In `web/src/lambda-folds.ts`, a node's default under the mode is open
+  unless it is a chip, in place of `autoOpen`. The overrides sit on top of either default, so a click folds one
+  node under the mode as it opens one without it, and `advance` needs no change: a step drops the overrides under
+  its contractum, and what it built takes the default. `reset` turns the mode off and clears the overrides;
+  `newTerm` clears the overrides alone.
+- **The menu item, `43d436e`.** `DisplayMenu.expandAll` and its item in `viewMenu`, `web/src/view-header.ts`,
+  wired in `web/src/lambda-pane.ts`, whose `setBuild` and `setBindings` call `newTerm` in place of `reset`; the
+  checked cue in `web/src/style.css`.
+- **The cost probe, `d26698a`, and `6c3e1b1`.** `pnpm test:probe:lambda-expand-all`,
+  `web/tests/browser/lambda-expand-all-cost.test.ts`, kept out of the default run by `vite.config.ts`'s
+  `PROBE_FILES`. It finds the largest term an example's recorded λ history draws as a tree, sum-to's at step 460,
+  17,831 nodes, builds three terms of 19,999 nodes, seeded random, an `f x … x` spine and an `a (a (… z))` chain,
+  and times turning the mode on and a step with it off and on. The design's cost table holds the figures; none is
+  over the brief's ~100 ms, past which a cap or a fallback would have been the user's call.
+- **No path without an override, `42a0436`.** `isOpen` looked up a path for every node it was asked about. Under
+  the mode the layout asks about every node of each step's new `Tree`, whose path cache is empty, and a path is as
+  long as its node is deep, so on the chain a step paid the sum of those nodes' depths. On the chain, in the
+  probe's first run before and after, the turn-on fell from 15.2 / 25.9 ms, median / max, to 2.9 / 3.2 ms, and the
+  step with the mode on from 35.1 / 43.6 ms to 2.3 / 2.6 ms; the design has both runs of each. One fold by hand
+  brings the lookup back for every node the layout asks about.
+- **Tests.** 8 node tests in `web/tests/node/lambda-folds.test.ts` under expand all, among them the fix round's,
+  which spies on `Tree.key`. 3 browser tests in `web/tests/browser/lambda-display.test.ts` drive the real menu with
+  `userEvent`: the mode opens what the policy folds and what a step builds, a click folds one node, and *reset
+  folds* turns it off; Tab reaches the item and Space toggles it; the mode outlives a new build and a new binding.
+  The file's Tab order gains the item.
+
+##### WHAT THE REVIEW CAUGHT
+
+`$R/review-1.md`: 0 Critical, 0 Important, 4 Minor, all four fixed.
+
+- **M1, a path looked up for every node with no override to match**: `42a0436`, above. Before the fix the new
+  node test saw `Tree.key` called 407 times on its term.
+- **M2, the design's turn-on median was a warm figure, and the design did not say the term map was closed**:
+  `6c3e1b1`.
+- **M3, two `console.error` lines left in the expand-all browser test**, printing values the next lines assert:
+  `3169b8f`.
+- **M4, `viewMenu`'s doc named one exception to "every item closes the menu", and expand all is a second**:
+  `4842c06`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`share-positions.test.ts`'s *reaches fact(4)'s λ step 3,000 after two continues* races on `main`.** The lane's
+  full browser run before review failed it, `the run: expected 3 to be 2`, its one failure of 1,745 tests.
+  `resultsReach` waits until the count of `result`s reaches `n`, then asserts it equals `n`; the count advances by
+  itself, since each continue's `result` posts the next, so under load a continue that lands inside one of
+  `until`'s 20 ms polls overshoots the `===`. The branch touches nothing on that path, and expand all is off until
+  a user turns it on. Run alone, the file passed 17 of 17 tests in each of seven runs: three by the lane, two by the
+  review and two at `42a0436`. A sibling race in the same file was closed by holding `result`s back
+  (`holdingResults`); this one needs a fix on `main`.
+- **A view made by a split starts with expand all off**, the implementer's call; the user has not been asked.
+- **The term map's cost under the mode has no committed probe.** The review measured it with the probe edited to
+  open the map, `$R/review-probe-minimap.log`, and the design quotes it.
+- **Where the view scrolls when the mode adds lines above it** is what *reset folds* does on `main`, by the
+  review's reading of `LambdaBody`'s paint; it was not changed.
+
+##### VERIFICATION
+
+Run on 2026-11-16 in the lane's worktree, from `web/`, each into its log in `$R`. The probe's runs were each at
+their commit's tree before it was committed; the rest at `42a0436`.
+
+```
+pnpm exec vitest run --project node
+  tests/node/lambda-folds.test.ts               → 15 tests passed (entry-node-folds.log)
+pnpm exec vitest run --project browser
+  tests/browser/lambda-display.test.ts          → 13 tests passed, no console.error line
+                                                  (entry-browser-display.log)
+pnpm exec vitest run --project browser
+  tests/browser/share-positions.test.ts         → twice; 17 tests passed each
+                                                  (entry-share-positions-1.log, -2.log)
+pnpm run test:probe:lambda-expand-all           → twice at 6c3e1b1's tree and twice at 42a0436's;
+                                                  2 tests passed each (fix-probe-before-1.log, -2.log,
+                                                  fix-probe-after-1.log, -2.log)
+```
+
+Each new test was seen to fail without its change. The fix
+round's node test failed before the fix with `key` called 407 times (`fix-M1-red.log`), and after it with the
+guard broken and then restored from a saved copy and `cmp`'d (`fix-M1-sab-always-key.log`); the implementer's
+sabotages are `$R/sab-*.log`, each failing its target. The branch changes no Rust. The full gate,
+`scripts/check-all.sh --no-llvm`, the CI scans, biome, typecheck, `test:coverage` and `build:app`, was not run
+before this entry's first commit.
+
+**Every count this entry quotes, with what produces it.** A command ran in the worktree, from `web/` for the
+`pnpm` rows, and its output is in the log the row names, in `$R`. A row naming only a record file gives the figure
+as that file states it.
+
+| Value | What | Produced by |
+|---|---|---|
+| 9; `42a0436`; three | commits in the range; its last; the docs commits after it | `git rev-list --count 1d40a4e..42a0436`; `git log --format=%h 1d40a4e..HEAD`, `42a0436` its fourth line; `git rev-list --count 42a0436..HEAD` (entry-touchup-figures.log) |
+| 0 | lines of diff under `crates/`, `Cargo.toml` and `Cargo.lock` | `git diff --stat 1d40a4e..HEAD -- crates Cargo.toml Cargo.lock \| wc -l` (entry-fix-figures.log) |
+| 200; 20 | `AUTO_FOLD_NODES`; `until`'s `pollMs`, in ms | `grep -n "AUTO_FOLD_NODES =" web/src/lambda-folds.ts`; `grep -n "pollMs = " web/tests/browser/until.ts` (entry-fix-figures.log) |
+| 8; 3 | node tests and browser tests the branch adds | `git diff 1d40a4e..HEAD -- web/tests/node/lambda-folds.test.ts \| grep -c "^+  it("`, and the same for `web/tests/browser/lambda-display.test.ts` (entry-fix-figures.log) |
+| 15; 13; 17 | tests in `lambda-folds.test.ts`, `lambda-display.test.ts` and `share-positions.test.ts` | the runs above, each log's `Tests` line |
+| step 460, 17,831; 19,999 | sum-to's largest term drawn as a tree; the synthetic terms' nodes | `pnpm run test:probe:lambda-expand-all`, its `scan sum-to` line and each `lambda-expand-all-cost` line's `nodes` (fix-probe-after-1.log) |
+| 15.2 / 25.9 → 2.9 / 3.2; 35.1 / 43.6 → 2.3 / 2.6 | ms, the chain's turn-on and step with the mode on, median / max, before and after `42a0436`, first runs | the same probe, its `synthetic chain` line (fix-probe-before-1.log, fix-probe-after-1.log) |
+| 407 | `Tree.key` calls on the fix round's node test's term before the fix | `pnpm exec vitest run --project node tests/node/lambda-folds.test.ts` with the test added and the fix not (fix-M1-red.log) |
+| 0, 0, 4 | the review's Critical, Important and Minor findings | `grep -n Counts review-1.md` |
+| 1 of 1,745; `expected 3 to be 2` | the lane's full browser run's failures; that failure | `gate-browser.log`, its `Tests` line and its `AssertionError` |
+| seven: three, two, two | runs of `share-positions.test.ts` alone, each 17 of 17: the lane's, the review's, at `42a0436` | `share-positions-1.log` to `-3.log`, `review-share-positions-1.log` and `-2.log`, `entry-share-positions-1.log` and `-2.log`, each one's `Tests` line |

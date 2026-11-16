@@ -21,7 +21,7 @@ export function autoOpen(t: Tree, i: number): boolean {
 }
 
 /**
- * One view's folds: the automatic policy, and whatever the user opened or folded by hand.
+ * One view's folds: the automatic policy or expand all, and whatever the user opened or folded by hand.
  *
  * **AN OVERRIDE IS KEYED BY PATH, NOT BY NODE INDEX.** An index moves whenever anything earlier in
  * pre-order changes size; a path names the same position in the next step's term unless that step
@@ -32,6 +32,7 @@ export function autoOpen(t: Tree, i: number): boolean {
  */
 export class Folds {
   #overrides = new Map<string, boolean>()
+  #expandAll = false
   #step: number | null = null
   #version = 0
 
@@ -40,8 +41,33 @@ export class Folds {
     return this.#version
   }
 
+  /**
+   * Whether every node but a chip starts open, in place of `autoOpen` (the expand-all spec). A MODE AND
+   * NOT A ONE-OFF OPENING, so what a later step builds opens too: it changes the default the overrides sit on, and
+   * `advance` hands a contractum that default as it always has.
+   *
+   * **A CHIP STAYS CLOSED UNDER IT**, because a numeral's or boolean's value is the readable form of it; a click
+   * still opens one, as an override.
+   */
+  get expandAll(): boolean {
+    return this.#expandAll
+  }
+
+  /**
+   * Turn expand all on or off. **EITHER WAY THE OVERRIDES GO:** turned on, a node folded by hand before would stay
+   * folded and "everything opens" would not hold; turned off, it is "reset folds".
+   */
+  setExpandAll(on: boolean): void {
+    this.#expandAll = on
+    this.#overrides.clear()
+    this.#version += 1
+  }
+
   isOpen(t: Tree, i: number): boolean {
-    return this.#overrides.get(t.key(i)) ?? autoOpen(t, i)
+    // NO PATH WITHOUT AN OVERRIDE TO MATCH IT: under expand all the layout asks about every node of a new `Tree` each
+    // step, and building and hashing a path costs its depth, so a deep term would pay its whole depth sum per step.
+    const o = this.#overrides.size === 0 ? undefined : this.#overrides.get(t.key(i))
+    return o ?? (this.#expandAll ? t.chip(i) === null : autoOpen(t, i))
   }
 
   toggle(t: Tree, i: number): void {
@@ -74,7 +100,16 @@ export class Folds {
     if (changed) this.#version += 1
   }
 
+  /** "reset folds": back to the automatic policy, expand all off and no overrides. */
   reset(): void {
+    this.setExpandAll(false)
+  }
+
+  /**
+   * A different term — a new build or another session's. Its paths name nothing the old term's did, so the
+   * overrides go; expand all is the user's choice of how to see a term, not a fact about this one, so it stays.
+   */
+  newTerm(): void {
     this.#overrides.clear()
     this.#version += 1
   }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AUTO_FOLD_NODES, autoOpen, Folds } from '../../src/lambda-folds'
 import { Tree } from '../../src/lambda-tree'
 import { wireOf } from './tree-fixture'
@@ -95,5 +95,121 @@ describe('Folds', () => {
     const later = new Tree(wireOf('k (a b) (c d)', { step: 9, contractum: 6 }))
     f.advance(later)
     expect(f.isOpen(later, 6)).toBe(false)
+  })
+})
+
+/**
+ * EXPAND ALL IS A MODE (the expand-all spec): every node but a chip defaults to open, the overrides still sit on top,
+ * and it outlives what a new term clears. Every big subterm here is over `AUTO_FOLD_NODES` and holds no redex, so
+ * the policy alone folds it — each test checks that first, or it could pass with the mode doing nothing.
+ */
+describe('Folds under expand all', () => {
+  const big = wide(AUTO_FOLD_NODES)
+
+  it('opens every subterm but a chip, and gives the policy back when it is turned off', () => {
+    const t = new Tree(wireOf(`g (${big}) (\\f. \\x. f (f x))`))
+    const bigNode = t.right(t.left(0))
+    const chip = t.right(0)
+    expect(t.chip(chip)).not.toBeNull()
+    const f = new Folds()
+    expect(f.isOpen(t, bigNode)).toBe(false)
+    const v = f.version
+    f.setExpandAll(true)
+    expect(f.expandAll).toBe(true)
+    expect(f.version).toBeGreaterThan(v)
+    for (let i = 0; i < t.count; i += 1) expect(f.isOpen(t, i), `node ${i}`).toBe(t.chip(i) === null)
+    f.setExpandAll(false)
+    expect(f.expandAll).toBe(false)
+    expect(f.isOpen(t, bigNode)).toBe(false)
+  })
+
+  it('still folds one node on a click, and opens a chip on one', () => {
+    const t = new Tree(wireOf(`g (${big}) (\\f. \\x. f (f x))`))
+    const bigNode = t.right(t.left(0))
+    const inner = t.left(bigNode)
+    const chip = t.right(0)
+    const f = new Folds()
+    f.setExpandAll(true)
+    f.toggle(t, bigNode)
+    expect(f.isOpen(t, bigNode)).toBe(false)
+    expect(f.isOpen(t, inner), 'only the node clicked').toBe(true)
+    f.toggle(t, chip)
+    expect(f.isOpen(t, chip)).toBe(true)
+  })
+
+  it('opens what a step creates, dropping a fold the user made on the redex it replaced', () => {
+    const before = new Tree(wireOf('k ((\\y. y) z)', { step: 1 }))
+    const f = new Folds()
+    f.advance(before)
+    f.setExpandAll(true)
+    f.toggle(before, before.right(0))
+    expect(f.isOpen(before, before.right(0))).toBe(false)
+    // Step 2 puts a big subterm where the redex was: the contractum, at the redex's path.
+    const after = new Tree(wireOf(`k (${big})`, { step: 2, contractum: 2 }))
+    expect(after.key(2)).toBe(before.key(before.right(0)))
+    expect(autoOpen(after, 2), 'the policy would fold it').toBe(false)
+    f.advance(after)
+    expect(f.isOpen(after, 2)).toBe(true)
+  })
+
+  it('keeps every subterm open across a jump', () => {
+    const f = new Folds()
+    f.advance(new Tree(wireOf('k ((\\y. y) z)', { step: 1 })))
+    f.setExpandAll(true)
+    const later = new Tree(wireOf(`k (${big}) (${big})`, { step: 40, contractum: null }))
+    f.advance(later)
+    expect(autoOpen(later, later.right(0))).toBe(false)
+    expect(f.isOpen(later, later.right(0))).toBe(true)
+    expect(f.isOpen(later, later.right(later.left(0)))).toBe(true)
+  })
+
+  it('clears the overrides when it is turned on, so a node folded by hand opens too', () => {
+    const t = new Tree(wireOf(`g (${big}) (a b)`))
+    const small = t.right(0)
+    const f = new Folds()
+    f.toggle(t, small)
+    expect(f.isOpen(t, small)).toBe(false)
+    f.setExpandAll(true)
+    expect(f.isOpen(t, small)).toBe(true)
+  })
+
+  it('is turned off by reset, which also clears the overrides', () => {
+    const t = new Tree(wireOf(`g (${big}) (a b)`))
+    const bigNode = t.right(t.left(0))
+    const small = t.right(0)
+    const f = new Folds()
+    f.setExpandAll(true)
+    f.toggle(t, small)
+    f.reset()
+    expect(f.expandAll).toBe(false)
+    expect(f.isOpen(t, bigNode)).toBe(false)
+    expect(f.isOpen(t, small)).toBe(true)
+  })
+
+  it('builds no path while there is no override, and looks one up again once there is', () => {
+    const t = new Tree(wireOf(`g (${big}) (a b)`))
+    const keys = vi.spyOn(t, 'key')
+    const f = new Folds()
+    f.setExpandAll(true)
+    for (let i = 0; i < t.count; i += 1) f.isOpen(t, i)
+    expect(keys).not.toHaveBeenCalled()
+    f.toggle(t, t.right(0))
+    keys.mockClear()
+    expect(f.isOpen(t, t.right(0))).toBe(false)
+    expect(keys).toHaveBeenCalled()
+  })
+
+  it('outlives a new term, which clears the overrides alone', () => {
+    const t = new Tree(wireOf(`g (${big}) (a b)`))
+    const small = t.right(0)
+    const f = new Folds()
+    f.setExpandAll(true)
+    f.toggle(t, small)
+    const v = f.version
+    f.newTerm()
+    expect(f.version).toBeGreaterThan(v)
+    expect(f.expandAll).toBe(true)
+    expect(f.isOpen(t, small), 'the fold made by hand is gone').toBe(true)
+    expect(f.isOpen(t, t.right(t.left(0)))).toBe(true)
   })
 })

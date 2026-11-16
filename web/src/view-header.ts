@@ -273,13 +273,19 @@ export type DisplayGroup = {
 }
 
 /**
- * A λ view's display settings in its `⋯` menu: its groups, and "reset folds".
+ * A λ view's display settings in its `⋯` menu: its groups, "expand all", and "reset folds".
  *
  * **EACH GROUP IS A `radiogroup` OF `radio`s, NOT `menuitemradio`s** (Plan 7 part 4 spec §5.1's "radio items").
  * This popover is not a `role="menu"` — none of its other items is a `menuitem` either — and a menu item
- * outside a menu is not valid ARIA; a radio is valid anywhere. `radioGroup` builds each one.
+ * outside a menu is not valid ARIA; a radio is valid anywhere. `radioGroup` builds each one. "expand all" is a
+ * `checkbox`, not a `menuitemcheckbox`, for the same reason: the radio's two-state sibling.
  */
-export type DisplayMenu = { readonly groups: readonly DisplayGroup[]; readonly reset: () => void }
+export type DisplayMenu = {
+  readonly groups: readonly DisplayGroup[]
+  /** Whether every subterm but a chip is open (`Folds.expandAll`), and setting it. "reset folds" turns it off. */
+  readonly expandAll: { readonly on: () => boolean; readonly set: (on: boolean) => void }
+  readonly reset: () => void
+}
 
 /**
  * One setting's choices as a radio group: a `radiogroup` named by the setting, a `radio` per choice, and
@@ -430,7 +436,7 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
  * **A DISPLAY SETTING'S CHOICES ARE THE EXCEPTION:** a choice leaves the menu open
  * and the focus on it, because a setting is picked and then looked at, and the group itself says which
  * choice is now in force — the arrows would have nothing to move between in a menu that closed on each.
- * "reset folds" is an action, and closes it like the rest.
+ * "expand all" is a setting too, and leaves it open; "reset folds" is an action, and closes it like the rest.
  */
 export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu {
   const n = viewMenuSeq++
@@ -563,6 +569,17 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
       syncs.push(group.sync)
       displayItems.push(group.el)
     }
+    const expand = item('expand-all', 'expand all')
+    expand.setAttribute('role', 'checkbox')
+    const syncExpand = (): void => expand.setAttribute('aria-checked', String(display.expandAll.on()))
+    syncExpand()
+    // A SETTING, NOT AN ACTION: it leaves the menu open as a display choice does, its check saying it is in force.
+    expand.addEventListener('click', () => {
+      display.expandAll.set(!display.expandAll.on())
+      syncExpand()
+    })
+    syncs.push(syncExpand)
+    displayItems.push(expand)
     const reset = item('reset-folds', 'reset folds')
     reset.addEventListener('click', () => {
       shut()
