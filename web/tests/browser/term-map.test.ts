@@ -7,7 +7,7 @@ import { icicleRect, TermMap } from '../../src/term-map'
 import { DEFAULT_DISPLAY } from '../../src/workspace'
 import { lambdaFrame } from '../node/session-fixtures'
 import { wireOf } from '../node/tree-fixture'
-import { controlState, fixtureHost, frames, inertEvents, until } from './harness'
+import { controlState, fixtureHost, frames, inertEvents, token, until } from './harness'
 
 /** The term map panel on a λ view built directly (Plan 7 part 4a, spec §6). */
 const host = (): HTMLElement => fixtureHost('term-map-fixture')
@@ -420,14 +420,9 @@ function painted(canvas: HTMLCanvasElement): number {
   return n
 }
 
-/** `token` as the page resolves it, `[r, g, b]` — the colour an element whose `color` is that token is drawn in. */
-function resolved(where: HTMLElement, token: string): number[] {
-  const probe = document.createElement('span')
-  probe.style.color = `var(${token})`
-  where.append(probe)
-  const rgb = getComputedStyle(probe).color.match(/\d+/g)?.slice(0, 3).map(Number) ?? []
-  probe.remove()
-  return rgb
+/** `name` as the page resolves it in `where`, `[r, g, b]` — the colour text whose `color` is that token is drawn in. */
+function resolved(where: HTMLElement, name: string): number[] {
+  return token(name, 'color', where).match(/\d+/g)?.slice(0, 3).map(Number) ?? []
 }
 
 /**

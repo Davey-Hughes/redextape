@@ -35251,3 +35251,156 @@ as that file states it.
 | 0, 0, 4 | the review's Critical, Important and Minor findings | `grep -n Counts review-1.md` |
 | 1 of 1,745; `expected 3 to be 2` | the lane's full browser run's failures; that failure | `gate-browser.log`, its `Tests` line and its `AssertionError` |
 | seven: three, two, two | runs of `share-positions.test.ts` alone, each 17 of 17: the lane's, the review's, at `42a0436` | `share-positions-1.log` to `-3.log`, `review-share-positions-1.log` and `-2.log`, `entry-share-positions-1.log` and `-2.log`, each one's `Tests` line |
+
+#### THE VIEW SWITCHER'S TOGGLES ARE FOUR BORDERED BUTTONS APART: A PRESSED ONE EDGED AND UNDERLINED IN THE ACCENT, ONE THAT IS NOT EDGED IN THE RULE WITH DIM TEXT, EVERY CORNER AT THE STYLE'S `--radius`; IN FORCED COLOURS ONE THAT IS NOT PRESSED IS DASHED AND A PRESSED ONE EDGED IN `Highlight` (2026-11-16, branch `view-switcher-style`, `f6666e9..38b6fb0`, 8 commits, plus four docs commits)
+
+The user, 2026-11-14 and 2026-11-16: the header's `views` toggles, `source`, `rxm`, `λ` and `TM`,
+should look like the bordered buttons of his palette mockups, because in the joined strip `main`
+drew the pressed state was hard to see. The design he approved, and the controller's and the
+implementer's calls, are in `docs/superpowers/specs/2026-11-16-view-switcher-style-design.md`. The
+lane's record is `~/temp/redextape-view-switcher-style-record/`, `$R` below: `brief.md`,
+`progress.md`, `review-1.md`, and the logs this entry names.
+
+##### DECISIONS
+
+The user's, 2026-11-16:
+
+- **Four separate buttons, a `--space-*` gap apart, every corner rounded**, with no joined edges and
+  no negative margin. Not pressed: a solid `--rule` border, `--fg-dim` text and no background.
+  Pressed: an `--accent` border, a 2px accent underline drawn inside by an inset shadow, and `--fg`
+  text, the panel radios' cue but at normal weight, so that a press does not widen the bar.
+- **Only the toggle-specific rules change.** The base rule every header button shares, and
+  `index.html`, stay; so do the focus ring, the hiding at 40rem and below, and the last pressed
+  toggle that cannot be turned off.
+- **The toggles' inline padding is `0.2em`, down from `0.3em`.** As first built, in `f480ae5`, the
+  header took two rows at 1280px in Instrument's Debugger preset, which `inspector-phone.test.ts`
+  caught. The controller put three options to him: the narrower padding, which it recommended,
+  accepting the second row, or 2px gaps. He chose the padding.
+
+The controller's:
+
+- **The corners take the style's `--radius`**, 2px in Instrument, 5px in Paper and 3px in Terminal,
+  and not the brief's 3px, so that the toggles match the header's other buttons in every style.
+- **The rule that draws the focused toggle over its neighbours stays**, held by a case at a 12px
+  root, where the gap of `--space-1`, a quarter of a rem, is 3px and the ring reaches 4px.
+- **After review, in forced colours only, one that is not pressed is dashed and a pressed one solid
+  in `Highlight`**: `main`'s solid/dashed cue, brought back for that mode alone, with a case that
+  fails without the rule. The look everywhere else stays as the user ruled. The review's four minor
+  findings were fixed as it proposed them (below).
+
+The implementer's, in the design doc's "My calls":
+
+- **The pressed state has no background.** `main`'s `--bg-raised` fill went: the mockup has none,
+  and neither do the panel radios.
+- **The gap is `--space-1`**, the smallest spacing token, as far as the ring reaches outside a
+  button at a 16px root.
+- **No new contrast floor.** `accent` on `bg-chrome`, the header's surface, is already held at 3:1
+  for every built-in palette, and `--rule` stays the faint edge it is elsewhere.
+
+##### WHAT CHANGED
+
+- **`web/src/style.css`.** The `.views-shown` and `.view-toggle` rules draw the look above. The
+  corner rules for the first and last toggle, the negative margin, the dashed border, the raised
+  fill and the pressed toggle's `position: relative` are gone. A `@media (forced-colors: active)`
+  rule draws one that is not pressed dashed and a pressed one in `Highlight`. The focus rule's
+  comment gives its reason now that the toggles are apart.
+- **`first-load-views.test.ts`** asserts the look: each side's style and colour against the resolved
+  `--accent` and `--rule`, the inset underline, a gap between neighbours, and, under forced colours
+  emulated through CDP (Chromium only, as the step buttons' case is), solid `Highlight` against
+  dashed. Its last case now asserts that the load left the focus on `<body>`.
+- **`view-toggle-focus-ring.test.ts`** reads every toggle's ring at a 16px root in every style, with
+  its top on the ring's pixel row nearest the button; reads both of the ring's pixel columns beside
+  each neighbour at a 12px root; and holds every toggle's four corners to `--radius` in every style.
+- **The harness has `token(name, property, where)`**, the probe that resolves a token or a system
+  colour, in place of the copies `focus.test.ts`, `term-map.test.ts` and `first-load-views.test.ts`
+  each had.
+- **The view layouts spec's §6** describes the new look and points at the design doc. §6.1's widths,
+  measured on the joined buttons, stay as written, with a pointer.
+
+**What it costs the header.** The four toggles are 3.0px wider in all in each style than on
+`f6666e9`: 152.6px in Instrument, 149.0 in Paper and 152.1 in Terminal. With the widest workspace
+label, `Debugger`, and the appearance button at its default, `system`, the header keeps one row with
+8.9px to spare at 1280px in Instrument and 22.2px in Paper, and in Terminal 22.9px at 1280px, at its
+half gap, and 15.9px at 1361px, at its full gap.
+
+##### WHAT THE REVIEW CAUGHT
+
+`review-1.md` found no Critical, 1 Important and 4 Minor findings, all fixed in this branch:
+
+- **I1, forced colours.** Forced colours put a system colour in place of each of the page's and draw
+  no shadow, so the accent edge, the dim text and the underline all went and the four toggles looked
+  alike. `4acbc0c` adds the media rule; without it the new case reads all four `solid` in the edge
+  forced colours give a header button.
+- **M1, the ring's top.** To keep clear of Paper's 5px corners on `λ`, the ring check had narrowed
+  every side's sample and dropped the top's floor to more than 2 pixels. `846a588` reads the top on
+  the ring's inner pixel row, where a round corner's curve stays in the ring further along the side,
+  which restores the middle half and the floor of more than 5. A red bar over the ring's top in Paper
+  fails it, `λ`'s top `0 of 7` where `7 of 7` was expected.
+- **M2, the first-load page.** The every-style corner case chose a style in the first-load file,
+  which left the focus on `settings` and a style stored, so the last case's "a load takes no
+  keyboard focus" was false. `7953ded` moves the case to the focus-ring file, and the last case now
+  asserts it; with the corner case still in the file, that assertion fails.
+- **M3.** The view layouts spec's §6 still described the joined strip; `38b6fb0`.
+- **M4.** A third local copy of the token probe; `b2d7975` makes it one harness helper.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`--rule` has no contrast floor on `--bg-chrome`**, so the edge of a toggle that is not pressed is
+  as faint as the user ruled it: the review put it at about 1.3:1 in Material dark, and a base16
+  scheme whose rule equals its chrome would leave `rxm` and `λ` no edge at all. They are still found
+  by their words.
+- **Forced colours in Firefox were not checked.** The new case emulates them through CDP, so it runs
+  in Chromium alone.
+- **The header's room at 1280px in Instrument with `Debugger` is 8.9px**: anything that widens the
+  header by more takes a second row there, which `inspector-phone.test.ts` would catch.
+- **The gap is in rem and the ring in px**, so under a root smaller than 16px the ring lies over the
+  neighbour's edge and the focus rule's `z-index` keeps it whole. A gap of
+  `max(var(--space-1), 4px)`, which would not need that rule, was the review's alternative; it was
+  not taken.
+- **The view layouts spec calls the rxm view `asm`**, in §6's list of the toggles among other
+  places: the name it had when the spec was written. Seen while §6 was edited, and left as it was.
+
+##### VERIFICATION
+
+Run on 2026-11-16 in the lane's worktree, `~/temp/redextape-view-switcher-style`, at `38b6fb0`
+checked out on its own, without this entry, each into its log in `$R`; `$R/rebase-runs-1.sh` runs the three:
+
+```
+pnpm exec vitest run --project browser <the ten files below>   → exit 0; "Test Files  10 passed (10)",
+                                                                  "Tests  125 passed (125)" (rebase-entry-browser.log)
+pnpm exec vitest run --project node tests/node/app-header.test.ts
+  tests/node/harness.test.ts tests/node/contrast.test.ts        → exit 0; "Test Files  3 passed (3)",
+                                                                  "Tests  32 passed (32)" (rebase-entry-node.log)
+FIT_ONLY=1 node $R/shoot.mjs rebase-entry, against vite on 5181 → exit 0 (rebase-entry-fit.log)
+```
+
+The ten browser files are `first-load-views`, `view-toggle-focus-ring`, `view-keys-focus`,
+`view-toggles-first-paint`, `view-toggles-narrow`, `view-toggle-tooltips`, `controls-gate`, `focus`,
+`term-map` and `inspector-phone`, each `tests/browser/<name>.test.ts`. The full gate ran on the
+final tree after the rebase onto `f6666e9`; the results are in the PR's description.
+
+**Every count this entry quotes, with what produces it.** A command ran in the worktree, and its
+output is in the log the row names, in `$R`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 8; `38b6fb0` | commits in the range; its last | `git rev-list --count f6666e9..HEAD`; `git rev-parse --short HEAD` (rebase-entry-figures.log) |
+| four | docs commits after the range: this entry, then fixes to it and the design doc after a fact-check, then a touch-up to the heading and this table, then this update of the SHAs and figures after the rebase onto `f6666e9` | `git rev-list --count 38b6fb0..HEAD`, run once the fourth was committed (rebase-entry-figures-2.log) |
+| 8, 322, 84 | files changed, insertions and deletions in the range | `git diff --stat f6666e9..HEAD`, its last line (rebase-entry-figures.log) |
+| 10, 125; 3, 32 | browser files and tests passed; node files and tests passed | the two vitest runs above (rebase-entry-browser.log, rebase-entry-node.log) |
+| 152.6, 149.0, 152.1 | the four toggles' width with their gaps in Instrument, Paper and Terminal | `FIT_ONLY=1 node $R/shoot.mjs rebase-entry` (rebase-entry-fit.log), the `group` column |
+| 8.9, 22.2, 22.9; 15.9 | the header's spare width with `Debugger` at 1280px in Instrument, Paper and Terminal; in Terminal at 1361px | the same run, the `spare` column |
+| 3.0; 149.6, 146, 149.1 | how much wider the toggles are than on `f6666e9`; their width there | `FIT_ONLY=1 node $R/shoot.mjs rebase-before`, run with `f6666e9` checked out (`rebase-before-fit.log`, the `group` column), against the row above |
+| 119.5 against 74.5 | the top of `main` at 1280 × 800 in Debugger as first built, `f480ae5`, against where `inspector-phone.test.ts` holds it: a second header row | `pnpm exec vitest run --project browser tests/browser/inspector-phone.test.ts` with `f480ae5` checked out (`rebase-first-build-inspector.log`, line 14) |
+| 2px, 5px, 3px | `--radius` in Instrument, Paper and Terminal | `rg -n -- '--radius:' web/src/style.css` (rebase-entry-figures.log) |
+| a quarter of a rem; 3px at a 12px root | `--space-1`, the gap | `rg -n -- '--space-1:' web/src/style.css`, `0.25rem` (rebase-entry-figures.log) |
+| 4px | how far the ring reaches outside a button | `rg -n -A3 '^:focus-visible' web/src/style.css`: `outline: 2px` and `outline-offset: 2px` (rebase-entry-figures.log) |
+| 2px | the pressed toggle's underline | `rg -n 'inset 0 -2px 0 var\(--accent\)' web/src/style.css`, line 267 (rebase-entry-figures.log) |
+| 3:1 | the floor for `accent` on `bg-chrome` | `sed -n 66,70p web/src/contrast.ts` (rebase-entry-figures.log) |
+| `0.2em`, `0.3em` | the toggles' inline padding, after and before | `git diff f6666e9..HEAD -- web/src/style.css \| rg padding-inline` (rebase-entry-figures.log) |
+| three; 2px | the options the controller put to the user for the header's row; the gaps one of them proposed | `$R/controller-question.txt`, the controller's record of the options it put to the user |
+| no Critical, 1 Important, 4 Minor | the review's findings | `sed -n 3p $R/review-1.md` (entry-figures.log) |
+| about 1.3:1 | the edge of a toggle that is not pressed, in Material dark | `review-1.md`, line 109, the reviewer's figure |
+| more than 2; more than 5 | the floor on the ring's top samples before and after `846a588` | `git show 846a588 -- web/tests/browser/view-toggle-focus-ring.test.ts \| rg 'toBeGreaterThan\((2\|5)\)'` (rebase-entry-figures.log) |
+| `0 of 7` where `7 of 7` | `λ`'s top under a red bar over the ring's top in Paper | the focus-ring file run with that bar drawn (`sabotage-m1-redbar.log`, line 64) |
+| all four `solid a button’s` | the forced-colours case on `846a588`'s CSS, without the media rule | `pnpm exec vitest run --project browser tests/browser/first-load-views.test.ts` with the case written and the rule not (`fix-i1-before.log`) |

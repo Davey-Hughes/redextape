@@ -199,6 +199,21 @@ export const space = (token: string): number => {
   return width
 }
 
+/**
+ * A token (`--accent`), or a system colour (`Highlight`), as the page resolves it for `property`, `color` unless
+ * named: the computed value of a probe that sets it inside `where`. A colour token is a `light-dark()` pair, which
+ * only a computed value turns into the colour drawn, and a probe inside `where` reads it as that element's colour
+ * scheme and cascade have it.
+ */
+export const token = (name: string, property = 'color', where: Element = document.body): string => {
+  const probe = document.createElement('span')
+  probe.style.setProperty(property, name.startsWith('--') ? `var(${name})` : name)
+  where.append(probe)
+  const value = getComputedStyle(probe).getPropertyValue(property)
+  probe.remove()
+  return value
+}
+
 /** How many lines a box's text is set on: one per distinct top among its text's line boxes. */
 export const linesOf = (el: Element): number => {
   const range = document.createRange()

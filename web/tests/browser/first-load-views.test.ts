@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { cdp } from 'vitest/browser'
 import { KIND_GLOSS } from '../../src/app-header'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { box, mountAt, mounted, pressed, storedLayout, until } from './harness'
+import { chromiumOnly } from './engine'
+import { box, mountAt, mounted, pressed, storedLayout, token, until } from './harness'
 
 /**
  * WHAT A FIRST VISIT SHOWS — the view layouts spec §8: the source beside the TM view, the focus on the TM view, and
@@ -67,22 +69,79 @@ describe('a first load, in a window wider than it is tall', () => {
   })
 
   /**
-   * **A PRESSED TOGGLE DIFFERS FROM ONE THAT IS NOT BY MORE THAN ITS COLOURS** (spec §6): its border is solid where
-   * the other's is dashed, and it is underlined, by an inset shadow along its foot. Each is read apart, so either one
-   * taken out of `style.css` fails.
+   * **THE TOGGLES' LOOK** (the view switcher style design): four buttons apart, each with a solid edge, a pressed one
+   * edged and underlined in `--accent` and one that is not edged in `--rule`. The underline is an inset shadow along
+   * the foot, the cue that is not a colour. Each part is a case of its own, so each taken out of `style.css` fails on
+   * its own. Their corners differ by style, so `view-toggle-focus-ring.test.ts` reads those, in every style: a style
+   * chosen here would make this something other than the page a visitor gets.
+   *
+   * **A COLOUR OR A RADIUS IS READ AS THE PAGE RESOLVES ITS TOKEN** (the harness's `token`), so the case holds the
+   * token and not one palette's or one style's value of it.
    */
-  it('draws a pressed toggle solid and underlined, and one that is not dashed with no underline', () => {
-    const look = (b: HTMLButtonElement): { border: string; underlined: boolean } => {
-      const style = getComputedStyle(b)
-      return { border: style.borderTopStyle, underlined: style.boxShadow.includes('0px -2px 0px 0px inset') }
-    }
-    const all = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
-    expect(all.map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), look(b)])).toEqual([
-      ['source', 'true', { border: 'solid', underlined: true }],
-      ['rxm', 'false', { border: 'dashed', underlined: false }],
-      ['lambda', 'false', { border: 'dashed', underlined: false }],
-      ['tm', 'true', { border: 'solid', underlined: true }],
+  const toggles = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
+  /** Each side's style and colour, the colour by its name in `names` where it has one; four alike are one entry. */
+  const edges = (b: HTMLButtonElement, names: Record<string, string>): string[] => {
+    const style = getComputedStyle(b)
+    const each = ['top', 'right', 'bottom', 'left'].map((side) => {
+      const colour = style.getPropertyValue(`border-${side}-color`)
+      return `${style.getPropertyValue(`border-${side}-style`)} ${names[colour] ?? colour}`
+    })
+    return [...new Set(each)]
+  }
+
+  it('edges every side of a pressed toggle solid in the accent, and of one that is not solid in the rule', () => {
+    const [accent, rule] = [token('--accent'), token('--rule')]
+    expect(accent, 'precondition: the accent and the rule resolve apart').not.toBe(rule)
+    const names = { [accent]: 'accent', [rule]: 'rule' }
+    expect(toggles().map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), edges(b, names)])).toEqual([
+      ['source', 'true', ['solid accent']],
+      ['rxm', 'false', ['solid rule']],
+      ['lambda', 'false', ['solid rule']],
+      ['tm', 'true', ['solid accent']],
     ])
+  })
+
+  it('underlines a pressed toggle in the accent, inside its box, and not one that is not', () => {
+    const accent = token('--accent')
+    expect(toggles().map((b) => [b.dataset.shows, getComputedStyle(b).boxShadow])).toEqual([
+      ['source', `${accent} 0px -2px 0px 0px inset`],
+      ['rxm', 'none'],
+      ['lambda', 'none'],
+      ['tm', `${accent} 0px -2px 0px 0px inset`],
+    ])
+  })
+
+  it('sets the toggles apart, a gap between each and the next', () => {
+    const boxes = toggles().map((b) => b.getBoundingClientRect())
+    expect(boxes, 'precondition: the four').toHaveLength(4)
+    const gaps = boxes.slice(1).map((b, i) => b.left - (boxes[i] as DOMRect).right)
+    for (const [i, gap] of gaps.entries()) expect.soft(gap, `the gap after toggle ${i + 1}`).toBeGreaterThan(0)
+  })
+
+  /**
+   * **FORCED COLOURS TAKE EVERY CUE ABOVE AWAY**: they put a system colour in place of each of the page's and draw no
+   * shadow, so the four would be alike. What they leave is a border's style and a system colour the page names, so
+   * there one that is not pressed is dashed and a pressed one is edged in `Highlight`.
+   */
+  it('tells a pressed toggle from one that is not in forced colours, solid in Highlight against dashed', async (ctx) => {
+    chromiumOnly(ctx, 'forced colours are CDP’s Emulation.setEmulatedMedia, which only Chromium has')
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] })
+    try {
+      expect(matchMedia('(forced-colors: active)').matches, 'precondition: forced colours').toBe(true)
+      expect(getComputedStyle(toggles()[0] as HTMLButtonElement).boxShadow, 'precondition: no underline').toBe('none')
+      const highlight = token('Highlight')
+      const button = getComputedStyle(document.querySelector('#new-view') as HTMLElement).borderTopColor
+      expect(highlight, 'precondition: Highlight is not the edge forced colours give a header button').not.toBe(button)
+      const names = { [highlight]: 'Highlight', [button]: 'a button’s' }
+      expect(toggles().map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), edges(b, names)])).toEqual([
+        ['source', 'true', ['solid Highlight']],
+        ['rxm', 'false', ['dashed a button’s']],
+        ['lambda', 'false', ['dashed a button’s']],
+        ['tm', 'true', ['solid Highlight']],
+      ])
+    } finally {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] })
+    }
   })
 
   it('records the TM view as the focused one, and remembers no other arrangement', () => {
@@ -97,6 +156,7 @@ describe('a first load, in a window wider than it is tall', () => {
    * two. Last in the file, since it changes the views.
    */
   it('adds the next view beside the TM view, which is where the focus is', async () => {
+    expect(document.activeElement, 'precondition: the load took no keyboard focus').toBe(document.body)
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     const item = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
       (b) => b.textContent === 'λ · program',

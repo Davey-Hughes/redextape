@@ -2,17 +2,7 @@ import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { createPanel } from '../../src/panel'
-import { until } from './harness'
-
-/** `--focus-ring` resolved to a colour, the way the browser resolves it for an outline. */
-function focusRingColour(): string {
-  const probe = document.createElement('span')
-  probe.style.color = 'var(--focus-ring)'
-  document.body.append(probe)
-  const c = getComputedStyle(probe).color
-  probe.remove()
-  return c
-}
+import { token, until } from './harness'
 
 describe('the focus ring', () => {
   it("is drawn on a control reached by keyboard, in the palette's focus colour", async () => {
@@ -27,7 +17,7 @@ describe('the focus ring', () => {
     const s = getComputedStyle(button)
     expect(s.outlineStyle).toBe('solid')
     expect(s.outlineWidth).toBe('2px')
-    expect(s.outlineColor).toBe(focusRingColour())
+    expect(s.outlineColor).toBe(token('--focus-ring'))
     before.remove()
     button.remove()
   })
@@ -57,7 +47,7 @@ describe('the focus ring', () => {
     await until(() => view.dom.classList.contains('cm-focused'), 'the editor to report focus')
     const content = getComputedStyle(view.contentDOM)
     expect(content.outlineStyle).toBe('solid')
-    expect(content.outlineColor).toBe(focusRingColour())
+    expect(content.outlineColor).toBe(token('--focus-ring'))
     expect(content.outlineOffset).toBe('-2px')
     expect(getComputedStyle(view.dom).outlineStyle).toBe('none')
     view.destroy()

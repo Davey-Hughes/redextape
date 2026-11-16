@@ -476,11 +476,15 @@ choose a preset first. A switch past the bound has a notice of its own (§4.5).
 
 ## §6 The toggles
 
-A group named `views` sits in the header after the workspace menu's button and before `+ view`. It holds four joined
-buttons in `HEADER_ORDER`: `source`, `asm`, `λ`, `TM`.
+A group named `views` sits in the header after the workspace menu's button and before `+ view`. It holds four
+buttons in `HEADER_ORDER`, a small gap apart: `source`, `asm`, `λ`, `TM`.
 
 - A button is pressed where the tree on screen holds a view of its kind, and `aria-pressed` says so. A pressed button
-  is solid, raised and underlined, and one that is not is dim and dashed: never colour alone.
+  is edged and underlined in the accent, and one that is not has the rule's edge and dim text: never colour alone. In
+  forced colours one that is not pressed is dashed and a pressed one edged in `Highlight`. The look is the view
+  switcher style design's (`2026-11-16-view-switcher-style-design.md`), which on 2026-11-16 replaced the four joined
+  buttons this section first described, a pressed one solid, raised and underlined and one that was not dim and
+  dashed.
 - Pressing one switches (§4.5) to the combination with that kind added or removed.
 - **A button's accessible name is its own word**, which the umbrella design's rule 1 asks for, and its tooltip says
   what a press does: *hide the TM view*, *show the TM view*. A toggle acts on every view of its kind, so where that
@@ -496,7 +500,8 @@ buttons in `HEADER_ORDER`: `source`, `asm`, `λ`, `TM`.
 - The four buttons are `index.html`'s own markup, not pressed, and `viewToggles` adopts them, so they hold their
   place from the first paint. Built by `main.ts` after the wasm had loaded, they moved `+ view`, `copies`, `examples`
   and `encoding` right by their own width (§6.1) in a header already on the page.
-- The toggle that has the focus is drawn over its neighbours, so its ring is whole where a pressed one is beside it.
+- The toggle that has the focus is drawn over its neighbours, so its ring is whole where it reaches over a
+  neighbour's edge: under a root font smaller than 16px the gap is narrower than the ring's reach.
 
 `+ view`, `✕` and the split items keep their behaviour. They edit the arrangement on screen (§4.3). `+ view`'s menu
 is filled again where the tree changes while it is open, and a rebuild closes a view's `⋯` menu and its title's with
@@ -506,7 +511,8 @@ In Stage the toggles choose which tabs there are.
 
 ### §6.1 What the toggles cost the header
 
-The four are 147.5 px wide in Paper, 149.1 in Terminal and 154.0 in Instrument. Measured at 1280 px:
+The four are 147.5 px wide in Paper, 149.1 in Terminal and 154.0 in Instrument. Measured at 1280 px, on the joined
+buttons; the view switcher style design has their widths and the header's spare width after its restyle:
 
 | Style | Workspace button | The header needs | Rows |
 |---|---|---|---|

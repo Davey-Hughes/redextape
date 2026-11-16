@@ -239,11 +239,12 @@ select option {
   cursor: pointer;
   white-space: nowrap;
 }
-/* THE `views` TOGGLES (the view layouts spec §6): four of the header's buttons, joined, one a kind of view.
+/* THE `views` TOGGLES (the view layouts spec §6; their look, the view switcher style design): four of the header's
+   buttons, apart, one a kind of view.
 
-   **A PRESSED TOGGLE IS RAISED AND UNDERLINED, AND ONE THAT IS NOT IS DIM AND DASHED** — a fill, a rule under it and
-   the border's own line, never colour alone (umbrella §4 rule 5), so the two states differ in every palette and
-   without colour at all. The rule under it is an inset shadow, so pressing a toggle does not move its neighbours.
+   **A PRESSED TOGGLE IS EDGED AND UNDERLINED IN THE ACCENT**, the panel radios' cue (`.map-mode`); the underline is a
+   shape, so the states differ without colour (umbrella §4 rule 5), save in forced colours (below). It is an inset
+   shadow at normal weight, unlike the radios', so a press neither moves the toggles beside it nor widens its own.
 
    **THE LAST ONE PRESSED IS DISABLED AND KEEPS ITS PRESSED LOOK**: it is shown, and it cannot be hidden. Only the
    cursor says it cannot be pressed, as the view menu's disabled items say it; its tooltip has the reason. It is
@@ -251,47 +252,47 @@ select option {
 .views-shown {
   display: inline-flex;
   align-items: center;
+  gap: var(--space-1);
 }
+/* Each corner takes the shared rule's `--radius`, as every header button does. The inline padding is narrower than
+   theirs so that the four, with their gaps, keep the header to one row at 1280px in the Debugger preset. */
 .view-toggle {
-  padding-inline: 0.3em;
-  border-radius: 0;
-  margin-inline-start: calc(-1 * var(--control-border));
-  border-style: dashed;
+  padding-inline: 0.2em;
+  border-color: var(--rule);
   color: var(--fg-dim);
 }
-.view-toggle:first-child {
-  margin-inline-start: 0;
-  border-start-start-radius: var(--radius);
-  border-end-start-radius: var(--radius);
-}
-.view-toggle:last-child {
-  border-start-end-radius: var(--radius);
-  border-end-end-radius: var(--radius);
-}
 .view-toggle[aria-pressed="true"] {
-  position: relative;
-  border-style: solid;
-  background: var(--bg-raised);
+  border-color: var(--accent);
   color: var(--fg);
-  box-shadow: inset 0 -2px 0 var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .view-toggle[aria-disabled="true"] {
   cursor: default;
 }
-/* **THE TOGGLE THAT HAS THE FOCUS IS DRAWN OVER ITS NEIGHBOURS, SO ITS RING IS WHOLE.** The ring is an outline 2px
-   outside the button, and the buttons are joined, so it lies over each neighbour's edge. A pressed toggle is
-   positioned and filled, and a positioned box is painted after the outlines of the boxes around it that are not, and
-   after a positioned box before it. Without this rule the ring of an unpressed toggle would have no side where a
-   pressed one is beside it, and the ring of a pressed one none on the right where the next is pressed too. */
+/* **IN FORCED COLOURS ONE THAT IS NOT PRESSED IS DASHED, AND A PRESSED ONE IS EDGED IN `Highlight`.** Forced colours
+   put a system colour in place of each of the page's and draw no shadow, so the accent edge, the dim text and the
+   underline go and the four would look alike. A border's style and a system colour the page names are kept. */
+@media (forced-colors: active) {
+  .view-toggle[aria-pressed="false"] {
+    border-style: dashed;
+  }
+  .view-toggle[aria-pressed="true"] {
+    border-color: Highlight;
+  }
+}
+/* **THE TOGGLE THAT HAS THE FOCUS IS DRAWN OVER ITS NEIGHBOURS, SO ITS RING IS WHOLE.** The ring reaches 4px outside
+   the button (`:focus-visible`'s offset and width), and the gap between toggles is `--space-1`, a quarter of a rem: 4px
+   at a 16px root, so under a smaller one the ring lies over the edge of the toggle beside it. Each toggle is painted
+   whole, ring included, before the next, so without this rule the toggle after the focused one would cover that side
+   of its ring. */
 .view-toggle:focus-visible {
   position: relative;
   z-index: 1;
 }
 /* **IN A WINDOW 40rem WIDE OR NARROWER THE TOGGLES ARE HIDDEN**, by the `hidden` attribute `main.ts` sets from that
-   media query, which this rule honours where `display: inline-flex` above would not. They are 148 to 154px wide, and
-   shown at 390px or at 481px they would cost the header a row, and at 320 × 568 the page would no longer fit its
-   window. The attribute and not a `display` in a media rule alone, so that a control no one can reach is one
-   `controls-gate.test.ts` does not walk.
+   media query, which this rule honours where `display: inline-flex` above would not. Shown at 390px or at 481px they
+   would cost the header a row, and at 320 × 568 the page would no longer fit its window. The attribute and not a
+   `display` in a media rule alone, so that a control no one can reach is one `controls-gate.test.ts` does not walk.
 
    **AND THE MEDIA RULE BESIDE IT, FOR THE PAINT BEFORE `main.ts` RUNS.** The four buttons are `index.html`'s own
    markup, so that they hold their place in a wide window from the first paint, and the attribute is not set until
