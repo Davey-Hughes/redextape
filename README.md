@@ -68,8 +68,8 @@ CodeMirror 6.
   goes through.
 - [Conventions](docs/conventions.md): how changes get onto `main`, from linear history and branch
   protection to squash messages.
-- The [command-line tool](crates/redextape-cli/README.md) and each of the
-  [tree-sitter grammars](grammars/) have their own README; the grammars' cover editor setup.
+- The [command-line tool](crates/redextape-cli/README.md) has its own README, and so do the
+  [tree-sitter grammars](grammars/README.md), with editor setup.
 - Design specs, plans and the [roadmap](docs/superpowers/plans/2026-07-19-redextape-roadmap.md) are
   under [`docs/superpowers/`](docs/superpowers/).
 
