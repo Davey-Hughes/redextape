@@ -1,464 +1,74 @@
 # Redextape
 
-> Watch the Church–Turing thesis happen.
+A small programming language that compiles to both lambda calculus and Turing machines, so you can
+run the same program both ways and step through them side by side. It runs in the browser at
+[redextape.com](https://redextape.com).
 
-Redextape transpiles a small imperative/functional programming language into **both** a
-**Turing machine** and a **lambda-calculus term**, then lets you watch the *same program*
-execute in both models side by side — source, λ-reduction, and TM tape/state kept in sync.
+[![One program on redextape.com, open as source, a λ-term and a Turing machine side by side](https://daveyhughes.com/readme/redextape/demo.webp)](https://redextape.com)
 
-The two targets are the destination, not a means to an end: execution happens in a real
-Turing-machine simulator and a real lambda reducer, so what you see is the genuine
-computation — not a native run with a decorative overlay.
+You write a program in `.rxt`, a small typed language. The compiler turns it into a λ-term, and
+also into a Turing machine by way of a register machine called rxm, and the site shows them next to
+each other. You can step each one forwards and backwards, and clicking part of one view highlights
+the matching part in the others. The λ-term really is reduced one step at a time and the machine
+really does follow its rules one move at a time, so the views show the actual runs.
 
-## Status
+## What it does
 
-**The compiler is built, and the thing you watch it run in now has three panes.** The front end
-and three backends — λ, Turing machine, and native — all work, and each is checked against the others
-on every commit. `crates/redextape-wasm` compiles the compiler to WASM through **ten exports** — the
-tenth, `tapeNames()`, labels the five Turing-machine tape rows from the lowering's own constants
-(`build.rs`) rather than a hand-copied list, so it can only speak for machines this compiler produced.
-`web/` is a real app: a source pane with lint diagnostics and syntax highlighting driven by a committed
-tree-sitter grammar — the same colourer the λ, TM and rxm copy editors take, whose grammar loads
-asynchronously so only the first paint waits on it, while every reparse and rebuild after that runs
-inside the same `ViewUpdate` as the keystroke that triggered it — a λ pane, and a
-Turing-machine pane showing all five tapes, a status line, and — Plan 5a-ii — a virtualized δ-table
-beside them: current state and the rule about to fire highlighted, following the machine by default and
-a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
-viewport's worth of rows — 24 of `map_fold`'s 25,852 at CI's window size, counting the overscan —
-side by side, the first thing in this project a human can click. **All three legs — λ, Turing machine and
-rxm — are steppable forward and backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps
-affordance (`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
-**The λ pane has no structural tree, and that is a decision, not a gap**: Plan 5a-ii measured one and cut
-it — a per-frame tree costs 850 MB against a 32 MB history ring, and most steps have no tree to draw at
-any budget that is still affordable
-(`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2). What the visualizer the
-project is *for* still lacks: click-linking between the panes, dual-focus highlight while running,
-editable λ/TM panes with detach-on-edit, and the λ pane's structural tree (deliberately, see above).
-See "Development & CI" below to build and run it, or still `cargo run --example` for the raw backends
-without a browser.
+- `.rxt` has functions, `let` and `mut` bindings, `if`, `while`, natural numbers, booleans, lists
+  and closures. The examples menu has a few programs to start from.
+- A program can be viewed as source, as a λ-term (drawn as a tree you can fold), as rxm, and as a
+  Turing machine with its tapes, rules and state diagram. Clicking a token, part of the term, an rxm
+  instruction or a machine rule marks the same place in the other views.
+- Each view steps forwards and backwards through a recorded history, plays at a speed you pick and
+  can go back to step 0. A run too long to record stops at a step budget and asks before going on.
+- A view's λ-term, rxm program or Turing machine can be copied out as text, edited and run on its
+  own.
+- Share links keep the program, the open views and the step each one is at. It all goes in the
+  URL's fragment, which the browser doesn't send to the server.
+- The tests run one set of programs through a reference interpreter, the λ reducer, the Turing
+  machine on unary and binary tapes, and native code from Cranelift or LLVM, and fail if any two
+  disagree.
+- `redextape-lsp` is a language server with diagnostics, formatting, hover, go to definition, find
+  references and an outline for `.rxt` and for rxm's and the Turing machine's text formats, plus
+  diagnostics and formatting for λ files. The site runs the same server in a web worker. There are
+  tree-sitter grammars for highlighting, and a Neovim plugin that sets up the filetypes, parsers and
+  server.
+- `redextape` is the command-line tool. It formats, lints, runs and emits programs: `run` picks the
+  reference, λ or Turing machine backend, and `emit` prints the λ-term, rxm program or Turing
+  machine as text, optionally reduced to a single tape or to two symbols.
 
-Design spec:
-[`docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md`](docs/superpowers/specs/2026-07-19-tm-lambda-visualizer-design.md).
-The plan sequence, and the running log of what implementation falsified:
-[`docs/superpowers/plans/2026-07-19-redextape-roadmap.md`](docs/superpowers/plans/2026-07-19-redextape-roadmap.md).
+## How it's built
 
-## Architecture
+It's a Rust workspace. `redextape-core` has the parser, the type checker and all the backends, and
+wasm-pack compiles it to WebAssembly, so everything runs in the browser and the server only serves
+static files. The web app is TypeScript with CodeMirror 6 and Vite, and the language server runs in
+a worker as a second WebAssembly build. Native code uses Cranelift by default, with LLVM (through
+`inkwell`) behind a feature flag. The site is deployed as a Docker image with nginx serving the
+static build. CI runs on Forgejo: formatting and clippy, the Rust tests with a 90% line-coverage
+minimum, the WebAssembly and web tests in a real browser, and a RustSec advisory check. It publishes
+the image from `main`.
 
-Ten crates under `crates/`.
+## Docs
 
-**`redextape-core`** — the whole language, with **no dependencies** (`cargo tree -p redextape-core
---edges normal` lists only itself), which is what keeps it WASM-clean:
-
-- **Front end:** lexer → hand-written Pratt parser → Hindley–Milner inference (Algorithm W) →
-  desugar to the **Core AST** → a reference tree-walking interpreter. Every Core node carries a
-  stable `NodeId`, and that id is the anchor everything downstream maps back to. Malformed input
-  produces spanned `Diagnostic`s rather than a panic, and the rule is mechanical rather than
-  documentary: `[workspace.lints.clippy]` warns on `unwrap`/`expect`/`panic`/`todo`/
-  `unimplemented`, which CI's `-D warnings` makes fatal.
-- **λ backend** (`src/lambda/`) — Core → de Bruijn terms (Church `Nat`, Scott `Bool`/`List`, the
-  call-by-name Y for recursion, store-passing for `mut`/`while`), a normal-order reducer that
-  reports the redex path at each step, type-directed decode back to a `Value`, and a round-tripping
-  λ text form.
-- **TM backend** (`src/tm/`) — Core → rxm, a register-machine IR → a genuine multi-tape Turing machine,
-  with defunctionalization for higher-order programs, two interchangeable numeric encodings
-  (`Unary` and `Binary`), a simulator, and a **self-describing** `.tm` text form whose optional
-  header records the initial tapes, so a foreign simulator can run the file knowing nothing about
-  this project.
-- **Shared layers:** `sourcemap` (`NodeId` → λ-subterm path, `NodeId` → TM state block), `trace`
-  (one step-event vocabulary over both backends, stepped lazily — a renderer never holds the whole
-  run), and `analysis` (token classification for all four languages; classes only, never colours).
-
-**`redextape-native`** — a third backend, and the oracle leg that is neither model: a **Cranelift**
-JIT, **AOT object emission** with a linker driver that produces a real standalone executable, and an
-**LLVM** JIT (inkwell, behind the `llvm` feature) as a second codegen behind the same `Codegen`
-seam. **`redextape-native-rt`** is its runtime — the `rt_*` heap/box/cap host functions — split out
-as `rlib` + `staticlib` so an AOT binary can link them without dragging Cranelift along.
-**`redextape-test-support`** holds the shared proptest generators.
-
-**`redextape-cli`** is the `redextape` command — `fmt`, `lint`, `run` and `emit`.
-**`redextape-wasm`** is the browser boundary the visualizer loads. **`redextape-grammar-check`**
-holds the tree-sitter differential that checks each editor grammar against the front end span for
-span. **These three went undescribed here while the count above still read "Four"**, which is the
-same defect the section below documents for test counts: a total and an enumeration that drift
-apart, where either alone looks right.
-
-**`redextape-lsp`** is the eighth, and the count above already included it before this paragraph
-did — the same drift named just above, one crate later. It is a stdio language server — diagnostics
-and formatting for all four text forms (`.rxt`, `.rxlambda`, `.tm`, `.rxm`), navigation for three
-of them (`.tm`, `.rxm` and `.rxt`), served over the Language
-Server Protocol to Neovim from the same `redextape-core` front ends the CLI and the web UI already
-call. `lsp-server` (the transport) is confined to its `main.rs`; every other file in the crate is a
-pure function of one client message to the messages that go back, which is what holds the crate to
-the workspace's coverage floor and is checked mechanically —
-`git grep -l lsp_server crates/redextape-lsp/src` names exactly that one file. Build it with
-`cargo build --release -p redextape-lsp`; `plugin/redextape.lua` finds the binary there (or on
-`PATH`) and registers it with `vim.lsp.enable` automatically, so a lazy.nvim spec of
-`{ "Davey-Hughes/redextape", lazy = false }` needs no change to pick it up — no binary just means no
-diagnostics or formatting, with a warning naming both remedies, and highlighting is unaffected
-either way. For `conform.nvim` users who route formatting through it rather than
-`vim.lsp.buf.format()` directly, `formatters_by_ft` is keyed by FILETYPE and this server serves four
-of them, so opting in takes four entries rather than one — `redextape`, `redextape_rxm`,
-`redextape_lambda` and `redextape_tm`, each `{ lsp_format = "fallback" }`, or conform's `["_"]`
-catch-all. Not required either way.
-
-**`redextape-lsp-wasm`** is the ninth, and it is named here in the same commit that moved the count
-above — the drift this section documents twice already, not repeated a third time. It is the
-`#[wasm_bindgen]` surface that lets the browser run the same server Neovim talks to: one exported
-type, `LspServer`, whose `handle` takes one JSON-RPC message and returns the messages that go back as
-a JSON array. It adds no behaviour to `redextape-lsp` at all — the split that crate's module doc
-argues for is what made this possible, and the whole crate is marshalling. Unlike `redextape-wire` it
-generates no TypeScript: LSP's types come from Microsoft's `MetaModel` via `gen-lsp-types`, so a
-generated copy would describe a shape this project does not own, and the web client hand-writes the
-handful of messages it actually sends instead.
-
-**`redextape-wire`** is the tenth: the statuses and values `redextape-wasm` answers with beyond core's
-types, with the TypeScript generated from them, the helpers that build them and the one serializer
-they cross by, in a crate of their own so that a second wasm module shares them rather than copying
-them.
-
-### The oracle
-
-Every backend is checked against every other on a shared 46-program corpus, which is what makes
-"the same program" a property rather than a claim:
-
-- `redextape-core`'s `tests/three_way_oracle.rs` — **`reference == λ == unary-TM == binary-TM`**.
-  The two TM legs are *different machines* compiled from the same Core, not one machine read twice.
-- `redextape-native`'s `tests/native_oracle.rs` adds native as a fifth leg; `tests/llvm_oracle.rs`
-  pins `cranelift == llvm` at every optimization level; `tests/aot_oracle.rs` links a standalone
-  binary and runs it as a subprocess.
-- Both text forms have a **foreign reader** (`tests/lambda_foreign_reader.rs`,
-  `tests/tm_foreign_reader.rs`) — an independent parser / reducer / simulator / decoder written from
-  the doc comments alone. It is the only check that the printed formats are documented well enough
-  to reimplement.
-
-Two known limits, recorded rather than hidden. **The first is a refusal and stands; the second was a
-hang and is closed — the difference between them is the whole point, and the history is kept because
-four designs died against the second.** The λ backend **declines** a handful of programs the other legs
-run — a closure over a `let mut` binding — and
-answers a `LowerError` rather than risk a silent miscompile; they live in
-`LAMBDA_LIMITATION_DEMOS` and are asserted TM-only. Separately, **nested mutually recursive `fn`
-groups** blow the λ term up exponentially through structural sharing, because `lower_group` clones the
-whole group term once per member and the factor nests. 512 bytes of ordinary source used to reach a
-β-step that did not finish. **CLOSED 2026-08-01, at the root rather than by refusing anything** — that
-program now reduces in 7.48 s, and the two-list counterexample below went from 19.0 s in its first
-β-step to under a millisecond.
-
-**Nothing guards it, and nothing needs to.** `term.rs`'s `shift` rebuilt every node it visited
-unconditionally, so it was Θ(*logical*) *and* it destroyed sharing on every β-step; `reduce.rs`'s
-`depth_exceeds` walked the logical expansion once per step and was 96% of what remained after that was
-fixed. Both now read `u32`s the three constructors maintain in O(1) — `maxfree` (highest free index + 1;
-`0` means closed) and `depth` — so `shift` and `subst` return their argument's *allocation* when it
-cannot be affected, and the depth guard is a comparison.
-
-**Four designs aimed at this hazard are dead, and the record keeps all four on purpose.** Two guards
-were falsified by counterexample: a total-size bound refused a working 699-element list literal, and
-`MAX_SHARED_LOGICAL_NODES` = 10,000 on the largest *shared* subterm landed and was reverted after a
-trivially-written program — `let xs = [0..500); let ys = [0..500); head(xs) + head(ys)`, 4,821 bytes,
-no recursion — measured **4** against it while spending 19.0 s in one step. A third, a per-redex work
-budget, was never built: not falsified, made unnecessary. The fourth was a performance rewrite carrying
-`subst`'s per-binder re-shift down as one `shift(d, 0, ·)`; **falsified 2026-08-02**, and on the family
-it was most likely to help it is a 0.99x regression.
-
-**The cost model those first three were argued from is also gone, and it is the interesting part.**
-`|body| + Abs(body) × |arg|` was true of a `subst` whose `Abs` arm copied the argument once per binder
-*whether or not the variable occurred below it*. The `maxfree` short-circuit means it no longer does —
-`subst` descends only along paths to an occurrence, and `shift(1, 0, arg)` is a refcount bump for the
-88.4% of β-steps whose argument is closed. Measured, the model over-reports the cost it names by
-~1,584x. The probe that carried it could not detect this on its own, because its counters *modelled* the
-functions instead of measuring them; that is repaired, and it is the lesson the record is built around.
-
-`examples/shift_cost_probe.rs` is the instrument (it carries its own memory-cap rules — read them
-first), with `examples/lambda_sharing_probe.rs`, `examples/blowup_probe.rs`,
-`examples/list_reduction_probe.rs` and `examples/guard_hole_probe.rs` alongside; the falsified
-counterexamples run in CI as `tests/guard_counterexamples.rs`. Start from the λ section of
-`docs/superpowers/plans/2026-07-19-redextape-roadmap.md` rather than the specs, two of which are
-withdrawn designs retained deliberately.
-
-**Divergence is a separate matter and is untouched** — the family has no base case, so "terminates"
-means it reaches a cap in bounded time. The cap it reaches is **`MAX_TERM_DEPTH`, not
-`MAX_REDUCTION_STEPS`** (105,607 steps against a step cap of 5,000,000), because the family grows deep
-as it diverges. Both are reachable only because control now returns from each β-step.
-
-### Not built yet
-
-- **The full visualizer** — `crates/redextape-wasm` (cdylib) and `web/` (Vite + CodeMirror 6, no
-  framework) now ship three panes (Roadmap Plan 5a-i) plus a virtualized δ-table in the TM pane (Plan
-  5a-ii): an editable source pane with live syntax highlighting and lint diagnostics, a λ pane, and a
-  Turing-machine pane with all five tapes, a status line, and a state table that follows the machine,
-  highlights the current state and the rule about to fire, and renders only the rows on screen — tested
-  against a viewport-derived bound, which is 24 rows of `map_fold`'s 25,852 at CI's window size, and a
-  flat ceiling of 200 that a whole-table renderer would miss by two orders of magnitude — both legs
-  independently steppable forward and backward
-  through a recorded history with a caps affordance for a run that exceeds it. Click-linking between
-  the panes (Plan 5b, 2026-08-09), dual-focus highlight while running (Plan 5c plus region-path
-  tagging, 2026-08-10), and editable λ / TM panes with detach-on-edit and recompile-from-source
-  (through Plan 5d-iv, 2026-08-18) have all since shipped — an earlier version of this bullet still
-  listed the three as missing after each had landed. What is left is Plan 5's own accessibility pass:
-  deliberately deferred to one pass once the pane set stopped changing shape, and unblocked but not yet
-  run now that 5d-iv has landed. **The λ pane's structural tree is a deliberate cut, not part of that
-  remaining work** — Plan 5a-ii measured it and cut it rather than leaving it unscheduled: a per-frame
-  tree costs 850 MB against `HISTORY_BYTES`' 32 MB ring, and most steps have no tree to draw at any
-  budget that is still affordable
-  (`docs/superpowers/specs/2026-08-08-plan5a-ii-state-table-design.md` §2).
-- **LSP** — `crates/redextape-lsp` now serves diagnostics and formatting for all four text forms,
-  plus **go-to-definition, find-references and document symbols for `.tm`, `.rxm` and `.rxt`**
-  (Architecture, above); `.rxt`'s names are scoped, so its pass resolves against a binder rather
-  than the flat lookup the other two share, and it landed in `binder`, not `analysis`. Still not
-  built: navigation for `.rxlambda`, whose de Bruijn terms carry no source positions at all; hover;
-  rename; and semantic tokens — the four tree-sitter
-  grammars already highlight all four forms in Neovim, so tokens are not needed for that editor and
-  stay deliberately out of this slice.
-
-`crates/redextape-cli` is no longer on this list. All four subcommands work — `redextape fmt` /
-`redextape lint` (Roadmap Plan 6's first half, 2026-08-19), `redextape run` / `emit` (Plan 6's second
-half, 2026-08-23), and a reader for the register-machine listing (2026-08-25; `parse_rxm` since the IR
-was renamed rxm) rounding out `emit`'s three text forms so all of them round-trip — and a
-`redextape.toml` for four settings plus `--deny-warnings` close Plan 6's remaining two knobs; see that
-crate's own README for the schema, discovery and precedence. `.rxlambda` is the one emitted form
-`redextape run` still does not take — a bare λ term carries no result type to decode against.
-`redextape fmt` has since grown the same two forms `run` already read — `.tm` and `.rxm` alongside
-`.rxt` (Roadmap `cli-fmt-tm-asm`, 2026-09-05, from when rxm was called asm) — chosen by extension, by
-`--form` where a caller needs to override it, or for stdin by asking the parsers themselves rather
-than a pattern. `--width` stays a line budget the `.rxt` printer alone reads; an explicit `--width` on
-a `.tm` or `.rxm` input is refused rather than silently ignored.
-
-The CLI and the web visualizer are both usable today. The examples below remain the most direct way to
-drive the raw backends, with no binary or browser involved:
-
-    cargo run --example lambda_demo -p redextape-core     # compile to λ, reduce it step by step
-    cargo run --example tm_demo     -p redextape-core     # compile to a TM, simulate, decode
-    cargo run --example tm_emit     -p redextape-core     # write a self-describing .tm, run one back
-    cargo run --example native_demo -p redextape-native   # compile to host machine code and run it
+- [Status and architecture](docs/architecture.md): where things stand, the crates and how they fit
+  together, the cross-backend oracle, and what isn't built yet.
+- [Development](docs/development.md): building and running it locally, CI, and the checks each commit
+  goes through.
+- [Conventions](docs/conventions.md): how changes get onto `main`, from linear history and branch
+  protection to squash messages.
+- The [command-line tool](crates/redextape-cli/README.md) and each of the
+  [tree-sitter grammars](grammars/) have their own README; the grammars' cover editor setup.
+- Design specs, plans and the [roadmap](docs/superpowers/plans/2026-07-19-redextape-roadmap.md) are
+  under [`docs/superpowers/`](docs/superpowers/).
 
 ## The name
 
-**Redextape** = `redex` (a *reducible expression* — the atom of lambda-calculus reduction)
-+ `tape` (the Turing-machine tape), read aloud as *"red tape."* Both computational models
-are literally in the name. Alternates once in the running: *Turnstile*, *Betamax*.
-
-## Development & CI
-
-- **Forgejo Actions** (`.forgejo/workflows/ci.yml`) — a `detect` job gates each build job on what
-  exists in the tree. **Live:** `linear-history` (unconditional), `rust` (fmt, clippy,
-  `scripts/check-all.sh --no-llvm`, then `cargo llvm-cov nextest` against a 90% line floor),
-  `rust-llvm` (installs LLVM 23, runs `scripts/check-all.sh --llvm-only`, then an informational
-  optimization report), `rust-slow` (the exhaustive sweeps), `rust-scoped` (the cheap path for a
-  change that touches one crate), `rust-browser` (the wasm boundary under headless Chrome), `gate`
-  (the required check — it fails loudly rather than letting a skipped tier pass quietly), and — now
-  that `web/package.json` has landed — `web` (biome, typecheck, both Vitest projects under a
-  coverage gate, build) and the `docker` build-and-push to `forge.daveynet.xyz`. **Every push to
-  `main` now builds and pushes an image**; there is no way to land `web/` changes without arming
-  that job. The same build runs every Sunday and on a manual dispatch, because nothing else rebuilds
-  `:latest` without a merge: on `main` it re-pushes `:latest` and main's `sha-` tag; a dispatch on a
-  branch publishes a new `sha-` tag for that unmerged commit, and one on a `v*` tag re-pushes that
-  tag's `sha-` and version tags.
-- **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
-  `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
-  stage 1 builds `crates/redextape-wasm`, stage 2 builds `web/`.
-- **Advisories** (`.forgejo/workflows/advisories.yml`) — `cargo deny check advisories` against
-  `Cargo.lock`, configured by `deny.toml`, on pushes to `main`, a dispatch, Mondays 15:00 UTC, and PRs
-  that touch `Cargo.lock`, a manifest or its config. A workflow of its own, outside `gate`, so a newly
-  published advisory blocks no merge and no image. Its header says how to accept a finding, including the
-  `ADVISORIES_MODE` switch for all of them at once.
-- **Toolchain** — `rust-toolchain.toml` (stable), `rustfmt.toml` (`max_width = 120`),
-  `.pre-commit-config.yaml`. `scripts/setup-dev.sh` is the once-per-clone setup — it installs
-  cargo-nextest, the pre-commit hooks, and the git config the conventions below depend on.
-- **Web toolchain** — `web/` is a pnpm project (`packageManager: pnpm@11.20.0` in
-  `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root `pkg/`
-  directory it writes to (gitignored, imported from `web/src/` as `../pkg/redextape_wasm.js`) does not
-  exist — and `tsc` resolves that import against a `.d.ts` `wasm-pack` has not produced yet either. Run
-  once, in order, before anything else in `web/` works:
-
-      cd web && pnpm install && pnpm run build:wasm
-
-  Only after that will `pnpm run dev`, `pnpm run typecheck`, or `pnpm test` succeed.
-
-## Checks
-
-`scripts/check-all.sh` runs the full feature matrix — `cargo fmt` once, then clippy *and* tests for
-each of the four configurations: the default (`cranelift`), `--no-default-features`, `--features
-llvm`, and `--no-default-features --features llvm`. CI runs this same script. Pass `--no-llvm` to
-skip the LLVM configurations when no LLVM 23 toolchain is installed.
-
-That gate covered **1,156 tests** at default features **when counted on 2026-08-24**
-(`redextape-core` 890, `redextape-cli` 78, `redextape-wasm` 67, `redextape-native` 66,
-`redextape-grammar-check` 44, `redextape-native-rt` 11; `redextape-test-support` carries none of its
-own) — 8 are skipped, so 1,148 run — and `--features llvm` takes `redextape-native` higher, 104 when
-last measured.
-
-**These are dated observations rather than current facts, and the tense is deliberate.** Recovering
-them costs `cargo nextest list --workspace`, measured at **218 s warm** — roughly **800x** the
-figure gate's own ~270 ms (its self-test and scan), and roughly **38x** the ~5.7 s the six unscoped
-pre-commit hooks cost together — so no gate holds them and none can. **THAT COMPARISON READ "150x"
-AND "the ~1.5 s the three unscoped hooks" UNTIL `check-attributions` LANDED**, and it was already
-wrong before that: there were four unscoped hooks, not three, and re-measuring all of them in one
-minute gives 1,127 + 494 + 253 + 181 + 2,603 ms. It then read **47x** against "the ~4.7 s the five
-unscoped hooks" until `check-colours` made six, beside the **1,450x** against "~150 ms" it had carried
-since the figure gate landed; both were re-measured then, and the figure gate had grown too. A ratio between two figures goes stale
-when EITHER moves, which is twice the exposure of the figures it compares. The
-figures above read 841/716/48 until 2026-08-24, having drifted by 315 tests and lost three crates
-from the breakdown entirely. Recount rather than trust them.
-
-**Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
-has **34** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
-`rust-browser` job. `web/` has **246** of its own across two Vitest projects — 187 in Node for the
-pure modules, 59 in real Chromium for the worker and the app end to end — run by CI's `web` job
-under the coverage gate. Recount with `pnpm test`. `pnpm test:firefox` runs the browser tier in
-Playwright's Firefox (install it once with `pnpm exec playwright install firefox`), where each test
-that needs what only Chromium has is skipped with its reason. `pnpm test:firefox --reporter=verbose`
-prints every reason, where the default reporter leaves some out. `pnpm test:firefox` runs two
-Firefox projects, each in a Firefox of its own: `firefox-capture` runs the files on
-`vite.config.ts`'s `CAPTURE_FILES` one at a time, since each takes a pointer capture through real
-input and, in one Firefox, a capture takes the clicks of every other tab; `firefox` runs the rest in
-one Firefox at 6 tabs, since that Firefox's one parent process synthesises every tab's real input,
-and with more tabs on a loaded machine its clicks come late enough to time cases out
-(`VITEST_MAX_WORKERS` sets another count). A file outside the list that takes a capture fails in
-`firefox` with a message naming the list: add it to `CAPTURE_FILES`. The run still has known
-failures, which later PRs fix, and nothing else runs it, CI included.
-
-All three numbers in the last two paragraphs were stale when measured on 2026-08-09, and the web one
-badly: it read **48** from PR 3c while the suite grew fivefold underneath it. That is what the
-recount instructions are for — a test count in prose has no mechanism keeping it honest, so treat
-every figure here as a claim with a date rather than a fact.
-
-The test runner is [`cargo-nextest`](https://nexte.st), not `cargo test`: `cargo test` runs the test
-binaries one at a time and only shares threads within a binary, which on this suite left 12 cores
-running at 1.39x. Same tests, same pass set, 231.7s → 135.2s. `scripts/check-all.sh` fails loudly if
-nextest is missing rather than falling back, so the gate behaves the same everywhere;
-`scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
-config with an explicit `cargo test --doc` at the same feature flags.
-
-There are **fourteen** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
-heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
-`check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
-equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
-language in an editor rather than failing, so nothing else in this tree could see it. The other
-nine — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
-`check-shared-docs`, `check-colours`, `check-grammar-wasm`, `check-licences` and `check-comments` — are
-unscoped and run on every commit whatever is staged: the first eight because they catch things that
-arrive in a path nobody thought to list, the ninth because it reads the whole branch rather than the
-staged set. The first three walk `git ls-files`, the fourth reads four READMEs, the fifth holds every
-marked region in a document to the single copy under `grammars/shared/`, the sixth scans tracked
-`.css` and `.ts` files under `web/src/` for colour literals outside the palette, skipping
-`palettes.ts` itself and the marked fallback block in `style.css`, and the seventh hashes each
-grammar's `src/parser.c` and its `.wasm` against `grammars/wasm-manifest.json` — unscoped because the
-file that goes stale is the `.wasm`, and the file being committed is `grammar.js` or `src/parser.c`,
-on the other side of the same input set `check-lua`'s own scoping already names. The eighth
-regenerates `web/src/third-party-licences.json`, the list the site's licences page draws, from the
-installed npm packages, `cargo tree`, the repository's `LICENSE.md` and the toolchain and
-colour-scheme texts under `web/scripts/toolchain-licences/` and `web/scripts/palette-licences/`,
-and compares it with the committed copy — unscoped because what makes it stale is a lockfile, an
-import or a dependency's own licence file, not the file being committed; it needs `web/node_modules`
-in step with `web/pnpm-lock.yaml`, and `cargo`, and took 0.51-0.78 s with its self-test over five
-runs (2026-10-08). The ninth, `check-comments`, fails a branch that adds history to a comment, grows
-a comment block past 8 lines of text or raises an area's comment share above its budget; its three
-rules are in `docs/superpowers/specs/2026-10-29-comment-guard-design.md`. The first two judge what
-the branch adds since its merge base with `origin/main`, and the third each area's share across the
-whole tree, which also fails as stale when a branch that removed comment lines leaves it more than
-0.0050 below its budget. Its `--self-test` took 0.091-0.102 s and its scan 0.463-0.503 s over five
-runs each (bash's `time` around `node scripts/check-comments.mjs --self-test`, then without the
-flag; 2026-10-30, at a 1-minute load average of 13.92 on 32 cores). `check-comments` is the newest
-of the nine and `check-attributions` the slowest, at ~3.2 s against the next slowest's ~1.25 s (each
-hook's `--self-test` and scan, measured 2026-09-18), because it strips comments and string literals
-out of every cited file rather than matching patterns line by line — the price of being able to tell
-a file that OWNS a symbol from one that merely talks about it. All **fourteen** are fast enough for
-every commit: measured interleaved in one session (2026-09-21, five rounds, alternating which set
-went first, after one untimed warm-up of each), the unscoped six ran 5.867-5.955 s and the same six
-plus `check-grammar-wasm` ran 6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is
-the seventh hook's own cost and not run-to-run noise. Run `scripts/check-all.sh` before merging.
-
-`scripts/check-slow.sh` runs the **slow test tier**: exhaustive sweeps marked
-`#[ignore = "slow tier: ..."]` — nine of them today — which `cargo test` skips by default and CI
-runs in its own job. The marker is deliberate: `cargo test` prints the ignored count, so a skipped
-sweep stays visible rather than looking like a passing one.
-
-## Conventions
-
-`main` is **linear** — no merge commits — and every commit on it is an **atomic unit**: it builds and
-passes the gate on its own. Work happens on a feature branch, which lands as **one squashed commit**.
-
-Pull requests are the only route to `main` — there is no local landing script. Push the branch, open
-a PR, and once CI has run, squash-merge it in the Forgejo web UI:
-
-    git push -u origin my-branch
-    # open a PR at forge.daveynet.xyz, squash-merge once CI is green
-
-CI runs against the PR head on every push to a **non-draft** PR, so its result is visible on the PR
-before anyone merges it: `rust` and `rust-llvm` run `scripts/check-all.sh` (`--no-llvm` and
-`--llvm-only` respectively, which together cover every config), and `rust-slow` runs
-`scripts/check-slow.sh`.
-
-A **draft** PR gets `rust-scoped` instead: a fast check that escalates rather than skips; on CI it
-always covers the whole branch diff — see the `rust-scoped` job header for what it actually buys.
-It is explicitly non-gating — its own banner says so. `rust`, `rust-llvm` and `rust-slow` do not run on a
-draft PR, and `gate` deliberately stays red until the PR leaves draft; that is expected, not a
-failure to investigate. `ci / gate (pull_request)` is the single required status check either way.
-
-What a web-UI merge does **not** do by itself, the way the retired `scripts/land.sh` did, is check the
-merged tree. `land.sh` ran the gate **on the merged tree, before the commit existed**, and refused to
-commit on failure — that ordering is what made "every commit on `main` builds and passes CI by itself"
-a *property*, not a hope. A squash-merge inverts it: the commit is built from the PR head, and merging
-is a decision a person makes by reading CI's result, not a check the merge itself re-runs.
-
-**`main` is branch-protected** (enabled 2026-08-04), which is what stands in for that ordering:
-
-- direct pushes are off — a PR is the only way in
-- `ci / gate (pull_request)` is the single required status check. Naming `rust`, `rust-llvm`,
-  `rust-slow` or `linear-history` directly was tried and measured unsound: Forgejo reports a
-  *skipped* job as `success` on the commit-status API, so a required context naming one of those
-  jobs cannot tell "ran and passed" from "never ran." `gate` instead reads `needs.<job>.result` — a
-  different subsystem that reports `skipped` as `skipped` — and fails unless every gating job
-  actually succeeded.
-- `block_on_outdated_branch` is on, so a PR green against a `main` that has since moved cannot merge
-- `apply_to_admins` is on, so the rule binds the repository owner too — without it the whole rule is
-  advisory for the only account that merges
-
-Required checks keep the PR head green and the outdated-branch block keeps that head current with
-`main`. That is not identical to gating the merged tree — the merge commit itself is still never
-tested before it exists — but it removes the two ways the gap actually bites: a red head, and a stale
-base. The residual is a semantic conflict between two green branches, which `block_on_outdated_branch`
-forces you to rebase and re-run rather than discover afterwards.
-
-A plain `git merge --squash` discards every commit message on the branch. `land.sh` used to work
-around that by prefilling the squash message with every branch commit verbatim under a
-`--- Squashed from N commits ---` marker; a PR's written body does that job now, and does it better as
-prose. Measured on this repository: `9a7db07`, landed by `land.sh`, carries 521 lines and 31,925 bytes
-of concatenated commit messages; `a32e967`, a squash-merged PR, carries 91 lines and 5,491 bytes of
-written body. (The squash figure moved slightly on 2026-08-05, when `main`'s history was rewritten
-to drop Forgejo's `Reviewed-on:` trailer, which was part of what was being measured — it read 93
-lines and 5,556 bytes before. `9a7db07` predates the rewrite and is untouched. The comparison the
-two support is unaffected, and a merge-message template now keeps the trailer off future commits.)
-What moves is *where* the intermediate messages live: they are no longer inside the
-commit object that lands on `main`. They still exist, on the PR page and under `refs/pull/N/head`, but
-only on `forge.daveynet.xyz` — a dependency the git history alone did not previously have. Losing the
-reasoning is still not the price of a tidy graph; keeping it now depends on the forge as well as on
-git.
-
-`SQUASH_TEMPLATE.md` deliberately stops at its first line, and the blank line after it is
-load-bearing. Forgejo prefills the squash merge box with `GetSquashMergeCommitMessages()` **plus** the
-template's body, and with `PopulateSquashCommentWithCommitMessages` off — the default — the first of
-those already *is* the PR description. A body of `${PullRequestDescription}` therefore wrote it twice,
-which is what `#13`–`#16` carried until their messages were rewritten on 2026-08-07. Deleting the
-trailing blank line does not merely undo that: `expandDefaultMergeMessage` splits the template on its
-first newline and falls back to the *default* body when there is no second part, so a one-line file
-brings the `Reviewed-on:` trailer back. `MERGE_TEMPLATE.md` keeps `${PullRequestDescription}` because
-the non-squash prefill does not prepend the description — it is unreachable while the remote has merge
-commits disabled, and correct if they are ever re-enabled.
-
-Three layers keep this true, none of which trusts the other two:
-
-- `scripts/setup-dev.sh` (run once per clone) sets `merge.ff = only` and `pull.ff = only`, so a
-  non-fast-forward merge fails rather than quietly creating a merge commit. Convenience only —
-  `.git/config` is untracked and cannot bind anyone.
-- The **remote** allows only squash and fast-forward merges; merge commits and rebase-merge are
-  disabled, so a PR merged in the web UI cannot produce a shape CI rejects.
-- CI's **`linear-history`** job rejects a merge commit on `main` however it arrived. This is the gate.
-
-Object-size baselines live in `crates/redextape-native/baselines/<target-triple>.txt` and gate the
-`size_baseline` test with a 10% band. Regenerate after an intentional codegen change:
-
-    cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline
+`redex` (a reducible expression, the thing one step of lambda-calculus reduction rewrites) plus
+`tape` (a Turing machine's tape). It's pronounced like "red tape". Other candidates were
+*Turnstile* and *Betamax*.
 
 ## License
 
-[GNU General Public License v3.0](LICENSE.md)
+GNU General Public License v3.0, version 3 only; see [LICENSE.md](LICENSE.md). The libraries and
+fonts the site bundles keep their own licences, which are listed on its
+[licences page](https://redextape.com/licences.html).

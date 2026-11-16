@@ -238,7 +238,7 @@ an editor has something to fetch. If you have a key on the instance,
 
 ### `.tm` collides with TeXmacs
 
-`tree-sitter.json` claims the `tm` extension, because that is what this project's own README and
+`tree-sitter.json` claims the `tm` extension, because that is what this project's architecture doc and
 `examples/tm_emit.rs` call these files. TeXmacs also uses `.tm`, and several editors ship a mapping
 for it. **If your editor already knows `.tm`, you have to say which wins** — with
 `vim.filetype.add` in Neovim, `file-types` in Helix, or `path_suffixes` in Zed, all shown below. There

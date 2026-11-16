@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hold the READMEs' numeric claims to the tree they describe.
+# Hold the numeric claims in the READMEs and in `docs/` to the tree they describe.
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
@@ -12,8 +12,8 @@
 # **WHY THIS GATE EXISTS: A README's FIGURE GOES STALE WHEN A DIFFERENT FILE CHANGES.** Adding one comment
 # line to a `grammar.js` falsifies a README that asserts that file's line count, and nothing fails.
 #
-# **THE ROOT README HAS REPO-LEVEL ROWS.** Its rows (`.` as the scope) describe the workspace rather than a
-# grammar, and every one is a structural grep that compiles nothing.
+# **`docs/architecture.md` AND `docs/development.md` HAVE REPO-LEVEL ROWS.** Their rows (`.` as the scope)
+# describe the workspace rather than a grammar, and every one is a structural grep that compiles nothing.
 #
 # **HOW MANY DOCUMENTS THIS TABLE COVERS IS DELIBERATELY NOT STATED HERE:** a count goes stale when a README
 # gets rows — the same failure the gate exists to stop, one level up, in the gate's own file. Read the table.
@@ -92,7 +92,7 @@
 #
 # **ONE ROW'S DOCUMENT IS A SOURCE FILE, NOT A README, AND THAT IS A DELIBERATE WIDENING.**
 # `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The TENTH export" in a doc comment, and
-# `README.md` states the same fact twice more — "ten exports" and "the tenth, `tapeNames()`". An ORDINAL
+# `docs/architecture.md` states the same fact twice more — "ten exports" and "the tenth, `tapeNames()`". An ORDINAL
 # that moves whenever any export is added, with no gate behind it, goes stale with nothing to say so.
 # The scan reads any path it is given — `normalize` just flattens a file — so the widening costs one row
 # and no machinery.
@@ -209,8 +209,8 @@ derive() {
     # REPO-LEVEL KEYS. These ignore `$dir` (passed as `.`) and describe the workspace rather than a
     # grammar. Each is a structural read of the tree — the reason they are gateable at all is that none
     # compiles anything. The workspace's TEST COUNT is deliberately absent: `cargo nextest list
-    # --workspace` costs 218 s warm against this whole script's fraction of a second, so the root README states
-    # that figure as a dated observation instead. A gate that cannot be cheap should not exist.
+    # --workspace` costs 218 s warm against this whole script's fraction of a second, so `docs/development.md`
+    # states that figure as a dated observation instead. A gate that cannot be cheap should not exist.
     workspace_crates)   n=$(find crates -mindepth 1 -maxdepth 1 -type d | wc -l) ;;
     grammar_count)      n=$(find grammars -mindepth 2 -maxdepth 2 -name tree-sitter.json | wc -l) ;;
     precommit_hooks)    n=$(grep -c '^      - id: ' .pre-commit-config.yaml) ;;
@@ -306,12 +306,12 @@ find_claim() {
 # ---------------------------------------------------------------------------
 claims() {
   cat <<'ROWS'
-README.md|.|workspace_crates|workspace crates under crates/|([0-9,]+|[A-Za-z]+) crates under
-README.md|.|precommit_hooks|pre-commit hooks (1 of 2: "There are N")|There are \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} pre-commit hooks
-README.md|.|precommit_hooks|pre-commit hooks (2 of 2: "All N are fast enough")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are fast enough
-README.md|.|wasm_browser_tests|wasm browser tests|has \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} browser tests
-README.md|.|wasm_exports|redextape-wasm free exports|to WASM through \*{0,2}([0-9,]+|[A-Za-z]+) exports
-README.md|.|wasm_tapenames_ordinal|tapeNames' position among them (1 of 2: the README)|exports\*{0,2} — the ([0-9,]+|[A-Za-z]+), `tapeNames\(\)`
+docs/architecture.md|.|workspace_crates|workspace crates under crates/|([0-9,]+|[A-Za-z]+) crates under
+docs/development.md|.|precommit_hooks|pre-commit hooks (1 of 2: "There are N")|There are \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} pre-commit hooks
+docs/development.md|.|precommit_hooks|pre-commit hooks (2 of 2: "All N are fast enough")|All \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} are fast enough
+docs/development.md|.|wasm_browser_tests|wasm browser tests|has \*{0,2}([0-9,]+|[A-Za-z]+)\*{0,2} browser tests
+docs/architecture.md|.|wasm_exports|redextape-wasm free exports|to WASM through \*{0,2}([0-9,]+|[A-Za-z]+) exports
+docs/architecture.md|.|wasm_tapenames_ordinal|tapeNames' position among them (1 of 2: docs/architecture.md)|exports\*{0,2} — the ([0-9,]+|[A-Za-z]+), `tapeNames\(\)`
 crates/redextape-wasm/src/lib.rs|.|wasm_tapenames_ordinal|tapeNames' position among them (2 of 2: its own doc comment)|in tape order\. The ([0-9,]+|[A-Za-z]+) export\.
 grammars/tree-sitter-redextape/README.md|grammars/tree-sitter-redextape|grammar_js_lines|mini grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
 grammars/tree-sitter-redextape-lambda/README.md|grammars/tree-sitter-redextape-lambda|grammar_js_lines|lambda grammar.js lines|`grammar\.js` is \*{0,2}([0-9,]+|[A-Za-z]+) lines
