@@ -6,9 +6,9 @@ import { armed, host, mounted, SHELL, stateIdle, until } from './harness'
 import { viewKey } from './user-event-fixture'
 
 /**
- * A VIEW KEY PRESSED FROM AN EDITOR DOES NOT FORMAT IT — the settings menu's *format on blur*, and the view layouts
- * spec §4.5 step 5: a switch takes the editor off the page and puts it back with the focus in it, and the `blur` that
- * sends the editor is not the user leaving it (`focusKept`'s doc in `main.ts`).
+ * A VIEW KEY PRESSED FROM AN EDITOR DOES NOT FORMAT IT — the settings menu's *format when leaving the editor*, and
+ * the view layouts spec §4.5 step 5: a switch takes the editor off the page and puts it back with the focus in it,
+ * and the `blur` that sends the editor is not the user leaving it (`focusKept`'s doc in `main.ts`).
  *
  * **WHAT IS COUNTED IS THE REQUEST TO FORMAT, AND NOT ONLY THE TEXT.** A format is asked of the language server and
  * its edits arrive a turn later, so "the text is unchanged" is true for a moment after any blur. `Worker`'s own

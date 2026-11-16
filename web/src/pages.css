@@ -103,8 +103,11 @@
   background: var(--bg-raised);
   border: 1px solid var(--rule);
 }
+/* A package's link is one URL with nowhere to break, and some are wider than a phone's line: it breaks anywhere
+   rather than widening the page. */
 .page .meta {
   color: var(--fg-dim);
+  overflow-wrap: anywhere;
 }
 
 .page-foot {

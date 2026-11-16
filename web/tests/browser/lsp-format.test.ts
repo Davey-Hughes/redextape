@@ -72,7 +72,7 @@ describe('format', () => {
 describe('format on blur', () => {
   it('is off until the setting is turned on, and then formats when focus leaves', async () => {
     const box = document.querySelector<HTMLInputElement>('#format-on-blur')
-    if (box === null) throw new Error('no `format on blur` setting in the settings menu')
+    if (box === null) throw new Error('no `#format-on-blur` checkbox in the settings menu')
     expect(box.checked, 'off on a first visit').toBe(false)
 
     retype(view, UNFORMATTED)

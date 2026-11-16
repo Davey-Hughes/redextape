@@ -77,7 +77,7 @@ export const SHELL = `
       <label class="skin">palette <select id="palette"></select></label>
       <label class="skin">appearance <select id="appearance-choice"></select></label>
       <label class="skin">keymap <select id="keymap"></select></label>
-        <label class="skin"><input type="checkbox" id="format-on-blur" /> format on blur</label>
+        <label class="skin"><input type="checkbox" id="format-on-blur" /> format when leaving the editor</label>
         <button type="button" id="import-base16">import base16…</button>
     </div>
   </header>

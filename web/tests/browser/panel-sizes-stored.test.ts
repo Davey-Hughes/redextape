@@ -163,6 +163,9 @@ describe('a view’s shares, in the stored workspace', () => {
       await userEvent.click(lambdaHost().querySelector('[data-panel="map"] .panel-toggle') as HTMLElement)
       await frame()
     }
+    // A WINDOW TALLER THAN THE FILE'S, so that under its header the λ view's term has room over its floor for the
+    // drag below. The next case's `beforeEach` puts the file's size back.
+    await page.viewport(1280, 960)
     await userEvent.click(toggle('lambda'))
     await until(() => host('lambda-0')?.querySelector('.term-rows > *') != null, 'the λ view to draw')
     await openMap()

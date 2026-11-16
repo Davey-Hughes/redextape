@@ -379,12 +379,13 @@ describe('every control in Explorer, in the settings menu and the import dialog'
     base16Dialog().querySelector<HTMLButtonElement>('button.base16-check')?.click()
   }
 
-  // THE SETTINGS MENU'S CHECKBOX IS AMONG WHAT THE WALK HOLDS: `format on blur`, named by the label around it.
+  // THE SETTINGS MENU'S CHECKBOX IS AMONG WHAT THE WALK HOLDS: `format when leaving the editor`, named by the label
+  // around it.
   it("walks the settings menu's checkbox", () => {
     document.querySelector<HTMLButtonElement>('#settings')?.click()
     const box = document.querySelector<HTMLInputElement>('#format-on-blur') as HTMLInputElement
     expect(controls()).toContain(box)
-    expect(nameOf(box)).toBe('format on blur')
+    expect(nameOf(box)).toBe('format when leaving the editor')
     check('#settings, its checkbox')
     document.querySelector<HTMLElement>('#settings-menu')?.hidePopover()
   })

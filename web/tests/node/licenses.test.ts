@@ -18,4 +18,10 @@ describe('the font licences the site ships', () => {
       readRelative('../../node_modules/@fontsource/inter/LICENSE'),
     )
   })
+
+  it('match the installed STIX Two Math package', () => {
+    expect(readRelative('../../public/licenses/stix-two-math-LICENSE.txt')).toBe(
+      readRelative('../../node_modules/@fontsource/stix-two-math/LICENSE'),
+    )
+  })
 })

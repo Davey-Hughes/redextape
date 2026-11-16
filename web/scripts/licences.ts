@@ -254,7 +254,7 @@ export function generate(): string {
   }
 
   const npm = (): Package[] => {
-    const fonts = new Set(['@fontsource/inter', 'hack-font'])
+    const fonts = new Set(['@fontsource/inter', '@fontsource/stix-two-math', 'hack-font'])
     const seen = new Map<string, Package>()
     const visit = (name: string, fromDir: string, walk: boolean): string => {
       const dir = packageDir(name, fromDir)

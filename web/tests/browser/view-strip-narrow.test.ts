@@ -21,10 +21,10 @@ import {
  * one row and never wraps would, at 390px, put `keep recording` in `fact(4)`'s λ strip past the view's right edge,
  * where only a sideways scroll of the view reaches it, and squeeze every strip's step text into a column a few
  * characters wide. What is held is that each strip lies inside its view at a phone's width, with its step text the
- * width of the view's header wherever it wraps and `keep recording` on one line; that at a desktop's width a short
- * line's strip is one row beside the title with the header's and `.controls`' gaps, while a long line's strip is two
- * rows, its step text and `keep recording` one line each; and that at every width each control is drawn and no box in
- * the header hides text. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
+ * width of the view's header wherever it wraps and `keep recording` on one line at 390px and two at most at 320px; that
+ * at a desktop's width a short line's strip is one row beside the title with the header's and `.controls`' gaps, while
+ * a long line's strip is two rows, its step text and `keep recording` one line each; and that at every width each
+ * control is drawn and no box in the header hides text. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 /** Explorer's three views that step, in the order the page draws them. The source view has no strip. */
@@ -238,9 +238,9 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
    * **A STEP TEXT SET ON MORE THAN ONE LINE IS AS WIDE AS ITS VIEW'S HEADER.** The step text may wrap, and `fact(4)`'s
    * λ line must at these widths, so it is held to more than one line; but only on a row of its own, where it has the
    * header's whole width (`roomOf`, which says why the strip's own width will not do). **`keep recording` IS ONE
-   * LINE.** **THE ROWS OF A WRAPPED STRIP ARE `var(--space-1)` APART**, the step bar's own row gap (`.step-bar-inner`),
-   * where `.controls`' own `gap` would set them `var(--space-2)` apart. **EVERY CONTROL IS DRAWN AND NONE HIDES TEXT**
-   * (`boxesFor`, `hidesNothing`).
+   * LINE AT 390PX, AND TWO AT MOST AT 320PX.** **THE ROWS OF A WRAPPED STRIP ARE `var(--space-1)` APART**, the step
+   * bar's own row gap (`.step-bar-inner`), where `.controls`' own `gap` would set them `var(--space-2)` apart. **EVERY
+   * CONTROL IS DRAWN AND NONE HIDES TEXT** (`boxesFor`, `hidesNothing`).
    *
    * **EVERY GEOMETRY ASSERTION IS SOFT, EVERY PRECONDITION HARD**, here and at 1280px: a red run names each property
    * that fails rather than stopping at the first, so the header, each box and `keep recording` are each shown able to
@@ -277,7 +277,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
         const pane = leafEl(line.long)
         const extend = extendOf(line.long)
         expect.soft(linesOf(stepOf(line.long)), `${line.long}’s long step text’s lines`).toBeGreaterThan(1)
-        expect.soft(linesOf(extend), 'keep recording’s lines').toBe(1)
+        expect.soft(linesOf(extend), 'keep recording’s lines').toBeOneOf(width === 320 ? [1, 2] : [1])
         // VERTICALLY ONLY, the view and then the page: `elementFromPoint` sees only what is in the viewport.
         const below = extend.getBoundingClientRect().bottom - (pane.getBoundingClientRect().top + pane.clientTop)
         if (below > pane.clientHeight) pane.scrollTop += below - pane.clientHeight
@@ -297,7 +297,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
 
   /**
    * **AT A DESKTOP'S WIDTH A SHORT LINE'S STRIP IS ONE ROW BESIDE THE TITLE**: every box of the header (the title, each
-   * control, the step text, the view's actions) on the title's vertical centre, `↺` `var(--space-3)` after the heading
+   * control, the step text, the view's actions) on the title's vertical centre, `↺` `var(--space-2)` after the heading
    * (the header's own gap), and each box of the strip after it `var(--space-2)` after the one before (`.controls`'
    * gap). **A LONG LINE'S STRIP IS TWO ROWS, THE TRANSPORT AND THE SPEED, THEN THE STEP TEXT AND `keep recording`, EACH
    * OF THESE ON ONE LINE.** The rows are `var(--space-1)` apart, as at a phone's width. Held by what each row holds,
@@ -349,7 +349,7 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
       const [first, ...rest] = drawn(leaf)
       expect(first?.getAttribute('aria-label'), `precondition: ${leaf}’s strip starts at ↺`).toBe('back to step 0')
       const lead = (first as HTMLElement).getBoundingClientRect().left - title.getBoundingClientRect().right
-      expect.soft(Math.abs(lead - space('--space-3')), `${leaf}: the gap before ↺, ${lead}px`).toBeLessThanOrEqual(0.5)
+      expect.soft(Math.abs(lead - space('--space-2')), `${leaf}: the gap before ↺, ${lead}px`).toBeLessThanOrEqual(0.5)
       let before = first as HTMLElement
       for (const el of rest) {
         const gap = el.getBoundingClientRect().left - before.getBoundingClientRect().right

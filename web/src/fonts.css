@@ -1,6 +1,6 @@
-/* The two faces Instrument draws with, self-hosted (Plan 7 part 1, spec §5). Both are declared always,
+/* The faces Instrument draws with, self-hosted (Plan 7 part 1, spec §5). All are declared always,
    and a browser fetches a face only when something renders in it — apart from the two files `index.html`
-   preloads (last paragraph).
+   preloads (the HACK AND INTER paragraph below).
 
    INTER comes as fontsource's per-weight sheets, at the two weights the style sheet uses. Each declares
    one face per subset, with that subset's `unicode-range`, so a browser fetches only the subsets the
@@ -9,10 +9,27 @@
    700, which is the browser's nearest-weight rule, not an accident.
 
    Bare package paths are resolved and bundled by Vite into `/assets/` with hashed names, which
-   `deploy/nginx.conf` already serves as immutable. The two preload links in `index.html` name the same
-   files, and Vite rewrites them to the same hashes. Those preloads are unconditional: every page load
-   requests the two files whatever the style, Paper and Terminal included, and as immutable assets they
-   are downloaded once per browser rather than once per load. */
+   `deploy/nginx.conf` already serves as immutable. HACK AND INTER: the two preload links in `index.html`
+   name the same files, and Vite rewrites them to the same hashes. Those preloads are unconditional: every
+   page load requests the two files whatever the style, Paper and Terminal included, and as immutable
+   assets they are downloaded once per browser rather than once per load.
+
+   STIX TWO MATH DRAWS THE FEW GLYPHS THE APP'S OWN TEXT USES WHERE ITS STACK'S BUNDLED FACE LACKS THEM, so that
+   their advances are the same on every machine: a glyph a stack's faces lack falls through to whatever
+   the OS has, and the header's carets, the appearance toggle, the about menu's `↗`, the base16 change
+   lines and the TM diagram's `⚠` would then lay out differently from one machine to the next, and with
+   them where the header wraps. Its `unicode-range` names exactly those glyphs, and it sits after Inter
+   and after Hack in their stacks (`style.css`), so a glyph either face has is still that face's: Hack
+   keeps `→` and `▾` in the monospace grid. The package's one subset holds all five, so it is the one file
+   bundled, in WOFF2 alone as Hack is. It has no preload: Paper and Terminal never draw from it, and
+   Instrument asks for it on its first paint, where the header draws `▾`. One weight, 400; a bolder
+   request is the browser's to synthesise.
+
+   ITS GLYPHS ARE DRAWN SMALLER THAN ITS EM (`size-adjust`). At STIX's own size its carets and `◐` are
+   wide enough to wrap Debugger's header onto a second row at a desktop width and a fourth at a phone's;
+   the value is the largest whole percentage at which the header keeps the rows the browser tests hold,
+   so the glyphs shrink no more than that needs. It is tuned to Chromium as `pnpm test:browser` runs it,
+   which rounds the shrunk size to whole pixels; Firefox draws that size unrounded. */
 @import "@fontsource/inter/400.css";
 @import "@fontsource/inter/600.css";
 
@@ -30,4 +47,15 @@
   font-weight: 700;
   font-display: swap;
   src: url("hack-font/build/web/fonts/hack-bold.woff2") format("woff2");
+}
+
+/* → ↗ ▾ ◐ ⚠, the list the paragraph above gives the reason for. */
+@font-face {
+  font-family: "STIX Two Math";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/stix-two-math/files/stix-two-math-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+2192, U+2197, U+25BE, U+25D0, U+26A0;
+  size-adjust: 83%;
 }

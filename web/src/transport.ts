@@ -68,7 +68,7 @@ export function createTransport(deps: {
     | 'references'
     | 'hover'
   >
-  /** Whether an editor losing focus should reformat — the settings menu's `format on blur`. */
+  /** Whether an editor losing focus should reformat — the settings menu's *format when leaving the editor*. */
   formatOnBlur: () => boolean
   /**
    * The page's keymap setting — the settings menu's *keymap*, which every editor this factory builds

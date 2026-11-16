@@ -46,8 +46,8 @@ const PATHS: Readonly<Record<IconName, string>> = {
   // `⏭`, to the newest recorded step: Hack lacks it (`hack-regular.woff2`'s cmap). `play`'s triangle, moved left,
   // against a bar.
   'to-newest': 'M3.5 3.5 L10 8 L3.5 12.5 Z M12.5 3.5 V12.5',
-  // `☀` and `☾`: Hack lacks both (part 1's roadmap entry); `⚙` is drawn to match. `◐` stays text — Hack
-  // draws it.
+  // `☀` and `☾`: Hack lacks both (part 1's roadmap entry); `⚙` is drawn to match. `◐` stays text, set in Inter's
+  // stack, which lacks it; `fonts.css`'s STIX Two Math draws it, so its advance is the same on every machine.
   sun: 'M8 5 A3 3 0 1 0 8 11 A3 3 0 1 0 8 5 M8 1.5 V3 M8 13 V14.5 M1.5 8 H3 M13 8 H14.5 M3.4 3.4 L4.5 4.5 M11.5 11.5 L12.6 12.6 M3.4 12.6 L4.5 11.5 M11.5 4.5 L12.6 3.4',
   moon: 'M11.5 2.5 A5.5 5.5 0 1 0 13.5 10.5 A4.5 4.5 0 0 1 11.5 2.5 Z',
   // Three left-aligned rules of unequal length — the shape text takes once it is laid out, which

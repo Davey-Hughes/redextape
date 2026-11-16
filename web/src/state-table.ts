@@ -172,7 +172,7 @@ export function centredScrollTop(row: number, rowHeight: number, viewportHeight:
  * services the write, and rounding across the write and the readback can accumulate that far without
  * the movement having been a real, intentional scroll.
  */
-const ECHO_TOLERANCE = ROW_HEIGHT / 2
+export const ECHO_TOLERANCE = ROW_HEIGHT / 2
 
 /**
  * Whether the table tracks the machine, and where it should scroll to when it does.

@@ -458,9 +458,9 @@ describe('the TM view, on sum_to(5)', () => {
   )
 
   /**
-   * **AT A DESKTOP'S WIDTH EVERY PANEL HEADER IN EXPLORER IS ONE ROW**: 28px tall at 1280px, with every box in it on
-   * the toggle's vertical centre, to 1px, and hiding no text; with both grids detached too, where the
-   * *follow current …* actions join their rows.
+   * **AT A DESKTOP'S WIDTH EVERY PANEL HEADER IN EXPLORER IS ONE ROW**: at 1280px, with every box in it on the toggle's
+   * vertical centre, to 1px, and hiding no text; with both grids detached too, where the *follow current …* actions
+   * join their rows.
    */
   it.each([false, true])('at 1280 px, with the grids detached: %s, every panel header is one row', async (detached) => {
     await at(1280, 800, detached)
@@ -468,7 +468,7 @@ describe('the TM view, on sum_to(5)', () => {
       const panel = panelOf(leaf, name)
       const header = panel.querySelector(':scope > .panel-header') as HTMLElement
       const toggle = panel.querySelector('.panel-toggle') as HTMLElement
-      expect.soft(header.getBoundingClientRect().height, `${leaf} ${name}: the header’s height`).toBe(28)
+      expect.soft(header.getBoundingClientRect().height, `${leaf} ${name}: the header’s height`).toBe(33)
       hidesNothing(leaf, name)
       for (const el of headerBoxes(panel)) {
         expect
@@ -497,33 +497,33 @@ describe('the TM view, on sum_to(5)', () => {
     const d = diagram()
     const boxes = [...side().querySelectorAll<HTMLElement>('.program-box')]
     const WHERE: [string, Element | null, [number, number, number, number]][] = [
-      ['the rules panel', rules, [0, 226, 634, 148]],
-      ['its header', rules.querySelector('.panel-header'), [0, 226, 634, 28]],
-      ['its toggle', rules.querySelector('.panel-toggle'), [8, 227, 57.41, 26]],
-      ['its name', rules.querySelector('.panel-name'), [24, 231, 41.41, 18]],
-      ['the rules’ actions', rules.querySelector('.panel-actions'), [601.22, 228.8, 24.78, 22.39]],
-      ['the rules’ maximise', rules.querySelector('.panel-maximise'), [601.22, 228.8, 24.78, 22.39]],
-      ['the rule table', table(), [0, 254, 634, 120]],
-      ['the diagram panel', d, [0, 382, 634, 148]],
-      ['its header', d.querySelector('.panel-header'), [0, 382, 634, 28]],
-      ['its toggle', d.querySelector('.panel-toggle'), [8, 383, 118.25, 26]],
-      ['its name', d.querySelector('.panel-name'), [24, 387, 102.25, 18]],
-      ['its actions', d.querySelector('.panel-actions'), [387.09, 384.81, 238.91, 22.38]],
-      ['program | local', d.querySelector('[role="radiogroup"][aria-label="level"]'), [387.09, 384.81, 109.56, 22.38]],
-      ['program', choice('program'), [387.09, 384.81, 61.78, 22.38]],
-      ['local', choice('local'), [448.88, 384.81, 47.78, 22.38]],
-      ['arcs | chips', d.querySelector('[role="radiogroup"][aria-label="edges"]'), [504.66, 384.81, 88.56, 22.38]],
-      ['arcs', choice('arcs'), [504.66, 384.81, 40.78, 22.38]],
-      ['chips', choice('chips'), [545.44, 384.81, 47.78, 22.38]],
-      ['the diagram’s maximise', d.querySelector('.panel-maximise'), [601.22, 384.8, 24.78, 22.39]],
-      ['the diagram', d.querySelector('.state-diagram'), [0, 410, 634, 120]],
-      ['the program level', d.querySelector('.program-level'), [0, 410, 634, 120]],
-      ['its grid', programScroll(), [0, 410, 458, 120]],
-      ['the runtime column', side(), [458, 410, 176, 120]],
+      ['the rules panel', rules, [0, 230, 634, 153]],
+      ['its header', rules.querySelector('.panel-header'), [0, 230, 634, 33]],
+      ['its toggle', rules.querySelector('.panel-toggle'), [8, 233.5, 57.41, 26]],
+      ['its name', rules.querySelector('.panel-name'), [24, 237.5, 41.41, 18]],
+      ['the rules’ actions', rules.querySelector('.panel-actions'), [601.22, 235.3, 24.78, 22.39]],
+      ['the rules’ maximise', rules.querySelector('.panel-maximise'), [601.22, 235.3, 24.78, 22.39]],
+      ['the rule table', table(), [0, 263, 634, 120]],
+      ['the diagram panel', d, [0, 391, 634, 153]],
+      ['its header', d.querySelector('.panel-header'), [0, 391, 634, 33]],
+      ['its toggle', d.querySelector('.panel-toggle'), [8, 394.5, 118.25, 26]],
+      ['its name', d.querySelector('.panel-name'), [24, 398.5, 102.25, 18]],
+      ['its actions', d.querySelector('.panel-actions'), [387.09, 396.3, 238.91, 22.38]],
+      ['program | local', d.querySelector('[role="radiogroup"][aria-label="level"]'), [387.09, 396.3, 109.56, 22.38]],
+      ['program', choice('program'), [387.09, 396.3, 61.78, 22.38]],
+      ['local', choice('local'), [448.88, 396.3, 47.78, 22.38]],
+      ['arcs | chips', d.querySelector('[role="radiogroup"][aria-label="edges"]'), [504.66, 396.3, 88.56, 22.38]],
+      ['arcs', choice('arcs'), [504.66, 396.3, 40.78, 22.38]],
+      ['chips', choice('chips'), [545.44, 396.3, 47.78, 22.38]],
+      ['the diagram’s maximise', d.querySelector('.panel-maximise'), [601.22, 396.3, 24.78, 22.39]],
+      ['the diagram', d.querySelector('.state-diagram'), [0, 424, 634, 120]],
+      ['the program level', d.querySelector('.program-level'), [0, 424, 634, 120]],
+      ['its grid', programScroll(), [0, 424, 458, 120]],
+      ['the runtime column', side(), [458, 424, 176, 120]],
       ...boxes.map((b, k): [string, Element, [number, number, number, number]] => [
         `the runtime box ${b.firstElementChild?.textContent}`,
         b,
-        [505, 411 + 24 * k, 104, 22],
+        [505, 425 + 24 * k, 104, 22],
       ]),
     ]
     expect.soft(level().scrollWidth, 'the program level’s scroll width').toBeLessThanOrEqual(level().clientWidth)
@@ -846,7 +846,7 @@ const DRAWS: Readonly<Record<Draws, string>> = {
 }
 /**
  * One sweep of the program level's rows: a layout by its name, the rendering, how many rows carry a count, how many
- * of those a ⚠, and what the rows WITHOUT a ⚠ must draw of their counts.
+ * of those a ⚠, and what the rows without a ⚠ and the rows with one must each draw of their counts.
  */
 type Sweep = {
   readonly name: string
@@ -854,6 +854,7 @@ type Sweep = {
   readonly rows: number
   readonly warned: number
   readonly drawn: Readonly<Record<Draws, number>>
+  readonly flagged: Readonly<Record<Draws, number>>
 }
 /** Where each swept layout puts the page, and the TM views it must then draw, each by its left and its width. */
 const LAYOUTS: Readonly<Record<string, Layout>> = {
@@ -920,17 +921,12 @@ function mayDraw(room: number, number: number, unit: number, character: number):
  * count: `fact(4)` at 320px draws 15 numbers alone, `map and fold`, with the widest arcs' gutter (75px), 14, each of
  * one digit, and 83 counts not at all. In *arcs* and in *chips*, whose rows hold their chips before their count.
  *
- * **A ROW WITH A ⚠ IS HELD ROW BY ROW AND NOT TALLIED, SINCE ITS ⚠ IS AS WIDE AS THE MACHINE'S FONTS MAKE IT.** The ⚠
- * is U+26A0, which neither web font has, so a system font draws it: where the generic `monospace` at the end of the
- * rows' font list is Noto Sans Mono, which lacks it too, the browser falls back to DejaVu Sans, whose ⚠ is 11px wide;
- * in CI's image, `node:26-bookworm`, `monospace` is DejaVu Sans Mono, whose ⚠ is 7.2px wide, and there each such row
- * leaves its count 3.8px more and three of `map and fold`'s ten rows with a ⚠ at 390px, those with a two-digit number,
- * then have the two characters a cut unit needs. Every glyph of a row without a ⚠ is Hack's, and those rows' tallies
- * are the same under both ⚠s and under one forced to 3, 7, 9, 13, 15 and 19px. So of the rows with a ⚠ only their
- * number is held, 2 and 10, the compiled program's; what they draw is held by the properties above, and said on the
- * console beside the tallies, with the ⚠'s width and a digit's. **THE ROWS' FONT IS A PRECONDITION**: Hack loaded, in
- * the hook, and first in the rows' font list, in each case, since a page that could not load it would fail on its
- * tallies with nothing to say why.
+ * **THE ROWS WITH A ⚠ ARE TALLIED APART**, so that a change to the ⚠ alone moves only their tally. The ⚠ is U+26A0,
+ * which Hack lacks: `fonts.css`'s STIX Two Math draws it, after Hack in the rows' font list, so it is as wide on every
+ * machine, and wider than a digit, which leaves its row's count less room. Their number is held too, 2 and 10, the
+ * compiled program's, and the tallies are said on the console with the ⚠'s width and a digit's, for whoever reads a
+ * failure. **THE ROWS' FONT IS A PRECONDITION**: Hack loaded, in the hook, and first in the rows' font list, in each
+ * case, since a page that could not load it would fail on its tallies with nothing to say why.
  *
  * **THE EXAMPLE IS PICKED IN A HOOK, AND EACH LAYOUT IS A CASE**: under a 25% CPU quota `map and fold`'s pick and two
  * sweeps in one case took 11,582ms of a case's 15,000. Its pick waits past two marks, a third and two thirds of the TM
@@ -953,6 +949,7 @@ const COUNTED: readonly {
         rows: 21,
         warned: 2,
         drawn: { whole: 0, cut: 4, number: 15, none: 0 },
+        flagged: { whole: 0, cut: 0, number: 0, none: 2 },
       },
       {
         name: 'Explorer at 320 px',
@@ -960,6 +957,7 @@ const COUNTED: readonly {
         rows: 26,
         warned: 2,
         drawn: { whole: 8, cut: 2, number: 4, none: 10 },
+        flagged: { whole: 0, cut: 2, number: 0, none: 0 },
       },
       {
         name: 'Explorer at 390 px',
@@ -967,6 +965,7 @@ const COUNTED: readonly {
         rows: 21,
         warned: 2,
         drawn: { whole: 4, cut: 15, number: 0, none: 0 },
+        flagged: { whole: 0, cut: 2, number: 0, none: 0 },
       },
       {
         name: 'Explorer at 390 px',
@@ -974,6 +973,7 @@ const COUNTED: readonly {
         rows: 26,
         warned: 2,
         drawn: { whole: 11, cut: 6, number: 3, none: 4 },
+        flagged: { whole: 2, cut: 0, number: 0, none: 0 },
       },
       {
         name: 'Explorer at 1280 px, split',
@@ -981,6 +981,7 @@ const COUNTED: readonly {
         rows: 21,
         warned: 2,
         drawn: { whole: 0, cut: 0, number: 4, none: 15 },
+        flagged: { whole: 0, cut: 0, number: 0, none: 2 },
       },
     ],
   },
@@ -995,6 +996,7 @@ const COUNTED: readonly {
         rows: 107,
         warned: 10,
         drawn: { whole: 0, cut: 0, number: 14, none: 83 },
+        flagged: { whole: 0, cut: 0, number: 0, none: 10 },
       },
       {
         name: 'Explorer at 320 px',
@@ -1002,6 +1004,7 @@ const COUNTED: readonly {
         rows: 112,
         warned: 10,
         drawn: { whole: 61, cut: 1, number: 11, none: 29 },
+        flagged: { whole: 0, cut: 10, number: 0, none: 0 },
       },
       {
         name: 'Explorer at 390 px',
@@ -1009,6 +1012,7 @@ const COUNTED: readonly {
         rows: 107,
         warned: 10,
         drawn: { whole: 0, cut: 97, number: 0, none: 0 },
+        flagged: { whole: 0, cut: 0, number: 10, none: 0 },
       },
       {
         name: 'Explorer at 390 px',
@@ -1016,6 +1020,7 @@ const COUNTED: readonly {
         rows: 112,
         warned: 10,
         drawn: { whole: 63, cut: 22, number: 5, none: 12 },
+        flagged: { whole: 10, cut: 0, number: 0, none: 0 },
       },
       {
         name: 'Debugger at 1024 px',
@@ -1023,6 +1028,7 @@ const COUNTED: readonly {
         rows: 107,
         warned: 10,
         drawn: { whole: 0, cut: 97, number: 0, none: 0 },
+        flagged: { whole: 0, cut: 0, number: 3, none: 7 },
       },
     ],
   },
@@ -1076,7 +1082,7 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
           'precondition: the rows are set in Hack first',
         ).toMatch(/^Hack,/)
         const seen = new Set<string>()
-        /** What the rows without a ⚠ draw of their counts, and what the rows with one do: held, and only said. */
+        /** What the rows without a ⚠ draw of their counts, and, apart, what the rows with one do. */
         const drawn: Record<Draws, number> = { whole: 0, cut: 0, number: 0, none: 0 }
         const flagged: Record<Draws, number> = { whole: 0, cut: 0, number: 0, none: 0 }
         let warned = 0
@@ -1167,8 +1173,7 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
           }
           if (top + grid.clientHeight >= grid.scrollHeight) break
         }
-        // SAID, NOT HELD: what the rows with a ⚠ draw, and how wide this machine's ⚠ and digit are, for whoever reads a
-        // failure on another machine.
+        // SAID AS WELL AS HELD: both tallies, and how wide the ⚠ and a digit are, for whoever reads a failure.
         const said = {
           on: id,
           layout: sweep.name,
@@ -1196,6 +1201,8 @@ describe.each(COUNTED)('the program level’s counts, on $title', ({ id, marks, 
         expect.soft(drawn.cut, `counts drawn with the unit cut, ${rows}`).toBe(sweep.drawn.cut)
         expect.soft(drawn.number, `counts drawn as the number alone, ${rows}`).toBe(sweep.drawn.number)
         expect.soft(drawn.none, `counts not drawn, ${rows}`).toBe(sweep.drawn.none)
+        const flaggedRows = `in the rows with a ⚠, the ⚠ ${sign}px wide`
+        expect.soft(flagged, `what the counts draw, ${flaggedRows}`).toEqual(sweep.flagged)
       } finally {
         programScroll().scrollTop = 0
         choice('arcs').click()

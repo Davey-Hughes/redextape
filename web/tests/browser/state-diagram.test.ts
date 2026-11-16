@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
+import { ECHO_TOLERANCE } from '../../src/state-table'
 import {
   activeProgramName,
   control,
@@ -179,7 +180,15 @@ describe('the program level, drawn as arcs', () => {
     await frame()
     await frame()
     expect(reattach.hidden).toBe(true)
-    programScroll().scrollTop = programScroll().scrollTop === 0 ? programScroll().scrollHeight : 0
+    // TO THE END FARTHER FROM WHERE FOLLOWING LEFT THE GRID: `Follow` reads a move within `state-table.ts`'s
+    // `ECHO_TOLERANCE`, half a row, as the echo of its own write.
+    const grid = programScroll()
+    const end = grid.scrollHeight - grid.clientHeight
+    const to = grid.scrollTop < end / 2 ? end : 0
+    expect(Math.abs(to - grid.scrollTop), 'precondition: the scroll moves past the echo tolerance').toBeGreaterThan(
+      ECHO_TOLERANCE,
+    )
+    grid.scrollTop = to
     await until(() => !reattach.hidden, 'following to detach')
     reattach.click()
     expect(reattach.hidden).toBe(true)

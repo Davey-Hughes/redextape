@@ -34422,3 +34422,411 @@ runs on the PR.
 | `1.100.0-0ef1bc386` | the version step's output here | the `### K2` line of `$S/keys-check.log` |
 | 6 | comment lines the key change adds, the header block | the block itself; the guard passes at 0.4991 (`$S/guard-keys.log`) |
 | one binary, `6a74bbafbb784998`'s then `c962124dd77daeea`'s | test binaries left under one toolchain after a run at package version 0.0.9 and then 0.1.0 | the `### binaries after` and `-object` lines of `$S/same-toolchain.log` |
+
+#### EDGE SPACING: A PANE'S TITLE ROW, STEP CONTROLS AND STATUS LINES STAND `var(--space-2)` IN FROM ITS SIDES AND THE HEADER `var(--space-1)` BELOW ITS TOP, A PANEL HEADER'S BUTTONS STAND AT LEAST `var(--space-1)` FROM ITS RULES, THE LICENCES PAGE WRAPS ITS LONG LINKS, `format on blur` READS *format when leaving the editor*, THE HEADER MENUS STAND CLEAR OF THE WINDOW'S EDGES IN FIREFOX AS IN CHROMIUM, EACH WITH A GUTTER ON THE SIDE IT GROWS TOWARDS, AND SCROLL WHAT DOES NOT FIT BELOW THEIR BUTTONS, THE STEP BAR'S `↺` FOLLOWS ITS TITLE AT A VIEW HEADER'S GAP, AND INSTRUMENT DRAWS `→ ↗ ▾ ◐ ⚠` FROM A BUNDLED STIX TWO MATH FACE AT 83%; A BROWSER TEST HOLDS TEXT AND CONTROLS 4 PX FROM THE EDGES (2026-11-14 to 2026-11-15, branch `fix/edge-spacing`, `5b43de5..68bf7c9`, 32 commits, three of them this entry's, `94df843`, `2a0537a` and `8f65351`, plus this update)
+
+The user, 2026-11-14, while choosing the default palette: "make sure we don't have text or buttons touching the edges",
+naming the TM program pane's `×` and the `source` title. In the same PR the settings checkbox `format on blur` was to
+get a label a reader understands: he did not know what "blur" meant. A sweep of `main` at `e65b164` found every 0-px
+gap of text or a drawn control inside the app in one place, a `.pane` with no padding and nothing inside it adding
+inline padding. The design is `docs/superpowers/specs/2026-11-14-edge-spacing-design.md` and the plan
+`docs/superpowers/plans/2026-11-14-edge-spacing.md`. Approach B and the four decisions that came with it are in the
+design's Decisions section, and "yes on format" is quoted from the lane's notes. The lane's ledger,
+`.superpowers/sdd/2026-11-14-edge-spacing/progress.md`, holds the user's other decisions below and the controller's
+rulings, and the task reports beside it hold the measurements. On 2026-11-15 the branch was rebased onto `5b43de5`,
+`main` with #171, which changes `ci.yml`, the comment budget and this file and nothing under `web/`. The ledger and the
+reports from before the rebase name the commits by their earlier SHAs; `~/temp/redextape-edge-record/entry/sha-map.txt`
+pairs them by subject, and this entry gives the SHAs as rebased. The range is the design's `28fd26f`, the plan's
+`753c626`, 27 commits that change files outside `docs/` and this entry's three. `3883831` and `6f1b04e` each
+change only a comment in `fonts.css`, and the final sweep, taken at `30dcb96`, stands for both. After this entry's
+three, `1066622` gives about, the add-view menu and the buffers list their gutters, and the gate below ran at it; the
+last code commit, `68bf7c9`, changes only comments and the guard's width scan. The sweep was not taken again at
+either.
+
+##### DECISIONS
+
+The user's:
+
+- **2026-11-14, approach B, pad the pane's own rows**, over A, pad the whole pane, which would inset the editors,
+  their gutters, the rows' highlight bands and the TM tape. The title row, the step controls and the status lines get
+  `var(--space-2)` inline, the panel headers' inline padding, so a pane's title lines up with its panels' headers, and
+  `var(--space-1)` above. With it, the design's other four: a panel header's buttons at least 4 px from its rules; the
+  licences page wraps its long URLs; the label becomes *format when leaving the editor* ("yes on format"), and
+  `help.html` says the same, while the storage key `redextape.formatOnBlur` and the code's names stay; and a browser
+  test holds every text run and control 4 px from its pane's and the window's edges.
+- **2026-11-14, `main`'s phone minimum stays 15rem, 240 px.** The taller panel headers left Debugger at that minimum
+  with the inspector open showing no whole line below its views' headers, and ruling R14 raised the minimum to 16.5rem
+  in a commit of its own, `06b0459`, so that it could be dropped. He kept 15rem, as the inspector-stacking entry's
+  decision 5 of 2026-10-06, "240 px stays", had. The commit was dropped, so `06b0459` is on no branch, and `c687bcf` no
+  longer holds Debugger at the minimum with the inspector open to a whole line below its views' headers, which are all
+  it has room for.
+- **2026-11-14, `main`'s red coverage goes to a PR of its own: "Separate PR now"**, and later **the toolchain's version
+  goes into its cache keys** in place of a one-off salt bump. That PR is #171, this range's base, `5b43de5`.
+- **2026-11-14, the view header's column gap is `var(--space-2)`, where it was `var(--space-3)`.** With the new
+  padding, the TM view's header at 1280 px, on `sum_to(5)` at step 12,976, needed 628.1 px for one row and had 618, so
+  `⋯ ✕` took a second row, and ruling R5 accepted the wrap for the time being. Asked, he said "Can you show me", was
+  shown screenshots of the branch, of the gap at 8 px and of `main`, and chose the gap, `c9a2b7f`: that header is one
+  row again, 33 px.
+- **2026-11-14, `keep recording` may take two lines at 320 px**, and keeps one at 390. At 320 px the λ view's header
+  leaves it 138 px, and it needs 146. Ruling R8 accepted it first; the ledger records his acceptance with ruling R29.
+- **2026-11-15, Firefox's header menus at the window's edge: "Fix in this PR"**, not in the Firefox lane.
+- **2026-11-15, a menu's bottom on the window's bottom in short windows: "Fix in this PR".**
+- **2026-11-15, the step bar's `↺` gap: "Match: 8 px"**, so that `↺` follows the bar's title at `var(--space-2)`, as a
+  view header's follows its heading. The patch left the λ bar's row at 481 × 800 on one line with 4.81 px to spare,
+  under the 9 px ruling R30 asked for, since the controller took that row to draw system glyphs. He said "Match now +
+  fix ▾ here". The glyph agent then found that the step bar draws none, its text being Hack's, `⏭ ⏵` SVG and the
+  speed's `▾` the select's own arrow, and that what tied the 481 figures to the machine was the header above it, with
+  four `▾` and a `◐`. Told so, he said **"Gap + STIX Two Math"**: `55eff0d` and `4b05006`.
+- **2026-11-15, "Shrink STIX glyphs"**, by `size-adjust`, so that Debugger's header is back to one row at 1280 px and
+  three at 390; at full size the STIX glyphs gave it two rows at 1280 and four at 390. `16ce35a`.
+
+The controller's rulings that changed something the user sees, besides those WHAT CHANGED tags by number:
+
+- **R16:** the inspector's height is fixed, so with its header 5 px taller its open body starts 5 px lower and is
+  5 px shorter.
+- **R20:** the user's label stays, and the settings menu stops `var(--space-2)` short of the window wherever it opens,
+  and at 390 px the label wraps onto two lines inside it in all three styles; R21 took the guard's case to every
+  header menu.
+- **The CI fix's brief, `ci-fix-brief.md`, and R34:** after PR #172's first CI run failed, fix every menu the class
+  scan finds under 4 px from the window's edge on settings' gutter, and add a guard case that holds it on every
+  machine. The brief also asked that no box standing 4 px or more clear move, and about's `var(--space-2)` moves none.
+  R34 gave the add-view menu and the buffers list `var(--space-2)` as well, the gutter settings and about keep, R20's
+  aim for an open header menu, moving the boxes that stood 4 to 8 px from the window's edge. The fix's first attempt
+  had given the two `var(--space-1)`, and with those 4 px gutters the guard passed in both engines, the smallest gaps
+  in its three scans 4.09, 4.27 and 4.45 px.
+
+##### WHAT CHANGED
+
+- **A pane's own rows, `acca5c7`.** `.view-header` takes `padding-inline: var(--space-2)` and `padding-block-start:
+  var(--space-1)`, and `.tm-status`, `.tm-value` and `.rxm-value` take `padding-inline: var(--space-2)`. A view's
+  title, `⋯`, `✕`, its step controls and every row they wrap onto stand 8 px from the pane's sides, the header 4 px
+  below its top, and the status lines line up with the title. The editors, their gutters, the highlight bands and the
+  tape stay edge to edge. `c9a2b7f` sets the header's column gap to `var(--space-2)`, the user's choice above.
+- **Panel headers, `3b27642`, then `f31e089` (R29).** `.panel-header`'s block padding is `calc(0.1em + 1px)`, 2.5 px
+  at a 16 px root, where it was 0: a bordered button stands 4.297 px from each rule, where it stood 1.8, and a one-row
+  header is 33 px, where it was 28. The toggle keeps its 26 px click height, and the headers one height. Where a
+  header's actions wrap onto a row of their own, as `tm · diagram`'s do at 375 × 667, 360 × 800 and 320 × 844,
+  `.panel-actions` takes `margin-block: calc(var(--space-1) - 0.1em - 1px)`, which makes their box as tall as the
+  toggle, so the last row stands 4.297 px from the bottom rule, where it stood 2.5. Set in `em`, the gap holds at any
+  root size: 2.688 px at a 10 px root, against `var(--space-1)`'s 2.5, and 8.594 at 32 px, against 8.
+- **The licences page, `b9f71a9`.** `.page .meta` takes `overflow-wrap: anywhere`, as `.page details pre` has. At
+  390 px with every `details` open, three package links made the page 415 px wide; it no longer scrolls sideways.
+- **The label, `01d9acd` and `c33327d`.** The settings checkbox reads *format when leaving the editor*, and
+  `help.html`'s sentence ends "the style, palette, appearance and keymap choices, and whether to format when leaving the
+  editor". Comments and test messages that quoted the old label give the new one or name the checkbox by its id; the
+  key, the id and the code's names stay.
+- **The header menus and the window's edges.** The guard's `HEADER_MENUS` is `workspace`, `new-view`, `buffers`,
+  `examples`, `share`, `about` and `settings`, and a case holds it to the popovers the header's buttons open through
+  `aria-controls`.
+  - **Settings, `69b5efe`:** `margin-inline-start: var(--space-2)` inside `@supports (position-area: block-end)`. It
+    flips with the placement, so where settings opens rightward it is an end gutter. At 390 px with the new label,
+    Terminal's flipped menu reached the window's right edge, 0 px; it now stops 8 px short, and Instrument's and
+    Paper's open 8 px from the left edge.
+  - **Firefox's fallbacks, `a989d13`:** the workspace, examples and share menus keep `main`'s `1rem` end margin, which
+    Chromium's overflow shift keeps and Firefox's drops: 49 of 117 probed placements sat flush on the right in Firefox.
+    Each now ends its fallback list with `--header-menu-to-end`, or, for the workspace and examples menus,
+    `--header-menu-to-end-narrowest` with `width: min-content`, which opens the menu below its button against the
+    page's end edge. Where neither the base option nor a flip fits, that fallback is taken, nothing overflows, and
+    nothing shifts. Chromium lands every probed box where its shift did, the largest change 0 px over 117; in Firefox
+    no probed placement is under 16 px from the left or right.
+  - **The height cap, `b89d5c2` (R25):** `.header-menu` takes `max-height: calc(100% - var(--space-2))`, the three menus
+    above `calc(100% - 1rem)` beside their margin, and the buffers list `calc(100% - var(--space-2))`. Under
+    `position-area` the percentage is of the room the menu opens into, so a menu longer than the room below its button
+    stops short of the window's bottom and scrolls the rest, and Tab scrolls the item it focuses into view. The
+    examples menu at 1280 × 400 in all three styles, and Terminal's at 320 × 568 and 390 × 500, had sat 0 to 3 px from
+    the window's bottom; they stand 16 px from it, in both engines.
+  - **Share's field at 320 px, `b89d5c2` (R25's round):** `.share-field` takes `min-width: 0`. As a grid item its
+    minimum counted the input at its default width, so share's content ran past its sides, in Chromium a scroll width
+    of 301 to 322 px in a client width of 286.
+  - **The buffers list, `8e8b7b5` (R26):** a last fallback of its own, `--buffer-list-to-end`, opens it below `copies ▾`
+    with `margin-inline-end: var(--space-2)` and `width: min-content`. At 480 and 600 px its width is its `26rem`
+    minimum, 416 px, more than the room on either side of its button, so no placement fitted and both engines shifted
+    it flush with the window's right edge; it now stops 8 px short. `1066622`, below, moves that margin onto the list
+    itself, where the fallback keeps it.
+  - **About, the add-view menu and the buffers list, `1066622`.** PR #172's first CI run, 2732, failed two of the
+    guard's cases, Paper's about menu at 320 × 568 and at 480 × 844, its box 0.6 px from the window's left edge
+    (`$R/ci-2732-web.log`): on CI's system sans the about button's right edge lay 0.6 px past the menu's 192 px width,
+    so the menu, which had no gutter, fitted leftward with that to spare. In Chromium here, with the button moved to
+    that edge, 192.59 px, in Paper or in Instrument, the menu opens 0.59 px from the left edge; with it at 191.89 px the
+    menu opens rightward. A scan of the seven header menus in each style at 320 to 1280 px in 8 px steps, 844 and 568 px
+    high, found the same in Chromium here for the two other menus with no gutter of their own: the add-view menu 1.09 px
+    from the right edge in Paper at 400 px and 3.44 in Terminal at 424, and the buffers list 2.86 px from the left in
+    Terminal at 440. In Instrument at 1 px steps, 844 px high, the add-view menu was under 4 px from an edge at 401 to
+    404 px, the list at 402 to 405 and 892 to 895, and about at 303 to 306, below the scan, where it opened rightward.
+    About takes settings' `margin-inline-start: var(--space-2)`, and a last fallback, `--header-menu-to-start`, opens it
+    below its button against the page's start edge where it fits neither way, as the end-edge fallbacks do for the
+    workspace, examples and share menus and the buffers list; the add-view menu takes `margin-inline-end:
+    var(--space-2)`, and the buffers list the same on itself, in place of its fallback's. Each margin flips with the
+    placement. The scan, repeated, has no box under 8 px from an edge. Besides the six under 4 px it moved twelve boxes
+    that had stood 4.27 to 7.27 px from the edge they grow towards, at both heights: the add-view menu in Instrument at
+    408 px, and the buffers list in Paper at 392 and 888, in Terminal at 888 and in Instrument at 400 and 896. The
+    add-view menu and the list at 888 and 896 now open on their buttons' other side, and the list at 392 and 400 by its
+    end fallback, each width within 0.01 px of what it was; every other box is where it was, the largest move 0 px over
+    5,064. In Instrument at 1 px steps the gutters moved 13 such boxes, 4.09 to 7.69 px clear.
+- **The step bar's `↺`, `4b05006`.** `.step-bar-title` loses its extra `margin-inline-end`, so `↺` follows the title
+  at the row's `var(--space-2)`, where it stood `var(--space-3)` after it. At 1280 × 800, 481 × 844 and 390 × 844
+  every box after the title moves 8 px left. At 481 × 800 the λ bar's row, `λ · program ↺ ◀ ▶ ⏭ ⏵ 8/s ▾ step 0 of 7`,
+  fits one line with 4.812 px to spare, where it lacked 3.188, so `main` is 22 px taller there; at 320 × 568 with a
+  `TM · program` title, `play` joins the title's row.
+- **STIX Two Math in Instrument, `55eff0d` (R31, R32), then `16ce35a`.** Before, this machine drew `▾`, `◐`, `↗` and
+  `→` in Inter's stack, which lacks them, and `⚠` in Hack's, which lacks it, from DejaVu Sans and Liberation Sans, so
+  their advances, and where the header wraps, varied by machine. `@fontsource/stix-two-math` 5.3.0, OFL-1.1, adds one
+  403,344-byte WOFF2 with `unicode-range: U+2192, U+2197, U+25BE, U+25D0, U+26A0` and `size-adjust: 83%`, placed
+  directly after Inter and after Hack in Instrument's two stacks, so Hack keeps `→` and `▾` in the monospace grid. It
+  has no preload. Paper's and Terminal's stacks are unchanged. In Chromium at 83% the header's `▾` is 8 px, as the
+  system face drew it, and `◐` 10 px, against the system face's 9.0625 and full-size STIX's 13; Debugger's header is
+  one row from 1273 px and three rows at 390, as with the system glyphs; and the TM diagram's `⚠` is 15 px at 12 px.
+  83% is the largest whole percentage that keeps both of Debugger's rows, by a probe over `size-adjust` values.
+  `help.html`'s `▾` comes from the face as well.
+- **The licence, `55eff0d` and `30dcb96`.** `web/scripts/licences.ts` adds the package to its fonts, so the licences
+  page lists it as OFL-1.1; `web/public/licenses/stix-two-math-LICENSE.txt` is the package's `LICENSE`, byte for
+  byte, beside Inter's and Hack's (R33), and a new case in `licenses.test.ts` holds it to the installed package's.
+- **The browser tests wait for every Instrument face, `55eff0d`.** `setup.ts` awaits `document.fonts.load` for Inter
+  400 and 600, Hack 400 and 700 and STIX Two Math 400 before any file runs. A new case in `fonts.test.ts` reads the
+  advances in Inter's stack, and `⚠`, `→` and `▾` in Hack's, against each face's `hmtx`, STIX's scaled by the
+  `size-adjust` it reads from the loaded rule.
+- **The guard, `web/tests/browser/edge-spacing.test.ts`, new: 117 cases.** It measures text by `Range` rects and
+  controls by their boxes, and holds each 4 px or more from an edge:
+  - every text run and control in the views against its pane's left, right and top and the window's four sides, and
+    everything outside the views, the app bar and the strip among it, against the window's: at 1600 × 1000, at
+    390 × 844 in Instrument and in Terminal, and at 1600 × 1000 with a TM copy and an rxm copy showing their values.
+    It skips a pane's bottom, which rows scroll past, and names its other exclusions;
+  - every panel header's text and bordered buttons against its rules, at 1600 × 1000 and at 320 × 844, where some
+    actions wrap, with every toggle as tall as its name's line and `2 * var(--space-1)`, and at 1600 every header one
+    height;
+  - each of the seven header menus in each style at 390 × 844, 320 × 568, 390 × 500, 480 × 844 and 600 × 844
+    (R21, R25, R26), 105 cases, its box and its contents against the viewport's four sides, with nothing in it wider
+    than it; a menu taller than its room, Instrument's examples at 390 × 420, scrolling inside its gutter while Tab
+    brings its last item into view; and settings opened rightward in Instrument at a width the case finds at run time,
+    scanning 330 to 450 px;
+  - about, the add-view menu and the buffers list in Instrument, `1066622`, each at a width the case finds at run time
+    where, its margins taken away, the menu opens from an edge of its button under 4 px from a side edge of the
+    window, its gap rounded to 0.1 px as the hold rounds it (`68bf7c9`): scanning 296 to 316 px for about and 392 to
+    416 px for the other two, 1 px apart.
+
+  `licences-narrow.test.ts`, new, holds the licences page at 390 px to no sideways scroll, every package link inside
+  the page.
+- **Tests re-derived from measurement**, each by the one cause its commit names: `tm-view-narrow.test.ts`'s panel
+  headers, `toBe(28)` to 33, and its 1280 px boxes; `inspector-phone.test.ts`'s held boxes, the inspector's header and
+  body by the header's 5 px and at 481 × 800 by the step bar's lost row; `view-strip-narrow.test.ts`'s gap before `↺`
+  and its `keep recording` lines; `step-bar-narrow.test.ts`'s gap; one case of `panel-sizes-stored.test.ts` at
+  1280 × 960, so that the λ term keeps room over its floor; `state-diagram.test.ts`, which scrolls to the end farther
+  from where following left the grid, past `state-table.ts`'s now exported `ECHO_TOLERANCE`; and
+  `tm-view-narrow.test.ts`'s new tally of the rows with a `⚠`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The TM tape label `BOX` at the TM pane's bottom.** In the sweep at 390 × 844 with source and TM, its bottom is
+  2.6 px above the pane's bottom edge, where the pane, its content taller than it, cuts its tapes; the rows above it
+  grew, which moved the cut. The plan has the guard skip a pane's bottom, since a pane scrolls, and ruling R24 has this
+  entry state `BOX` as that case. It is the sweep's one row against a pane's edge left.
+- **`linesShown` in `inspector-phone.test.ts` counts a panel header's label as a line of content**, so Debugger at
+  320 × 500 with the notice gone keeps its open-inspector check on a label.
+- **Two 1-px header bands.** `◐` at 10 px is 0.94 px wider than this machine's system face drew it, so `settings`
+  takes an extra header row at 587 px in all three presets and at 372 px in Stage. No pinned width sits on either; the
+  guard's settings scan steps through 372 and picks its width at run time.
+- **83% is tuned to Chromium's rounding.** Chromium as the browser tests run it sets the shrunk face on a whole pixel,
+  15 px × s to 12 px for every s from 76.67% to 83.33%; Firefox draws it unrounded, at 83% of STIX's advances. Firefox
+  kept Debugger's header on one row at 1280 px with full-size STIX too.
+- **Paper and Terminal draw `→ ↗ ▾ ◐ ⚠` from system fonts, by design**: the face is in Instrument's stacks only, and
+  their headers wrap where each machine's fonts put them.
+- **`help.html`'s six other glyphs**, `↺ ◀ ▶ ⋯ ✕` in its `<strong>`s and `⌘` in a `<kbd>`, are system-drawn: the
+  range names the app's list. STIX has five of the six, not `✕`.
+- **The face has no preload.** On a first Instrument visit the header draws its carets and `◐` in a system face until
+  the file arrives (`font-display: swap`), and can shift when it swaps in. The shrunk glyphs sit on the baseline,
+  lower against the text than full-size STIX's.
+- **The wrapped-actions case at 320 × 844 runs in the default style only**, and the tally of `⚠` rows was not
+  sabotaged again at 83%.
+- **The guard's pane edges come from `clientWidth` and `clientHeight`**, which Chromium rounds to whole pixels, so a
+  pane's right-side gap is good to under 1 px; its rows sit 8 px in against a 4 px threshold. The panel-header cases
+  read their rules from the border box.
+- **Measuring an open menu against the viewport, `52a0617`, was not sabotaged**, so whether the earlier measure, the
+  document's scroll size, was ever blind at the guard's windows is not known. A menu taller than the whole window was
+  not measured; the cap is of the room below its button.
+- **About's guard case runs below 320 px.** In Instrument in Chromium no window from 320 to 1280 px wide, 844 px
+  high, puts about's button where its menu fits beside it with under 4 px to spare, so the case finds 303 to 306 px
+  and holds about at 305; there, with its gutter, about fits neither way, and in Firefox only its fallback keeps the
+  gutter.
+- **Settings and the add-view menu have no fallback against the page's edge**; in the scans neither fits neither way.
+- **Paper's about menu on CI's fonts was reproduced in Chromium here only by moving its button.** Before the fix,
+  Firefox here put it 2.47 px from the window's left edge in Paper at 488, 496 and 944 to 1040 px, and 0.93 px in
+  Instrument at 488, 496 and 952 to 1048, by the same leftward fit; it now opens rightward there, 120.27 and 118.9 px
+  from the left edge.
+- **Firefox, which CI does not run, for the Firefox lane, whose next is its PR 3:**
+  - `header-menus-narrow.test.ts`'s "the workspace menu, open > lies under its button at a desktop width, each row on
+    one line" fails in Firefox before `a989d13` and after: Firefox sizes that menu at 320 px, its `20rem` minimum, in
+    Paper and at 321.35 px in Instrument, against Chromium's 368 to 370, and a row wraps.
+  - `view-keys-focus.test.ts`'s "in Stage > leaves the caret in the source editor, and the key chooses the tabs" and
+    "on a views toggle > leaves the focus alone when the window is narrowed with the focus elsewhere" pass in some runs
+    and fail in others; the first failed at `c6b4d68` too, and passes run alone.
+  - Of the 15 files that open the workspace, examples or share menu, 12 cases fail in Firefox both at `c6b4d68` and
+    after `a989d13`: controls-gate 1, follow-kept 1, header-menus-narrow 1, scroll-kept 5 and view-keys-focus 4. The
+    15 were last run at `8e8b7b5`, twice, with 13 and 12 failures, and not on the final tree.
+  - `inspector-phone.test.ts` fails 11 cases in Firefox, the same 11 at `52a0617` and at `30dcb96`: Debugger and Stage
+    open at 320 × 568, 390 × 844 and 480 × 800, Explorer with the inspector open at 390 × 844, and the stage-strip
+    short pages at 320 × 320 and 320 × 400 with the notice up and gone. The figures this branch re-derives are
+    Chromium's.
+- **The README screenshots** are to be retaken once this merges, as the design's "After it merges" says: Material
+  Darker for #168's README and Material Lighter for the portfolio's snapshot.
+- **The design's non-goals:** the TM tape cells, whose glyphs sit 1.7 px from the cell borders; `help.html`'s `kbd`
+  chips, the sweep's category C on the pages; the editor gutter at the window's left edge, whose numbers are 5 px or
+  more in; and any change to colours, palettes or the layout beyond the paddings. Decisions and rulings above widened
+  that last one. The user's: the view header's column gap, the step bar's gap, the STIX glyphs, and "Fix in this PR",
+  twice, which brought the Firefox fallbacks and the menus' height caps. The controller's: the settings menu's gutter
+  (R20), the buffers list's gutter and fallback (R26), share's field (R25's round), and the CI fix's gutters and
+  about's fallback, by its brief and R34.
+
+##### VERIFICATION
+
+`R=~/temp/redextape-edge-record`, the lane's record. The gate ran on 2026-11-15 at `1066622`, the tree clean, by
+`$R/ci-fix-2/gate.sh`, each step into its own log in `$R/ci-fix-2/`, its exit status in `$R/ci-fix-2/exits.txt`;
+from `web/` unless the line says the root. It is `$R/entry/gate.sh`, which ran at `3883831`, with the guard's two
+runs below added as its last two steps.
+
+```
+scripts/check-all.sh --no-llvm                        → exit 0, from the root; "green, but PARTIAL — these tiers
+                                                        were SKIPPED: LLVM"; 47 legs; cargo nextest run --workspace
+                                                        1942 passed, 33 skipped; wasm-pack test --chrome 34
+                                                        passed (check-all.log)
+pnpm test:browser                                     → exit 0; 218 files, 1742 tests (test-browser.log)
+pnpm test:node                                        → exit 0; 73 files, 1482 tests (test-node.log)
+pnpm exec biome ci --error-on-warnings                → exit 0; 450 files (biome.log)
+pnpm run typecheck                                    → exit 0 (typecheck.log)
+the eight scans of ci.yml's linear-history job, and
+  check-licences.sh, --self-test then alone           → 18 of 18 exit 0, from the root (*-self.log, *.log)
+node scripts/check-comments.mjs --self-test, then
+  --base 5b43de5                                      → exit 0 each, from the root; 224 cases; no history and no
+                                                        grown block in 30 changed files (comments-*.log)
+git log --merges 5b43de5..HEAD                        → no merge commit (merges.log)
+pnpm vitest run --project browser
+  tests/browser/edge-spacing.test.ts
+  tests/browser/licences-narrow.test.ts               → exit 0; 2 files, 120 tests (guard.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=6 pnpm vitest
+  run --project firefox
+  tests/browser/edge-spacing.test.ts                  → exit 0; 1 file, 117 tests (firefox-guard.log)
+```
+
+The 28 steps all exit 0, the guard's at its second run, by the same command at the same commit after `gate.sh`
+ended: its first, inside `gate.sh`, failed to connect to its browser session within the timeout and ran no test
+(`guard-try1-connect-timeout.log`). The guard's two files are its own command; the Firefox run is for information.
+`68bf7c9` changes comments and the guard's width scan; at it, each run's log and exit status in `$R/ci-fix-3/`,
+`edge-spacing.test.ts` alone passed in Chromium with 117 tests (`guard.log`) and its scan found the runs above, 303 to
+306, 401 to 404 and 402 to 405 px (`guard-runs.log`, by a print taken out again), and `pnpm test:node` (73 files,
+1482 tests), biome (450 files), typecheck and the root's `node scripts/check-comments.mjs --base 5b43de5` (no history
+and no grown block in 30 changed files) passed.
+
+Not run: the LLVM tier and `cargo llvm-cov`, `scripts/check-slow.sh`, `test:coverage`'s thresholds and the Docker
+image, which `ci.yml`'s `docker` job never builds for a pull request; the branch changes no Rust.
+Firefox is for information only, since `ci.yml` does not run it.
+
+**The sweep.** The before sweep is the design's, of `main` at `e65b164`, whose `web/` `5b43de5` leaves as it is, by
+`$R/edge.mjs`, `group.mjs` and `table.mjs` into `$R/edges-table.tsv`: Chromium, at 1600 × 1000 and 390 × 844, dark and
+light, every view, the menus and dialog it opens and the static pages. The same scripts ran against the branch at
+`c6b4d68` in `$R/after/` and at `30dcb96` in `$R/final/`, each against `pnpm dev` on a free port with no source edit
+while it ran. `node compare.mjs` in each directory tallies a run against the before table, and
+`node $R/final/gate/three-way.mjs` sets the three side by side, into `$R/final/gate/three-way.log`. Rows under 4 px,
+as items / rows / smallest gap in px, light folded into dark:
+
+| Scope | Category | Before, `e65b164` | 4a, `c6b4d68` | Final, `30dcb96` |
+|---|---|---|---|---|
+| app | A, a pane's or region's edge | 63 / 82 / 0 | 1 / 1 / 2.6 | 1 / 1 / 2.6 |
+| app | A, the window's edge | 20 / 20 / 0 | 0 | 0 |
+| app | B, a control or text against a bar's rule | 37 / 71 / 1.8 | 10 / 20 / 3.2 | 10 / 20 / 3.2 |
+| app | C, text inside its own control or chip | 129 / 205 / 1 | 129 / 203 / 1 | 129 / 203 / 1 |
+| app | D, a borderless control's box | 15 / 29 / 0 | 14 / 28 / 2.5 | 14 / 28 / 2.5 |
+| pages | A, the window's edge | 1 / 1 / 0 | 0 | 0 |
+| pages | C, text inside its own control or chip | 120 / 480 / 0 | 120 / 480 / 0 | 120 / 480 / 0 |
+| all | rows | 888 | 732 | 732 |
+
+The plan expected "no category A row inside the app, no category B row on a panel header, no licences row". The one A
+row left is `BOX`, above. Of B's 71 rows before, 51 were against a panel header's rules and 20 were the text of the
+`program`/`local`, `arcs`/`chips` and `icicle`/`minimap` segment buttons inside their own borders; after, 0 and the
+same 20. So 20 B rows on a panel header remain, and the plan's B is met for what B is meant to catch, not to the
+letter: each of the 20 is a button's text 3.2 px inside that button's own border, as before, which `table.mjs` files
+under B only because the button's path holds `div.panel-header`. D is the panel toggle's undrawn click box, now 2.5 px
+from the header's band, the padding above it. The final run's rows equal 4a's key for key, 0 either way. **What the
+sweep does not show:** it runs in Chromium only, at 1600 × 1000 and 390 × 844, in the default preset, which shows no
+step bar, and it opens settings, examples, copies, about and add-view, so neither the workspace menu nor share. The
+step bar's gap, the Firefox fallbacks and the 320 px wrap of a panel header's actions do not reach these figures, nor
+anything at another size; the guard and the gate's browser tests hold them.
+
+**The RULES header, 28 px to 33.** 33 px, client 31, at 1600 × 1000 in the default workspace, dark, is
+`node heights.mjs` from `$R/final/` at `30dcb96`, into `$R/final/heights.log`, with the outline and state diagram
+headers the same; `tm-view-narrow.test.ts` pins the headers of the 8 view panels in its `PANELS` at `toBe(33)` at
+1280 × 800, and the inspector's header is not among them. 28 px is the `toBe(28)` pin in that file at `5b43de5`, line
+471, which the plan's commit carries too. Task 2 measured 28 by a diagnostic print it then removed, so that figure has
+no re-runnable command.
+
+**Firefox, for information only**, each run from `web/` as `REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=6 pnpm vitest run
+--project firefox` and the files named, at the commits as rebased:
+
+| Commit | Files | Result |
+|---|---|---|
+| `c6b4d68` | `edge-spacing`, `licences-narrow` | 5 failed, 26 passed (31): the workspace menu in each style, and examples and share in Terminal, 0 px from the window's right edge at 390 px |
+| `a989d13` | the same | 31 passed |
+| `c6b4d68`, then `a989d13` | the 15 files that open the workspace, examples or share menu | 21 failed, then 12, of 160, 2 skipped; no new failure |
+| `8e8b7b5` | `edge-spacing`, `licences-narrow` | 116 passed |
+| `52a0617` | `edge-spacing` | 114 passed |
+| `30dcb96` | `edge-spacing`, `licences-narrow`, `inspector-phone`, `fonts` | 11 failed, 155 passed (166); the 11 are `inspector-phone`'s above |
+| `1066622` | `edge-spacing` | 117 passed |
+| `68bf7c9` | `edge-spacing` | 117 passed |
+
+The class scan behind `1066622` ran in Firefox too, for information, by the same probe with `VITEST_MAX_WORKERS=1`:
+at `8f65351`, 74 of its 5,082 rows were under 4 px from the window's edge, about's 60 among them; with `1066622`'s
+rules, none of 5,082 is under 8 px. Besides those 74 it moved four boxes, the buffers list's in Terminal and in
+Paper at 888 px, both heights, which had stood 4.45 and 7.6 px from the right edge and now open leftward; every other
+box is where it was, the largest move 0 px over 5,004.
+
+**Every figure this entry quotes, with what produced it.** A row naming a report is that file in
+`.superpowers/sdd/2026-11-14-edge-spacing/`; a row naming a log is that file under `$R`. A row that names a report and
+no command or log gives the figure as that report states it. Several such figures came from probes that were not
+kept, among them task 1's and task 2's temporary prints, the fix wave's `fw-probe.mjs` and the glyph fix's
+`size-adjust` probe, so they have no re-runnable command; task 4a-ii's probes are kept in `$R/task-4a-ii/`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 32; 27; `28fd26f`, `753c626` | commits in the range; those that change a file outside `docs/`; the design's and the plan's | `git rev-list --count 5b43de5..68bf7c9`; `git diff-tree --name-only -r` of each, less `docs/` |
+| `ci.yml`, the comment budget, this file | what #171 changes from `e65b164` to `5b43de5` | `git diff --stat e65b164 5b43de5`: 3 files, none under `web/` |
+| 8, 4; 2.5 | px of `var(--space-2)` and `var(--space-1)`, and of `calc(0.1em + 1px)` at the header's 15 px, at a 16 px root | the design's decision 1; `final-fix-wave-report.md`, I1 and M4 |
+| 12,976; 628.1, 618 | the TM view's step; px its header's row needed and had at 1280 px with the padding | `task-1-report.md`, the table under Step 5 |
+| 138, 146 | px `keep recording` had and needed at 320 px | `task-1-report.md`, Step 7, `view-strip-narrow` |
+| 33, one row | the TM header at 1280 px with the gap at `var(--space-2)` | `task-2-report.md`, "Choice B" |
+| 16.5rem, `06b0459`; 2026-10-06 | R14's minimum and its commit; the date of "240 px stays" | `progress.md`, the Task 2 lines and R14; `task-2-report.md`, concern 1 |
+| 4.81; 9; four `▾` and a `◐` | the λ row's slack at 481 × 800 with the patch; R30's threshold; the header's unbundled glyphs | `final-fix-wave-report.md`, "Step bar gap (R30)"; `progress.md`, R30 and the glyph agent's line |
+| two rows at 1280, four at 390 | Debugger's header with full-size STIX | `glyph-fix-report.md`, the first part's concern 1 |
+| 5 px; 1280 × 960 | the inspector header's growth and its open body's move and loss; `panel-sizes-stored`'s one case | `task-2-report.md`, the `HELD_BOXES` table; `task-1-report.md`, R7 |
+| 1.8 → 4.297; 28 → 33; 26 | a bordered button's gap from a panel header's rules; the header; the toggle | `task-2-report.md`, "Why 2.5 px"; `final-fix-wave-report.md`, I1's first table |
+| 375 × 667, 360 × 800, 320 × 844; 2.5 → 4.297; 2.688, 8.594 | where `tm · diagram`'s actions wrap; a wrapped last row's gap from the bottom rule; the smallest gap at a 10 px and a 32 px root | `final-fix-wave-report.md`, I1's two tables |
+| 415 | px wide, the licences page at 390 px before | `task-3-report.md`, the RED run |
+| 0 → 8; 8 | Terminal's settings menu from the window's right edge at 390 px; Instrument's and Paper's from the left | `task-3-report.md`, the two probe tables |
+| 49 of 117; 0 | Firefox placements flush right before `a989d13`; Chromium's largest box change | `task-4a-ii-report.md`, sections 1 and 3 |
+| 0 to 3 → 16 | px from the window's bottom, the five capped menu placements | `task-4a-ii-report.md`, R25's cause and its Chromium table |
+| 301 to 322, 286 | share's scroll width and client width at 320 px | `task-4a-ii-report.md`, R25's cause |
+| 416; 0 → 8 | px, the buffers list's width at 480 and 600 px, 480 − 64 and 600 − 184; its gap from the right edge | `task-4a-ii-report.md`, R26's table; `style.css`'s `min-width: min(26rem, 90vw)` |
+| 8; 4.812, −3.188; 22 | px each box after the step bar's title moves; the λ row's slack at 481 × 800 after and before; `main`'s gain | `final-fix-wave-report.md`, the shift check; `glyph-fix-report.md`, sections 4 and 5c |
+| `play` on the title's row | the step bar at 320 × 568 with `TM · program` | `final-fix-wave-report.md`, the shift check and R30's "320×568 with the TM title" |
+| DejaVu Sans, Liberation Sans | the faces that drew the five before | `glyph-fix-report.md`, section 1 |
+| 5.3.0, OFL-1.1, 403,344 | the font package, its licence, its WOFF2's bytes | `glyph-fix-report.md`, section 2 |
+| 8; 10, 9.0625, 13; 1273, 390; 15 | `▾` at 83%; `◐` at 83%, system, full; Debugger's one-row and three-row widths; `⚠` at 12 px | `glyph-fix-report.md`, "The value, by measurement" |
+| 76.67% to 83.33%, 12 | the `size-adjust` values Chromium draws alike, and the px it sets them at | `glyph-fix-report.md`, "Why the table steps"; `task-4b-i-report.md`, its rounding probe |
+| 0.94; 587, 372 | `◐`'s extra width; the widths of the two bands | `glyph-fix-report.md`, "Every width 320–1600 px" |
+| seven; five windows; 390 × 420; 330 to 450 | `HEADER_MENUS`; `MENU_WINDOWS`; the scrolling-menu case; `RIGHTWARD_SCAN` | `web/tests/browser/edge-spacing.test.ts` at `3883831` |
+| 117; 105 | the guard's cases; those of `every header menu` | `$R/ci-fix-2/guard.log` at `1066622`, 120 less `licences-narrow`'s 3; `task-4a-ii-report.md`, R26's guard |
+| 296 to 316, 392 to 416 | the window widths the three gutter cases scan | `GUTTER_SCANS` in `web/tests/browser/edge-spacing.test.ts` at `1066622` |
+| 2732; 320 × 568, 480 × 844; 0.6 | PR #172's first CI run; the two failing windows; Paper's about menu from the window's left edge | `progress.md`, which names the run; `$R/ci-2732-web.log`, its two failures |
+| 192; 192.59 → 0.59; 191.89 | the about menu's width; its button's right edge and the menu's gap from the left edge, in Paper and Instrument at 320 × 568; where it opens rightward | `$R/ci-fix/probe3-before.log`, by `$R/ci-fix/probes/zz-edge-probe3.test.ts` at `8f65351` |
+| 5,082; 1.09, 3.44, 2.86 | rows of the class scan, seven menus × three styles × 121 widths × two heights; its contacts' gaps | `$R/ci-fix/scan-before-chromium.log`, by `$R/ci-fix/probes/zz-edge-probe.test.ts` at `8f65351`; `node $R/ci-fix/probes/analyse.mjs` on it |
+| 401 to 404; 402 to 405, 892 to 895; 303 to 306 | the widths, 1 px apart in Instrument, where the add-view menu, the buffers list and about stood under 4 px from an edge | `$R/ci-fix/fine-instrument-before.log`, the same probe with `VITE_PROBE_STEP=1`; for about `$R/ci-fix/probe2-instrument.log`, by `zz-edge-probe2.test.ts`, `node analyse2.mjs` on it |
+| 0 under 8 px; six and twelve, 4.27 to 7.27; 0 over 5,064; 0.01 | with `1066622`'s rules, Chromium: the scan's rows under 8 px; the boxes it moved that had stood under 4 px and 4 px or more clear, and how far; the largest move of every other box; the largest change in a moved box's width | `$R/ci-fix-2/scan-chromium.log`, by the same probe; `node $R/ci-fix/probes/analyse.mjs <log> 8`; `node $R/ci-fix-2/probes/compare2.mjs` against `$R/ci-fix/scan-before-chromium.log`, into `$R/ci-fix-2/compare-chromium-vs-8f65351.txt` |
+| 4.09, 4.27, 4.45; 120, 117 | with the first attempt's `var(--space-1)` gutters, the smallest side gap of a menu in the 1 px Instrument scan, the Chromium class scan and the Firefox scan of the three changed menus; its guard's tests passed in Chromium and in Firefox | `node $R/ci-fix-3/probes/minside.mjs` on `$R/ci-fix/fine-instrument-after.log`, `scan-after-chromium.log` and `scan-after-firefox3.log`, into `$R/ci-fix-3/first-attempt-smallest-gaps.txt`; `$R/ci-fix/guard.log` and `firefox-guard.log` |
+| 13, 4.09 to 7.69 | the boxes 4 px or more clear that the gutters moved in Instrument at 1 px steps, and how far clear | `$R/ci-fix-2/fine-instrument.log`, by the same probe with `VITE_PROBE_STEP=1`; `compare2.mjs` against `$R/ci-fix/fine-instrument-before.log`, into `$R/ci-fix-2/compare-fine-vs-8f65351.txt` |
+| 74 of 5,082, about's 60; 0 of 5,082 under 8 px; four, 4.45 and 7.6; 0 over 5,004; 2.47, 0.93; 120.27, 118.9 | the Firefox scan before and with `1066622`'s rules; the clear boxes it moved, and how far clear; every other box's largest move; Paper's and Instrument's about gaps before, and their left edges after | `$R/ci-fix/scan-before-firefox.log`, `$R/ci-fix-2/scan-firefox.log`; `node analyse.mjs`; `compare2.mjs`, into `$R/ci-fix-2/compare-firefox-vs-8f65351.txt` |
+| about fits neither way at 303 to 306 px; only the fallback keeps its gutter in Firefox | the guard's about case at its width, 305 px | `$R/ci-fix/probe2-instrument.log`, about's button and the menu's 192 px; `$R/ci-fix-2/sabotage-fallback-browser.log` and `sabotage-fallback-firefox.log`, at `1066622`'s rules with the fallback taken out: Chromium passes, Firefox 0 px from the left edge |
+| settings and the add-view menu never fit neither way | every row of the scans with `1066622`'s rules opens from an edge of its button | `node $R/ci-fix/probes/predict.mjs <log> 0 settings,new-view`, `"other":0`, on `$R/ci-fix-2/scan-chromium.log`, `fine-instrument.log` and `scan-firefox.log` |
+| 2.6 | `BOX`'s gap from the TM pane's bottom | `task-4a-report.md`, C1 |
+| 1.7; 5 | px of the tape cells' glyphs from their borders; of the gutter's numbers from the edge | the design's "Non-goals" |
+| 320, 321.35; 368 to 370 | Firefox's and Chromium's workspace menu at a desktop width | `task-4a-ii-report.md`, fix round 1, finding 2 |
+| 12; 13 and 12; 11 | Firefox failures in the 15 menu files; in them at `8e8b7b5`; in `inspector-phone` | `task-4a-ii-report.md`, section 5 and R26's Firefox counts; `task-4b-i-report.md`, B; `glyph-fix-report.md`, section 9 |
+| the sweep table; 51 and 20; 0 either way | items / rows / px by category; B's split; 4a's rows against the final's | `$R/final/gate/three-way.log`, lines 2 to 21; `task-4b-i-report.md`, C; `task-4a-report.md`, C1 |
+| 8; 1280 × 800 | the view panels `tm-view-narrow.test.ts` pins at `toBe(33)`; where | its `PANELS` and the 1280 px case that reads them, at `3883831` |
+| the Firefox table | | `task-4a-report.md`, B; `task-4a-ii-report.md`, sections 5 and R26's Firefox counts; `final-fix-wave-report.md`, its commands; `task-4b-i-report.md`, B; `$R/ci-fix-2/firefox-guard.log` for `1066622`; `$R/ci-fix-3/firefox-guard.log` for `68bf7c9` |

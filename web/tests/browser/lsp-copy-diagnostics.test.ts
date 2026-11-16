@@ -120,7 +120,7 @@ describe('format on blur in a copy', () => {
    */
   it('keeps keystrokes made inside the debounce window', async () => {
     const box = document.querySelector<HTMLInputElement>('#format-on-blur')
-    if (box === null) throw new Error('no `format on blur` setting')
+    if (box === null) throw new Error('no `#format-on-blur` checkbox')
     box.checked = true
     box.dispatchEvent(new Event('change'))
 

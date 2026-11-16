@@ -19,8 +19,8 @@ import {
  * it there, at 320px and 390px, under a short step line and a long one. A bar that is one row and never wraps would
  * widen the page at 320px, push `keep recording` past the page's right edge on `fact(4)`'s line at 390px, and, where
  * the page holds, squeeze the step text into a column a few characters wide. What is held is that each of its boxes
- * lies inside the page at a phone's width, and that at a desktop's width the bar is one row with two gaps. ONE MOUNT
- * FOR THE FILE, for the reason `app.test.ts` gives.
+ * lies inside the page at a phone's width, and that at a desktop's width the bar is one row, its boxes one gap apart.
+ * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 type Preset = 'debugger' | 'stage'
@@ -179,14 +179,14 @@ describe.each(LINES)('the step bar, under $name', (line) => {
   })
 
   /**
-   * **AT A DESKTOP'S WIDTH THE BAR IS ONE ROW, WITH TWO GAPS**: every box on the title's vertical centre, the title
-   * at the bar's content edge, `↺` `var(--space-3)` after the title, and each box after it `var(--space-2)` after the
-   * one before.
+   * **AT A DESKTOP'S WIDTH THE BAR IS ONE ROW, ITS BOXES ONE GAP APART**: every box on the title's vertical centre,
+   * the title at the bar's content edge, and each box after it, `↺` first, `var(--space-2)` after the one before, the
+   * gap a view header keeps between its heading and its `↺`.
    *
    * **THAT IS ALL IT HOLDS, NOT WHERE EACH BOX IS.** A change to a box's own width, or to the bar's padding, can leave
    * every case here passing.
    */
-  it.each(PRESETS)('in %s at 1280 px, is one row with its two gaps', async (preset) => {
+  it.each(PRESETS)('in %s at 1280 px, is one row, its boxes one gap apart', async (preset) => {
     try {
       await at(preset, line, 1280, 800)
       const boxes = drawn()
@@ -198,10 +198,10 @@ describe.each(LINES)('the step bar, under $name', (line) => {
       const start = stepBar().getBoundingClientRect().left + Number.parseFloat(getComputedStyle(stepBar()).paddingLeft)
       expect(title().getBoundingClientRect().left, 'the title at the bar’s start').toBeCloseTo(start, 1)
       const [first, ...rest] = boxes
+      const want = space('--space-2')
       let before = first as HTMLElement
       for (const el of rest) {
         const gap = el.getBoundingClientRect().left - before.getBoundingClientRect().right
-        const want = before === title() ? space('--space-3') : space('--space-2')
         expect(Math.abs(gap - want), `the gap before ${nameOf(el)}: ${gap}px, not ${want}px`).toBeLessThanOrEqual(0.5)
         before = el
       }

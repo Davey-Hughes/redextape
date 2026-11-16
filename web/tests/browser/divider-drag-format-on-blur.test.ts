@@ -6,11 +6,11 @@ import { formats, formatsOnALeave, recordFormats } from './format-on-leave-fixtu
 import { drawn, frames, host, SHELL, stateIdle, until } from './harness'
 
 /**
- * A DIVIDER DRAGGED WHILE AN EDITOR HAS THE FOCUS DOES NOT FORMAT IT — the settings menu's *format on blur*, and
- * `pane-host.ts`'s `keepingFocus`: the drag's end takes the editor off the page and puts it back with the focus in
- * it, as a switch of views does, and the `blur` that sends the editor is not the user leaving it (`focusKept`'s
- * doc in `main.ts`). `view-keys-format-on-blur.test.ts` holds a switch to the same flag, and
- * `divider-drag-focus.test.ts` drags with the setting off.
+ * A DIVIDER DRAGGED WHILE AN EDITOR HAS THE FOCUS DOES NOT FORMAT IT — the settings menu's
+ * *format when leaving the editor*, and `pane-host.ts`'s `keepingFocus`: the drag's end takes the editor off the page
+ * and puts it back with the focus in it, as a switch of views does, and the `blur` that sends the editor is not the
+ * user leaving it (`focusKept`'s doc in `main.ts`). `view-keys-format-on-blur.test.ts` holds a switch to the same
+ * flag, and `divider-drag-focus.test.ts` drags with the setting off.
  *
  * **WHAT IS COUNTED IS THE REQUEST TO FORMAT**, as `view-keys-format-on-blur.test.ts` counts it and for its reason:
  * the request is posted inside the `blur` handler and its edits arrive a turn later, so none posted by the time the

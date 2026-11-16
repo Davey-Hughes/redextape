@@ -349,7 +349,7 @@ async function main(): Promise<EditorView> {
   }
 
   let appearance = readStored(readAppearanceStorage())
-  /** The settings menu's `format on blur`, read at every blur. */
+  /** The settings menu's *format when leaving the editor*, read at every blur. */
   let formatOnBlur = readFormatOnBlur()
   /**
    * Whether a rebuild that gives the keyboard focus back is under way now, which is when a blur is not the user's:
@@ -370,7 +370,7 @@ async function main(): Promise<EditorView> {
   let focusKept = false
   // THE TOGGLE SHOWS ITS STATE IN A WORD, BESIDE THE GLYPH (Plan 7 part 2 spec §6) — the word is its
   // accessible name, and `aria-label` is removed so the two cannot disagree. `☀`/`☾` are drawn (Hack lacks
-  // them); `◐` stays text.
+  // them); `◐` stays text, which Inter lacks and `fonts.css`'s STIX Two Math draws.
   const glyphFor = (a: Appearance): Node => {
     if (a === 'light') return icon('sun')
     if (a === 'dark') return icon('moon')

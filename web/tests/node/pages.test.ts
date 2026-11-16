@@ -76,6 +76,20 @@ describe('the help page', () => {
       expect(shown, key).toBe((key ?? '').replace(/^Mod-/, 'Ctrl-'))
     }
   })
+
+  /**
+   * **THE PAGE NAMES THE CHOICE IN THE MENU'S WORDS**, so a reader finds in the settings menu what the page told them
+   * to look for. `blur` is the DOM's word for leaving the editor, not a reader's. Whitespace is collapsed, so where
+   * the HTML wraps its lines is not a difference.
+   */
+  it('names the format choice as the settings menu does', () => {
+    const words = (s: string) => s.replace(/\s+/g, ' ').trim()
+    const label = /<input type="checkbox" id="format-on-blur" \/>([^<]+)<\/label>/.exec(html('index'))?.[1]
+    expect(label, 'index.html has the format checkbox’s label').toMatch(/\S/)
+    const page = words(html('help'))
+    expect(page).toContain(words(label as string))
+    expect(page).not.toMatch(/blur/i)
+  })
 })
 
 describe('the help page’s view keys', () => {

@@ -19,8 +19,8 @@
      and every `light-dark()` value follows without a second copy of the palette. */
   color-scheme: light dark;
 
-  --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Hack", ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  --font-ui: "Inter", "STIX Two Math", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Hack", "STIX Two Math", ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
   --radius: 2px;
   --label-transform: uppercase;
   --label-tracking: 0.04em;
@@ -307,7 +307,13 @@ select option {
     display: none;
   }
 }
-/* The header's menus, on the view menu's positioning — its comment has the argument. */
+/* The header's menus, on the view menu's positioning — its comment has the argument.
+
+   **NO TALLER THAN THE ROOM IT OPENS INTO, LESS A GUTTER, AND IT SCROLLS THE REST.** Under `position-area` the
+   percentage is of that room, so a menu longer than the window has left below its button stops short of the window's
+   bottom, and a popover's own `overflow: auto` scrolls what does not fit. The browser scrolls an item the focus moves
+   to into view, so every item stays in reach of the keyboard. Capped, a menu always fits below its button, so the
+   browser never shifts it up over the header to keep it on the page. */
 .header-menu {
   position-area: block-end span-inline-end;
   position-try-fallbacks:
@@ -320,6 +326,7 @@ select option {
   padding: 0.25rem;
   margin: 0;
   min-width: 12rem;
+  max-height: calc(100% - var(--space-2));
 }
 @supports not (position-area: block-end) {
   .header-menu {
@@ -406,16 +413,16 @@ select option {
 }
 /* The workspace menu is wider than the others, because a switch row is a label and two values.
 
-   **AT A PHONE'S WIDTH A ROW'S VALUES WRAP UNDER ITS LABEL**, and the menu is no wider than the page less a `1rem`
-   gutter each side, as `#examples-menu` below is. On one line its rows are 360.5px wide, so without the wrap the
-   menu would run past a 320px and a 360px page; the gutter bounds the minimum too, since a minimum wins over a
-   maximum. At a desktop width nothing wraps and nothing here binds.
+   **WHERE THE MENU IS TOO NARROW FOR A ROW ON ONE LINE, ITS VALUES WRAP UNDER ITS LABEL**, so that it is never wider
+   than the page less a `1rem` gutter each side, like `#examples-menu` below; at a phone's width that is less than a row
+   on one line. The gutter bounds the minimum too, since a minimum wins over a maximum. At a desktop width the gutter
+   does not bind. Chromium fits each row on one line; Firefox can size the menu to the `20rem` minimum and wrap a row.
 
    **THE MAXIMUM BINDS ONLY WHERE THE MENU IS NOT ANCHORED.** Anchored, its content is fitted to the room from its
    button to the page's right edge, always narrower than the gutter allows; where that room is narrower than the
-   minimum, the minimum decides and the browser shifts the menu left onto the page. Either way the maximum never
-   binds. A browser without `position-area` takes the `@supports` branch above and centres the menu on the
-   page, where without the maximum it spans the page's whole width. */
+   minimum, the minimum decides and the menu opens `1rem` short of the page's right edge, by a fallback below. Either
+   way the maximum never binds. A browser without `position-area` takes the `@supports` branch above and centres the
+   menu on the page, where without the maximum it spans the page's whole width. */
 #workspace-menu {
   min-width: min(20rem, calc(100vw - 2rem));
   max-width: calc(100vw - 2rem);
@@ -433,18 +440,18 @@ select option {
   min-width: min(20rem, calc(100vw - 2rem));
   max-width: min(36rem, calc(100vw - 2rem));
 }
-/* **AND THE GUTTER ON THE PAGE'S EDGE, FOR THE TWO MENUS AND THE POPOVER WIDE ENOUGH TO REACH IT.** Where the anchored
-   placement would run past the page's edge, the browser shifts the menu back inside, flush with that edge: both menus
-   would be, at 320, 360 and 390px. A margin on the end side is kept in that shift, so each stops `1rem` short; and
-   where the placement flips to open leftward the margin flips with it, so `examples ▾`'s menu stops `1rem` short of
-   the left edge at 600 and 700px, where without it it would touch it. At 1280px the margin moves nothing. Not on
-   `.header-menu`: settings opens leftward from its button's right edge, and an end margin would move it off that edge
-   at every width.
+/* **AND THE GUTTER ON THE PAGE'S EDGE, FOR THE WORKSPACE AND EXAMPLES MENUS AND `share`'S POPOVER, WIDE ENOUGH TO
+   REACH IT.** The popover (Plan 7 part 6a spec §5.2) is a disclosure, not a menu. The margin comes out of the room a
+   menu is fitted to, so one that fills that room stops `1rem` short of the page's edge, and where the placement flips
+   to open leftward the margin flips with it. Not on `.header-menu`: settings opens leftward from its button's right
+   edge, and an end margin would move it off that edge at every width. Their height cap takes the same `1rem` from the
+   room below, in place of `.header-menu`'s. The buffers list reaches the edge too; `.buffer-list` keeps its own gutter.
 
-   `share`'s popover (Plan 7 part 6a spec §5.2), a disclosure and not a menu, is the third. Without the margin it lies
-   flush with the page's right edge at 480, 600 and 700px, and at 390px in Debugger; with it, `1rem` short of either
-   edge at 320, 360, 390, 480, 600 and 700px in each preset. At 1280px it opens leftward from its button's right edge
-   either way.
+   **WHERE A MENU IS WIDER THAN THE ROOM FROM ITS BUTTON AND NO FLIP FITS, A FALLBACK OPENS IT BELOW ITS BUTTON AGAINST
+   THE PAGE'S END EDGE**, its margin from that edge. Left to its first placement, the browser shifts the menu back, and
+   Firefox's shift puts the box flush with the edge, the margin dropped; the fallback lands where Chromium's shift does,
+   which keeps it. It holds the workspace and examples menus to `min-content`, their width in the first placement there;
+   share's width is its own. Each list restates `.header-menu`'s flips, since it replaces that list whole: change both.
 
    **ONLY WHERE THE MENU IS ANCHORED.** A browser without `position-area` takes the `@supports not` branch above,
    whose `margin: auto` centres the menu on the page; an id's end margin would beat that class rule and put the menu
@@ -454,6 +461,57 @@ select option {
   #share-menu,
   #workspace-menu {
     margin-inline-end: 1rem;
+    max-height: calc(100% - 1rem);
+  }
+  #examples-menu,
+  #workspace-menu {
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline,
+      --header-menu-to-end-narrowest;
+  }
+  #share-menu {
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline,
+      --header-menu-to-end;
+  }
+  @position-try --header-menu-to-end {
+    position-area: block-end span-all;
+    justify-self: end;
+  }
+  @position-try --header-menu-to-end-narrowest {
+    position-area: block-end span-all;
+    justify-self: end;
+    width: min-content;
+  }
+  /* SETTINGS AND ABOUT TAKE THEIR GUTTER ON THE START SIDE, the side each grows towards, so its end edge stays on its
+     button's, and the add-view menu on the end side, for the same reason. Where the header leaves a button too little
+     room for its menu and the gutter, the placement flips and the margin flips with it. Either way the menu stops
+     short of the window's edge, and at a phone's width settings' label wraps inside it. The three take one gutter,
+     `var(--space-2)`, so that, filling its room to the window's edge, each stops as far short of it as the others. */
+  #about-menu,
+  #settings-menu {
+    margin-inline-start: var(--space-2);
+  }
+  #new-view-menu {
+    margin-inline-end: var(--space-2);
+  }
+  /* WHERE ABOUT FITS NEITHER WAY BESIDE ITS BUTTON, A FALLBACK OPENS IT BELOW ITS BUTTON AGAINST THE PAGE'S START
+     EDGE, its margin from that edge, for the end-edge fallback's reason above. Its list restates `.header-menu`'s
+     flips. */
+  #about-menu {
+    position-try-fallbacks:
+      flip-block,
+      flip-inline,
+      flip-block flip-inline,
+      --header-menu-to-start;
+  }
+  @position-try --header-menu-to-start {
+    position-area: block-end span-all;
+    justify-self: start;
   }
 }
 #examples-menu .example-title,
@@ -475,8 +533,12 @@ select option {
   display: grid;
   gap: var(--space-2);
 }
-/* THE FIELD WEARS THE HEADER'S SELECTS' CHROME, and its label is dim as theirs is. */
+/* THE FIELD WEARS THE HEADER'S SELECTS' CHROME, and its label is dim as theirs is. **IT MAY BE NARROWER THAN ITS
+   CONTENTS' MINIMUM**, which counts the input at its default width: as a grid item it would otherwise hold the
+   popover's column at that width, past the popover's padding at a phone's width. At zero the input, which may shrink,
+   gives up the difference. */
 .share-field {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -712,12 +774,18 @@ select option {
 }
 
 /* A VIEW'S HEADER — Plan 7 part 2 spec §7: title, status, step controls, actions, on one line that wraps
-   rather than overflowing a narrow view. The step controls take the middle and the actions the end. */
+   rather than overflowing a narrow view. The step controls take the middle and the actions the end.
+   **THE HEADER KEEPS ITS TEXT AND CONTROLS OFF THE PANE'S EDGES, BECAUSE THE PANE DOES NOT**: a pane has no
+   padding, so that its editors, tapes and highlight bands run edge to edge, and without this the title, `⋯`, `✕`
+   and every row the step controls wrap onto would touch the pane's sides and top, which read as clipped. The
+   inline padding is `.panel-header`'s, so a view's title lines up with its panels' headers' content. */
 .view-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+  padding-block-start: var(--space-1);
   margin-bottom: var(--space-2);
 }
 /* THE HEADING WRAPS THE HEADER AS ITS TITLE DOES, WHATEVER ITS STATUS. Were a copy's `copy · not linked` in the
@@ -995,12 +1063,15 @@ button.view-title[aria-expanded="true"] {
   font-style: italic;
 }
 
+/* THE STATUS LINES CARRY THE PANE'S INLINE GAP, as the view's header does and for its reason: the pane has none,
+   so a line without it starts on the pane's edge. The same `var(--space-2)` keeps them in line with the title above. */
 .tm-status,
 .tm-value,
 .rxm-value {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   color: var(--fg-dim);
+  padding-inline: var(--space-2);
   margin-bottom: var(--space-2);
 }
 
@@ -1138,9 +1209,9 @@ button.view-title[aria-expanded="true"] {
 /* THE TITLE AND EVERY CONTROL ARE ONE LINE, AND IT WRAPS. A row that never wrapped would widen a phone's page or
    keep the width and squeeze the step text into a column a few characters wide. Its controls have no box of their
    own here (`.step-bar .controls` below), so each is an item of this row beside the title, and the title costs
-   the bar no row of its own: `λ · program ↺ ◀ ▶ ⏵` on a 320px page, then the speed and the step text. A step text
+   the bar no row of its own: `λ · program ↺ ◀ ▶ ⏭ ⏵` on a 320px page, then the speed and the step text. A step text
    longer than the bar takes a row of its own and wraps inside it. The row's gap is `.controls`' own
-   `var(--space-2)`, which the controls keep between each other. */
+   `var(--space-2)`, which the controls keep between each other and the title keeps before them. */
 .step-bar-inner {
   display: flex;
   flex-wrap: wrap;
@@ -1148,13 +1219,12 @@ button.view-title[aria-expanded="true"] {
   row-gap: var(--space-1);
   column-gap: var(--space-2);
 }
-/* The view it drives, in the title-selector's own spelling (`step-bar.ts`). ITS END MARGIN KEEPS ITS GAP BEFORE
-   `↺` AT `var(--space-3)`, wider than the row's own gap, which is the controls' narrower one. */
+/* The view it drives, in the title-selector's own spelling (`step-bar.ts`). `↺` follows it at the row's own gap, as a
+   view header's `↺` follows its heading at the header's (`.view-header`): the two are one gap. */
 .step-bar-title {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   color: var(--fg-dim);
-  margin-inline-end: calc(var(--space-3) - var(--space-2));
 }
 .step-bar-title[hidden] {
   display: none;
@@ -1278,8 +1348,8 @@ button.view-title[aria-expanded="true"] {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* THE HEADER'S BUFFER LIST, ON THE SAME TWO POSITIONING DECLARATIONS AS `.view-menu` ABOVE — and
-   the argument for them is up there rather than restated here: without `position-area` this list opens
+/* THE HEADER'S BUFFER LIST, ON `.view-menu`'S TWO POSITIONING DECLARATIONS ABOVE, plus a last fallback of its own
+   below — and the argument for them is up there rather than restated here: without `position-area` this list opens
    in the TOP-LEFT CORNER OF THE VIEWPORT, because `margin: 0` is what leaves the UA's `inset: 0`
    over-constrained against a definite width. The anchor is `buffer-list.ts`'s button and it is
    implicit, so there is no `anchor-name` here either, and `position-try-fallbacks` is what keeps a
@@ -1301,11 +1371,16 @@ button.view-title[aria-expanded="true"] {
   position-try-fallbacks:
     flip-block,
     flip-inline,
-    flip-block flip-inline;
+    flip-block flip-inline,
+    --buffer-list-to-end;
   border: 1px solid var(--rule);
   background: var(--bg);
   padding: var(--space-1);
   margin: 0;
+  /* The gutter on the side the list grows towards, flipping with it and kept in the end fallback below:
+     `var(--space-2)`, the settings menu's, so that, filling its room to the window's edge, the list stops as far short
+     of it as that menu does. */
+  margin-inline-end: var(--space-2);
   /* WIDE ENOUGH FOR A TERM TO BE WORTH SHOWING, capped so the list stays a menu rather than a panel.
      A row carries the buffer's term (`buffer-list.ts`'s `BufferRow.term`), and a `min-width` of 14rem would
      truncate it to a few tokens, which distinguishes nothing — every buffer on this page is a fork of one
@@ -1320,6 +1395,17 @@ button.view-title[aria-expanded="true"] {
      accommodation. */
   min-width: min(26rem, 90vw);
   max-width: min(40rem, 90vw);
+  /* Capped and scrolled as `.header-menu` is, for its reason. */
+  max-height: calc(100% - var(--space-2));
+}
+/* WHERE THE LIST IS TOO WIDE TO OPEN EITHER WAY FROM ITS BUTTON, IT OPENS BELOW IT AGAINST THE PAGE'S END EDGE, its own
+   margin from that edge, the gutter its cap keeps from the bottom; without this fallback the browser shifts it back
+   against that edge, Firefox's shift dropping the margin. `min-content` keeps the width the first placement had there,
+   as for the header menus' fallback. */
+@position-try --buffer-list-to-end {
+  position-area: block-end span-all;
+  justify-self: end;
+  width: min-content;
 }
 /* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — `.view-menu`'s `@supports` block above states
    this in full, including why the test is written `not (position-area: block-end)` rather than against
@@ -1420,12 +1506,18 @@ button.view-title[aria-expanded="true"] {
 .panel {
   margin-block-start: var(--space-2);
 }
+/* THE TOGGLE SETS A PANEL HEADER'S HEIGHT, AND A BORDERED ACTION IS SHORTER THAN IT, so an action centred beside it
+   sits nearer the header's rules than the toggle's text does and, against them, reads as clipped. The block padding
+   is an action's own block padding and border, `0.1em + 1px`, at the header's font size, which is larger than the
+   actions': with the actions' box as tall as the toggle (`.panel-actions`), that puts every bordered action at least
+   `var(--space-1)` from each rule at any root size, beside the toggle or on a row of its own under it. The toggle,
+   still the tallest box, keeps a header with actions and one without at one height. */
 .panel-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1) var(--space-2);
-  padding: 0 var(--space-2);
+  padding: calc(0.1em + 1px) var(--space-2);
   background: var(--bg-chrome);
   border-block: 1px solid var(--rule);
 }
@@ -1464,12 +1556,18 @@ button.view-title[aria-expanded="true"] {
   }
 }
 /* The actions take the toggle's size here, on the container: the shared control rule above gives every
-   `.panel-actions button` `font: inherit`, which outranks a size set on a button's own class. */
+   `.panel-actions button` `font: inherit`, which outranks a size set on a button's own class.
+
+   **THE ACTIONS' BOX IS AS TALL AS THE TOGGLE**, its block margin the toggle's block padding less an action's own
+   padding and border, the two lines being one height at one size. Where the actions wrap onto a row of their own,
+   that row would otherwise be only as tall as the buttons, and the header's padding alone would part them from its
+   bottom rule. Beside the toggle the box fits its row, so a header that does not wrap keeps its height. */
 .panel-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-1) var(--space-2);
+  margin-block: calc(var(--space-1) - 0.1em - 1px);
   margin-inline-start: auto;
   font-size: var(--step--2);
 }

@@ -98,3 +98,21 @@ shim.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text: 'let x = 40; x + 2', 
  * fresh workspace holds — has to be written against the default, not this seed.
  */
 shim.setItem(LAYOUT_STORAGE_KEY, serializeWorkspace(fourViewWorkspace()))
+
+/**
+ * Browser-tier setup, part five: every face Instrument draws the app's text in is loaded before a file runs.
+ *
+ * **A FACE ARRIVES AFTER THE TEXT THAT ASKS FOR IT** (`font-display: swap` in `fonts.css`): until then the text is laid
+ * out in the next face in its stack, which for a glyph only STIX Two Math has is whatever the OS has. A test that
+ * measured the header, or anything beside it, in that window would hold a figure from a face the app does not ship,
+ * and one that differs from machine to machine. Vitest's tester page carries none of `index.html`'s preloads, so
+ * nothing else starts these loads before a file mounts the app. Each is asked for with the text that selects it:
+ * Inter's faces by subset (`A` for Latin, `λ` for Greek), STIX Two Math by its `unicode-range`.
+ */
+await Promise.all([
+  document.fonts.load('400 1em "Inter"', 'Aλ'),
+  document.fonts.load('600 1em "Inter"', 'Aλ'),
+  document.fonts.load('400 1em "Hack"', 'A'),
+  document.fonts.load('700 1em "Hack"', 'A'),
+  document.fonts.load('400 1em "STIX Two Math"', '→↗▾◐⚠'),
+])

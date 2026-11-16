@@ -29,8 +29,8 @@ async function openAt(id: string, width: number, height: number): Promise<DOMRec
  * Hold a menu's `rect` to a phone-width page: inside its gutter on both sides, on a page with no sideways scroll.
  *
  * **BOTH SIDES, NOT ONLY THE WIDTH.** A menu no wider than the gutter allows can still sit flush with the page's edge,
- * where the browser shifts an anchored menu that would run past it, which is why the examples and workspace menus
- * each have a `1rem` margin on their end side.
+ * where an anchored menu that would run past it is moved back onto the page, which is why the examples and workspace
+ * menus each have a `1rem` margin on their end side.
  */
 function expectWithinGutter(rect: DOMRect, width: number): void {
   expect(innerWidth).toBe(width)
@@ -149,14 +149,14 @@ describe('the workspace menu, open', () => {
 
   /**
    * **WHERE THE MENU IS NOT ANCHORED, THE MAXIMUM IS WHAT KEEPS THE GUTTER.** Anchored, the menu's content is fitted
-   * to the room from its button, at 115px, to the page's right edge, which is always narrower than the gutter allows.
-   * Where that room is narrower than the minimum, the minimum decides and the browser shifts the menu left to keep it
-   * on the page: at 320px it is 288px wide against a 205px room. Either way the maximum never binds above. A browser
-   * without `position-area` takes `style.css`'s `@supports not (position-area: block-end)` branch and centres the menu
-   * on the page instead, where it would span the page. That layout is put on for these cases, on the rule the branch
-   * overrides: no anchored area, no fallbacks, and the branch's `margin: auto`; and on the menus' own ids, whose end
-   * margin sits in the `@supports (position-area: block-end)` block such a browser does not apply either, and would
-   * otherwise beat a class rule. Put on by hand, it holds the layout the branch gives, not that the branch applies.
+   * to the room from its button to the page's right edge, which is always narrower than the gutter allows. Where that
+   * room is narrower than the minimum, the minimum decides and a fallback moves the menu left to keep it on the page.
+   * Either way the maximum never binds above. A browser without `position-area` takes `style.css`'s `@supports not
+   * (position-area: block-end)` branch and centres the menu on the page instead, where it would span the page. That
+   * layout is put on for these cases, on the rule the branch overrides: no anchored area, no fallbacks, and the
+   * branch's `margin: auto`; and on the menus' own ids, whose end margin, fallbacks and `1rem` height cap sit in the
+   * `@supports (position-area: block-end)` block such a browser skips too, and would otherwise beat a class rule, the
+   * cap going back to the class's own. Put on by hand, it holds the branch's layout, not that the branch applies.
    */
   it.each(WIDTHS.slice(0, 3))(
     'lies within its gutter on a page %i px wide where it is not anchored',
@@ -164,7 +164,8 @@ describe('the workspace menu, open', () => {
       const unanchored = document.createElement('style')
       unanchored.textContent =
         '.header-menu { position-area: none; position-try-fallbacks: none; margin: auto; } ' +
-        '#examples-menu, #workspace-menu { margin: auto; }'
+        '#examples-menu, #workspace-menu { margin: auto; position-try-fallbacks: none; ' +
+        'max-height: calc(100% - var(--space-2)); }'
       document.head.append(unanchored)
       try {
         expectWithinGutter(await openAt('workspace', width, height), width)
