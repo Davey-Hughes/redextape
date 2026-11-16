@@ -22,7 +22,7 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::tm::{
     Binary, DEFAULT_CAPS as RXM_CAPS, Encoding, RxmRun, TM_DEFAULT_CAPS, TmRun, Unary, decode_rxm_reason, decode_tape,
-    decode_tape_reason, lower_rxm, run_rxm, run_tm, run_tm_fitted,
+    decode_tape_reason, lower_rxm, run_rxm, run_tm, run_tm_at, run_tm_fitted,
 };
 use redextape_core::{RunError, run};
 
@@ -201,4 +201,53 @@ fn tm_cap_matches_a_reference_nonterminating_program() {
     let core = desugar(&prog.unwrap());
     let caps = TmCaps { steps: 50_000, cells: 50_000 };
     assert!(matches!(run_tm(&core, &Unary::default(), caps), TmRun::HitCap), "expected the TM to hit a cap");
+}
+
+/// Seventeen call sites whose values all fit four bits: sixteen in the `then` branch, then the one
+/// the `else` branch takes. Its call ordinal is 16, so a return tag written at the auto-fitted width
+/// must hold 16, which needs five bits.
+fn many_call_sites_src() -> String {
+    let calls = vec!["f(0)"; 16].join(" + ");
+    format!("fn f(x) {{ x }} let c = 1; if c == 0 {{ {calls} + 7 }} else {{ f(3) }}")
+}
+
+/// Asserts the probe's precondition (17 lowered call sites), then the reference oracle under `enc`.
+fn assert_many_call_sites_agree(enc: &dyn Encoding) {
+    let src = many_call_sites_src();
+    let (prog, ds) = parse(&src);
+    assert!(ds.is_empty(), "parse errors: {ds:?}");
+    let core = desugar(&prog.unwrap());
+    let program = lower_rxm(&core).unwrap();
+    let calls = program.code.iter().filter(|i| matches!(i, redextape_core::tm::rxm::Instr::Call(_))).count();
+    assert!(calls >= 17, "the probe needs at least 17 call sites, lowered {calls}");
+    assert_tm_agrees(&src, enc);
+}
+
+#[test]
+fn a_binary_return_tag_wider_than_the_fitted_width_still_returns_to_its_own_call_site() {
+    assert_many_call_sites_agree(&Binary::default());
+}
+
+#[test]
+fn a_unary_return_tag_past_the_fitted_width_still_returns_to_its_own_call_site() {
+    assert_many_call_sites_agree(&Unary::default());
+}
+
+/// The same program at pinned widths. At four bits the `else` call's tag (16) does not fit, so the run
+/// halts in the overflow guard instead of resuming after the wrong call site; at five bits it fits and
+/// the answer is the reference's. Auto-fit tries 4, overflows there, and settles on 8.
+#[test]
+fn a_binary_return_tag_that_does_not_fit_a_pinned_width_overflows() {
+    let src = many_call_sites_src();
+    let reference = run(&src).expect("the reference runs");
+    assert_eq!(reference, redextape_core::value::Value::Nat(3), "the probe's `else` branch answers 3");
+    let core = desugar(&parse(&src).0.unwrap());
+    let at4 = run_tm_at(&core, &Binary::at(4), TM_DEFAULT_CAPS);
+    assert!(matches!(at4, TmRun::Overflow), "width 4 cannot hold tag 16, so the run must overflow");
+    let TmRun::Ran { tapes } = run_tm_at(&core, &Binary::at(5), TM_DEFAULT_CAPS) else {
+        panic!("width 5 holds tag 16 and must run");
+    };
+    assert_eq!(decode_tape(&tapes, &reference, &Binary::at(5)), Some(reference));
+    let (_, width) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
+    assert_eq!(width, Some(8), "auto-fit widens past 4 to the next rung");
 }

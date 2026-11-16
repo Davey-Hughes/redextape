@@ -35404,3 +35404,191 @@ output is in the log the row names, in `$R`.
 | more than 2; more than 5 | the floor on the ring's top samples before and after `846a588` | `git show 846a588 -- web/tests/browser/view-toggle-focus-ring.test.ts \| rg 'toBeGreaterThan\((2\|5)\)'` (rebase-entry-figures.log) |
 | `0 of 7` where `7 of 7` | `λ`'s top under a red bar over the ring's top in Paper | the focus-ring file run with that bar drawn (`sabotage-m1-redbar.log`, line 64) |
 | all four `solid a button’s` | the forced-colours case on `846a588`'s CSS, without the media rule | `pnpm exec vitest run --project browser tests/browser/first-load-views.test.ts` with the case written and the rule not (`fix-i1-before.log`) |
+
+#### TM ANSWERS THAT WERE WRONG: A BINARY CALL'S RETURN TAG THAT DOES NOT FIT THE FIELD WIDTH GOES TO THE OVERFLOW GUARD INSTEAD OF RESUMING AFTER ANOTHER CALL SITE, A TM RUN CONTINUED PAST ITS CAP INTO `overflow` REPORTS A FAULT NAMING ITS WIDTH INSTEAD OF A VALUE, EVERY OVERFLOW MESSAGE SAYS A NUMBER THE MACHINE STORES (A VALUE, AN ADDRESS OR A CALL'S RETURN TAG) OUTGREW ITS FIELD, AND A TM OR rxm RUN A RAISED CAP CARRIES FURTHER REPORTS HOW FAR IT HAS GONE, NOT THE CAP (2026-11-16, branch `tm-return-tag`, `649fd0f..b01ba64`, 15 commits, the code ending at `31be292` but for a test's comment in `c644009`, and this entry's earlier versions, `479b45e`, `09641ed` and `b01ba64`, among them, plus this update of the entry)
+
+Two wrong TM values and one wrong length, found on 2026-11-16. The lane's record is
+`~/temp/redextape-tm-return-tag-record/`, `$R` below: `brief.md` holds the two wrong values and the
+user's rulings on them, and its ADDENDUM 2 the user's ruling on the steps row and the controller's
+calls; `progress.md` holds the work, `review-1.md` the review, and the logs the runs this entry
+quotes. The controller's ledger, `~/temp/redextape-ui-lanes-ledger.md`, records the user's ruling
+that the return-tag fix ship as its own PR first.
+The design doc is `docs/superpowers/specs/2026-11-16-tm-return-tag-design.md`, which holds the
+enumerations in full.
+
+##### WHAT CHANGED AND WHY
+
+- **A binary return tag that does not fit.** Under binary auto-fit, `fn f(x) { x } let c = 1; if c
+  == 0 { f(0) + …sixteen calls… + 7 } else { f(3) }` answered `10` where the reference answers `3`,
+  with no overflow. The `else` call is call site 16; `Binary::push_frame` wrote its return tag cut to
+  four bits, as 0, and `dispatch_tag` resumed after call site 0. `push_frame` now sends a tag that
+  does not fit to the overflow guard, as `write_literal` does a literal, so auto-fit widens (to 8)
+  and a pinned width 4 halts in `overflow`; `dispatch_tag` compares only call sites whose ordinal
+  fits, so a cut ordinal can never shadow a real tag. Unary is not affected: its tags are unbounded
+  mark runs. The design doc enumerates every number derived from the program's structure, in both
+  encodings, and found no other.
+- **A continued run that halts in `overflow`.** Auto-fit keeps the narrowest width whose attempt did
+  not overflow, and an attempt the step cap stopped has not overflowed yet. In the web app a raised
+  cap then carried the cursor into the guard, and `tm_value` decoded its cut fields: binary `let a =
+  9; let b = 9; a + b` under a ten-step cap answered `0`, and with the real 5,000,000-step cap `fn
+  g(n) { if n == 0 { 1 } else { g(n - 1) * g(n - 1) } } g(13) + 20` answered `1` where the answer is
+  21. `tm_value` now answers a fault that names the width and, below 64 cells, points at a wider
+  one; at 64, the widest, it names the encoding's limit instead.
+- **The overflow words (review findings M2 and M3).** The fault said "a value outgrew", but a
+  return tag can be what outgrew; and a copy of the session's machine said "this is the encoding's
+  limit" at every width, false below 64. Checking the class found a third kind: every value of
+  `head(tail([0, …twenty zeros]))` is 0, yet `emit --field-width 4` refused it with "a value does not
+  fit" (twenty cells need a five-bit address), and seventy zeros under unary were refused at the
+  64-cell ceiling the same way. One phrase, `tm::OVERFLOWING_NUMBER`, "a number the machine stores (a
+  value, an address or a call's return tag)", is now in every overflow message: the web app's fault
+  and decline reason, `redextape run`'s two and `redextape emit`'s refusal. `overflowed_at(width,
+  from)` is the one place the web app words the fault, for the session's leg and every copy, and
+  below 64 both say "it needs a field wider than N cells".
+- **A continued run's length.** After a raised cap carried a TM run to a halt, the `steps` row (the
+  strip and the inspector) showed the cap, 5,000,000 under the default caps, as the run's length,
+  because `TmStatus::total_steps` was always `compile`'s count; after a continue that stopped at a
+  cap again it said `stopped after <compile's count> at a cap`, a stop the cursor had gone past. The
+  rxm row did both. While `compile`'s run was capped, each leg's `total_steps` is now the larger of
+  `compile`'s count and the cursor's: at a halt or a fault the run's length, beside the value read
+  off the cursor, and at a later cap where that cap stopped the run. A rewind puts it back to
+  `compile`'s count with the value.
+- **The review's other findings:** `Builder::overflow`'s doc names the return tag among what reaches
+  it (M1); `tm_value`'s doc names the fault (M4); `stack_push_literal` and `branch_on_equals` state
+  that their constant must fit and `debug_assert!` it, with two unit tests compiled only with debug
+  assertions, since a release build drops a `debug_assert!`: `check-slow.sh --all` runs the whole
+  suite in release, though by default, and in CI, the script runs only the `#[ignore]` slow tier
+  (M5).
+
+##### DECISIONS
+
+The user's, all on 2026-11-16:
+
+- **The return-tag fix ships as its own PR first, and a tag that does not fit goes to the overflow
+  guard**, the way a literal does, rather than any other repair.
+- **The continued-overflow fix is in this PR, and its behaviour is "say it overflowed"**: a TM that
+  halts in `overflow` never reports a value; its status names its width and points at a wider one,
+  with no automatic re-fit or re-run.
+- **The steps row's cap is fixed here too.**
+
+The controller's:
+
+- **The rxm leg's twin of the steps row is fixed with it**, as the same mistake, and so is a
+  continue that stops at a cap again, which this entry's first version listed as not closed. The
+  controller's dispatch asked for the steps-row fix test-first, and for every other place a run's
+  length is shown, λ included, to be checked.
+- **Review 1's findings are all fixed**, M2's and M3's overflow words among them; the words
+  themselves are the implementer's.
+
+The implementer's:
+
+- **`dispatch_tag` trims `exits` to the fitting prefix before the chain**, so its defensive last
+  exit is a site a frame can name.
+- **The overflow travels as the value's `Fault`**, the shape a `.tm` buffer already used, not as a
+  new `TmStatus` field; the rows already show the width beside it.
+- **The words for M2 and M3**: one phrase that names addresses as well as return tags, from the
+  probes above, as one constant in core that the CLI and the web app share; and one function,
+  `overflowed_at`, that words the session's fault and a copy's alike. Help text that describes what
+  binary holds ("a far larger value") or what auto-fit does ("until the values fit") is unchanged.
+- **The length is how far the run has gone**: while `compile`'s run was capped, the larger of its
+  count and the cursor's, so at an end the length is the one beside the value read off the cursor,
+  and the figure never falls back to `compile`'s while the cursor is past it, after a second
+  `[continue]` for instance.
+- **`tm_value`'s doc was shortened to make room** for the fault's paragraph, since the comment
+  guard does not let an over-cap block grow. The measurements it quoted were dropped, and so was its
+  paragraph on the two producers of `HitCap` (the step budget and the live-cell budget, which no
+  test can tell apart); `results.ts`'s TM comment, beside the count it is about, still makes that
+  point.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The narrow-window strip cuts the width part of the overflow message** (review 1, extra item 3).
+  `.results .segment` is `nowrap` with an ellipsis and the full text in its `title`, so a narrow
+  window loses " · width 4" and then "wider than 4 cells"; the inspector wraps and shows all of it.
+  The new phrase makes the fault longer, so the strip cuts it sooner.
+- **The fault says "this run was fitted to"**, true while the width is always auto-fitted. The
+  `tm-width` lane, stacked on this branch, adds a pinned width and a third wording to
+  `overflowed_at`; whichever lands second keeps the words true.
+- **The pointer to a wider width is words only**: `main` has no width control (the `tm-width` lane's
+  job), and nothing re-fits a continued run.
+- **`TmStatus` carries no overflow**: `run` reads `Ended` beside the fault, and only the value says
+  why.
+- **A recording stopped on its history budget past `compile`'s count still reads "stopped after N
+  at a cap"** in the TM and rxm `steps` rows (found by reading): N is now how far the run has gone,
+  but no cap stopped it there, and the rows cannot tell that stop from a cap's without a web change.
+- **A corrupted binary STACK with a tag no site compares falls through to the last fitting site**,
+  as on `main` (review 1, extra item 1); no lowered program can produce one.
+
+##### VERIFICATION
+
+Run on 2026-11-16 in the lane's worktree, after the rebase onto `main` at `19256df`, at
+`b01ba64`: the entry's third version on `c644009`, the last commit to touch a source file. Every
+command below, `check-all` and the scans included, ran in one `systemd-run --user` unit,
+`$R/gate4/run.sh`, each into its log in `$R/gate4/`, which ends with the command's exit status;
+`pnpm run build:wasm`, `build:lsp-wasm` and `build:bindings` ran (exit 0 each) before the web legs:
+
+```
+cargo nextest run -p redextape-wasm
+  -p redextape-core --no-fail-fast           → exit 0; "1476 tests run: 1476 passed, 32 skipped"
+                                               (nextest-wasm-core.log)
+pnpm exec biome ci --error-on-warnings       → exit 0 (biome.log)
+pnpm run typecheck                           → exit 0 (typecheck.log)
+pnpm run test:coverage                       → exit 0; "Test Files 291 passed (291)",
+                                               "Tests 3240 passed (3240)" (test-coverage.log)
+pnpm run build:app                           → exit 0 (build-app.log)
+cargo llvm-cov nextest --workspace
+  --fail-under-lines 90                      → exit 0; "1971 tests run: 1971 passed, 33 skipped",
+                                               lines 95.70% (llvm-cov.log)
+scripts/check-slow.sh                        → exit 0; "slow tier green", 33 tests passed (check-slow.log)
+TREE_SITTER=$R/tools/tree-sitter
+  scripts/check-all.sh --no-llvm             → exit 0; 42 commands, the largest nextest run "1971
+                                               tests run: 1971 passed, 33 skipped" (check-all.log)
+```
+
+`check-all` and the scans ran with the entry's third version (`b01ba64`) in the tree, before this
+update moved its SHAs to the rebased commits and its figures to this run's. Each of
+`scripts/check-text-bytes.sh`, `check-citations.sh`, `check-attributions.sh`,
+`check-doc-figures.sh`, `check-shared-docs.sh`, `check-colours.sh`, `check-lua.sh`,
+`check-grammar-wasm.sh` and `check-licences.sh` exits 0 with `--self-test` and then alone, and `node
+scripts/check-comments.mjs` with `--self-test` and then `--base 19256df` (`$R/gate4/scan-*.log`).
+
+After a fact-check of this entry (`$R/factcheck-1.md`), `c644009` rewords the comment on
+`binary.rs`'s two debug-only tests and corrects the design doc. Its pre-commit hook passed before
+the rebase (fmt, clippy `-D warnings` and the always-run scans, each with its self-test, while
+`check-lua`, the only file-scoped scan, was skipped; `$R/commit-factcheck.log`), and at `b01ba64`
+`cargo nextest run -p redextape-core --no-fail-fast` exits 0, "1331 tests run: 1331 passed, 32
+skipped", the two tests among them (`$R/gate4/nextest-core.log`). After a second fact-check
+(`$R/factcheck-2.md`) and the rebase, this update moves the entry's SHAs and figures as above. With
+it in the tree, the nine scans above exit 0 with `--self-test` and then alone, and `node
+scripts/check-comments.mjs` with `--self-test` and then `--base 19256df` (`$R/gate5/scan-*.log`).
+
+Not run: the Docker image, since nothing here adds a build output the web app imports. Nothing has
+been pushed, so no CI run has seen the branch.
+
+**Every count this entry quotes, with what produces it.** A log named in a row is in `$R`; a row
+naming a test gives the figure as that test's failure printed it before its fix.
+
+| Value | What | Produced by |
+|---|---|---|
+| 15; `649fd0f`, `b01ba64` | commits in the range; its first and last | `git rev-list --count 19256df..b01ba64`; `git rev-list --reverse 19256df..b01ba64 \| head -1` (figures-4.log) |
+| 17, 707, 85 | files changed, insertions and deletions in the range, the roadmap aside | `git diff --stat 19256df..b01ba64 -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md'`, its last line (figures-4.log) |
+| one file, 2 and 2 | the range's change under `web/`, a comment in `results.ts` | `git diff 19256df..b01ba64 --stat -- web/` (figures-4.log) |
+| 5; 0, 0 | review 1's Minor findings; its Critical and Important ones | `review-1.md`, its "Counts" line |
+| 16, 17 | the probe's ordinal past four bits, and its call sites | `many_call_sites_src` in `crates/redextape-core/tests/tm_oracle.rs`; `assert_many_call_sites_agree` asserts at least 17 |
+| `10`, `3` | the binary TM's answer before the fix, and the reference's | `a_binary_return_tag_wider_than_the_fitted_width_still_returns_to_its_own_call_site` failing before `9601f03` (tests-before-fix.log); `redextape run return-tag-probe.rxt` prints 3 (probes-2.log) |
+| 8 | the width auto-fit settles on for the probe | `redextape emit --no-config --lang tm --encoding binary return-tag-probe.rxt`, its `width` line (probes-2.log); `a_binary_return_tag_that_does_not_fit_a_pinned_width_overflows` |
+| `0`; 18 | `9 + 9`'s answer after a ten-step cap and a continue, before `fb965b2`; the right one | `a_raised_tm_cap_driven_into_overflow_reports_no_value` failing (addendum-before-fix.log) |
+| 5,000,000 | the TM step cap, and the cell cap | `crates/redextape-core/src/tm/sim.rs`, `DEFAULT_CAPS` |
+| `1`; 21 | `g(13) + 20`'s TM answer under the real cap, continued, before `fb965b2`; the reference's | a temporary session test, since removed (real-cap-probe-main-behaviour.log); `redextape run cap-probe.rxt` (probes-2.log) |
+| 0, 8; 2 | every value of the twenty-zero probe, and its binary auto-fit width; `--field-width 4`'s exit | `redextape run addr-probe.rxt`; `redextape emit … --encoding binary` and `… --field-width 4` (addr-probes.log) |
+| seventy; 64 | zeros in the unary probe; the ceiling it was refused at | `addr-probe-unary.rxt`; `redextape emit --no-config --lang tm --encoding unary addr-probe-unary.rxt` (addr-probes.log) |
+| 4 | wording tests failing on the old words | `cargo nextest run -p redextape-wasm -E 'test(/overflow\|widest_width/)'` before `f3c9395`, "5 tests run: 1 passed, 4 failed" (m2m3-before.log) |
+| 2 | M5's unit tests failing before the assertions | `cargo nextest run -p redextape-core --lib -E 'test(/wider_than_the_field_is_refused/)'` before `cbb500b`, "2 tests run: 0 passed, 2 failed" (m5-before.log) |
+| 10, 348; 3, 8 | the TM row's `total_steps` after the continue, and the uncapped run's; the rxm row's, and its | `cargo nextest run -p redextape-wasm -E 'test(/carried_to_a_halt_by_a_raised_cap/)'` before `bfd5dcd`, its `left`/`right` lines (steps-before.log) |
+| 3, 10 | the faulting rxm program's count with `bfd5dcd`'s `Faulted` arm sabotaged, and its real length | the same command (sabotage-steps-fault-arm.log); restored and `cmp`-checked |
+| 10, 110; 3, 5 | the TM row's `total_steps` after a continue that stopped at a raised cap, and the right count; the rxm row's, and its | `cargo nextest run -p redextape-wasm --no-fail-fast -E 'test(/raised_cap_stops_short_again/)'` before `31be292`, its `left`/`right` lines (again-before.log) |
+| 0; 10, 3 | both rows' count after a rewind with `compile`'s count sabotaged out of the larger-of; the right ones | `cargo nextest run -p redextape-wasm --no-fail-fast -E 'test(/raised_cap/) \| test(/total_steps/) \| test(/rxm/)'` (sabotage-again-cursor-only.log); restored and `cmp`-checked |
+| 1476, 32 | `redextape-wasm` and `redextape-core` tests run and skipped | the first command above, its summary line (`$R/gate4/nextest-wasm-core.log`) |
+| 291, 3240; 1971, 33; 95.70%; 33 | web test files and tests; Rust tests run and skipped; line coverage; slow-tier tests | the commands above, their summary lines (`$R/gate4/`); the slow tier's is the sum of its `test result: ok. N passed` lines |
+| 42 | `check-all`'s commands: its 47 `==>` lines less the five that report a tool it found (`using …` and `chromedriver … already matches`) | `grep '^==> ' $R/gate4/check-all.log \| grep -vc -e '^==> using ' -e '^==> chromedriver .* already matches'`; `grep -c '^==> '` for the 47 |
+| 1331, 32 | `redextape-core` tests run and skipped at `b01ba64` | `cargo nextest run -p redextape-core --no-fail-fast`, its summary line (`$R/gate4/nextest-core.log`) |
+| 45; 12, 4, 3 | figures `check-doc-figures.sh` pins; shared regions, files and sources | `scripts/check-doc-figures.sh`; `scripts/check-shared-docs.sh` (`$R/gate4/scan-doc-figures.log`, `scan-shared-docs.log`, and the same in `$R/gate5/`) |

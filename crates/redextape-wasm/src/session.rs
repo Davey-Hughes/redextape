@@ -57,8 +57,8 @@ use redextape_wire::{
 pub const MAX_PRINT_DEPTH: u32 = 1_000;
 
 /// Why the TM leg is absent. `TmRun` already distinguishes these and the UI must not flatten them:
-/// `TooLarge` means lowering REFUSED and the program never ran a step; `Overflow` means a value does
-/// not fit the encoding at any width up to the ceiling; `Lower` means it could not be lowered at all.
+/// `TooLarge` means lowering REFUSED and the program never ran a step; `Overflow` means a number the machine
+/// stores does not fit the encoding at any width up to the ceiling; `Lower` means it could not be lowered at all.
 /// `HitCap` is deliberately NOT here — a run that started and ran out of budget produces a working
 /// cursor, which is what `raise_cap` exists for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -351,7 +351,13 @@ impl RxmLeg {
             Some(trace::RxmStatus::Halted | trace::RxmStatus::Faulted(_)) => (RunStatus::Ended, None),
             Some(trace::RxmStatus::Capped(cap)) => (RunStatus::Capped, Some(*cap)),
         };
-        RxmStatus { available: true, reason: String::new(), run: Some(run), cap, total_steps: Some(self.total_steps) }
+        // `Session::tm_status`'s rule: past where `compile`'s capped run stopped, to the halt or fault `value` reads
+        // or to a later cap, the run has gone as far as the cursor.
+        let total_steps = match &self.end {
+            RxmEnd::Capped => self.total_steps.max(self.cursor.steps_taken()),
+            RxmEnd::Halted(_) | RxmEnd::Faulted { .. } => self.total_steps,
+        };
+        RxmStatus { available: true, reason: String::new(), run: Some(run), cap, total_steps: Some(total_steps) }
     }
 
     /// Back to step 0 under the caps `run` opened the cursor with.
@@ -496,6 +502,32 @@ fn tm_run_status(status: Option<tm::TmStatus>) -> RunStatus {
         Some(tm::TmStatus::Halted) => RunStatus::Ended,
         Some(tm::TmStatus::HitCap) => RunStatus::Capped,
     }
+}
+
+/// Where the width of a machine that halted in its overflow guard came from, which `overflowed_at` names.
+#[derive(Clone, Copy, Debug)]
+enum FieldFrom {
+    /// The session's leg: auto-fit chose it from `compile`'s run, which a raised cap carried further.
+    Fit,
+    /// A copy or a `.tm` buffer: its header records it.
+    Header,
+}
+
+/// The answer for a machine that halted in its overflow guard at `width`: a fault, never the value its cut fields
+/// decode to. Nothing is fitted or run again, so below the widest width the words point at a wider one, and at it
+/// they name the encoding's limit. The session's leg and every copy word an overflow here, so they cannot disagree.
+fn overflowed_at(width: usize, from: FieldFrom) -> Decoded {
+    let what = tm::OVERFLOWING_NUMBER;
+    let field = match from {
+        FieldFrom::Fit => format!("the {width}-cell tape field this run was fitted to"),
+        FieldFrom::Header => format!("the {width}-cell tape field its header records"),
+    };
+    let message = if width < tm::MAX_FIELD_WIDTH {
+        format!("{what} outgrew {field}; it needs a field wider than {width} cells")
+    } else {
+        format!("{what} outgrew {field}, the widest there is; this is the encoding's limit")
+    };
+    Decoded::Fault { message }
 }
 
 /// Advance `leg` up to `budget` β-steps, then report where the run stands. The shared body of
@@ -778,13 +810,19 @@ impl Session {
                 reason: String::new(),
                 width: Some(p.width),
                 run: Some(tm_run_status(c.status())),
-                total_steps: self.total_steps,
+                // When `compile`'s run stopped at a cap, a raised one can carry the cursor past it, to the halt
+                // `tm_value` reads or to a later cap, and the run has then gone as far as the cursor: its count is the
+                // length beside that answer, or the "stopped after" count beside `Unfinished`.
+                total_steps: match &self.final_tapes {
+                    None => self.total_steps.map(|compiled| compiled.max(c.steps_taken())),
+                    Some(_) => self.total_steps,
+                },
             },
             Err(d) => {
                 let reason = match d {
                     TmDecline::TooLarge => "the machine this program needs is too large to build".to_string(),
                     TmDecline::Overflow => {
-                        "a value does not fit the encoding at any width up to the ceiling".to_string()
+                        format!("{} does not fit the encoding at any width up to the ceiling", tm::OVERFLOWING_NUMBER)
                     }
                     TmDecline::Lower(what) => format!("the program could not be lowered: {what}"),
                 };
@@ -893,33 +931,29 @@ impl Session {
 
     /// The TM leg's answer, decoded from the run `compile` already performed.
     ///
-    /// **NO SECOND RUN.** `compile` calls `run_tm_described_program`, which simulates the machine to a halt;
-    /// driving the cursor for the same answer would simulate the `map` demo's 344,999 steps twice.
-    /// The cursor exists for WATCHING a run.
+    /// **NO SECOND RUN.** `compile` simulates the machine to a halt, and driving the cursor for the same answer
+    /// would simulate the run twice. The cursor exists for WATCHING a run.
     ///
-    /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK.** `final_tapes` is written once, by
-    /// `compile`, and a `HitCap` compile writes `None` — but `raise_tm_cap` then lets a caller drive
-    /// the cursor to a halt, at which point the session holds a final configuration that `final_tapes`
-    /// does not. Reading `final_tapes` alone would answer `Unfinished` forever for exactly the run
-    /// `RunStatus::Capped` invites the caller to continue: `tm_status().run` says `Ended` while
-    /// this says `Unfinished`, both reporting on the same machine. The fallback decodes tapes the
-    /// cursor ALREADY HOLDS, so the "no second run" property above survives it intact.
+    /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK.** A `HitCap` compile records no
+    /// `final_tapes`, and `raise_tm_cap` then lets a caller drive the cursor to a halt; read alone, `final_tapes`
+    /// would answer `Unfinished` forever beside a `tm_status().run` of `Ended`. The fallback decodes tapes the
+    /// cursor already holds, so there is still no second run, and `Unfinished` means no final configuration at all.
     ///
-    /// `Unfinished` therefore means there is no final configuration ANYWHERE — no halted run recorded
-    /// at compile time and a cursor that has not itself halted.
+    /// **A CURSOR HALTED IN THE OVERFLOW GUARD ANSWERS A `Fault`, NEVER A VALUE**: a capped attempt can stop before
+    /// the number that outgrows its width is written, and the guard's tapes hold fields cut to that width. The fault
+    /// names the width (`overflowed_at`); `tm_status().run` reads `Ended` beside it, since the machine did halt.
     ///
-    /// `TooLargeToPrint` IS A REAL OUTCOME TOO: `decode_tape_ty` answered `Some(v)` and only
-    /// `decoded_value`'s capped print refused — `decode_tape_ty` memoizes, so a `tails`-shaped program
-    /// reaches this at ~4,471 elements, far below any run cap.
-    ///
-    /// **THE `HitCap` THAT PUTS IT THERE HAS TWO PRODUCERS, NOT ONE.** `TmCursor` caps on the step
-    /// budget and on the live-CELL budget, and `trace.rs` says outright that no test can tell those two
-    /// apart. Under the second, `total_steps` is the count reached when cells ran out — well below
-    /// `caps.steps` — so a reader must not take a capped run's length as evidence of which wall it hit.
+    /// `TooLargeToPrint` is a real outcome too: the decode succeeded and only `decoded_value`'s capped print refused.
     pub fn tm_value(&self) -> Result<Decoded, SessionError> {
-        let (_, cursor, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
+        let (_, cursor, header, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
         let tapes: &[Tape] = match &self.final_tapes {
             Some(t) => t,
+            // Only the cursor can be here: `final_tapes` holds a `TmRun::Ran`, which never ended in the guard.
+            None if cursor.status() == Some(tm::TmStatus::Halted)
+                && tm::is_overflow_guard(cursor.machine(), cursor.state()) =>
+            {
+                return Ok(overflowed_at(header.width, FieldFrom::Fit));
+            }
             None if cursor.status() == Some(tm::TmStatus::Halted) => cursor.tapes(),
             None => return Ok(Decoded::Unfinished),
         };
@@ -930,7 +964,8 @@ impl Session {
     // --- the rxm leg --------------------------------------------------------------------------
 
     /// Whether the rxm leg is there, how its cursor stands and which cap stopped it — see `RxmStatus`. `run`
-    /// and `cap` are read off the CURSOR, and `total_steps` off `compile`'s run, the split `tm_status` makes.
+    /// and `cap` are read off the CURSOR, and `total_steps` off `compile`'s run until a raised cap carries the cursor
+    /// past it, the split `tm_status` makes.
     pub fn rxm_status(&self) -> RxmStatus {
         match &self.rxm {
             Ok(leg) => leg.status(),
@@ -1772,12 +1807,7 @@ impl TmValueRun {
                 let name = self.cursor.machine().states.get(s as usize).map_or("?", |st| st.name.as_str());
                 Decoded::Fault { message: format!("halted in `{name}`, which is not an accept state") }
             }
-            tm::RunFailure::Overflow => Decoded::Fault {
-                message: format!(
-                    "a value outgrew the {}-cell tape field its header records; this is the encoding's limit",
-                    self.header.width
-                ),
-            },
+            tm::RunFailure::Overflow => overflowed_at(self.header.width, FieldFrom::Header),
             tm::RunFailure::Decode(tm::DecodeFailure::Mismatch) => Decoded::Undecodable,
             tm::RunFailure::Decode(tm::DecodeFailure::BudgetExhausted) => Decoded::Fault {
                 message: "ran out of decode budget; the value may be fine, and this is the tool's limit".to_owned(),
@@ -2337,6 +2367,60 @@ mod tests {
         let value = Ok(Decoded::Value { text: "[1, 2, 3]".to_string() });
         assert_eq!(s.rxm_value(), value);
         assert_eq!(compile().rxm_value(), value);
+    }
+
+    /// The rxm leg's twin of the TM leg's raised-cap length: once a raised cap carries the cursor to its end, a
+    /// halt or a fault, `total_steps` is that run's length, the count an uncapped compile reports, beside the value
+    /// read off it.
+    #[test]
+    fn an_rxm_run_carried_to_a_halt_by_a_raised_cap_reports_its_own_length() {
+        for src in ["[1, 2, 3]", "head(tail(tail(tail([1, 2, 3]))))"] {
+            let whole = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
+            let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
+            let mut s = Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, caps)
+                .session
+                .expect("compiles");
+            assert_eq!(s.rxm_status().total_steps, Some(3), "the premise: compile's run stopped at the cap: {src}");
+
+            while s.step_rxm().expect("rxm available") {}
+            s.raise_rxm_cap(1_000).expect("rxm available");
+            while s.step_rxm().expect("rxm available") {}
+            assert_eq!(s.rxm_status().run, Some(RunStatus::Ended), "{src}");
+            assert_eq!(s.rxm_value(), whole.rxm_value(), "the premise: the cursor ended as compile's run did: {src}");
+            assert!(whole.rxm_status().total_steps > Some(3), "the premise: the whole run outlasts the cap: {src}");
+            assert_eq!(s.rxm_status().total_steps, whole.rxm_status().total_steps, "{src}");
+        }
+        let faulted = Session::compile("head(tail(tail(tail([1, 2, 3]))))", EncodingKind::Unary).session;
+        let value = faulted.expect("compiles").rxm_value();
+        assert!(matches!(value, Ok(Decoded::Fault { .. })), "the premise: the second program faults: {value:?}");
+    }
+
+    /// The rxm leg's twin of the TM leg's raised cap that stops short again: `total_steps` is how far the run has
+    /// gone, at the new cap or mid-recording, and `compile`'s count again once rewound.
+    #[test]
+    fn an_rxm_run_a_raised_cap_stops_short_again_reports_how_far_it_has_gone() {
+        for src in ["[1, 2, 3]", "head(tail(tail(tail([1, 2, 3]))))"] {
+            let whole = Session::compile(src, EncodingKind::Unary).session.expect("compiles").rxm_status();
+            let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
+            let mut s = Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, caps)
+                .session
+                .expect("compiles");
+            assert!(whole.total_steps > Some(6), "the premise: no raise below reaches the run's end: {src}");
+
+            while s.step_rxm().expect("rxm available") {}
+            s.raise_rxm_cap(2).expect("rxm available");
+            while s.step_rxm().expect("rxm available") {}
+            let st = s.rxm_status();
+            assert_eq!((st.run, st.cap), (Some(RunStatus::Capped), Some(RxmCap::Steps)), "{src}");
+            assert_eq!(st.total_steps, Some(5), "stopped at the raised cap: {src}");
+
+            s.raise_rxm_cap(2).expect("rxm available");
+            assert!(s.step_rxm().expect("rxm available"), "the premise: one step short of the new cap: {src}");
+            assert_eq!(s.rxm_status().total_steps, Some(6), "mid-recording: {src}");
+
+            s.rewind_rxm().expect("rxm available");
+            assert_eq!(s.rxm_status().total_steps, Some(3), "rewound: {src}");
+        }
     }
 
     /// An rxm copy's rewind goes back to the caps it was built with.
@@ -2928,6 +3012,128 @@ mod tests {
             Ok(Decoded::Value { text: "[1, 2, 3]".to_string() }),
             "the status says this machine halted, so the value must be the halted machine's"
         );
+    }
+
+    /// `src` compiled under a ten-step TM cap, stepped to that cap, then continued to its halt, which must be in
+    /// the overflow guard at width 4: the capped attempt at 4 stopped before anything outgrew its field, so
+    /// auto-fit kept 4, and the continued cursor's tapes hold fields cut to four bits.
+    fn continued_into_overflow(src: &str) -> Session {
+        let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
+        let mut s = Session::compile_with_caps(src, EncodingKind::Binary, caps, tm::rxm::DEFAULT_CAPS)
+            .session
+            .expect("a capped run yields a working session");
+        assert_eq!(s.tm_status().width, Some(4), "the capped attempt at 4 overflowed nothing, so auto-fit kept 4");
+
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Capped), "the premise: the budget ran out first");
+        s.raise_tm_cap(1_000_000, 0).expect("TM available");
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Ended));
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        let halted = &cursor.machine().states[cursor.state() as usize];
+        assert!(
+            halted.name == tm::build::OVERFLOW_STATE && !halted.accept,
+            "the premise: the continued run halted in the overflow guard, not in `{}`",
+            halted.name
+        );
+        s
+    }
+
+    /// The words a TM leg fitted to four cells answers once its continued run halts in the guard.
+    const FITTED_4_OVERFLOW: &str = "a number the machine stores (a value, an address or a call's return tag) outgrew \
+                                     the 4-cell tape field this run was fitted to; it needs a field wider than 4 cells";
+
+    /// `9 + 9` needs five bits, and ten steps at four reach no overflow. The continued machine's cut fields
+    /// decode without complaint to a wrong number, so the answer is a fault that names the width and asks for a
+    /// wider one, never a value.
+    #[test]
+    fn a_raised_tm_cap_driven_into_overflow_reports_no_value() {
+        let s = continued_into_overflow("let a = 9; let b = 9; a + b");
+        assert_eq!(s.tm_value(), Ok(Decoded::Fault { message: FITTED_4_OVERFLOW.to_string() }));
+    }
+
+    /// A call's return tag reaches the same guard with every value fitting: of seventeen call sites, the one the
+    /// `else` branch takes is ordinal 16, which needs five bits, while the values it computes are 1, 0 and 3. So
+    /// the words cannot say only that a value outgrew the field.
+    #[test]
+    fn a_return_tag_continued_into_overflow_is_named_in_the_fault() {
+        let calls = vec!["f(0)"; 16].join(" + ");
+        let s =
+            continued_into_overflow(&format!("fn f(x) {{ x }} let c = 1; if c == 0 {{ {calls} + 7 }} else {{ f(3) }}"));
+        assert_eq!(s.tm_value(), Ok(Decoded::Fault { message: FITTED_4_OVERFLOW.to_string() }));
+    }
+
+    /// At the widest width there is no wider one to point at, so the words name the encoding's limit.
+    #[test]
+    fn an_overflow_at_the_widest_width_points_at_no_wider_one() {
+        assert_eq!(
+            overflowed_at(tm::MAX_FIELD_WIDTH, FieldFrom::Fit),
+            Decoded::Fault {
+                message: "a number the machine stores (a value, an address or a call's return tag) outgrew the \
+                          64-cell tape field this run was fitted to, the widest there is; this is the encoding's limit"
+                    .to_string()
+            }
+        );
+    }
+
+    /// Once a raised cap carries the cursor to a halt, `total_steps` is that run's length, not the count `compile`'s
+    /// capped run stopped at: the results row reads it as the length beside the value the cursor's tapes hold, so
+    /// it must be the count an uncapped compile reports. Rewound, the cursor no longer holds the end, and both
+    /// answers go back to `compile`'s run.
+    #[test]
+    fn a_tm_run_carried_to_a_halt_by_a_raised_cap_reports_its_own_length() {
+        let src = "let a = 2; let b = 3; a + b";
+        let compile = |steps| {
+            let caps = tm::TmCaps { steps, cells: tm::TM_DEFAULT_CAPS.cells };
+            Session::compile_with_caps(src, EncodingKind::Binary, caps, tm::rxm::DEFAULT_CAPS)
+                .session
+                .expect("compiles")
+        };
+        let whole = compile(tm::TM_DEFAULT_CAPS.steps).tm_status();
+        let mut s = compile(10);
+        assert_eq!(s.tm_status().total_steps, Some(10), "the premise: compile's run stopped at the cap");
+        assert_eq!(s.tm_status().width, whole.width, "the premise: both runs are of the same machine");
+
+        while s.step_tm().expect("TM available") {}
+        s.raise_tm_cap(1_000_000, 0).expect("TM available");
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Ended));
+        assert_eq!(s.tm_value(), Ok(Decoded::Value { text: "5".to_string() }));
+        assert!(whole.total_steps > Some(10), "the premise: the whole run is longer than the cap");
+        assert_eq!(s.tm_status().total_steps, whole.total_steps);
+
+        s.rewind_tm().expect("TM available");
+        assert_eq!((s.tm_status().total_steps, s.tm_value()), (Some(10), Ok(Decoded::Unfinished)));
+    }
+
+    /// A raised cap that stops the cursor short again: `total_steps` is how far the run has gone, the cursor's count
+    /// once it is past `compile`'s, at the new cap or mid-recording. Beside `Unfinished` the row reads "stopped after
+    /// N at a cap", and `compile`'s count would name a stop the cursor has gone past. Rewound, it is `compile`'s again.
+    #[test]
+    fn a_tm_run_a_raised_cap_stops_short_again_reports_how_far_it_has_gone() {
+        let src = "let a = 2; let b = 3; a + b";
+        let whole = Session::compile(src, EncodingKind::Binary).session.expect("compiles").tm_status();
+        let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
+        let mut s = Session::compile_with_caps(src, EncodingKind::Binary, caps, tm::rxm::DEFAULT_CAPS)
+            .session
+            .expect("compiles");
+        assert!(whole.total_steps > Some(160), "the premise: no raise below reaches the run's end");
+
+        while s.step_tm().expect("TM available") {}
+        s.raise_tm_cap(100, 0).expect("TM available");
+        while s.step_tm().expect("TM available") {}
+        assert_eq!((s.tm_status().run, s.tm_value()), (Some(RunStatus::Capped), Ok(Decoded::Unfinished)));
+        assert_eq!(s.tm_status().total_steps, Some(110), "stopped at the raised cap");
+
+        s.raise_tm_cap(100, 0).expect("TM available");
+        for _ in 0..50 {
+            s.step_tm().expect("TM available");
+        }
+        assert_eq!(s.tm_status().run, Some(RunStatus::Running), "the premise: stepped short of the new cap");
+        assert_eq!(s.tm_status().total_steps, Some(160), "mid-recording");
+
+        s.rewind_tm().expect("TM available");
+        assert_eq!(s.tm_status().total_steps, Some(10), "rewound");
     }
 
     /// An absent TM leg is an error, matching every other TM method.
@@ -3857,7 +4063,8 @@ state halt: accept
             .expect("the fixture lays out");
         assert!(matches!(d.run, tm::TmRun::Overflow), "the premise: {:?}", d.run);
         let (_end, got) = run_out(&mut tm_scratch(&tm::print_tm_with(&d.machine, &d.header)).value.expect("header"));
-        let message = "a value outgrew the 4-cell tape field its header records; this is the encoding's limit";
+        let message = "a number the machine stores (a value, an address or a call's return tag) outgrew the 4-cell \
+                       tape field its header records; it needs a field wider than 4 cells";
         assert_eq!(got, Decoded::Fault { message: message.into() });
     }
 

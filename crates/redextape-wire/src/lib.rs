@@ -45,16 +45,16 @@ pub enum RunStatus {
 /// | | `Value` | `TooLargeToPrint` | `Undecodable` | `Unfinished` | `Fault` |
 /// | --- | --- | --- | --- | --- | --- |
 /// | `lambda_value` | ✅ | ✅ | ✅ | the cursor has not reached `Ended` | — |
-/// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | — |
+/// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | a raised cap ran it into `overflow` |
 /// | `rxm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since ended | ✅ |
 /// | `evaluate` | ✅ | ✅ | — | — | ✅ |
 ///
 /// `tm_value`'s `Unfinished` is NOT λ-specific: `compile` gives both `Ran` and `HitCap` a working
 /// cursor, so a capped machine is a live session with no tapes to decode. It is also not permanent —
 /// a raised cap can drive that cursor to a halt, and `tm_value` decodes the configuration it stopped
-/// on. There is no state in which the TM leg reports `Ended` and `Unfinished` together.
+/// on, or faults if that is `overflow`. No state has the TM leg report `Ended` and `Unfinished` together.
 ///
-/// **`rxm_value` IS `tm_value`'S SHAPE WITH A FAULT ADDED.** It answers from the run `compile` performed and
+/// **`rxm_value` IS `tm_value`'S SHAPE WITH ITS OWN FAULT.** It answers from the run `compile` performed and
 /// falls back on the cursor after a raised cap, so its `Unfinished` is the TM's; and an rxm program can
 /// fault — `head([])` types, and its `head` meets `nil` — which the cursor reports with the instruction and
 /// the reason. That run has ENDED (`rxm_status().run` is `Ended`), so the fault is the leg's answer,
@@ -123,18 +123,16 @@ pub struct TmStatus {
     pub width: Option<usize>,
     /// Where the CURSOR stands.
     pub run: Option<RunStatus>,
-    /// How long the WHOLE run is, in δ-steps, from the run `compile` performed.
+    /// How long the WHOLE run is, in δ-steps: the run `compile` performed, or the cursor once it has gone further.
     ///
     /// **A DIFFERENT NUMBER ABOUT A DIFFERENT THING THAN `run`**, and both are needed: a renderer
     /// showing "step 40 of 2,870" reads the cursor for the first and this for the second. It does not
-    /// move as the cursor advances, because it was never about the cursor.
+    /// move as the cursor advances over ground `compile`'s run covered: it is not the cursor's position.
     ///
-    /// **FOR A `HitCap` RUN THIS IS THE CAP IT STOPPED AT, NOT THE LENGTH OF A COMPLETED RUN.** The
-    /// machine never reached a final configuration, so there is no length to report — only the budget
-    /// it exhausted. `raise_tm_cap` can then extend that budget and drive the cursor PAST this count,
-    /// so "step N of `total_steps`" can show N exceeding its own total after a cap raise. A consumer
-    /// rendering a progress bar must read `run` to know whether this field is a length or a floor
-    /// before trusting it as one.
+    /// **FOR A `HitCap` RUN THIS IS THE CAP IT STOPPED AT, NOT THE LENGTH OF A COMPLETED RUN**, and a raised cap
+    /// can drive the cursor PAST it, so a consumer reads `run` before taking it for a length. Past it, until a
+    /// rewind, this is the cursor's count, how far the run has gone: at a halt the length beside `tm_value`'s
+    /// answer, and otherwise the furthest it got, so no count names a stop the run has since gone past.
     ///
     /// **`LambdaStatus` HAS NO COUNTERPART, and the asymmetry is real.** The TM's length is known at
     /// compile time because `compile` already ran the machine; λ's is not, because `compile` builds
@@ -202,18 +200,18 @@ pub struct RxmStatus {
     /// `Ended` would name a stop that did not happen — and only `Some(RxmCap::Steps)` names one that
     /// `raise_rxm_cap` resumes.
     pub cap: Option<RxmCap>,
-    /// How long the WHOLE run is, in instructions, from the run `compile` performed (Plan 7 part 5 spec amendment 13).
+    /// How long the WHOLE run is, in instructions, from `compile`'s run (Plan 7 part 5 spec amendment 13) or the cursor's.
     ///
     /// **`compile` RUNS THE PROGRAM TO ITS END TO KNOW THIS, AS IT RUNS THE TM.** `run_rxm` returns no step
     /// count, so `compile` drives an `RxmCursor` to the end and keeps the count and the outcome, and the
     /// cursor a view records is a fresh one. It is a different number about a different thing than `run`,
     /// for `TmStatus::total_steps`'s reason: "instruction 23 of 55" reads the cursor for the first number
-    /// and this for the second, and this does not move as the cursor does.
+    /// and this for the second, and this does not move as the cursor does over ground `compile`'s run covered.
     ///
     /// **FOR A CAPPED RUN IT IS WHERE THE CAP FIRED, NOT THE LENGTH OF A COMPLETED RUN**: 5,000,000 under
     /// `DEFAULT_CAPS`' step cap, and the instructions completed before the refused one under a stack, heap or
-    /// memory cap. A raised step cap can drive the cursor past it, so a renderer reads `run` before it takes
-    /// this for a length — `TmStatus::total_steps`'s caveat.
+    /// memory cap. A raised step cap can drive the cursor past it, and from there, until a rewind, this is the
+    /// cursor's count, to a halt, a fault or a later cap — `TmStatus::total_steps`'s rule.
     ///
     /// **`Some` EXACTLY WHEN THE LEG IS AVAILABLE.** The only decline is a lowering that failed, and a program
     /// that never lowered never ran a step, so there is no count to withhold, unlike the TM's `Overflow`.

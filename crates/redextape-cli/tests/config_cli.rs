@@ -377,21 +377,21 @@ fn a_pinned_field_width_can_refuse_what_auto_fit_accepts() {
         .args(["emit", "p.rxt", "--lang", "tm", "--field-width", "4"])
         .output()
         .unwrap();
-    assert_eq!(pinned.status.code(), Some(2), "a value that does not fit is a refusal");
+    assert_eq!(pinned.status.code(), Some(2), "a number that does not fit is a refusal");
     // **EXIT 2 ALONE CANNOT TELL THE TWO REFUSALS APART, AND THAT IS WHY THIS ASSERTION EXISTS.**
-    // `emit_tm` has an `Overflow` arm ("a value does not fit this encoding's widest tape field")
+    // `emit_tm` has an `Overflow` arm ("… does not fit this encoding's widest tape field")
     // and a `TooLarge` arm ("this program lowers to more than N TM states"), and both exit 2. A
     // regression routing the pinned path through `TooLarge` would keep the code and swap the
     // message, and a code-only test would never see it.
     //
     // **AND THE MESSAGE MUST BE THE PINNED PATH'S OWN, NOT THE AUTO-FIT PATH'S.** The auto-fit message
-    // reads "a value does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)",
+    // reads "… does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)",
     // where 64 was never attempted here — the field was 4 — and then suggests `--encoding binary`,
     // which does not lift a pin (`--encoding binary --field-width 4` refuses this same program; `8`
     // emits). So the width tried and the setting that pinned it are what is asserted.
     let text = String::from_utf8(pinned.stderr).unwrap();
     assert!(
-        text.contains("a value does not fit a 4-cell tape field"),
+        text.contains("does not fit a 4-cell tape field"),
         "the pinned refusal must be the OVERFLOW one, not `TooLarge`, and must name the width it tried: {text}"
     );
     assert!(text.contains("`--field-width 4` pinned it"), "and the setting that chose that width: {text}");

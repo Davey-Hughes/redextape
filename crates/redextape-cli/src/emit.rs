@@ -450,10 +450,11 @@ fn emit_described(
             };
             writeln!(
                 err,
-                "error: no machine was written: a value does not fit {what}\n  \
+                "error: no machine was written: {} does not fit {what}\n  \
                  the program is fine — but the machine would halt in its `overflow` state, and `redextape run` \
                  would find no value on its tapes and exit 2\n  \
-                 {remedy}"
+                 {remedy}",
+                redextape_core::tm::OVERFLOWING_NUMBER
             )?;
             Ok(None)
         }

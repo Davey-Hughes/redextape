@@ -15,7 +15,8 @@
 //!     has no analogue here: every field is the same length and both digits are content.
 //!
 //! Overflow is still real, and still routes to `Builder::overflow()`: a carry out of the top digit, a
-//! 1 shifted out of the top by `mul`, or a literal needing more than `width` digits.
+//! 1 shifted out of the top by `mul`, or a literal or call-site return tag needing more than `width`
+//! digits.
 
 use crate::core::BinOp;
 use crate::tm::build::{AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, REG, RuleSpec, SEP, STACK, Slot, WORK, ZERO};
@@ -360,7 +361,11 @@ fn stack_push_acc(b: &mut Builder, from: StateId, width: usize, label: &str) -> 
 
 /// Append the build-time constant `c` as a new `width`-cell field at the STACK top. `from`: STACK
 /// head at the top. On exit the STACK head is at the new top; WORK and REG are untouched.
+///
+/// PRECONDITION: `c` fits `width` digits. Only its low `width` bits are written, so a `c` that does not
+/// fit is stored as a different number; the caller checks `fits` first, as `push_frame` does.
 fn stack_push_literal(b: &mut Builder, from: StateId, c: u64, width: usize, label: &str) -> StateId {
+    debug_assert!(Binary::at(width).fits(c), "the constant {c} does not fit {width} digits");
     let mut cur = from;
     for i in 0..width {
         let nxt = b.state(format!("{label}.d{i}"));
@@ -432,6 +437,9 @@ fn stack_pop_acc(b: &mut Builder, from: StateId, width: usize, label: &str) -> S
 /// Branch on whether field `slot` of `tape` equals the build-time constant `c`. `entry` and both
 /// exits have the `tape` head home. A counted digit-by-digit comparison: `width` states, each with a
 /// match arm and a mismatch arm, both of which rewind.
+///
+/// PRECONDITION: `c` fits `width` digits. Only its low `width` bits are compared, so a `c` that does not
+/// fit matches a different number; the caller checks `fits` first, as `dispatch_tag`'s trim does.
 #[allow(clippy::too_many_arguments)] // a (tape, slot) pair, the constant, width, both branch targets, plus label.
 fn branch_on_equals(
     b: &mut Builder,
@@ -444,6 +452,7 @@ fn branch_on_equals(
     if_ne: StateId,
     label: &str,
 ) {
+    debug_assert!(Binary::at(width).fits(c), "the constant {c} does not fit {width} digits");
     let at = seek_slot(b, entry, tape, BITS, slot, &format!("{label}.s"));
     let mut cur = at;
     // Each digit position gets its own mismatch exit, because the head is at a different offset in
@@ -1141,6 +1150,15 @@ impl Encoding for Binary {
     }
 
     fn push_frame(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32, tag: u64) {
+        // OVERFLOW GUARD, STATIC, as in `write_literal`: the tag is the call site's ordinal, a
+        // build-time constant. Pushed anyway, it would be stored cut to `width` digits, and
+        // `dispatch_tag` would resume after a different call site with nothing telling auto-fit to
+        // widen.
+        if !self.fits(tag) {
+            let overflow = b.overflow();
+            b.add_rule(entry, RuleSpec::new(), overflow);
+            return;
+        }
         let l = format!("bpf{entry}");
         let mut cur = stack_push_literal(b, entry, tag, self.width, &format!("{l}.tg"));
         for k in 0..n_loc {
@@ -1164,9 +1182,14 @@ impl Encoding for Binary {
     }
 
     fn dispatch_tag(&self, b: &mut Builder, entry: StateId, exits: &[StateId]) {
+        // Only the call sites whose ordinal fits can have pushed a frame (`push_frame` sends the rest
+        // to the guard), and ordinals count up from 0, so they are a prefix of `exits`. A site past
+        // it must never be compared: its ordinal cut to `width` digits is a real site's tag, so its
+        // test could only shadow that site. Trimmed, the clamp below is the last site that fits.
+        let fitting = exits.iter().enumerate().take_while(|&(i, _)| self.fits(i as u64)).count();
         // An empty `exits` leaves `entry` rule-less, so the machine simply halts there — the trait's
         // stated contract, and what makes this total.
-        let Some((&last, rest)) = exits.split_last() else { return };
+        let Some((&last, rest)) = exits[..fitting].split_last() else { return };
         let l = format!("bdt{entry}");
         let popped = stack_pop_acc(b, entry, self.width, &format!("{l}.pop"));
         // A LINEAR chain of equality tests, not a decision trie: a depth-`width` trie has 2^width
@@ -1355,4 +1378,31 @@ pub(crate) fn branch_on_zero(
     b.add_rule(home_nz, RuleSpec::new(), if_nonzero);
     let home_z = rewind_home(b, z, tape, BITS, slot, &format!("{label}.rz"));
     b.add_rule(home_z, RuleSpec::new(), if_zero);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both helpers cut a build-time constant to `width` digits, so one that does not fit would be pushed or
+    /// matched as a different number with nothing sent to the overflow guard. Their callers check `fits` first,
+    /// and the assertion catches one that forgets. Debug builds only: a release build drops the `debug_assert!`
+    /// these expect to panic, and `check-slow.sh --all` runs the whole suite in release.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn pushing_a_constant_wider_than_the_field_is_refused() {
+        let mut b = Builder::new();
+        let from = b.state("from");
+        stack_push_literal(&mut b, from, 16, 4, "t");
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn comparing_with_a_constant_wider_than_the_field_is_refused() {
+        let mut b = Builder::new();
+        let [entry, if_eq, if_ne] = ["entry", "eq", "ne"].map(|name| b.state(name));
+        branch_on_equals(&mut b, entry, WORK, W_ACC, 16, 4, if_eq, if_ne, "t");
+    }
 }

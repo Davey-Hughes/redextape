@@ -1,3 +1,3 @@
-error: a value exceeded the widest tape field this encoding has (64 cells, `MAX_FIELD_WIDTH`)
+error: a number the machine stores (a value, an address or a call's return tag) exceeded the widest tape field this encoding has (64 cells, `MAX_FIELD_WIDTH`)
   the program is fine; `--backend tm` runs it under unary
   `redextape emit --lang tm --encoding binary` packs a far larger value into the same field, and `redextape run` runs the file it writes

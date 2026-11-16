@@ -76,6 +76,11 @@ pub const MAX_FIELD_WIDTH: usize = 64;
 /// non-accept state, which is what `Builder::state` always allocates.
 pub const OVERFLOW_STATE: &str = "overflow";
 
+/// What can reach the overflow guard, as a message about an overflow names it: every number a lowered machine
+/// keeps in a fixed-width field. One phrase for every such message, because "a value" alone is false when a
+/// list's address or a call's return tag outgrew the field and every value fits.
+pub const OVERFLOWING_NUMBER: &str = "a number the machine stores (a value, an address or a call's return tag)";
+
 /// The most states any one `Machine` may contain. Reaching it makes `Builder` stop allocating and
 /// raise `overflowed`; `lower_tm_all` then refuses the program rather than laying out the rest. The three
 /// machine-model reductions enforce the same ceiling through `reduction.rs`'s `StateTable`, and refuse
@@ -175,9 +180,9 @@ impl Builder {
     /// The ONE shared overflow-guard state, allocated on first request. Rule-less and non-accept, so
     /// reaching it halts the machine immediately and `simulate_final` can name it as the reason.
     ///
-    /// Every gadget that writes a value into a fixed-width field (the REG bank, the BOX tape) routes its
-    /// "this value does not fit" case here, rather than allocating a fault state of its own as the
-    /// nil/dangling DEREF faults do. Those spin to a cap on purpose (matching λ's Ω and the reference's
+    /// Every gadget that writes a number into a fixed-width field (a value into the REG bank or the BOX
+    /// tape, a call site's return tag onto binary's STACK) routes its "this does not fit" case here, rather
+    /// than allocating a fault state of its own as the nil/dangling DEREF faults do. Those spin to a cap on purpose (matching λ's Ω and the reference's
     /// `Runtime`); an overflow is a different thing — the program is fine, the tape is too narrow — and
     /// the caller retries at a wider one, so it must be told apart from divergence.
     ///

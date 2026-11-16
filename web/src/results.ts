@@ -95,8 +95,8 @@ const FULL: Readonly<Record<Exclude<RxmCap, 'Steps'>, string>> = {
 /**
  * The rxm leg's rows (Plan 7 part 5 spec §5.5): its steps as instructions, and its value.
  *
- * **`total_steps` IS `compile`'S OWN RUN**, which drove the rxm cursor to its end (amendment 13), so it is a length
- * once that run finished and the count it stopped at otherwise — `tmRows`' distinction, read the same way, off
+ * **`total_steps` IS THE RUN'S END WHEN ONE EXISTS**, `compile`'s or a continued cursor's, so it is a length once a
+ * run finished and how far the run has gone otherwise — `tmRows`' distinction, read the same way, off
  * whether the value is `Unfinished`. A fault is an end: it has a length, and its value says what faulted where.
  *
  * **A CAP IS NAMED ONLY WHEN THE RECORDED RUN HAS REACHED IT.** `cap` is the recording cursor's, and a recording that

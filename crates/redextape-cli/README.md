@@ -174,9 +174,10 @@ tapes and what `decode_tape_ty` needs to read the final ones. A header-less `.tm
 `run` still refuses it, with a message saying to re-emit through `redextape emit --lang tm`, which
 always writes a header. A machine that does not halt inside `TM_DEFAULT_CAPS` exits `1` and prints
 no value: a partial tape that happens to decode is not an answer. One that halts in its `overflow`
-state exits `2`, also with no value: a value outgrew the field width its header records, so the
-tapes hold truncated fields, and the message says to re-emit it with `redextape emit --lang tm`,
-which widens the field until the values fit or writes no file.
+state exits `2`, also with no value: a number it stores (a value, an address or a call's return
+tag) outgrew the field width its header records, so the tapes hold truncated fields, and the
+message says to re-emit it with `redextape emit --lang tm`, which widens the field until everything
+fits or writes no file.
 
 **A reduced `.tm` file runs from its own header too.** `emit --reduce` writes one as `version 2`, and
 `run` simulates it under the `steps` its header records rather than `TM_DEFAULT_CAPS`'s step count,
@@ -316,7 +317,7 @@ the same types at the same exit `2` and write no file, because a `result` line m
 **`--lang tm` refuses a program whose values do not fit the tape**, and refusing is the whole point:
 
     $ redextape emit p.rxt --lang tm -o p.tm    # p.rxt counts to 300
-    error: no machine was written: a value does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)
+    error: no machine was written: a number the machine stores (a value, an address or a call's return tag) does not fit this encoding's widest tape field (64 cells, `MAX_FIELD_WIDTH`)
       the program is fine — but the machine would halt in its `overflow` state, and `redextape run` would find no value on its tapes and exit 2
       `--encoding binary` holds a far larger value in the same field and may succeed where unary did not
     # exit 2
@@ -334,7 +335,7 @@ could not express the answer.
 points at the binary emit:
 
     $ redextape run p.rxt --backend tm
-    error: a value exceeded the widest tape field this encoding has (64 cells, `MAX_FIELD_WIDTH`)
+    error: a number the machine stores (a value, an address or a call's return tag) exceeded the widest tape field this encoding has (64 cells, `MAX_FIELD_WIDTH`)
       the program is fine; `--backend tm` runs it under unary
       `redextape emit --lang tm --encoding binary` packs a far larger value into the same field, and `redextape run` runs the file it writes
     # exit 2
@@ -344,7 +345,7 @@ search really did reach 64 cells and the encoding is what ran out. Pinned, 64 wa
 so the message names the width that *was*, and the setting that chose it:
 
     $ redextape --no-config emit q.rxt --lang tm --field-width 4    # q.rxt is `40 + 2`
-    error: no machine was written: a value does not fit a 4-cell tape field, which is where `--field-width 4` pinned it
+    error: no machine was written: a number the machine stores (a value, an address or a call's return tag) does not fit a 4-cell tape field, which is where `--field-width 4` pinned it
       the program is fine — but the machine would halt in its `overflow` state, and `redextape run` would find no value on its tapes and exit 2
       raise `--field-width`, or drop it and let the search fit one: auto-fit starts at 4 cells and doubles to at most 64 (`MAX_FIELD_WIDTH`)
     # exit 2
@@ -353,7 +354,7 @@ With `field-width = 4` in `redextape.toml` and no flag typed, the same program h
 the remedy is in a file the user may not have written, so the message says which key:
 
     $ redextape emit q.rxt --lang tm
-    error: no machine was written: a value does not fit a 4-cell tape field, which is where the config file's `emit.field-width = 4` pinned it
+    error: no machine was written: a number the machine stores (a value, an address or a call's return tag) does not fit a 4-cell tape field, which is where the config file's `emit.field-width = 4` pinned it
       …
       raise `emit.field-width`, set it to 0 to auto-fit, or override it for this run with `--field-width`: auto-fit starts at 4 cells and doubles to at most 64 (`MAX_FIELD_WIDTH`)
     # exit 2

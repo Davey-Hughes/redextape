@@ -484,6 +484,52 @@ fn dispatch_tag_routes_on_the_tag_value() {
     }
 }
 
+/// A return tag is a build-time constant, like a literal, so one needing more than `width` digits
+/// routes to the guard before anything is pushed, as `write_literal` does. Tag 16 at width 4 is
+/// `10000`: cut to four digits it would read back as 0 and return to call site 0. Tag 15, the largest
+/// that fits, must still push.
+#[test]
+fn push_frame_routes_a_tag_that_does_not_fit_to_the_guard() {
+    let (tapes, final_state, _halt, overflow, status) =
+        run_gadget_raw(4, 1, |e, b, start, halt| e.push_frame(b, start, halt, 0, 16));
+    assert!(matches!(status, TmStatus::Halted), "tag 16 must halt, not cap");
+    assert_eq!(final_state, overflow, "tag 16 at width 4 must halt in the overflow guard");
+    assert_eq!(tapes[STACK].iter().find(|&&c| c != BLANK), None, "nothing pushed");
+
+    let tapes = run_gadget_tapes(4, 1, |e, b, start, halt| e.push_frame(b, start, halt, 0, 15)).unwrap();
+    assert_eq!(&tapes[STACK][..5], &[MARK, MARK, MARK, MARK, SEP], "tag 15 fits and is pushed");
+}
+
+/// Only call sites whose ordinal fits the width can push a frame, so `dispatch_tag` compares the
+/// popped tag against those alone. Site 16's ordinal cut to four digits is 0, site 0's tag: compared,
+/// it could only ever shadow site 0. Over twenty exits at width 4, every tag `0..=15` reaches its own
+/// exit, and no rule routes to exits 16 to 19.
+#[test]
+fn dispatch_tag_never_compares_a_site_whose_tag_does_not_fit() {
+    const EXITS: usize = 20;
+    for tag in 0..16u64 {
+        let mut exits = Vec::new();
+        let (_, final_state, _halt, _overflow, status) = run_gadget_raw(4, 1, |e, b, start, _halt| {
+            let pushed = b.state("pushed");
+            e.push_frame(b, start, pushed, 0, tag);
+            // Rule-less exits: the run halts in whichever one the dispatch chose.
+            exits = (0..EXITS).map(|i| b.state(format!("e{i}"))).collect();
+            e.dispatch_tag(b, pushed, &exits);
+        });
+        assert!(matches!(status, TmStatus::Halted), "tag {tag} must halt, not cap");
+        assert_eq!(final_state, exits[tag as usize], "tag {tag} took the wrong exit");
+    }
+
+    let mut b = Builder::new();
+    let entry = b.state("entry");
+    let exits: Vec<StateId> = (0..EXITS).map(|i| b.state(format!("e{i}"))).collect();
+    Binary::at(4).dispatch_tag(&mut b, entry, &exits);
+    let m = b.finish(entry);
+    let targeted: Vec<usize> =
+        (0..EXITS).filter(|&i| m.states.iter().any(|s| s.rules.iter().any(|r| r.next == exits[i]))).collect();
+    assert_eq!(targeted, (0..16).collect::<Vec<_>>(), "only the exits whose ordinal fits 4 digits are reachable");
+}
+
 // ---- HEAP gadgets: `cons`, `is_empty_op`, `head_op`, `tail_op`, `parse_heap_cells` ----
 
 /// A binary cons cell is FIXED width: `@` + w digits + `#` + w digits. Two cells therefore occupy

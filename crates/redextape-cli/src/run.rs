@@ -194,11 +194,12 @@ fn run_artifact_text(
         Err(redextape_core::tm::RunFailure::Overflow) => {
             writeln!(
                 err,
-                "error: `{label}`'s machine halted in its `overflow` state: a value outgrew the {}-cell tape \
+                "error: `{label}`'s machine halted in its `overflow` state: {} outgrew the {}-cell tape \
                  field its header records\n  \
                  the tapes hold truncated fields, so there is no value to print\n  \
-                 re-emit it with `redextape emit --lang tm`, which widens the field until the values fit \
+                 re-emit it with `redextape emit --lang tm`, which widens the field until everything fits \
                  or writes no file",
+                redextape_core::tm::OVERFLOWING_NUMBER,
                 header.width
             )?;
             return Ok(Outcome::ToolFailed);
@@ -589,10 +590,11 @@ fn run_tm_backend(
         redextape_core::tm::TmRun::Overflow => {
             writeln!(
                 err,
-                "error: a value exceeded the widest tape field this encoding has ({} cells, `MAX_FIELD_WIDTH`)\n  \
+                "error: {} exceeded the widest tape field this encoding has ({} cells, `MAX_FIELD_WIDTH`)\n  \
                  the program is fine; `--backend tm` runs it under unary\n  \
                  `redextape emit --lang tm --encoding binary` packs a far larger value into the same field, \
                  and `redextape run` runs the file it writes",
+                redextape_core::tm::OVERFLOWING_NUMBER,
                 redextape_core::tm::MAX_FIELD_WIDTH
             )?;
             Ok(Outcome::ToolFailed)
@@ -875,6 +877,7 @@ mod tests {
         let (out, err, outcome) = run_case("tm-overflow", "m.tm", &text, None);
         assert_eq!(out, "", "no value may be printed from truncated fields");
         assert!(err.contains("halted in its `overflow` state"), "got: {err}");
+        assert!(err.contains(redextape_core::tm::OVERFLOWING_NUMBER), "naming whatever outgrew the field: {err}");
         assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the file's: exit 2");
     }
 

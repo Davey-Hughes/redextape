@@ -108,6 +108,8 @@ pub trait Encoding {
     /// at top): push the return-tag `tag` at the frame's bottom, then save each `Loc` field (slots
     /// `1..=n_loc`) above it, in slot order. Flows `entry -> exit` with all heads home/top on exit.
     /// `n_loc = 0` pushes only the tag. A COPY (not a move): the REG `Loc` fields are left UNCHANGED.
+    /// A `tag` this encoding's field cannot hold routes `entry` to the overflow guard instead, as
+    /// `write_literal` does for a literal: stored cut down, it would return to the wrong call site.
     fn push_frame(&self, b: &mut Builder, entry: StateId, exit: StateId, n_loc: u32, tag: u64);
     /// The first half of the `Ret`-side gadget: pop the `Loc` fields (top->down, reverse of the save)
     /// back into REG, leaving the STACK head on the tag field for the second half to dispatch. `from` `entry`
@@ -123,9 +125,9 @@ pub trait Encoding {
     /// `from` `entry` (STACK head at the top — the blank right of the tag's `#`; REG/WORK home).
     /// Erases the whole tag field so on the chosen exit the STACK head is at the NEW top (the caller's
     /// frame, or an empty stack), REG/WORK untouched (still home). Does NOT flow to a single `exit`: it
-    /// is a finite-state fan-out to one of `exits`. If `c >= exits.len()` (cannot happen for a
-    /// well-formed program) it clamps to `exits.last()` defensively — never panics, never over-indexes.
-    /// An empty `exits` is a no-op (leaves `entry` rule-less, so the machine simply halts there).
+    /// is a fan-out to one of `exits`, never to one whose index the field cannot hold: `push_frame`
+    /// never pushes that tag. A `c` past the last candidate (impossible for a well-formed program)
+    /// clamps to it — never panics, never over-indexes. An empty `exits` leaves `entry` rule-less.
     fn dispatch_tag(&self, b: &mut Builder, entry: StateId, exits: &[StateId]);
     /// Append a cons cell (head = field `rh`'s value, tail = field `rt`'s value) at the HEAP top, and
     /// write the new cell's 1-based pointer (= the cell count) into field `rd`. Flows `entry -> exit`,

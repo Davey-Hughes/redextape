@@ -192,12 +192,19 @@ pub enum RunFailure {
     /// The state always exists in the machine, because [`value_of_run`] produces this only when `states.get` finds
     /// it, so a caller may index the machine's states by it, as `redextape run` does.
     NotAccept(StateId),
-    /// A lowered run halted in a non-accept state named [`OVERFLOW_STATE`]: a value outgrew the field width the header records. The
+    /// A lowered run halted in a non-accept state named [`OVERFLOW_STATE`]: a number it stores outgrew the field width the header records. The
     /// tapes then hold truncated fields that decode without complaint to a wrong value, so they are not read.
     /// Never produced under a reduced header, whose final state `NotAccept` judges.
     Overflow,
     /// [`decode_reduced`] refused the tapes, for either of `DecodeFailure`'s causes.
     Decode(DecodeFailure),
+}
+
+/// Whether `state` is a lowered machine's overflow guard: a non-accept state named [`OVERFLOW_STATE`]. A run halted
+/// there holds fields cut to its width, which decode without complaint to a wrong value, so no reader decodes them.
+#[must_use]
+pub fn is_overflow_guard(m: &Machine, state: StateId) -> bool {
+    m.states.get(state as usize).is_some_and(|s| !s.accept && s.name == OVERFLOW_STATE)
 }
 
 /// The value a finished run's tapes hold under `h`: a capped run first, then a lowered run halting in its
@@ -225,7 +232,7 @@ pub fn value_of_run(
     // The guard `Builder::overflow` allocates is never an accept state, so a hand-written file's accept state
     // that happens to be called `overflow` still holds a value. A non-accept halt with that name cannot be
     // told from the guard, because the header does not record which state the guard is.
-    if h.reduction.is_none() && m.states.get(state as usize).is_some_and(|s| !s.accept && s.name == OVERFLOW_STATE) {
+    if h.reduction.is_none() && is_overflow_guard(m, state) {
         return Err(RunFailure::Overflow);
     }
     if h.reduction.is_some() && m.states.get(state as usize).is_some_and(|s| !s.accept) {
@@ -477,7 +484,7 @@ mod tests {
         assert_eq!(value_of_run(&d.machine, &d.header, tapes, WALKING, Status::Halted), Ok(Value::Nat(1)));
     }
 
-    /// The tapes decode; only the final state's name says a value outgrew its field. A reduced header leaves
+    /// The tapes decode; only the final state's name says a number outgrew its field. A reduced header leaves
     /// that state to the accept check, which refuses it too.
     #[test]
     fn a_lowered_run_that_halts_in_its_overflow_state_has_no_value() {

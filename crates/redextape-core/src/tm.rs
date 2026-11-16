@@ -26,8 +26,8 @@ pub mod universal;
 
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
-    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, REG, RuleSpec, SEP,
-    STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
+    AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, OVERFLOWING_NUMBER,
+    REG, RuleSpec, SEP, STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
 };
 pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason};
 pub use defunc::{defunc, defunc_mapped};
@@ -39,7 +39,7 @@ pub use header::{
 pub use lower_rxm::{LowerError, lower_rxm, lower_rxm_mapped};
 pub use lower_tm::{lower_tm, lower_tm_guarded, lower_tm_mapped, n_slots_of};
 pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
-pub use reduced_file::{ReduceError, RunFailure, decode_reduced, reduce, run_caps, value_of_run};
+pub use reduced_file::{ReduceError, RunFailure, decode_reduced, is_overflow_guard, reduce, run_caps, value_of_run};
 pub use rxm::{
     Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, RxmHeader, RxmOutcome, RxmRun, decode_rxm,
     decode_rxm_reason, decode_rxm_ty, decode_rxm_ty_reason, print_instr, print_rxm, print_rxm_doc, print_rxm_mapped,
@@ -441,7 +441,7 @@ pub fn run_tm_described_program(
 ///
 /// **`TmRun::Overflow` COMES BACK AS `Ok`, exactly as it does from `run_tm_described`** — a run that
 /// started still has a configuration to describe, and the caller decides what an overflow means. It
-/// is `emit`'s "a value does not fit this encoding's widest tape field" refusal that reads it.
+/// is `emit`'s "… does not fit this encoding's widest tape field" refusal that reads it.
 ///
 /// **THE WIDTH IS CHECKED BEFORE ANY WORK, AND THAT CHECK IS WHAT `run_tm_described` GETS FOR FREE
 /// FROM ITS SEARCH.** The search only ever reaches `MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH`; taking the
