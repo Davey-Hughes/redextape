@@ -41,7 +41,7 @@ beforeAll(async () => {
   view = await (await import('../../src/main')).ready
   // **THE TM VIEW TAKES THE WHOLE ROW, WHICH EVERY WIDTH IN THIS FILE IS CHOSEN FOR.** The four-view tree puts rxm
   // beside TM (Plan 7 part 5 spec §3, row 4), which halves the view at any viewport: at 1280px the program row's
-  // sub-steps would not fit, and the local level would already be under its 750px floor, so narrowing to 1000px
+  // sub-steps would not fit, and the local level would already be narrower than its drawing, so narrowing to 1000px
   // could not shrink it — neither the fits-case nor the narrows-case would be the case it names. Closed through the
   // rxm view's own `✕`, and the width asserted rather than assumed, since every viewport below stands for the
   // view's width.
@@ -137,7 +137,8 @@ describe('the local level (spec §8)', () => {
   it('draws the current state in column 0 and its neighbours at signed distances', () => {
     const current = nodes().filter((n) => n.getAttribute('aria-current') === 'step')
     expect(current).toHaveLength(1)
-    expect(current[0]?.textContent).toBe(tmStatus().split(' ')[0])
+    // BY ITS FULL NAME, which its text may show cut in the middle.
+    expect(current[0]?.getAttribute('aria-label')).toBe(tmStatus().split(' ')[0])
     expect(current[0]?.dataset.column).toBe('0')
     const columns = new Set(nodes().map((n) => Number(n.dataset.column)))
     expect([...columns].every((c) => c >= -2 && c <= 2)).toBe(true)
@@ -147,12 +148,10 @@ describe('the local level (spec §8)', () => {
   })
 
   it("labels its edges with the tapes their rules touch, and marks the next rule's", () => {
-    const labels = [...diagram().querySelectorAll('.local-label')].map((l) => l.textContent ?? '')
-    expect(labels.length).toBeGreaterThan(0)
-    // Each label is a list of `tape:read…` or `*`, never a tape the rule leaves alone.
-    for (const label of labels) {
-      for (const part of label.split(', ')) expect(part).toMatch(/^(\*|([A-Z]+:\S+( [LR])?)( [A-Z]+:\S+( [LR])?)*)$/)
-    }
+    const lines = [...diagram().querySelectorAll('.local-label tspan')].map((l) => l.textContent ?? '')
+    expect(lines.length).toBeGreaterThan(0)
+    // Each line is one tape of one rule, `tape:read…`, or a rule's `*`, never a tape the rule leaves alone.
+    for (const line of lines) expect(line).toMatch(/^(\*|[A-Z]+:\S+( [LR])?)$/)
     expect(diagram().querySelectorAll('.local-edge.is-next')).toHaveLength(1)
   })
 
@@ -187,10 +186,11 @@ describe('the local level (spec §8)', () => {
     watch.disconnect()
     expect(mutations).toBe(0)
     toggle.click()
-    await until(() => nodes().some((n) => n.textContent === tmStatus().split(' ')[0]), 'the level at the current state')
+    await until(() => nodes().some((n) => n.title === tmStatus().split(' ')[0]), 'the level at the current state')
     const level = diagram().querySelector('.local-level') as HTMLElement
     const svg = diagram().querySelector('.local-edges') as SVGSVGElement
-    expect(Number(svg.getAttribute('width'))).toBe(Math.max(level.clientWidth, 750))
+    // The level's drawing is narrower than the view at 1280px and at 1000px, so it spans the level at both.
+    expect(Number(svg.getAttribute('width'))).toBe(level.clientWidth)
   })
 
   it('lays out again for a width it was not laid out for, with the state unchanged', async () => {
@@ -201,7 +201,7 @@ describe('the local level (spec §8)', () => {
     await until(() => level.clientWidth < before, 'the view to narrow')
     await frame()
     await frame()
-    expect(Number(svg.getAttribute('width'))).toBe(Math.max(level.clientWidth, 750))
+    expect(Number(svg.getAttribute('width'))).toBe(level.clientWidth)
     expect(Number(svg.getAttribute('width'))).toBeLessThan(before)
     await page.viewport(1280, 2400)
   })
@@ -259,7 +259,7 @@ describe('the local level (spec §8)', () => {
     // WHICH PATH IS MARKED, NOT ONLY HOW MANY: a mark frozen at the first layout also leaves exactly one
     // path with `is-next` — the stale self-loop, never joined by a second — so a bare length check cannot
     // tell a repaint from a freeze. Its target is the exit state's own id, not the self-loop's.
-    const exit = nodes().find((n) => n.textContent === 'wl1s19.s.sk1') as HTMLElement
+    const exit = nodes().find((n) => n.title === 'wl1s19.s.sk1') as HTMLElement
     const marked = [...diagram().querySelectorAll<SVGPathElement>('.local-edge.is-next')]
     expect(marked).toHaveLength(1)
     expect(marked[0]?.dataset.to).toBe(exit.dataset.state)
@@ -276,7 +276,7 @@ describe('a machine with no program level (spec §7)', () => {
     })()
     const copy = (await import('@codemirror/view')).EditorView.findFromDOM(editor)
     copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: FLAT } })
-    await until(() => nodes().some((n) => n.textContent === 'q0'), 'the copy to compile and draw q0')
+    await until(() => nodes().some((n) => n.title === 'q0'), 'the copy to compile and draw q0')
     expect(diagramChoice('program')?.disabled).toBe(true)
     expect(diagramChoice('program')?.getAttribute('aria-description')).toMatch(/no program level/)
     expect(diagramChoice('local')?.getAttribute('aria-checked')).toBe('true')
@@ -309,7 +309,7 @@ describe('a recompile that changes the level shown', () => {
     programScroll().focus()
     expect(document.activeElement).toBe(programScroll())
     ;(await copy()).dispatch({ changes: { from: 0, to: (await copy()).state.doc.length, insert: FLAT } })
-    await until(() => nodes().some((n) => n.textContent === 'q0'), 'the flat copy to compile and draw q0')
+    await until(() => nodes().some((n) => n.title === 'q0'), 'the flat copy to compile and draw q0')
     expect(diagramShows('.program-level')).toBe(false)
     // The grid is hidden under it, and a hidden element's focus falls to the page.
     expect(document.activeElement).not.toBe(document.body)

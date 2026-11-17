@@ -18,11 +18,16 @@ export const REACH = 2
 export type LocalNode = { readonly state: number; readonly column: number }
 
 /**
- * The rules from one state on the level to another, as one edge: its label names only the tapes those rules touch
- * (`reg:1 L`, "on `reg` read 1, move left"), each rule's own label once, and `next` is whether the rule about to
- * fire is among them.
+ * The rules from one state on the level to another, as one edge: `labels` holds each rule's label once
+ * (`ruleLabel`), in rule order, and `next` is whether the rule about to fire is among them. Lists rather than one
+ * joined string, since the diagram sets each tape of each rule on a line of its own.
  */
-export type LocalEdge = { readonly from: number; readonly to: number; readonly label: string; readonly next: boolean }
+export type LocalEdge = {
+  readonly from: number
+  readonly to: number
+  readonly labels: readonly (readonly string[])[]
+  readonly next: boolean
+}
 
 export type Local = { readonly nodes: readonly LocalNode[]; readonly edges: readonly LocalEdge[] }
 
@@ -43,11 +48,12 @@ export function predecessors(p: TmProgram): number[][] {
 }
 
 /**
- * One rule's label: for each tape it touches — reads a symbol, writes one or moves — `name:read`, then `/write` if
- * it writes and the move if it moves. A tape it leaves alone is not named, so a gadget that works one tape of five
- * reads as that one tape. A rule that touches nothing at all is `*`.
+ * One rule's label, a part per tape it touches — reads a symbol, writes one or moves — in tape order: `name:read`,
+ * then `/write` if it writes and the move if it moves (`reg:1 L`, "on `reg` read 1, move left"). A tape it leaves
+ * alone is not named, so a gadget that works one tape of five reads as that one tape. A rule that touches nothing at
+ * all is `*`.
  */
-export function ruleLabel(rule: RuleView, names: readonly string[]): string {
+export function ruleLabel(rule: RuleView, names: readonly string[]): readonly string[] {
   const parts: string[] = []
   for (let i = 0; i < rule.read.length; i += 1) {
     const read = rule.read[i] ?? null
@@ -57,7 +63,7 @@ export function ruleLabel(rule: RuleView, names: readonly string[]): string {
     const name = names[i] ?? `tape ${i}`
     parts.push(`${name}:${read ?? '*'}${write === null ? '' : `/${write}`}${move === 'S' ? '' : ` ${move}`}`)
   }
-  return parts.length === 0 ? '*' : parts.join(' ')
+  return parts.length === 0 ? ['*'] : parts
 }
 
 /** Breadth-first distances from `start` along `step`, up to `REACH`. */
@@ -100,16 +106,17 @@ export function localLevel(
 
   const edges: LocalEdge[] = []
   for (const { state: from } of nodes) {
-    const byTarget = new Map<number, { labels: string[]; next: boolean }>()
+    const byTarget = new Map<number, { labels: (readonly string[])[]; next: boolean }>()
     for (const [i, r] of (p.states[from]?.rules ?? []).entries()) {
       if (!column.has(r.next)) continue
       const edge = byTarget.get(r.next) ?? { labels: [], next: false }
       const label = ruleLabel(r, names)
-      if (!edge.labels.includes(label)) edge.labels.push(label)
+      const said = label.join(' ')
+      if (!edge.labels.some((l) => l.join(' ') === said)) edge.labels.push(label)
       if (from === current && i === rule) edge.next = true
       byTarget.set(r.next, edge)
     }
-    for (const [to, e] of byTarget) edges.push({ from, to, label: e.labels.join(', '), next: e.next })
+    for (const [to, e] of byTarget) edges.push({ from, to, labels: e.labels, next: e.next })
   }
   return { nodes, edges }
 }

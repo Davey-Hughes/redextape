@@ -15,7 +15,7 @@
     "typecheck": "pnpm run build:bindings && tsc --noEmit",
     "test": "pnpm run build:bindings && vitest run",
     "test:node": "vitest run --project node",
-    "test:browser": "vitest run --project browser",
+    "test:browser": "vitest run --project browser --project browser-scrollbars",
     "test:firefox": "REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=${VITEST_MAX_WORKERS:-6} vitest run --project firefox --project firefox-capture",
     "test:probe": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/buffer-affordability.test.ts",
     "test:probe:tm": "REDEXTAPE_PROBE=1 vitest run --project browser tests/browser/tm-fork-cost.test.ts",

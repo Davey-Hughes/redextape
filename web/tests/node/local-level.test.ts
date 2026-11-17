@@ -15,14 +15,19 @@ const rule = (over: Partial<RuleView>): RuleView => ({
 
 describe('a rule as an edge label (spec §8)', () => {
   it('names only the tapes the rule touches', () => {
-    expect(ruleLabel(rule({ read: ['1', null], moves: ['L', 'S'] }), ['reg', 'work'])).toBe('reg:1 L')
-    expect(ruleLabel(rule({ read: [null, '_'], write: [null, '1'] }), ['reg', 'work'])).toBe('work:_/1')
-    expect(ruleLabel(rule({ moves: ['S', 'R'] }), ['reg', 'work'])).toBe('work:* R')
+    expect(ruleLabel(rule({ read: ['1', null], moves: ['L', 'S'] }), ['reg', 'work'])).toEqual(['reg:1 L'])
+    expect(ruleLabel(rule({ read: [null, '_'], write: [null, '1'] }), ['reg', 'work'])).toEqual(['work:_/1'])
+    expect(ruleLabel(rule({ moves: ['S', 'R'] }), ['reg', 'work'])).toEqual(['work:* R'])
+  })
+
+  it('gives each tape it touches a part of its own, in tape order, for the diagram to set a line each', () => {
+    const both = rule({ read: ['0', '0'], write: [null, '1'], moves: ['R', 'R'] })
+    expect(ruleLabel(both, ['reg', 'work'])).toEqual(['reg:0 R', 'work:0/1 R'])
   })
 
   it('says `*` for a rule that touches no tape, and numbers a tape it has no name for', () => {
-    expect(ruleLabel(rule({}), ['reg', 'work'])).toBe('*')
-    expect(ruleLabel(rule({ read: ['1', null] }), [])).toBe('tape 0:1')
+    expect(ruleLabel(rule({}), ['reg', 'work'])).toEqual(['*'])
+    expect(ruleLabel(rule({ read: ['1', null] }), [])).toEqual(['tape 0:1'])
   })
 })
 
@@ -99,8 +104,8 @@ describe('the local level (spec §8, amendment 10)', () => {
     expect(edges.filter((e) => e.next).map((e) => [e.from, e.to])).toEqual([[2, 3]])
   })
 
-  it('joins the labels of several rules between the same two states, each once', () => {
+  it('lists the labels of several rules between the same two states, each once, one per line to draw', () => {
     const { edges } = localLevel(TWICE, twiceInto, 0, null, ['reg'])
-    expect(edges).toEqual([{ from: 0, to: 1, label: 'reg:1, reg:_', next: false }])
+    expect(edges).toEqual([{ from: 0, to: 1, labels: [['reg:1'], ['reg:_']], next: false }])
   })
 })

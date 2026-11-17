@@ -96,10 +96,23 @@ export const CAPTURE_FILES = [
   'tests/browser/panel-boundaries.test.ts',
   'tests/browser/panel-regions.test.ts',
   'tests/browser/panel-sizes-stored.test.ts',
+  'tests/browser/state-diagram-local-layout.test.ts',
+  'tests/browser/state-diagram-local-pan.test.ts',
   'tests/browser/step-focus-recording.test.ts',
   'tests/browser/view-keys.test.ts',
   'tests/firefox/two-browsers.test.ts',
 ]
+
+/**
+ * The files that need classic scroll bars, which take their width out of the box they scroll: they run in
+ * `browser-scrollbars`, a Chromium launched without Playwright's `--hide-scrollbars`. Every other browser file runs
+ * with that flag, under which a scroll bar takes no width, and neither a `::-webkit-scrollbar` rule nor CDP's
+ * `Emulation.setScrollbarsHidden` brings one back in a page. Paths are relative to `web/`.
+ */
+export const SCROLLBAR_FILES = ['tests/browser/state-diagram-local-scrollbars.test.ts']
+
+/** Every Chromium project's flags: the `browser` project below says what each is for. */
+const CHROMIUM_ARGS = ['--enable-precise-memory-info', '--js-flags=--expose-gc']
 
 /** Each Firefox project's browser, by the name Vitest gives the project, for `two-browsers.test.ts`. */
 const browsers = new Map<string, Browser>()
@@ -163,8 +176,30 @@ const captureFileSpan: BrowserCommand<[edge: 'begin' | 'end']> = ({ testPath }, 
   return [...captureFilesInFlight]
 }
 
+/**
+ * A real mouse move to the point `x`, `y` of the page, then a press of the left button for `'down'` or its release for
+ * `'up'`: Playwright's own mouse, in either engine, for a press held while a test does other things. `clickCount` is
+ * the count the system would give a press or its release, which Playwright does not work out itself: 2 makes the
+ * press a double-click's second.
+ */
+const mouse: BrowserCommand<[type: 'move' | 'down' | 'up', x: number, y: number, clickCount?: number]> = async (
+  { page },
+  type,
+  x,
+  y,
+  clickCount = 1,
+) => {
+  await page.mouse.move(x, y)
+  if (type === 'down') await page.mouse.down({ clickCount })
+  if (type === 'up') await page.mouse.up({ clickCount })
+}
+
+/** What every browser project registers. */
+const COMMANDS = { mouse } satisfies Record<string, BrowserCommand<never[]>>
+
 /** What each Firefox project registers. */
 const FIREFOX_COMMANDS = {
+  ...COMMANDS,
   // Playwright's own collection, for `collect.ts` in an engine that gives a page no `gc`.
   requestGC: async ({ page }) => page.requestGC(),
   registerBrowser,
@@ -387,15 +422,25 @@ export default defineConfig({
           // `frame-cost.test.ts`'s entry above `THE READINGS ARE TAKEN AFTER A FULL COLLECTION`).
           // WITH IT that test collects before every reading, so each delta is retained heap, and
           // the result is reproducible to the byte across browser restarts.
-          launchOptions: { args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'] },
+          launchOptions: { args: CHROMIUM_ARGS },
         }),
+        COMMANDS,
+        { exclude: SCROLLBAR_FILES },
+      ),
+      // THE SAME CHROMIUM WITH CLASSIC SCROLL BARS, for `SCROLLBAR_FILES` alone.
+      browserProject(
+        'browser-scrollbars',
+        'chromium',
+        playwright({ launchOptions: { args: CHROMIUM_ARGS, ignoreDefaultArgs: ['--hide-scrollbars'] } }),
+        COMMANDS,
+        { include: SCROLLBAR_FILES },
       ),
       ...(FIREFOX
         ? [
             // Its tab count is `test:firefox`'s `VITEST_MAX_WORKERS`: 6 unless the caller sets one (README, Checks).
             browserProject('firefox', 'firefox', playwright(), FIREFOX_COMMANDS, {
               include: ['tests/browser/**/*.test.ts', 'tests/firefox/**/*.test.ts'],
-              exclude: CAPTURE_FILES,
+              exclude: [...CAPTURE_FILES, ...SCROLLBAR_FILES],
               pointerCaptureRefused: true,
             }),
             // ONE FILE AT A TIME, AND BESIDE THE REST: `browser.fileParallelism`, not `maxWorkers` or the top-level

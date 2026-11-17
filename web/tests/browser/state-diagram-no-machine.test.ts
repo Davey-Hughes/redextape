@@ -107,6 +107,17 @@ describe('the state diagram with no machine to draw', () => {
     expect(document.activeElement).toBe(diagram().querySelector('.local-nodes'))
   })
 
+  it('leaves the local level nothing to scroll or drag once a compile empties it', () => {
+    // Still on `HALF_TYPED` from the case above, with the local level shown and emptied.
+    const level = diagram().querySelector('.local-level') as HTMLElement
+    const drawing = diagram().querySelector('.local-content') as HTMLElement
+    expect(diagramShows('.local-level'), 'precondition: the local level shown').toBe(true)
+    expect([drawing.offsetWidth, drawing.offsetHeight], 'the drawing’s size').toEqual([0, 0])
+    expect(level.scrollWidth, 'its scroll across').toBeLessThanOrEqual(level.clientWidth)
+    expect(level.scrollHeight, 'its scroll down').toBeLessThanOrEqual(level.clientHeight)
+    expect(getComputedStyle(level).cursor, 'its pointer').not.toBe('grab')
+  })
+
   it('hands the focus to the grid when a recompile builds again the runtime box that held it', async () => {
     diagramChoice('program')?.click()
     await compile(view, FACT3)

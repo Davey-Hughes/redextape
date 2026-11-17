@@ -9,6 +9,11 @@ import { until } from './until'
 
 declare module 'vitest/browser' {
   interface BrowserCommands {
+    /**
+     * A real mouse move to a point of the page, with a press or a release of the left button there, of the system's
+     * click count (1 by default): every project's.
+     */
+    mouse: (type: 'move' | 'down' | 'up', x: number, y: number, clickCount?: number) => Promise<void>
     /** Playwright's `page.requestGC()`, a full collection, registered by the Firefox projects alone. */
     requestGC: () => Promise<void>
     /** Registers this project's browser in the config's process; replies how many other projects have, and browsers. */

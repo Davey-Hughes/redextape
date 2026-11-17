@@ -1,3 +1,4 @@
+import { CAP_CHARS, layoutLocal, type Metrics } from './local-layout'
 import { type Local, localLevel, predecessors, REACH } from './local-level'
 import { type Arc, arcsOf, chipsOf, type Edges, type ProgramRow, programRows } from './program-level'
 import { type Groups, groupStates, stepOf, type Tier } from './state-groups'
@@ -11,20 +12,89 @@ const LANE = 9
 const GUTTER_PAD = 12
 /** The runtime column's boxes: each one row tall, a row apart, and this wide. Must match `.program-box`'s `width`. */
 const BOX_WIDTH = 104
-/**
- * The local level's grid: a column per signed distance, at least `COLUMN_MIN` wide, its node `GAP` narrower so the
- * edges between columns have room for their labels, and each node `NODE_STEP` below the last. `TOP` leaves room above
- * the first row for a self-loop and its label.
- */
-const COLUMN_MIN = 150
-const GAP = 64
-const NODE_STEP = 44
-const NODE_HEIGHT = 24
-const PAD = 8
-const TOP = 30
 const SVG = 'http://www.w3.org/2000/svg'
 
 let minted = 0
+
+/** How far a mouse press on the local level moves, in pixels, before it pans rather than clicks. */
+const PAN_THRESHOLD = 4
+
+/**
+ * The local level's zoom (decision 12): a wheel notch, a key press, or a hundred pixels of a trackpad's wheel scale
+ * it by `NOTCH`, between `ZOOM_MAX` and a floor where the whole level fits its panel, at most `ZOOM_FLOOR` and never
+ * below `ZOOM_MIN`.
+ */
+const NOTCH = 1.1
+const ZOOM_MAX = 3
+const ZOOM_FLOOR = 0.5
+const ZOOM_MIN = 0.05
+/** A wheel's delta that makes one notch, in each of `WheelEvent.deltaMode`'s units: pixels, lines and pages. */
+const PER_NOTCH = [100, 3, 1]
+
+/** A mouse press on the local level that may yet pan it (`#panLocal`). */
+interface Press {
+  id: number
+  x: number
+  y: number
+  /** The level's scroll at the press, which a pan moves from; a zoom or a reset during it moves this with the level. */
+  left: number
+  top: number
+  onNode: boolean
+  panning: boolean
+}
+
+/** `el`'s scrolled box, inside its border, as the page has it. */
+function scrolledBox(el: HTMLElement): { left: number; top: number; right: number; bottom: number } {
+  const box = el.getBoundingClientRect()
+  const left = box.left + el.clientLeft
+  const top = box.top + el.clientTop
+  return { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight }
+}
+
+/**
+ * How far to scroll along one axis to centre the point `at` of a drawing that runs `from`..`to` in a panel that runs
+ * `start`..`end`, all as the page has them: no further than keeps the panel covered, and the drawing's own middle to
+ * the panel's where the panel is the larger, so a level its panel fits is shown whole.
+ */
+function towards(at: number, from: number, to: number, start: number, end: number): number {
+  const middle = (start + end) / 2
+  if (to - from <= end - start) return (from + to) / 2 - middle
+  return Math.min(Math.max(at - middle, from - start), to - end)
+}
+
+/**
+ * The diagrams whose local levels are measured again when the fonts may have changed, held weakly: a diagram has no
+ * teardown, and a document's listener holding one would keep a closed view's diagram alive.
+ */
+const measuring = new Set<WeakRef<StateDiagram>>()
+/** Whether the font and style listeners are in place: once for the page, as `measuring` empties when diagrams go. */
+let listening = false
+
+/** What `m` gives a few texts that stand for the level's, to compare one measuring with another. */
+const measuredAs = (m: Metrics): string =>
+  [m.cap, m.ascent, m.descent, m.nodeChrome, m.nameWidth('bpf31…r1.Wq'), m.labelWidth('REG:0/1 L')].join(' ')
+
+/**
+ * Have `d` measured again when the fonts may have changed: a web font that arrives after a layout (`fonts.css` loads
+ * Hack with `font-display: swap`, so a level can be laid out in a fallback first), and a style or palette picked
+ * (`skin.ts`'s `applySkin` sets `data-style` and the colour tokens on `<html>`). One listener of each for every
+ * diagram, for the page's life.
+ */
+function measureOnFontChange(d: StateDiagram): void {
+  if (!listening) {
+    listening = true
+    const all = () => {
+      for (const ref of measuring) {
+        const live = ref.deref()
+        if (live === undefined) measuring.delete(ref)
+        else live.remeasure()
+      }
+    }
+    document.fonts.addEventListener('loadingdone', all)
+    new MutationObserver(all).observe(document.documentElement, { attributeFilter: ['data-style', 'style'] })
+  }
+  measuring.add(new WeakRef(d))
+}
 
 export type DiagramEvents = {
   /** Link `state`'s construct, as a click on its row of the rule table does (spec §8). */
@@ -46,8 +116,8 @@ export type Level = 'program' | 'local'
  * lanes, the runtime routines in a column of their own — or as *chips*, text on each row (amendment 11).
  *
  * THE LOCAL LEVEL is the current state and every state within `REACH` rules of it, in columns by signed distance
- * (amendment 10), the rules between them drawn and labelled with the tapes they touch. A machine with no program
- * level — neither instructions nor dotted names (§7's third tier) — shows it alone.
+ * (amendment 10), the rules between them drawn and labelled; a mouse drag moves it in a panel too small for it. A
+ * machine with no program level — neither instructions nor dotted names (§7's third tier) — shows it alone.
  *
  * **WHAT IS BUILT WHEN** (amendment 18). The groups, the arcs and their lanes are built once per machine
  * (`setProgram`), and the list of rows once per current group, since the current group is the one that opens onto
@@ -82,6 +152,13 @@ export class StateDiagram {
   #boxes: HTMLElement
   #programEl: HTMLElement
   #localEl: HTMLElement
+  /**
+   * The box the level's drawing takes on screen, at its zoom, with room around it in `#localEl` to be moved into.
+   * The scroll's range is this box's size, so a drag's reach holds at any zoom.
+   */
+  #localContent: HTMLElement
+  /** The drawing at the size it was laid out at, scaled by the zoom into `#localContent`. */
+  #localDrawing: HTMLElement
   #localEdges: SVGSVGElement
   #localNodes: HTMLElement
 
@@ -98,10 +175,33 @@ export class StateDiagram {
   #local: Local = { nodes: [], edges: [] }
   /** The state the local level was laid out around, or `null` when it has not been. */
   #localAround: number | null = null
+  /**
+   * The state the local level was last scrolled to centre, or `null` to centre the current one at the next draw. A
+   * draw around this same state centres it again, unless the user moved the level since (`#offset`).
+   */
+  #centredOn: number | null = null
+  /** The local level's scroll as that centring left it: a scroll anywhere else is the user's. */
+  #centredAt = { left: 0, top: 0 }
+  /** The local level's zoom, which a step, a new state and a resize keep (decision 12). */
+  #zoom = 1
+  /** The size the local level was last laid out at, which the zoom scales. */
+  #drawn = { width: 0, height: 0 }
+  /** A mouse press on the local level, armed or panning, or `null`. */
+  #press: Press | null = null
+  /** Whether a draw that would move the local level waited for a press to end (`#drawLocal`). */
+  #waited = false
+  /** Whether each of the last two presses on the local level panned, for a double-click to tell (`#zoomLocal`). */
+  #panned: [boolean, boolean] = [false, false]
+  /** The scroll the last zoom asked for, which an engine that keeps whole pixels rounds (`#zoomAt`). */
+  #zoomedTo = { left: Number.NaN, top: Number.NaN }
   /** The local level's roving cursor: the state whose node holds the one tab stop. */
   #localActive: number | null = null
   /** The width the local level was last laid out for. */
   #localWidth = 0
+  /** The canvas `#measure` sets text on, made on the first layout. */
+  #canvas: CanvasRenderingContext2D | undefined
+  /** What the level was last laid out with (`measuredAs`), so a font load that changes none of it lays nothing out. */
+  #measured = ''
   #linkedStates: Set<number> = new Set()
   #frame: TmState | null = null
   /** The current group, or `null` with no frame, and for the `overflow` state, which is a badge. */
@@ -177,11 +277,23 @@ export class StateDiagram {
     // `#focusShown` to land on when the level empties out from under whichever node held the roving
     // tab stop — there is otherwise nothing left in the local level to receive it.
     this.#localNodes.tabIndex = -1
-    this.#localEl.append(this.#localEdges, this.#localNodes)
+    this.#localDrawing = document.createElement('div')
+    this.#localDrawing.className = 'local-drawing'
+    this.#localDrawing.append(this.#localEdges, this.#localNodes)
+    this.#localContent = document.createElement('div')
+    this.#localContent.className = 'local-content'
+    this.#localContent.append(this.#localDrawing)
+    this.#localEl.append(this.#localContent)
+    // NO TAB STOP OF ITS OWN: Firefox makes one of a scroller with somewhere to scroll, which the room always gives,
+    // and it would be an unnamed stop ahead of the nodes, the level's one stop. A node's focus still scrolls it.
+    this.#localEl.tabIndex = -1
     this.#localNodes.addEventListener('click', (e) => {
       const el = e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('.local-node') : null
       if (el === null) return
       this.#localActive = Number(el.dataset.state)
+      // THE CLICKED NODE TAKES THE FOCUS, as its press does not, the level being one a drag moves (`#panLocal`). NO
+      // RING, as a press's own focus draws none: a scripted focus draws one wherever the focus was last the keyboard's.
+      el.focus({ preventScroll: true, focusVisible: false })
       // PAINTED BEFORE LINKING, as the program level's row click and the rule table's row click both are: `link`
       // can return early for a pane that is nothing else's to link, and the clicked node should hold the tab
       // stop regardless — not stay at `tabIndex -1` because the paint that would have moved it never ran.
@@ -191,12 +303,17 @@ export class StateDiagram {
     this.#localNodes.addEventListener('keydown', (e) => this.#localKey(e))
     // THE LOCAL LEVEL IS LAID OUT FOR A WIDTH, so a width it was not laid out for lays it out again — a divider
     // drag, a window resize. The panel's own reopening goes through its `onToggle`'s `redraw()` instead of this.
+    // ITS BORDER BOX, which is all the width it is laid out for: it draws no scroll bar to take any (style.css), and
+    // its content does not size it (`container-type`), so a layout cannot change what this observes. Any change of
+    // size, a height's too, places the level again: centred, unless the user moved it (`#drawLocal`).
     new ResizeObserver(() => {
-      if (this.#localEl.clientWidth === this.#localWidth) return
-      this.#localAround = null
-      if (this.shown === 'local') this.#drawLocal()
-    }).observe(this.#localEl)
+      if (this.#localEl.clientWidth !== this.#localWidth) this.#localAround = null
+      if (this.shown === 'local') this.#drawLocal(true)
+    }).observe(this.#localEl, { box: 'border-box' })
     this.el.append(program, this.#localEl)
+    this.#panLocal()
+    this.#zoomLocal()
+    measureOnFontChange(this)
 
     // THE PANE'S RE-ATTACH GOES WITH THE GRID'S FOLLOWING, which a user's scroll and a key that scrolls change. Told
     // after the grid's own listeners, registered first in its constructor, have acted on the event; not for a box that
@@ -252,6 +369,7 @@ export class StateDiagram {
     this.#names = names
     this.#into = p === null ? [] : predecessors(p)
     this.#localAround = null
+    this.#centredOn = null
     this.#localActive = null
     this.#linkedStates = new Set()
     this.#groups = p === null ? null : groupStates(p)
@@ -288,6 +406,7 @@ export class StateDiagram {
     // page: *show states* in the grid would move it to `<body>`. It moves to the shown level's own tab stop.
     const had = this.el.contains(document.activeElement)
     this.#level = level
+    this.#centredOn = null
     this.#layout()
     if (had) this.#focusShown()
   }
@@ -324,6 +443,16 @@ export class StateDiagram {
   /** Follow the running state again, and scroll to it now. */
   attach(): void {
     this.#grid.attach()
+  }
+
+  /**
+   * Lay the local level out again if its text measures differently than when it was laid out: a web font arrived, or
+   * the style changed. Its boxes are sized to their names, and its gaps to their labels, in the widths measured then.
+   */
+  remeasure(): void {
+    if (this.#localAround === null || measuredAs(this.#measure()) === this.#measured) return
+    this.#localAround = null
+    if (this.shown === 'local') this.#drawLocal()
   }
 
   /** Redraw after the panel opens, or after anything else that changed its size without a scroll or a frame. */
@@ -651,15 +780,16 @@ export class StateDiagram {
 
   /**
    * Lay the local level out around the current state — only when that state changed, since it is small but not
-   * free (spec §8) — and paint its marks.
+   * free (spec §8) — and paint its marks. `resized` when its panel changed size, which places it again.
    */
-  #drawLocal(): void {
+  #drawLocal(resized = false): void {
     const p = this.#program
     const current = this.#frame?.state ?? null
     // NOTHING WHILE IT IS NOT DRAWN — a closed panel, a view off the page: a layout there would be for no width at
     // all, and it is marked stale so the next one on screen lays it out.
     if (this.#localEl.clientWidth === 0) {
       this.#localAround = null
+      this.#centredOn = null
       return
     }
     if (p === null || current === null) {
@@ -669,111 +799,405 @@ export class StateDiagram {
       const had = this.#localNodes.contains(document.activeElement)
       this.#localNodes.replaceChildren()
       this.#localEdges.replaceChildren()
+      // NOTHING LEFT TO SCROLL OR DRAG: the last drawing's size would keep a scroll range, and the open hand, over a
+      // level with nothing in it.
+      this.#drawn = { width: 0, height: 0 }
+      this.#sizeLocal()
+      this.#localEdges.setAttribute('width', '0')
+      this.#localEdges.setAttribute('height', '0')
+      this.#localEl.removeAttribute('data-pans')
       this.#localAround = null
+      this.#centredOn = null
       if (had) this.#focusShown()
       return
     }
-    if (current !== this.#localAround) {
-      this.#localAround = current
-      this.#local = localLevel(p, this.#into, current, this.#frame?.rule ?? null, this.#names)
-      if (this.#localActive === null || !this.#local.nodes.some((n) => n.state === this.#localActive)) {
-        this.#localActive = current
-      }
-      this.#layoutLocal(p)
+    // A NEW STATE IS CENTRED; A LAYOUT OR A RESIZE AROUND THE SAME ONE CENTRES IT AGAIN, OR KEEPS IT WHERE THE USER
+    // MOVED IT (decision 11). A step that stays in the state does neither, and costs no measuring.
+    const same = current === this.#centredOn
+    const stale = current !== this.#localAround
+    if (same && !stale && !resized) {
+      this.#paintLocal()
+      return
     }
+    // NOTHING THAT MOVES THE LEVEL WHILE A MOUSE PRESS IS ON IT: a pan sets the scroll from where its press began, so
+    // a placing under it shows for a frame and is undone by the next move, and a layout would change what is under
+    // the pointer. The release draws what waited (`#panLocal`), centring a state that came during the press.
+    if (this.#press !== null) {
+      this.#waited = true
+      return
+    }
+    // READ BEFORE THE LAYOUT, which replaces the node it is measured from.
+    const kept = same ? this.#offset(current) : null
+    if (stale) {
+      this.#localAround = current
+      this.#layoutLocal(p, current)
+    }
+    this.#place(current, kept)
     this.#paintLocal()
   }
 
-  /** Place the nodes in their columns and draw the edges between them. */
-  #layoutLocal(p: TmProgram): void {
+  /**
+   * Build the level around `current`, place the nodes in their columns and draw the edges between them
+   * (`local-layout.ts`).
+   */
+  #layoutLocal(p: TmProgram, current: number): void {
     // A NODE HOLDING THE FOCUS IS REBUILT BELOW, AND ITS FOCUS WOULD FALL TO THE PAGE: it goes to the active node.
     const had = this.#localNodes.contains(document.activeElement)
     this.#localWidth = this.#localEl.clientWidth
-    const width = Math.max(this.#localWidth, (2 * REACH + 1) * COLUMN_MIN)
-    const column = Math.floor(width / (2 * REACH + 1))
-    const nodeWidth = column - GAP
-    const at = new Map<number, { x: number; y: number }>()
-    const filled = new Map<number, number>()
-    for (const n of this.#local.nodes) {
-      const row = filled.get(n.column) ?? 0
-      filled.set(n.column, row + 1)
-      at.set(n.state, { x: (n.column + REACH) * column + PAD, y: TOP + row * NODE_STEP })
+    const nameOf = (s: number) => p.states[s]?.name ?? String(s)
+    const rule = this.#frame?.rule ?? null
+    // THE PANEL'S WHOLE WIDTH, WHICH NO SCROLL BAR TAKES ANY OF (`.local-level` in style.css): the spread changes the
+    // level's height, and a width that changed with the height would lay it out again every frame.
+    const metrics = this.#measure()
+    this.#measured = measuredAs(metrics)
+    const local = localLevel(p, this.#into, current, rule, this.#names)
+    const layout = layoutLocal(local, nameOf, metrics, this.#localWidth)
+    this.#local = local
+    if (this.#localActive === null || !local.nodes.some((n) => n.state === this.#localActive)) {
+      this.#localActive = current
     }
-    const height = TOP + PAD + Math.max(1, ...filled.values()) * NODE_STEP
-    this.#localNodes.style.height = `${height}px`
-    this.#localEdges.setAttribute('width', String(width))
-    this.#localEdges.setAttribute('height', String(height))
+    this.#drawn = { width: layout.width, height: layout.height }
+    this.#sizeLocal()
+    this.#localEdges.setAttribute('width', String(layout.width))
+    this.#localEdges.setAttribute('height', String(layout.height))
     // COMPUTED ONCE HERE, FOR THE FIRST PAINT: `#paintLocal`, called right after this returns, repaints it
     // fresh on every later frame — see `#nextEdge`'s own doc for why a layout cannot just bake it in.
     const next = this.#nextEdge()
     this.#localNodes.replaceChildren(
-      ...this.#local.nodes.map((n) => {
+      ...layout.nodes.map((n) => {
         const b = document.createElement('button')
         b.type = 'button'
         b.className = 'local-node'
         b.dataset.state = String(n.state)
         b.dataset.column = String(n.column)
-        const place = at.get(n.state) ?? { x: 0, y: 0 }
-        b.style.left = `${place.x}px`
-        b.style.top = `${place.y}px`
-        b.style.width = `${nodeWidth}px`
-        b.textContent = p.states[n.state]?.name ?? String(n.state)
-        b.title = b.textContent
+        b.style.left = `${n.x}px`
+        b.style.top = `${n.y}px`
+        b.style.width = `${n.width}px`
+        b.textContent = n.text
+        // THE WHOLE NAME, WHICHEVER PART OF IT SHOWS: on hover, and as the name a reader is read, so a cut name
+        // is never all that a screen reader says.
+        b.title = nameOf(n.state)
+        b.setAttribute('aria-label', b.title)
         b.setAttribute('aria-description', this.#said(p, n.state, n.column, next))
         return b
       }),
     )
+    // WITHOUT SCROLLING: the level's scroll is the centring's or the user's (`#drawLocal`), not the focus's.
     if (had) {
       this.#paintLocal()
-      this.#localNodes.querySelector<HTMLElement>('.local-node[tabindex="0"]')?.focus()
+      this.#localNodes.querySelector<HTMLElement>('.local-node[tabindex="0"]')?.focus({ preventScroll: true })
     }
-    const mid = NODE_HEIGHT / 2
     const drawn: SVGElement[] = []
-    for (const e of this.#local.edges) {
-      const a = at.get(e.from)
-      const b = at.get(e.to)
-      if (a === undefined || b === undefined) continue
-      let d: string
-      let lx: number
-      let ly: number
-      if (e.from === e.to) {
-        // A SELF-LOOP: out of the node's right edge, over it, and back into its top.
-        const x = a.x + nodeWidth
-        d = `M${x} ${a.y + 6} C${x + 22} ${a.y - 10} ${x - 12} ${a.y - 18} ${x - 20} ${a.y}`
-        lx = x - 30
-        ly = a.y - 8
-      } else if (b.x > a.x) {
-        const x1 = a.x + nodeWidth
-        d = `M${x1} ${a.y + mid} C${x1 + PAD} ${a.y + mid} ${b.x - PAD} ${b.y + mid} ${b.x} ${b.y + mid}`
-        lx = (x1 + b.x) / 2
-        ly = (a.y + b.y) / 2 + mid - 5
-      } else {
-        // BACK, OR ALONG A COLUMN: under the nodes, from the bottom of one to the bottom of the other.
-        const x1 = a.x + nodeWidth / 2
-        const x2 = b.x + nodeWidth / 2
-        const low = Math.max(a.y, b.y) + NODE_HEIGHT + 14
-        d = `M${x1} ${a.y + NODE_HEIGHT} C${x1} ${low} ${x2} ${low} ${x2} ${b.y + NODE_HEIGHT}`
-        lx = (x1 + x2) / 2
-        ly = low
-      }
+    for (const e of layout.edges) {
       // THE FIRST PAINT COMES FROM `next`, THE SAME PLACE EVERY LATER ONE DOES (`#paintLocal`), NOT FROM
       // `e.next` — `localLevel`'s own frozen flag, kept on `LocalEdge` for the node fixtures that test
       // it directly, but a second source of truth for the drawn mark would
       // only ever agree with the first by construction, not because anything kept them in step.
       const isNext = next !== null && next.from === e.from && next.to === e.to
-      drawn.push(
-        svg('path', {
-          d,
-          class: isNext ? 'local-edge is-next' : 'local-edge',
-          'data-from': String(e.from),
-          'data-to': String(e.to),
-        }),
-      )
-      const label = svg('text', { x: String(lx), y: String(ly), class: 'local-label', 'text-anchor': 'middle' })
-      label.textContent = e.label
-      drawn.push(label)
+      const ends = { 'data-from': String(e.from), 'data-to': String(e.to) }
+      drawn.push(svg('path', { d: e.d, class: isNext ? 'local-edge is-next' : 'local-edge', ...ends }))
+      const { label } = e
+      const text = svg('text', { class: 'local-label', 'text-anchor': label.anchor, ...ends })
+      for (const [i, line] of label.lines.entries()) {
+        const span = svg('tspan', { x: String(label.x), y: String(label.baselines[i] ?? 0) })
+        span.textContent = line
+        text.append(span)
+      }
+      drawn.push(text)
     }
     this.#localEdges.replaceChildren(...drawn)
+    // A DRAWN LEVEL IS ONE A DRAG MOVES, whatever its size, for `#panLocal` and the stylesheet's open hand.
+    this.#localEl.setAttribute('data-pans', '')
+  }
+
+  /** The local level's node for `state`, or `null` where the level has none. */
+  #nodeOf(state: number): HTMLElement | null {
+    return this.#localNodes.querySelector<HTMLElement>(`.local-node[data-state="${state}"]`)
+  }
+
+  /**
+   * Where the user moved `state`'s node to, from the middle of the panel, or `null` where nothing has scrolled the
+   * local level since it was last centred: a drag, the wheel, a finger or a focus brought into view all scroll it.
+   */
+  #offset(state: number): { x: number; y: number } | null {
+    const el = this.#localEl
+    const at = this.#centredAt
+    if (Math.abs(el.scrollLeft - at.left) <= 0.5 && Math.abs(el.scrollTop - at.top) <= 0.5) return null
+    const node = this.#nodeOf(state)
+    if (node === null) return null
+    const v = scrolledBox(el)
+    const r = node.getBoundingClientRect()
+    return { x: r.left + r.width / 2 - (v.left + v.right) / 2, y: r.top + r.height / 2 - (v.top + v.bottom) / 2 }
+  }
+
+  /**
+   * Scroll the local level so `state`'s node is `kept` from the middle of the panel, where the user left it, or with
+   * `kept` null, centre it (`towards`) and remember that. The browser holds either to the scroll's range, which puts a
+   * corner of the drawing at the panel's middle at its ends (`.local-content` in style.css).
+   */
+  #place(state: number, kept: { x: number; y: number } | null): void {
+    const node = this.#nodeOf(state)
+    if (node === null) return
+    const el = this.#localEl
+    const v = scrolledBox(el)
+    const r = node.getBoundingClientRect()
+    const x = r.left + r.width / 2
+    const y = r.top + r.height / 2
+    if (kept !== null) {
+      el.scrollLeft += x - (v.left + v.right) / 2 - kept.x
+      el.scrollTop += y - (v.top + v.bottom) / 2 - kept.y
+      return
+    }
+    const k = this.#localContent.getBoundingClientRect()
+    el.scrollLeft += towards(x, k.left, k.right, v.left, v.right)
+    el.scrollTop += towards(y, k.top, k.bottom, v.top, v.bottom)
+    this.#centredOn = state
+    this.#centredAt = { left: el.scrollLeft, top: el.scrollTop }
+  }
+
+  /**
+   * A mouse drag on the local level, on its background or a node, moves it in its panel both ways, at any size
+   * (decisions 10 and 11). A press is a click until it has moved more than `PAN_THRESHOLD` px, so a click on a node
+   * still links it; one that moved further pans, captures the pointer, and neither links nor moves the roving tab
+   * stop. A pen and a finger keep the browser's own scrolling, which the level's room to move gives as much reach.
+   */
+  #panLocal(): void {
+    const el = this.#localEl
+    // THE MOVES AND THE RELEASE ARE HEARD ON THE DOCUMENT: before the threshold there is no capture, and a move that
+    // leaves the level in one step would not pan, or a release off it would leave the press armed for later moves.
+    const move = (e: PointerEvent) => {
+      const press = this.#press
+      if (press === null || e.pointerId !== press.id) return
+      // NO BUTTON HELD IS A RELEASE THE PAGE NEVER HEARD, one in another window say: the press is over, or the level
+      // would follow a pointer that holds nothing, and every draw waiting for the press would wait on.
+      if ((e.buttons & 1) === 0) {
+        stop(press, false)
+        return
+      }
+      const dx = e.clientX - press.x
+      const dy = e.clientY - press.y
+      if (!press.panning) {
+        if (Math.hypot(dx, dy) <= PAN_THRESHOLD) return
+        press.panning = true
+        el.dataset.dragging = 'true'
+        // CAPTURED ONCE IT PANS, AND NOT BEFORE: a captured release sends its click to the level rather than to the
+        // node under the pointer, which a pan keeps under it, so a pan links nothing and a click still links.
+        el.setPointerCapture(e.pointerId)
+      }
+      el.scrollLeft = press.left - dx
+      el.scrollTop = press.top - dy
+    }
+    const end = (e: PointerEvent) => {
+      const press = this.#press
+      if (press === null || e.pointerId !== press.id) return
+      stop(press, e.type === 'pointerup')
+    }
+    // A WINDOW THAT LOSES THE FOCUS MAY NEVER HEAR THE RELEASE, which comes to the window that took it.
+    const blur = () => {
+      if (this.#press !== null) stop(this.#press, false)
+    }
+    /** End `press`; `released` when by its own release, which may make it a click. */
+    const stop = (press: Press, released: boolean) => {
+      this.#press = null
+      this.#panned = [this.#panned[1], press.panning]
+      el.ownerDocument.removeEventListener('pointermove', move, true)
+      el.ownerDocument.removeEventListener('pointerup', end, true)
+      el.ownerDocument.removeEventListener('pointercancel', end, true)
+      el.ownerDocument.defaultView?.removeEventListener('blur', blur)
+      // WHAT WAITED FOR THE PRESS IS DRAWN IN A LATER FRAME, after the release's click: a layout now would replace the
+      // node the click is on, and the click would link nothing.
+      if (this.#waited) {
+        this.#waited = false
+        requestAnimationFrame(() => {
+          if (this.shown === 'local') this.#drawLocal(true)
+        })
+      }
+      if (!press.panning) {
+        // A CLICK ON THE BACKGROUND TAKES THE FOCUS INTO THE LEVEL, to its tab stop and with no ring, as a press's own
+        // focus would: that is stopped below, and typing would otherwise go on editing wherever the focus was. A
+        // node's click focuses the node.
+        if (released && !press.onNode) {
+          const stop = this.#localNodes.querySelector<HTMLElement>('.local-node[tabindex="0"]') ?? this.#localNodes
+          stop.focus({ preventScroll: true, focusVisible: false })
+        }
+        return
+      }
+      delete el.dataset.dragging
+      if (el.hasPointerCapture(press.id)) el.releasePointerCapture(press.id)
+    }
+    // A CAPTURE THE BROWSER TOOK BACK IS A PRESS WHOSE RELEASE MAY NEVER REACH THE LEVEL.
+    el.addEventListener('lostpointercapture', end)
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !el.hasAttribute('data-pans')) return
+      const onNode = e.target instanceof Element && e.target.closest('.local-node') !== null
+      this.#press = {
+        id: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        left: el.scrollLeft,
+        top: el.scrollTop,
+        onNode,
+        panning: false,
+      }
+      el.ownerDocument.addEventListener('pointermove', move, true)
+      el.ownerDocument.addEventListener('pointerup', end, true)
+      el.ownerDocument.addEventListener('pointercancel', end, true)
+      el.ownerDocument.defaultView?.addEventListener('blur', blur)
+      // NO TEXT SELECTED AND NO FOCUS MOVED BY A PRESS THAT MAY BE A PAN: both are its `mousedown`'s, which this
+      // stops. A click focuses its node, or the level, itself.
+      e.preventDefault()
+    })
+  }
+
+  /**
+   * The local level's zoom (decision 12): the wheel, and a pinch, which browsers send as a wheel with Ctrl, scale the
+   * drawing about the pointer; a double-click on its background puts it back at full size, centred on the current
+   * state; with the focus in it, `+` or `=` and `-` zoom about the panel's middle and `0` is the double-click's.
+   */
+  #zoomLocal(): void {
+    const el = this.#localEl
+    // NOT PASSIVE, SO IT CAN BE STOPPED: the wheel over the drawing is the drawing's, so it neither scrolls the view
+    // around it nor, with Ctrl, zooms the page.
+    el.addEventListener(
+      'wheel',
+      (e) => {
+        if (!el.hasAttribute('data-pans')) return
+        e.preventDefault()
+        // `deltaY` READ BEFORE `deltaMode`, which in Firefox then gives pixels rather than lines; either is a notch.
+        const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX
+        const notches = delta / (PER_NOTCH[e.deltaMode] ?? 1)
+        this.#zoomAt(this.#zoom * NOTCH ** -notches, { x: e.clientX, y: e.clientY })
+      },
+      { passive: false },
+    )
+    el.addEventListener('dblclick', (e) => {
+      if (e.target instanceof Element && e.target.closest('.local-node') !== null) return
+      // TWO CLICKS, NOT A DRAG AND A CLICK: a drag's release clicks the level it captured, and a press soon after at
+      // the same spot is counted the second of a double-click, which would reset a zoom the user is moving around in.
+      if (this.#panned[0] || this.#panned[1]) return
+      this.#unzoom()
+    })
+    el.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || !el.hasAttribute('data-pans')) return
+      const v = scrolledBox(el)
+      const middle = { x: (v.left + v.right) / 2, y: (v.top + v.bottom) / 2 }
+      if (e.key === '+' || e.key === '=') this.#zoomAt(this.#zoom * NOTCH, middle)
+      else if (e.key === '-') this.#zoomAt(this.#zoom / NOTCH, middle)
+      else if (e.key === '0') this.#unzoom()
+      else return
+      e.preventDefault()
+    })
+  }
+
+  /**
+   * Zoom the local level towards `to`, keeping the point of the drawing at `at`, a point on the page, where it is. Held
+   * to the range (`ZOOM_MAX` and the floor): a zoom already past an end, as a step or a resize can leave one, is moved
+   * no further past it, and not pulled back to it in one jump.
+   */
+  #zoomAt(to: number, at: { x: number; y: number }): void {
+    const el = this.#localEl
+    const { width, height } = this.#drawn
+    if (width === 0 || height === 0) return
+    const from = this.#zoom
+    const fits = Math.min(el.clientWidth / width, el.clientHeight / height)
+    const floor = Math.max(ZOOM_MIN, Math.min(ZOOM_FLOOR, fits))
+    const zoom = Math.min(Math.max(to, Math.min(floor, from)), Math.max(ZOOM_MAX, from))
+    if (zoom === from) return
+    // READ BEFORE THE RESIZE, which can take the scroll in to a smaller range on its own.
+    const k = this.#localContent.getBoundingClientRect()
+    // FROM THE SCROLL THE LAST ZOOM ASKED FOR while the level is within a pixel of it, which is a rounding and not a
+    // move or the range's end: an engine rounds each zoom's scroll, and a trackpad's run of small zooms would add the
+    // roundings up and move the point under the pointer.
+    const z = this.#zoomedTo
+    const left = Math.abs(el.scrollLeft - z.left) < 1 ? z.left : el.scrollLeft
+    const top = Math.abs(el.scrollTop - z.top) < 1 ? z.top : el.scrollTop
+    // THE DRAWING'S CORNER WHERE THAT SCROLL PUTS IT.
+    const x = k.left + el.scrollLeft - left
+    const y = k.top + el.scrollTop - top
+    this.#zoom = zoom
+    this.#sizeLocal()
+    const toLeft = left + ((at.x - x) / from) * (zoom - from)
+    const toTop = top + ((at.y - y) / from) * (zoom - from)
+    el.scrollLeft = toLeft
+    el.scrollTop = toTop
+    this.#zoomedTo = { left: toLeft, top: toTop }
+    this.#rebase(left, top)
+  }
+
+  /** Put the local level back at full size, centred on the current state as a new one is. */
+  #unzoom(): void {
+    const current = this.#frame?.state ?? null
+    if (this.#drawn.width === 0 || current === null) return
+    const left = this.#localEl.scrollLeft
+    const top = this.#localEl.scrollTop
+    this.#zoom = 1
+    this.#sizeLocal()
+    this.#place(current, null)
+    this.#rebase(left, top)
+  }
+
+  /**
+   * A PAN UNDER WAY GOES ON FROM WHERE A ZOOM OR A RESET LEFT THE LEVEL, scrolled from `left`, `top`: its next move sets
+   * the scroll from its press's, which would otherwise undo the zoom's scroll in one jump.
+   */
+  #rebase(left: number, top: number): void {
+    if (this.#press === null) return
+    this.#press.left += this.#localEl.scrollLeft - left
+    this.#press.top += this.#localEl.scrollTop - top
+  }
+
+  /** Size the local level's drawing at its zoom: the box it takes on screen, and the scale that fills it. */
+  #sizeLocal(): void {
+    const { width, height } = this.#drawn
+    const z = this.#zoom
+    this.#localContent.style.width = `${width * z}px`
+    this.#localContent.style.height = `${height * z}px`
+    this.#localDrawing.style.width = `${width}px`
+    this.#localDrawing.style.height = `${height}px`
+    // A TRANSFORM, NOT A LAYOUT AT ANOTHER SIZE: the drawing scales as one, every box, line and label in proportion,
+    // where text set at a scaled font size is not, and a cut name could then outgrow its box. It is drawn afresh at
+    // each scale, so it stays sharp.
+    this.#localDrawing.style.transform = z === 1 ? '' : `scale(${z})`
+  }
+
+  /**
+   * The level's fonts as `layoutLocal` needs them, read from a node and a label as style.css sets them, so a style
+   * that changes the font changes what is measured. A canvas measures the text: it does not lay the page out, as a
+   * hidden element would once for every cut a name is tried at.
+   */
+  #measure(): Metrics {
+    const node = document.createElement('button')
+    node.className = 'local-node is-current'
+    node.hidden = true
+    const label = svg('text', { class: 'local-label' })
+    this.#localNodes.append(node)
+    this.#localEdges.append(label)
+    const ns = getComputedStyle(node)
+    const ls = getComputedStyle(label)
+    const px = (v: string) => Number.parseFloat(v) || 0
+    const nodeFont = `${ns.fontStyle} ${ns.fontWeight} ${ns.fontSize} ${ns.fontFamily}`
+    const labelFont = `${ls.fontStyle} ${ls.fontWeight} ${ls.fontSize} ${ls.fontFamily}`
+    const chrome = px(ns.paddingLeft) + px(ns.paddingRight) + px(ns.borderLeftWidth) + px(ns.borderRightWidth)
+    node.remove()
+    label.remove()
+    // A NEW CANVAS ALWAYS HAS A 2D CONTEXT: `null` is only for a canvas that already has another kind.
+    this.#canvas ??= document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D
+    const ctx = this.#canvas
+    const width = (font: string) => (s: string) => {
+      ctx.font = font
+      return ctx.measureText(s).width
+    }
+    ctx.font = labelFont
+    const metrics = ctx.measureText('0')
+    const nameWidth = width(nodeFont)
+    return {
+      nameWidth,
+      labelWidth: width(labelFont),
+      ascent: metrics.fontBoundingBoxAscent,
+      descent: metrics.fontBoundingBoxDescent,
+      nodeChrome: chrome,
+      cap: nameWidth('0'.repeat(CAP_CHARS)),
+    }
   }
 
   /**
@@ -812,7 +1236,8 @@ export class StateDiagram {
       .filter((e) => e.from === state)
       .map((e) => {
         const fires = next !== null && next.from === state && next.to === e.to
-        return `to ${p.states[e.to]?.name ?? e.to} on ${e.label}${fires ? ', fires next' : ''}`
+        const on = e.labels.map((l) => l.join(' ')).join(', ')
+        return `to ${p.states[e.to]?.name ?? e.to} on ${on}${fires ? ', fires next' : ''}`
       })
     return out.length === 0 ? where : `${where}; ${out.join('; ')}`
   }

@@ -35924,3 +35924,666 @@ output is in the log the row names, in `$R`.
 | 193; 1 | tests passed and failed in the five files in both engines at `cf2bd2b`, the failure Firefox's workspace-menu case | the second command above (rb-touched-both.log) |
 | 14 (10, 2, 1, 1); 15 | the four files' failures in Firefox here (`inspector-phone`, `focus-scroll`, `controls-gate`, `header-menus-narrow`) and at `846bb78`, where the same 14 fail and one more `inspector-phone` case, which passes here | the third command above (rb-ff-four-head.log, rb-ff-four-base.log) |
 | 18; 16; 2 | tests failed: the new tests against the old sources; with the row put back; with no catching, in both engines together | `REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project browser --project firefox tests/browser/notice-float.test.ts tests/browser/share-through-open.test.ts` on each tree (r6-old-both.log, r6-sab-F1.log, r6-sab-F2.log), their `Tests` lines |
+
+#### THE STATE DIAGRAM'S LOCAL LEVEL CUTS A LONG NAME IN THE MIDDLE SO THE END, WHERE ONE LEVEL'S NAMES DIFFER, SHOWS, SETS EVERY LABEL CLEAR OF THE BOXES, LOOPS, LINES AND OTHER LABELS AND A FAN'S LABELS BY THEIR OWN LINES, WRITES ONE TAPE OF ONE RULE A LINE IN GAPS AS WIDE AS THEIR LABELS, CENTRES ITSELF IN ITS PANEL, KEEPS EVERY STATE IN A PANEL TOO SMALL FOR IT, MOVES WITH A MOUSE DRAG AT ANY SIZE, AS A MAP DOES, WHILE A STEP TO A NEW STATE CENTRES IT, AND ZOOMS WITH THE WHEEL (2026-11-16 and 2026-11-17, branch `state-diagram-tidy`, `7085aa2..d02504c`, 37 commits: 21 to `233e4ac`, four docs commits, `30b365f`, the crop and drag, `58c1f35`, its docs, `d6b7073`, the drag at any size, `ab26085`, its docs, `f7d5c59`, the zoom, `426730f`, its docs, `7a49354`, review 6's fixes, `bc68049`, their docs, `d8b9439`, two of their tests' waits, `eb4c819` and `f43f1e5`, docs that bring this entry to `d8b9439` and correct it after a fact-check, and `d02504c`, a fan's label along its row by its own line; then two docs commits that bring this entry to it, the second naming the new browser file among the tests, and one after a fourth fact-check that also narrows `MOST_APART`'s comment and a node test's name to a rule that moves, and one that gives the design doc's rise in a gap 0.75 px wider as its log has it, and one after a fifth fact-check that also cuts `MOST_APART`'s comment to its first sentence and renames a node test, and one that updates this entry for the rebase onto `7085aa2` and deletes a clause from the design doc; 43 commits in all)
+
+The user, 2026-11-06: "fix the visuals for the state diagram", with a screenshot of the TM view's
+state diagram at the `local` level. It reproduces with `is_even(6)` under the binary encoding at
+step 276, state `bpf31.l2.r1.rw0`, in an 844 × 324 panel: five boxes in one row at the top, four of
+them reading `bpf31.l2.r1…` because the CSS ellipsis cut the end of each name, which is where they
+differ; each self-loop's arc drawn through its own label (`REG:0 L, REG:1 L`); the short edges
+crowded with labels; and the rest of the panel empty. The design, with every call and the
+measurements behind it, is `docs/superpowers/specs/2026-11-16-state-diagram-tidy-design.md`. The
+lane's record is `~/temp/redextape-state-diagram-tidy-record/`, `$R` below: `brief.md` (the user's
+decisions), `progress.md`, `review-1.md` to `review-6.md`, the scripts and logs this entry names, and
+screenshots in `$R/shots/`: `before-844-dark.png` is the user's state on `main`, `fix3-844-dark.png`
+and `fix3-844-light.png` the same state on this branch; `$R/pan/shots/narrow-500-dragged-light.png`
+and `-dark.png` are that state in a narrow panel after a mouse drag to its left edge, at `e8ec924`;
+at `8dc4fbd`, `$R/map/shots/drag-844-light.png` and `-dark.png` are it in the 844 px panel, which it
+fits, after a drag 120 px right and 20 px down, and `narrow-500-light.png` and `-dark.png` in a
+500 px panel after a drag to its left edge (`$R/map/shoot-map.mjs`); at `f79fe78`,
+`$R/zoom/shots/zoom-0.5-light.png`, `zoom-2-light.png` and their `-dark` pairs are it in the 844 px
+panel after a wheel over its current state zoomed it to 50% and 200% (`$R/zoom/shoot-zoom.mjs`). The
+program level (*arcs* and *chips*) is unchanged.
+
+A SHA this entry gives for a run, a measurement, a screenshot, a review or a trial of the user's is that
+commit's SHA before the rebase onto `7085aa2`, measured before the rebase, on `486df8d`, and
+`$R/rebase2/sha-map.txt` maps each to its SHA after it (the local branch `state-diagram-tidy-pre-rebase-2`
+keeps them); a SHA that names what a commit changes, a range or a count of commits is its SHA after it.
+
+##### DECISIONS
+
+The user's, 2026-11-16:
+
+- **Fix all four.** Cut a long name in the middle, not at its end, with each box sized to its measured
+  name up to a cap and the full name kept in the node's `title`; set each self-loop's label clear of
+  its loop; write one rule a line instead of a `, `-joined line, with the gap between two columns as
+  wide as its longest label; and centre a diagram shorter than its panel vertically, still scrolling
+  when it is taller and centring again when the panel's height changes.
+- **One tape a line, and one rule each way where two do not fit.** With gaps sized to their labels,
+  37.5% of the 24,428 local levels of the seven examples were wider than the 844 px panel and
+  scrolled sideways. The user chose to write a rule that touches several tapes a tape a line
+  (`REG:0 R` over `WORK:0/0 R`), and to draw a level still wider than its panel at two rules each way
+  at one (±1 state), decided against the panel's real width and decided again when it changes. The
+  second half is replaced by crop and drag, below.
+- **A fan's labels by their own lines, in this PR.** After review 1's fixes, `is_even(6)` at step
+  11,827 stood the four `*` labels of a fan into `bdt35.n0` in one column, and the three of a fan
+  out of `bdt35.q1.e0` in another, so which line each belonged to was a guess. The user ruled that
+  a sloping edge's label sit beside its own line. The implementer measures that as no other edge's
+  drawn line nearer the label; the labels that miss it are under WHAT THIS DID NOT CLOSE.
+- **Keep the scroll bar's room**, `scrollbar-gutter: stable`, the option the lane called A, rather
+  than lay rows out at their natural width and only spread them sideways. Its cost: where scroll bars
+  take width (Chrome on Linux and Windows), an 844 px panel lays its level out over 829 px, and more
+  levels are wider than their panel. Overtaken by the drag at any size, below: the level draws no
+  scroll bar, so there is no bar's room to keep.
+- **A fallen-back level says so in a tooltip only**: the level's `title` reads `states within 1 rule
+  each way: the panel is too narrow for 2`. Nothing is drawn; three columns in place of five are
+  what a reader sees. Gone with the fallback.
+- **Crop and drag** (2026-11-17, after trying the branch: "I can't freely drag the diagram around",
+  and a narrower panel "just alters the diagram by combining states"). Chosen over shrinking to fit
+  with drag and zoom, and over the fallback with drag added: a narrow panel cuts off the diagram's
+  edges without changing what is in it; a drag on the background moves it any way, with an open and
+  a closed hand as over the panel divider, and a click on a state still links it, since a drag starts
+  only once the pointer has moved a few pixels; touch keeps its own scrolling; a step to a new state
+  centres the diagram on it, and while the run stays on one state the dragged position stays put.
+- **"I can't move it around at all"** (2026-11-17, after trying `d1e14a6`: "am I supposed to drag
+  the state diagram? I can't move it around at all"). As built, a level its panel fits ignored
+  presses, and at an ordinary width most levels fit. The controller's answer, that a drag always
+  moves the diagram, is below. After trying it at `5c17348`: "dragging works".
+- **The wheel zooms the diagram** (2026-11-17, asked about the wheel after review 5 found that in
+  Firefox the wheel over a level moved it and no longer scrolled the TM view: "I think scrolling over
+  the diagram should actually zoom it if possible").
+
+The controller's:
+
+- **The same reason in the level's group name**, its `aria-label`, which a screen reader says as the
+  focus enters the level. Gone with the fallback.
+- **Crop and drag's details** (2026-11-17): a drag starts past about 4 px; it pans both ways with the
+  pointer captured; mouse only, so a pen and a finger keep native scrolling; the open hand only while
+  the level is larger than its panel, the default pointer when there is nothing to pan; a press that
+  panned neither links nor moves the roving focus; and the scroll bar's room stays unless a test
+  shows the loop cannot occur. The open hand's condition and the scroll bar's room are replaced by
+  the next.
+- **A drag always moves the diagram, like a map** (2026-11-17, the answer to the user's "I can't
+  move it around at all"): a drag moves the level both ways whatever its size,
+  the open hand over the whole level; it cannot be lost, since it moves until any point of it reaches
+  the panel's middle and no further, by half the panel's width and height of room on every side of
+  the drawing in the level's own scroll, whose scroll bars are hidden; a new state centres it, and so
+  does a resize, a font load or a skin change with no drag since the last centring (review 4's I1),
+  while after a drag a redraw around the same state keeps the user's offset; a pen and a finger
+  scroll natively, which the room now gives a level that fits too; and review 4's M1 and M2 fixed as
+  no ring for a focus a pointer gives, and a click on the level's background taking the focus into
+  the level, with no ring.
+- **The zoom's design** (2026-11-17): the wheel over the level, and Ctrl with it, as a trackpad's
+  pinch comes, zoom the drawing about the pointer, with no page zoom over the diagram and the TM view
+  left unscrolled; about ×1.1 a notch, scaled by the delta; from where the whole level fits, or 50%
+  if that is smaller, never below 5%, up to 300%, the drawing scaled rather than a bitmap; the zoom
+  kept through steps and resizes, a new state centred at it; a double-click on the background, or
+  `0` with the focus in the level, back to 100% and centred, `+` or `=` and `-` about the panel's
+  middle; no indicator; a drag at any zoom with its clamp in zoomed terms; phones unchanged; review
+  5's fixes as listed under WHAT THE REVIEW CAUGHT, with its I1 as its option (a) and its M1 as
+  `tabIndex = -1` on the level.
+- **Review 6's fixes** (2026-11-17, after the user tried the zoom: "yes zoom works well"): M1, `0`
+  during a drag moving the drag's start as `#zoomAt` does; M2, the zoom keeping its scroll as a
+  float of its own; M3, a press whose release never comes ended at `lostpointercapture`,
+  `pointercancel` and the window's `blur`; M4, a double-click resetting only if neither of its
+  presses moved past the drag's threshold; each test-first in both engines where it applies; M6 and
+  M7 in the docs; and M5, the pinch's rate, left as it is with its figure recorded under WHAT THIS
+  DID NOT CLOSE, since the user judged the zoom by feel.
+- **Every review finding fixed**, six reviews, under WHAT THE REVIEW CAUGHT, but review 6's M5
+  (above). For review 1's M3 and M4 the controller set the fix: text measured again when a web font loads or the style or palette
+  changes, and two names whose cuts clash cut longer only until they differ, still capped where
+  possible, rather than shown whole.
+- **The implementer's last resort accepted** (review 3's M1): a label with no clear place near its
+  line moves from whichever of its places it moves least from to be clear, not from its best place
+  alone. The review's suggested fix on its own, weighing each label's best place past the cap, moved
+  none of the labels it was aimed at.
+- **The fan labels the sweep found, fixed in this PR** (2026-11-17, on the user's decision "fan
+  labels: fix in this PR"): the ten `WORK:1 R` labels the sweep at `ca21e4e` found by the wrong line
+  in `fact(12)`'s `bmul17.sN.up31` levels, which fell back to one rule until the crop and drag, by
+  their own line at 844 and 829 px, test-first, with the sweep run again. The way, a higher
+  `MOST_APART` rather than a wider gap, is the implementer's (`Where each label goes`, below).
+
+The implementer's, each with its reason in the design doc's "My calls":
+
+- **The cut.** A name over the cap keeps its first dotted segment, then `…`, then as many whole
+  trailing segments as fit: `bpf31.l2.r1.rw2` shows as `bpf31…r1.rw2`. A name whose first and last
+  segments do not fit is cut by characters, two thirds of them from its end. Clashing cuts (the
+  controller's fix, above) grow by a character's room at a time, and only a pair that no cut tells
+  apart is shown whole. The CSS ellipsis stays as a safety net.
+- **The cap is 14 characters** of the node's font, the width of fourteen `0`s. Text is measured with
+  canvas `measureText` in the node's computed font at the current node's weight. It is measured
+  again (the controller's fix, above) on `document.fonts`' `loadingdone` and on a change to
+  `data-style` or `style` on `<html>`, and the level is laid out again only if sample texts measure
+  differently.
+- **Columns size to what they hold, and the fixed 750 px floor goes.** A column is as wide as its
+  widest box or self-loop label, in place of `floor(width / 5)`, and a gap, as wide as its widest
+  label by the user's decision, keeps a margin either side of it. Spare width is shared by the gaps,
+  so a level still spans its panel, and the width is rounded to the nearest pixel.
+- **The rules of a stacked label stand 4 px apart** (`RULE_GAP`), and **different edges' labels at
+  least 8 px** (`LABEL_GAP`).
+- **Where each label goes.** A self-loop's label sits over its arc, right-aligned to its box, and
+  moves right along the arc past a line up its column. A backward edge's sits under its curve, kept
+  inside the drawing. A sloping edge's goes by the end where its line is apart from the others, on
+  the side the line turns away from. A line along a row between a rising and a falling sibling has
+  its row set apart from the rising one, by up to five node heights (`MOST_APART`, 120 px), and its
+  label goes up against its target. A moving rule `<tape>:1 R` was measured for `REG`, `WORK`,
+  `STACK`, `HEAP` and `BOX`, needing up to 109 px in a gap its width and two `LABEL_MARGIN` wide; a
+  rule that writes, such as `STACK:0/1 R`, was not measured. Each label takes
+  the cheapest of its places that is clear of the nodes, the arcs, the other lines and the labels
+  placed before it, with its own line nearer than any other by `NEARER` (1 px), searching up to
+  `SEARCH` (24 px) from each place. Failing that, it takes the clear place where it is least behind,
+  and failing that, the last resort above, found in one pass (`firstClear`).
+- **A level weighs at most `WEIGHED_PLACES` (2,000) places** beyond each label's best one.
+- **A `browser-scrollbars` vitest project**: Chromium without Playwright's `--hide-scrollbars`, for the
+  one test that needs classic scroll bars. `test:browser` runs it with `browser`.
+- **Crop and drag's mechanics.** A press on a level that can pan has its default prevented, so it
+  neither selects text nor moves the focus, and a click focuses its node itself; the pointer is
+  captured when the drag passes the threshold, so the release's click goes to the level and a pan
+  links nothing, while a plain click still reaches its node. The level is centred on a new state, and
+  also when it is shown afresh (switched to, a recompile, its panel reopened), since a dragged
+  position belongs to a view the user left. The fallback's reach parameter, `Local`'s `reach` and
+  `fitLocal` go with it.
+- **The drag at any size's mechanics.** The room is CSS: `.local-content`'s margins are `50cqh
+  50cqw` of the level, a size container, so a resize leaves the drawing where it was against the
+  panel's middle. A centring keeps the clamp it had, so a level its panel fits is shown whole rather
+  than shifted to put its current state at the middle. A scroll since the last centring, by a drag,
+  the wheel, a finger or a focus, is the user's move, and a redraw then keeps the current node's
+  offset from the panel's middle. No `scrollbar-gutter`: beside hidden bars it keeps no room. A click
+  on the background (review 4's M2) focuses the level's tab stop rather than its group, since the
+  arrows move from a node; the empty outer columns' gaps are taken in first in a narrow panel; and an
+  emptied level has no size left.
+- **The zoom's mechanics.** A transform: `.local-drawing` holds the drawing at its laid-out size,
+  scaled from its top left, and `.local-content` takes the scaled size, so the scroll's range is the
+  drawing as shown and the drag's clamp holds at any zoom. A layout at the zoomed size would rearrange
+  the drawing, and CSS `zoom` sets text at a scaled font size that a cut name can outgrow. A notch is
+  100 px, 3 lines or a page of delta, ×1.1 each, continuously; a key press is one. A zoom already past
+  an end, as a step or a resize can leave it, is kept and moved no further past it. `0` is the
+  double-click's reset. A zoom counts as the user's move, as a drag does. An emptied level leaves the
+  wheel to the view. While a mouse press is on the level, a draw that would lay it out or place it
+  waits, and the release draws it a frame later, after the release's click. A `mouse` command in
+  every browser project holds a press in Firefox too.
+- **Review 6's mechanics**, on the controller's fixes above. A wider rule for M1, that a move
+  finding the scroll changed by anything goes on from it, made three drag tests' drags end about
+  330 px out in both engines and was dropped. The next zoom starts from the scroll the last asked for
+  only while the level is within a pixel of it. A press also ends at a move with no left button held.
+  The level keeps whether each of the last two presses panned (`#panned`). The `mouse` command takes
+  the system's click count, which Playwright does not work out.
+
+##### WHAT CHANGED
+
+- **`web/src/local-level.ts`.** An edge carries its rules' labels as a list, each rule a list of its
+  tapes' parts. What a screen reader is told of an edge is unchanged.
+- **`web/src/local-layout.ts`**, new, pure and free of the DOM: the cut and the rule that keeps
+  names apart, the layout (columns, gaps, rows, loops, lanes, every label's places and the search),
+  and `firstClear`. A level wider than the width it is given keeps its own width, and one narrower
+  takes in the gaps past its outermost occupied columns before it is wider than its panel.
+- **`web/src/state-diagram.ts`.** The local level measures its text, lays out on each change of
+  state or width, and draws a label's lines as `<tspan>`s. A mouse drag moves a drawn level at any
+  size (`#panLocal`), `data-pans` marks one, and `#place` centres a new state, or a redraw around the
+  same one that nothing has moved since, and keeps the user's offset after a move. Its resize
+  observer watches the border box, and any change of size places the level again. One pair of font
+  and style listeners serves the page. The wheel, Ctrl with it, a double-click and the keys zoom the
+  level (`#zoomLocal`, `#zoomAt`, `#unzoom`, `#sizeLocal`); nothing moves it while a mouse press is
+  on it; the level is no tab stop of its own (`tabIndex = -1`). A press ends without its release at a
+  move with no button held, a lost capture or the window's blur; a zoom or `0` during a drag moves
+  the drag's start with the level; a double-click after a drag leaves the zoom.
+- **`web/src/style.css`.** `.local-level` is a flex column and a size container with no scroll bar
+  (`scrollbar-width: none`), an open hand while it holds a drawing (`data-pans`) and a closed one
+  while it moves (`data-dragging`). `.local-content`, the drawing's box at its zoom, has half the
+  level's width and height of room on every side (`margin: 50cqh 50cqw`), and holds
+  `.local-drawing`, the nodes and edges at their laid-out size, scaled from its top left.
+- **`web/vite.config.ts` and `web/package.json`.** The `browser-scrollbars` project; its one file is
+  left out of `browser` and of Firefox's project. `state-diagram-local-pan.test.ts` and
+  `state-diagram-local-layout.test.ts` are in `CAPTURE_FILES`, since their drags hold a pointer
+  capture. A `mouse` command in every browser project (typed in `tests/browser/engine.ts`), with
+  a click count.
+- **Tests.** New: `tests/node/local-layout.test.ts`, and `tests/browser/state-diagram-local-layout`,
+  `state-diagram-local-fans`, `state-diagram-local-fan-row`, `state-diagram-local-scrollbars`,
+  `state-diagram-font-listeners` and `state-diagram-local-pan` (each `.test.ts`). `tests/node/local-level.test.ts` pins the parts;
+  `tests/browser/state-diagram-local.test.ts` finds nodes by their full names and holds the drawing
+  to the level's width in place of the 750 px floor; `tests/browser/state-diagram-no-machine.test.ts`
+  holds an emptied local level to nothing to scroll or drag.
+
+In all, at `7a49354`, 18 files change against `7085aa2`, with 4,955 lines added and 127 removed
+(`git diff --shortstat 7085aa2..7a49354`, which counts this entry and the design as `426730f` left
+them).
+
+##### WHAT THE REVIEW CAUGHT
+
+Review 1, `$R/review-1.md`, at `58fe5f1`: no Critical, 2 Important and 7 Minor findings.
+
+- **I1.** A level whose height depends on its width laid itself out again every frame as a classic
+  vertical scroll bar came and went: 60 times a second at `is_even(6)` step 11,827 in a 1690 × 613
+  window. Fixed by the gutter, by one width for both the fallback and the spread, by the border-box
+  observer, and held by `state-diagram-local-scrollbars.test.ts` under real scroll bars.
+- **I2.** The labels of different edges were nudged into one stack and read as one edge's: 819
+  levels had two of them under 3 px apart. Fixed by `LABEL_GAP`, then by the user's decision on fans.
+- **M1 to M7.** Labels of edges along an outer column cut off at the drawing's side; a label nudged
+  onto another edge's line; no new measurement when a web font arrives or the style changes; names
+  shown whole without a cap; two gaps in the tests; a fallback that hid no state saying the panel
+  was too narrow; three comments holding history. All fixed.
+
+Review 2, `$R/review-2.md`, at `3592f88`: no Critical, 2 Important and 3 Minor findings.
+
+- **I1.** In `fact(12)`'s `bmul17.s31.up31`, the label of the flat edge `need → wr1` sat over the
+  rising `need → wr0`, so a reader would predict the wrong next state. The row is set apart and the
+  label goes up against its target. The sweep run again at `ca21e4e` found it back in ten `fact(12)`
+  levels that the crop and drag brought to two rules, which `d02504c` fixes (DECISIONS).
+- **I2.** A self-loop's label under a line up its column (`hs.dc.n` in `closure` and `map-fold`) was
+  pushed past the next node onto that node's loop label. It now moves right along its arc, in a
+  column widened for it.
+- **M1**, the search's cost, per level about ten times what it was at `6b5c999`: each line is cut
+  into points once, and the cap. **M2**, a scroll-bar test that saw a layout loop only indirectly:
+  it now fails on any `ResizeObserver loop` error and checks that the width the level is laid out
+  for is the same overflowing as fitting. **M3**, the font and style listeners added again once every diagram was
+  collected: a module flag, and a test.
+
+Review 3, `$R/review-3.md`, at `5605426`: no Critical, 1 Important and 2 Minor findings.
+
+- **I1.** The last resort moved 2 px at a time and checked every box at each step, which took
+  seconds a layout on a hand-written 30-way fan. `firstClear` finds the same place in one pass, and
+  no level of the examples lays out differently.
+- **M1.** The labels left when the cap ran out lost their place search. Each label's best place is
+  now weighed past the cap, and the last resort tries every place. In `fact(12)`, the `*` label
+  furthest from its own line in `pc20`'s level went from 617.5 px from it to 44.3, and the
+  `overflow` level from 7,421 px tall to 6,522.
+- **M2.** Ten levels a fraction of a pixel over 829 px fell back: the width is rounded, not ceiled.
+
+Review 4, `$R/review-4.md`, at `d1e14a6`: no Critical, 1 Important and 5 Minor findings.
+
+- **I1.** A panel narrowed with nothing dragged kept the scroll at (0, 0), so the current state
+  went off screen at the right (`s` at x 220 to 239 of a 185 px view). A redraw around the same
+  state now centres it again unless the level was moved since.
+- **M1.** A click on a node of a level that could pan drew the keyboard's focus ring wherever the
+  keyboard was last used. Focused with `focusVisible: false`.
+- **M2.** A click on the background of such a level left the focus in the editor, so typing edited
+  the program. It now focuses the level's tab stop, with no ring.
+- **M3.** Three fallback sentences outside what the design marked historical. Reworded or marked.
+- **M4.** A level with nothing two rules away spent 40 px on each empty outer column's gap, so it
+  was wider than a panel its states fit. Those gaps are taken in first in a narrow panel.
+- **M5.** An emptied level kept its size, its scroll and the open hand. Its drawing and SVG are
+  sized to nothing, and the open hand goes; the SVG's old size, which alone kept half a panel of
+  scroll, was found by the new test.
+
+Review 5, `$R/review-5.md`, at `5c17348`, in Chromium and Firefox: no Critical, 1 Important and 5
+Minor findings.
+
+- **I1.** A drag while a run played fought the centring: each new state centred the level for a
+  frame and the next move put it back, and after the release the current state was left where
+  neither rule put it. Nothing that moves the level is drawn while a mouse press is on it; the
+  release draws it, centring a state that came during the press.
+- **M1.** In Firefox the level was a Tab stop of its own, an unnamed one ahead of its nodes, at any
+  size, since the room gives it somewhere to scroll. `tabIndex = -1` takes it out of the tab order.
+- **M2.** In Firefox the wheel over a level stayed with it and no longer scrolled the TM view.
+  Answered by decision 12: the wheel over the level zooms it, and never scrolls the view.
+- **M3.** Three failures in `pnpm test:firefox`, in two files this branch adds: two label tests
+  measured Firefox's client rectangle of a loop, which it pads by more than the stroke, and the
+  font-listener test needed `gc`. The label tests measure the stroke, and the font-listener test
+  collects through Firefox's `requestGC` command.
+- **M4.** In a panel of a couple of hundred px, a backward edge's label wider than its columns hung
+  past the drawing's left edge. The drawing is now never narrower than such a label and its margins.
+- **M5.** The PR draft's review count, its scroll shares and its Firefox line had gone stale.
+
+Review 6, `$R/review-6.md`, at `f26fe9c`, in Chromium and Firefox: no Critical, no Important and 7
+Minor findings.
+
+- **M1.** `0` during a held drag centred the level, and the next 2 px move set the scroll from the
+  press's: the level jumped about 300 × 950 to 1,080 px. `0` now moves the drag's start with the
+  level, as a zoom did.
+- **M2.** A trackpad's run of small wheel events moved the point under the pointer: each zoom's
+  scroll was rounded and the next started from the rounded one. In the new test, 60 events of −4 px,
+  the old code moved it 11.4 px across in Chromium and 5.8 px down in Firefox. The zoom now starts
+  from the scroll it asked for.
+- **M3.** A press whose release the page never heard kept the level following a pointer with no
+  button held, and every draw that waited for the press waited on. It now ends at a move with no
+  button held, a lost capture or the window's blur.
+- **M4.** Two drags from one spot, counted a double-click by the system, put the zoom back to full
+  size. A double-click either of whose presses was a drag now leaves it.
+- **M5.** The pinch's rate has a figure: ×1.07 for a pinch that doubles the fingers' spread, by
+  Chromium's convention. Recorded, not changed (WHAT THIS DID NOT CLOSE).
+- **M6.** At the drag's reach the clamp wins over the point under the pointer staying put, which the
+  docs did not say. They do now.
+- **M7.** The PR draft and the design said every zoom test failed first and was sabotaged in both
+  engines, named the wrong logs for Firefox's passing run, and called the text sharp at any zoom
+  from Chromium's 200% screenshots. Each now says what was checked.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Phones zoom the page, not the diagram.** One finger moves the diagram natively, and a pinch
+  zooms the page, as before decision 12 (its point 5).
+- **How far a real pinch or wheel notch zooms is not measured.** No trackpad or mouse was tried:
+  the tests send Playwright's pixel deltas. A pinch comes as Ctrl and the wheel and zooms at the
+  wheel's rate, ×1.1 for 100 px of delta. By Chromium's convention a pinch that scales the fingers'
+  spread by `s` arrives with `deltaY = −100·ln(s)` (Chromium review 250923004, and its PDF viewer's
+  `gesture_detector.ts`), so the level zooms by `s^0.095`: ×1.07 for a pinch that doubles the
+  spread (review 6's M5, computed, not measured). If a pinch proves slow, a rate of its own for Ctrl
+  would make Ctrl and a mouse's wheel jump instead (×2.7 for a 100 px Chromium notch), which is the
+  user's choice.
+- **Keys under a held drag** (review 6's M1 siblings, older than the zoom): an arrow key's focus, and
+  Home, End, Page Up and Page Down, scroll the level while the mouse holds a drag, and the next move
+  undoes them.
+- **A lost capture in Firefox is untested.** Firefox fired no `lostpointercapture` for a capture the
+  page released while the button was held, so the case runs in Chromium alone; a move with no button
+  held is sent through CDP, Chromium's alone.
+- **The panel moved up the page in Chromium** by 4.75 px during the test's run of 60 wheel
+  events, which the zoom does not do; not looked into, and the test measures the point under the
+  pointer from the panel.
+- **Home, End, Page Up and Page Down on a focused node scroll the level** (review 5), as a scroller's
+  keys; the arrows move between nodes.
+
+- **Labels still nearer another edge's line**: 144 of 156,485 labels at 844 px, in 5 of the 24,428
+  levels (143 at 829 px), as `51d3a73` lays them out. 103 of them (102 at 829 px) are in `overflow`
+  levels, where up to 65 edges converge from rows far apart and cross every gap. There, 62 of the
+  103 (61 of 102 at 829 px) sit nearer a line whose text differs from their own
+  (`$R/fan/fix-mis3h-844.log` and `fix-mis3h-829.log`, `ovfDiff`). The 41 outside `overflow` sit
+  nearest a line whose label has the same text, the `*` fans into `bdt25.n0` in `fact(12)`'s `pc20`
+  and `bdt25.n0` levels, so they mislead no one. Outside `overflow`, none sits nearer a line whose
+  label differs from its own. That 0 is asked of the levels outside `overflow` only, by the
+  controller's ruling, 2026-11-17.
+- **A big program's `overflow` level is tall.** `fact(12)`'s, 131 states, is 6,522 px tall at 844
+  px, 2.25 times `main`'s 2,898 (`fact`'s, 1,752 px against 786), and takes about 0.13 s to lay
+  out. Few of its labels have a clear place near their own lines, and hiding a label rather than
+  moving it far is a question for the user, as review 3 put it. A hand-written 30-way fan with
+  six-rule loops (review 3's probe) takes 159 to 185 ms a layout and draws 110,927 to 154,588 px
+  tall.
+- **The scroll-bar test's height change comes from where labels sit.** With no reach to turn, its
+  level is taller at one spread than at a scroll bar's width less only because its labels' places
+  change with the spread (324.3 px over 319 px, 322.4 px over 324 px, 309.2 px over 358 px in
+  `$R/pan/scrollbars-2.log`), which other font metrics may move. With the level's scroll bars shown
+  again and no gutter, the loop test passes and only the no-bar test fails
+  (`$R/map/sab/s6-bars.log`): the border-box observer alone stops the loop.
+- **Text selection by a drag is untested.** The nodes' layer lies over the labels, so a press never
+  lands on a label's text; the press's prevented default is tested through the focus it no longer
+  moves. A copy's nodes link nothing, so `state-diagram-local-pan.test.ts` tests a click by the tab
+  stop and focus it takes, and `state-diagram-local-layout.test.ts` links a node in a 600 px panel.
+- **The cap's accounting alone is untested.** Weighing a label's best place past `WEIGHED_PLACES`
+  moves one label in the examples, in `map-fold`'s `overflow` level, by 4 px, and every node test
+  passes without it.
+- **A sabotage that does not fire.** A self-loop's label put back at `main`'s place, centred 30 px
+  left of its box's right edge with its baseline 8 px above the box, passes every node test and the
+  five local-level browser files: the place search lifts it clear of its arc. The tests hold the
+  property, clear of its loop, not the place.
+- **A fan's rows grow.** The row set apart under a rising line makes `fact`'s `bmul17.s7.up7` level
+  159 px tall at 844 px instead of 122 (`fact(12)`'s `bmul17.s31.up31`, 131 instead of 130), and
+  `fact(12)`'s ten levels `bmul17.s0.up31` to `bmul17.s9.up31` 184.0 px tall instead of 123.3, at 844
+  and 829 px. Widening the gap instead would make those levels wider.
+- **Wider than their panel**: 1,911 of the 24,428 levels (7.82%) at 844 px, as `ca21e4e` and
+  `51d3a73` lay them out, the widest 902 px. Over 829 px, 4,576 (18.73%), but the level draws no scroll bar now, so an
+  844 px panel lays it out over 844.
+- **Only Chromium is tested with classic scroll bars.** Firefox's project leaves the scroll-bar file
+  out, and Firefox's scroll bars were not checked.
+- **A level wider than its panel shows part of itself**, which a drag, a pen or a finger moves and
+  the wheel zooms out, and nothing drawn says there is more of it.
+
+##### VERIFICATION
+
+The gate on the final tree, this commit, after the rebase onto `7085aa2` (43 commits on it; no Rust changed,
+so the Rust-only jobs, `cargo llvm-cov nextest` and `scripts/check-slow.sh`, were not run). Each log is in
+`$R/rebase2/gate/` and holds its command, `git rev-parse HEAD`, the count of changed files and its exit
+status (`$R/rebase2/gate.sh` runs them):
+
+```
+TREE_SITTER=<tree-sitter 0.25.10> scripts/check-all.sh --no-llvm
+                                                → exit 0, the LLVM tier skipped (check-all.log)
+the eight scans, each with --self-test and then alone; ../scripts/check-licences.sh --self-test and alone,
+  from web/; node scripts/check-comments.mjs --self-test and --base 7085aa2
+                                                → exit 0 each (scan-*.log, licences*.log, comments*.log)
+pnpm exec biome ci --error-on-warnings          → exit 0; "Checked 461 files" (biome.log)
+pnpm run typecheck                              → exit 0 (typecheck.log)
+pnpm run build:app                              → exit 0 (build-app.log)
+pnpm run test:coverage   (systemd-run, MemoryMax=16G)
+                                                → exit 0; "Test Files  300 passed (300)",
+                                                  "Tests  3352 passed (3352)"; statements
+                                                  97.84%, branches 91.85%, functions 98.58%,
+                                                  lines 99.1% (coverage.log)
+pnpm run test:browser   (browser, browser-scrollbars)
+                                                → exit 0; "Test Files  226 passed (226)",
+                                                  "Tests  1830 passed (1830)" (chromium.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run --project firefox
+  --project firefox-capture state-diagram
+                                                → exit 0; "Test Files  8 passed (8)",
+                                                  "Tests  76 passed | 3 skipped (79)"
+                                                  (firefox.log)
+```
+
+Review 6's fixes, measured before the rebase, on `486df8d`: run on 2026-11-17 in the same worktree on the
+tree `8fcec9a` commits (its four
+files under `web/` uncommitted on `f26fe9c`), each log in `$R/r6/fail/` (`$R/r6/pan.sh` runs them):
+
+```
+VITEST_MAX_WORKERS=2 pnpm exec vitest run --project browser tests/browser/state-diagram-local-pan.test.ts
+                                                → "Tests  24 passed (24)" (new5-chromium.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox-capture
+  tests/browser/state-diagram-local-pan.test.ts → "Tests  21 passed | 3 skipped (24)"
+                                                  (new5-firefox.log)
+```
+
+The three skipped are the pan file's three that drive the mouse through CDP. With `f26fe9c`'s
+`state-diagram.ts`, the five new tests failed in Chromium (`old3-chromium.log`) and the four that
+run there failed in Firefox (`old2-firefox.log`, where the small-wheel test measured from the page
+rather than the panel). The gate's `pnpm run test:coverage` at `16ebd36` then failed
+`tests/node/browser-timeout-invariants.test.ts`: two of the new tests passed `until` a timeout of
+their own, which the invariant refuses. `d8b9439` drops them; the gate below ran after it. Seven
+sabotages, each restored from a copy and compared with `cmp`
+(`$R/r6/sab/summary.txt` and a log per run): `#unzoom` without `#rebase`, the zoom from the read
+scroll, no check of the buttons, no `lostpointercapture` listener, no `blur` listener, and the
+double-click checking only the second press or only the first. The full gate ran at this entry's
+commit; its results are in the PR's description.
+
+The zoom, measured before the rebase, on `486df8d`: run on 2026-11-17 in the same worktree on the nine files `f79fe78` commits, uncommitted on
+`5c17348` (each log says so), before one change they did not see: `style.css`'s comment over
+`.local-level` reflowed to fit the comment check's cap, which `f79fe78`'s pre-commit hook ran with
+biome and the typecheck, both passing. Each log is in `$R/zoom/fin/` with its command and exit
+status (`run.sh` there runs them):
+
+```
+pnpm exec biome ci --error-on-warnings          → exit 0; "Checked 458 files" (biome.log)
+pnpm run typecheck                              → exit 0 (typecheck.log)
+pnpm run test:node                              → exit 0; "Test Files  74 passed (74)",
+                                                  "Tests  1514 passed (1514)" (node.log)
+VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars <ten files>
+                                                → exit 0; "Test Files  10 passed (10)",
+                                                  "Tests  82 passed (82)" (browser.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run --project firefox
+  --project firefox-capture <the nine of them Firefox runs>
+                                                → exit 0; "Test Files  9 passed (9)",
+                                                  "Tests  77 passed | 2 skipped (79)" (firefox.log)
+```
+
+The ten files are those of the next paragraph. The two skipped are the pan file's two that hold a
+press through CDP. Every new test failed first against `5c17348`'s `state-diagram.ts`,
+`local-layout.ts` and `style.css` (`$R/zoom/fail/`): in Chromium the nine zoom tests, in Firefox
+those and the Tab test (Chromium never made a stop of the level), and the node test; there the
+Firefox run's layout file was skipped whole after a click timed out behind the pan file's failures.
+Fourteen sabotages, each restored from a copy and compared with `cmp` (`$R/zoom/sab/summary.txt`
+and a log per run). Twelve fired in Chromium and in Firefox: the zoom about the panel's middle, a
+top end of 4, no 5% floor, Ctrl's wheel and the plain wheel left to the browser, no double-click, no
+`0`, the keys about a corner, the room's box unscaled, a layout resetting the zoom, no waiting for a
+press, and nothing drawn at the release. The Tab stop put back fired in Firefox alone, and the
+backward label without its margins in the node test. Without `0`, seven cases fail: each that leaves the
+zoom changed fails in `afterEach`, which puts it back with `0`. With Ctrl's wheel left to Firefox,
+the six cases after that one failed too, five by timing out, which was not looked into.
+
+The drag at any size, measured before the rebase, on `486df8d`: run on 2026-11-17 in the same worktree at `8dc4fbd` with nothing under `web/`
+changed, each log in `$R/map/fin/` with its command, the commit and its exit status (`run.sh` there
+runs them):
+
+```
+pnpm exec biome ci --error-on-warnings          → exit 0; "Checked 458 files" (biome.log)
+pnpm run typecheck                              → exit 0 (typecheck.log)
+pnpm run test:node                              → exit 0; "Test Files  74 passed (74)",
+                                                  "Tests  1513 passed (1513)" (node.log)
+VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars <ten files>
+                                                → exit 0; "Test Files  10 passed (10)",
+                                                  "Tests  73 passed (73)" (browser.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run --project firefox
+  --project firefox-capture <the nine of them Firefox runs>
+                                                → exit 1; "Test Files  2 failed | 7 passed (9)",
+                                                  "Tests  3 failed | 65 passed | 2 skipped (70)"
+                                                  (firefox.log)
+```
+
+The ten files are the nine below and `state-diagram`; Firefox's projects leave out
+`state-diagram-local-scrollbars`. Firefox's three failures fail the same way with `d1e14a6`'s
+`state-diagram.ts`, `style.css` and `local-layout.ts` (`firefox-old-src.log`): two labels of the
+screenshot's level a pixel or two into a self-loop in Firefox's text metrics, and
+`state-diagram-font-listeners` stopped by `globalThis.gc is unavailable`. Neither `test:browser`
+nor the gate has run at `8dc4fbd`. Every new test failed before the change, against `d1e14a6`
+(`$R/map/fail/browser.log`, `node.log` and `pan-old-2.log`), and each was sabotaged once, restored
+from a copy and compared with `cmp` (`$R/map/sab/`, a log per sabotage, `summary.txt` and
+`summary-2.txt`). In the first run (`summary.txt`) two sabotages did not fire the no-drag resize
+test: re-placing nothing on a redraw around the same state failed only the resize after a drag,
+and treating every redraw as moved failed nothing. That test resized between two panels narrower
+than the level, where the room keeps the drawing in place against the middle anyway. It now
+resizes to a panel wider than the level and back, and both sabotages fail it (`summary-2.txt`).
+
+Crop and drag, measured before the rebase, on `486df8d`: run on 2026-11-17 in the same worktree at `e8ec924`, each log in `$R/pan/fin/` with
+its command, the commit and its exit status:
+
+```
+pnpm exec biome ci --error-on-warnings          → exit 0; "Checked 458 files" (biome.log)
+pnpm run typecheck                              → exit 0 (typecheck.log)
+pnpm run test:node                              → exit 0; "Test Files  74 passed (74)",
+                                                  "Tests  1511 passed (1511)" (node.log)
+VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars <nine files>
+                                                → exit 0; "Test Files  9 passed (9)",
+                                                  "Tests  49 passed (49)" (browser.log)
+pnpm exec vitest run --project browser-scrollbars → exit 0; "Test Files  1 passed (1)",
+                                                  "Tests  2 passed (2)" (scrollbars.log)
+```
+
+The nine files are `state-diagram-local-pan`, `state-diagram-local-layout`,
+`state-diagram-local-scrollbars`, `state-diagram-local`, `state-diagram-local-fans`,
+`state-diagram-font-listeners`, `tm-pointer`, `state-diagram-no-machine` and `tm-display-restore`.
+Neither `test:browser` nor the gate has run at `e8ec924`. The new tests failed before the change
+(`$R/pan/fail-1.log`), and each was sabotaged once (`$R/pan/sab/`, a log per sabotage).
+
+Before the crop and drag, measured before the rebase, on `486df8d`: run on 2026-11-16 in the lane's worktree,
+`~/temp/redextape-state-diagram-tidy`, at `a8e8717`, after the earlier rebase onto `486df8d`, with `pkg/`, `pkg-lsp/` and `web/bindings/` built from that tree
+(`$R/rebuild-pkg.log`). Each log is in `$R/fin/`:
+
+```
+pnpm run test:node                                  → "Test Files  74 passed (74)",
+                                                      "Tests  1516 passed (1516)" (node.log)
+pnpm run test:browser   (browser, browser-scrollbars) → exit 0; "Test Files  222 passed (222)",
+                                                      "Tests  1768 passed (1768)" (browser.log)
+pnpm exec vitest run --project browser-scrollbars   → "Test Files  1 passed (1)",
+                                                      "Tests  3 passed (3)" (scrollbars.log)
+```
+
+`pnpm run test:node` and `pnpm exec vitest run --project browser-scrollbars` ran again at `883a46c`,
+the third of this entry's docs commits, on a tree that differs from `a8e8717` only under `docs/`:
+exit 0 each, with the counts above, in `$R/fin2/node.log` and `$R/fin2/scrollbars.log`, each of
+which records its command, `git rev-parse HEAD` and its exit status.
+
+The gate's results are in the PR's description, each with the commit it ran at. CI's `web` job runs
+`pnpm run test:coverage`, which runs every project the config defines, `browser-scrollbars` among
+them.
+
+The label sweep, measured before the rebase, on `486df8d`, ran on 2026-11-17 at `ca21e4e`, against its `local-layout.ts` and `local-level.ts`,
+in `$R/sweep/`: `node --experimental-strip-types mis3h.mts ./ll-head.ts 844`, and `829`, and the same
+with `mis5h.mts`, each log holding its directory, HEAD, command and exit status (0 for each; `run.sh`
+there runs them, and `run2.sh` the `levels.mts` and `need-levels.mts` of the rows below). The sweep
+takes Hack's advance widths, every state of the seven examples under binary, the rebuilt `pkg/`, and
+each level at two rules each way, laid out by `layoutLocal` as the page lays it out. The files a log
+counts as changed are this correction's, under `docs/`: nothing under `web/` differed from HEAD
+(`post.log`). `mis3h.mts` and `mis5h.mts` are `$R/fin/`'s `mis3.mts` and `mis5.mts` with `layoutLocal` in
+place of `a8e8717`'s `fitLocal`; `ll-head.ts` is `local-layout.ts` with its one import made absolute,
+the one line in which they differ (`$R/sweep/prep.log` and `post.log`). Over every level, at 844 px
+and at 829 px, no two edges' labels are closer than `LABEL_GAP`, no other edge's line crosses a
+label (self-loop arcs are not counted), no node box overlaps a label, and no label is outside the
+drawing.
+
+The same sweep, measured before the rebase, on `486df8d`, ran again on 2026-11-17 at `51d3a73`, in `$R/fan/`: `sweep-a5.sh
+$R/fan/ll-fix.ts fix` runs `$R/sweep/`'s `mis3h.mts`, `mis5h.mts` and `levels.mts` at 844 and 829 px
+on `ll-fix.ts`, `51d3a73`'s `local-layout.ts` with its import made absolute, the one line in which
+they differ (`prep-fix.log`); each of its six logs, `fix-mis3h-*`, `fix-mis5h-*` and
+`fix-levels-*.log`, holds its directory, HEAD, command and exit status (0 for each).
+`alldiff.mts ../sweep/ll-head.ts ll-fix.ts 844`, and `829`, lays every level out with
+`ca21e4e`'s layout and `51d3a73`'s and counts those that differ (`fix-alldiff-844.log`,
+`fix-alldiff-829.log`), and `relmoved.mts` the same way the labels that moved against their edge's
+source node (`fc4-relmoved-844.log`, `fc4-relmoved-829.log`, run again at `8fb543e` by
+`fc4-run.sh`, each holding its directory, HEAD, command and exit status, 0). The node and browser
+tests' runs, failing on `ca21e4e`'s `local-layout.ts` and passing on `51d3a73`'s, are
+`node-red.log` and `node-green.log`, which hold vitest's output alone, and `browser-rg.sh`'s
+`red-*.log` and `green-*.log`; the sabotage, `sabotage.sh`'s `sab-*.log`.
+
+The other sweeps, measured before the rebase, on `486df8d`, ran in `$R/fin/` at `a8e8717`, the same way, with that commit's `local-level.ts`
+and `ll-rebased.ts`, its `local-layout.ts` with its import made absolute by the `sed` in
+`mis3.mts`'s header. `ll-3592f88.ts`, `ll-5605426.ts` and `ll-oldacct.ts` are the layout at those
+commits and at `a8e8717` with the cap's accounting reverted. There, `fitLocal` laid a level too wide
+for its panel out at one rule each way, 1,911 levels at 844 px and 4,576 at 829, so `mis3.mts` and
+`mis5.mts` swept those at one rule; the sweep above replaces them.
+
+**Every count this entry quotes, with what produces it.** Logs are in `$R/fin/` unless a row says
+otherwise. A row that counts commits, or a range's changes, names the commits by their SHAs after the
+rebase and was counted again on them (`$R/rebase2/entry-figures.log`); every other row was measured
+before the rebase, on `486df8d`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 21; `233e4ac` | commits in the range; its last | `git rev-list --count 7085aa2..233e4ac` (`$R/rebase2/entry-figures.log`) |
+| four | docs commits after the range: this entry, a correction to its decision on fans, a correction after a fact-check, and a correction after a second fact-check that also changes this row | `git rev-list --count 233e4ac..038f880`, `038f880` being the fourth (`$R/rebase2/entry-figures.log`) |
+| 14, 3,052, 133 | files changed, insertions and deletions in the range | `git diff --shortstat 7085aa2..233e4ac` (`$R/rebase2/entry-figures.log`) |
+| 26; `30b365f`; 16, 3,479, 121 | commits in `7085aa2..30b365f`; its last; files changed, insertions and deletions in it | `git rev-list --count 7085aa2..30b365f`, `git diff --shortstat 7085aa2..30b365f` (`$R/rebase2/entry-figures.log`) |
+| 324.3, 322.4, 309.2 px over 319, 324, 358 px | the scroll-bar fixture's height at three spreads | the scroll-bar test's scan with a print of its heights (`$R/pan/scrollbars-2.log`, its `HEIGHTS` line) |
+| 276; 844 × 324; five, four | the reproduced state's step, its panel, its boxes and the ones reading alike | the lane's reproduction, `$R/progress.md` "Done" and `$R/shots/before-844-dark.png`; `state-diagram-local-layout.test.ts` walks to the same state |
+| 37.5%, 24,428 | levels wider than 844 px with gaps sized and tapes not stacked, of all the levels | `node --experimental-strip-types opts.mts` in `$R`, row `A` (opts.log; the same as `$R/opts.log`, its run before the user's decision) |
+| 24,428; 156,485; seven | levels and labels swept, at 844 and at 829 px; the examples they come from | `mis3h.mts ./ll-head.ts 844` and `829`, their `layout` and `LABELS` lines (`$R/sweep/mis3h-844.log`, `mis3h-829.log`) |
+| 750 px | `main`'s floor on the level's width, five columns of `COLUMN_MIN` (150) | `git show 7085aa2:web/src/state-diagram.ts \| rg -n COLUMN_MIN`, and the same file's test's `Math.max(level.clientWidth, 750)` (`$R/rebase2/entry-figures.log`) |
+| 11,827 | the step of `is_even(6)` with the fans | `tests/browser/state-diagram-local-fans.test.ts`, its file comment; `$R/review-1.md`, I1 |
+| ten | the levels a fraction of a pixel over 829 px | `$R/review-3.md`, M2, the reviewer's figure |
+| 154, 15; 103, 41, 10 | labels nearer another edge's line at 844 px at `ca21e4e` and the levels holding them; of them in `overflow`, with the same text outside it, and with differing text outside it | `mis5h.mts ./ll-head.ts 844`, its `SUMMARY` line (`$R/sweep/mis5h-844.log`); the 15 from `mis3h-844.log`'s `LABELS` line |
+| 153, 15; 102, 41, 10 | the same at 829 px | `mis5h.mts ./ll-head.ts 829`, its `SUMMARY` line (`$R/sweep/mis5h-829.log`); the 15 from `mis3h-829.log` |
+| 144, 5; 103, 41, 0 | the same at `51d3a73`, at 844 px | `$R/fan/fix-mis5h-844.log`, its `SUMMARY` line; the 5 from `fix-mis3h-844.log`'s `LABELS` line |
+| 143, 5; 102, 41, 0 | the same at 829 px | `$R/fan/fix-mis5h-829.log`, its `SUMMARY` line; the 5 from `fix-mis3h-829.log`'s `LABELS` line |
+| 5: 3, 2 | the levels holding a label nearer another edge's line at `51d3a73`: `overflow`'s, and `pc20` and `bdt25.n0` | `$R/fan/fix-levels-844.log` and `fix-levels-829.log` |
+| 10; 123.3 to 184.0 px; 847 px | the levels `51d3a73` lays out differently from `ca21e4e`, at 844 and at 829 px, each a `bmul17.sN.up31`; their height before and after; their width, as before | `alldiff.mts ../sweep/ll-head.ts ll-fix.ts 844` and `829` in `$R/fan/` (`fix-alldiff-844.log`, `fix-alldiff-829.log`, a line a level and `SUMMARY`: `width 0, height 10`) |
+| 30 of 70; 40 | the labels in those levels that moved against their edge's source node; those that moved with it | `relmoved.mts ../sweep/ll-head.ts ll-fix.ts 844` and `829` in `$R/fan/` (`fc4-relmoved-844.log`, `fc4-relmoved-829.log`, their `SUMMARY` lines) |
+| 68.25 px; 99 px; 96, 120 px | the gap `WORK:1 R` sits in, in those levels; the rise it needs there; `MOST_APART` at `ca21e4e` and at `51d3a73` | the gap from `dump.mts ../sweep/ll-head.ts fact-12.rxt 5400 844` in `$R/fan/` (`fc4-dump.log`: `need`'s lines from x 664.75 to 733); `rise.mts 68.25 48.1640625` (`$R/fan/rise.log`); `git show ca21e4e:web/src/local-layout.ts \| rg -n '^const MOST_APART '`, and the same at `51d3a73`: `4 * NODE_HEIGHT` and `5 * NODE_HEIGHT`, `NODE_HEIGHT` 24 |
+| 91, 100, 109 px; 94 px | the rise `REG:1 R` or `BOX:1 R`, `WORK:1 R` or `HEAP:1 R`, and `STACK:1 R` needs in a gap its width and two `LABEL_MARGIN` wide; `WORK:1 R`'s in a gap of 69 px | `rise.mts` in `$R/fan/` (`rise.log`) |
+| 2.5, 32.0 px; 2.0, 32.0; 1.8, 34.0 | `WORK:1 R`'s distance from the line of `need → wr0` and from its own on `ca21e4e`'s layout: in the node fixture; in Chromium; in Firefox | `$R/fan/node-red.log`, `red-chromium.log`, `red-firefox.log` |
+| 23; 2, 2 | the node file's tests passing on `51d3a73`'s layout; the new browser file's, in Chromium and in Firefox | `$R/fan/node-green.log`, `green-chromium.log`, `green-firefox.log` |
+| `bmul17.s0.up31` to `bmul17.s9.up31`; 2.5 px, 32.0 px | the levels of the 10 with differing text at `ca21e4e`; the label `WORK:1 R`'s distance from the line of `need → wr0` and from its own | `$R/sweep/mis5h-844.log` and `mis5h-829.log`, a line each, `own 32.0 other 2.5` |
+| 15: 3, 2, 10; 41: 21, 20 | the levels holding a label nearer another edge's line at `ca21e4e`: `overflow`'s, `pc20` and `bdt25.n0`, and the ten above; the same-text labels outside `overflow`, in `pc20` and in `bdt25.n0` | `levels.mts ./ll-head.ts 844` and `829` in `$R/sweep/` (`levels-844.log`, `levels-829.log`) |
+| 847 px; one rule | those ten levels' width at two rules each way; their reach at `a8e8717` in an 844 px panel, and in an 829 px one | `need-levels.mts 844` and `829` in `$R/sweep/` (`need-levels-844.log`, `need-levels-829.log`), which lays them out with `ll-head.ts` and with `a8e8717`'s `fitLocal` (`ll-a8e8717.ts`, `$R/fin/ll-rebased.ts` but for its import, and `lv-a8e8717.ts`, that commit's `local-level.ts`) |
+| 1,911, 7.82%; 4,576, 18.73%; 902 px | levels wider than an 844 px panel at `ca21e4e` and at `51d3a73`; than an 829 px one; the widest | `mis3h.mts ./ll-head.ts 844` and `829`, the `still wider than the panel` and `width` lines (`$R/sweep/mis3h-844.log`, `mis3h-829.log`, and `$R/fan/fix-mis3h-844.log`, `fix-mis3h-829.log`); at `a8e8717`, 1,911 and 4,576 fell back (`$R/fin/mis3-844.log`, `mis3-829.log`, the `fell back` lines) |
+| 0; 0; 0; 0 | levels, at 844 and at 829 px, at `ca21e4e` and at `51d3a73`, with two edges' labels closer than `LABEL_GAP`; with another edge's line through a label, self-loop arcs not counted; with a node over a label; with a label outside the drawing | `mis3h.mts ./ll-head.ts 844` and `829`, the `closer than LABEL_GAP` line and the `another edge's line through a label` line (`$R/sweep/mis3h-844.log`, `mis3h-829.log`, and `$R/fan/fix-mis3h-844.log`, `fix-mis3h-829.log`) |
+| 0 of 24,428 | levels laid out differently at `5605426` with `firstClear` alone | `same.mts ./ll-5605426.ts ./ll-5605426-firstclear.ts 844` (same-firstclear-844.log) |
+| 131, 65; 6,522, 2,898; 1,752, 786; 0.13 s | `fact(12)`'s `overflow` level's states and edges in; its height on this branch and on `main`; `fact`'s; its layout time, best of the run | `node --experimental-strip-types measure.mts 844` in `$R/overflow/` (`$R/fin/overflow-measure-844.log`): `844 x 6522 px`, `best 128 ms`, and `MAIN … 844 x 2898 px` |
+| 2.25 | 6,522 / 2,898 | the row above |
+| 159 against 122; 131 against 130 | `fact`'s `bmul17.s7.up7` level's height at `a8e8717` and at `3592f88`; `fact(12)`'s `bmul17.s31.up31` | `draw.mts ./ll-rebased.ts fact.rxt 1345 844` and `./ll-3592f88.ts`, and the same for `fact-12.rxt 3145` (draw.log: 159.0, 121.5, 131.0, 130.1); the state numbers from `idx.mts` |
+| 617.5 to 44.3; 7,421 to 6,522 | the `*` label furthest from its own line in `pc20`'s level, at `5605426` and at `a8e8717`; the `overflow` level's height | `own.mts ./ll-5605426.ts 844 fact-12.rxt:pc20 fact-12.rxt:bdt25.n0 fact-12.rxt:overflow`, and `./ll-rebased.ts` (own-844.log) |
+| 1 of 24,428; 4 px | levels that lay out differently with the cap's accounting reverted; how far its one label moves (480.7 to 484.7) | `same.mts ./ll-oldacct.ts ./ll-rebased.ts 844` (same-acct-844.log); `difflabels.mts ./ll-oldacct.ts ./ll-rebased.ts map-fold.rxt overflow 844` (difflabels-acct-844.log) |
+| 74, 1,516 | node files and tests passing with the accounting reverted | `pnpm exec vitest run --project node` with `sab/local-layout.ts.acct` copied over `web/src/local-layout.ts` (sab/acct-node.log) |
+| 30, 8; 74, 1,516; 5, 32 | the old self-loop label's place; node files and tests, and local-level browser files and tests, passing with it | the same with `sab/local-layout.ts.s2a` (sab/s2a-node.log), and `pnpm exec vitest run --project browser --project browser-scrollbars` on the five `state-diagram-local*` and `state-diagram-font-listeners` files (sab/s2a-browser.log) |
+| 159 to 185 ms; 110,927 to 154,588 px | the 30-way fan's layout time and height | `MOD=./ll-rebased.ts node --experimental-strip-types patho.mts 30` (patho-30.log) |
+| 14; 4; 8; 1; 24; 2,000; 1; 2 px | `CAP_CHARS`, `RULE_GAP`, `LABEL_GAP`, `NEARER`, `SEARCH`, `WEIGHED_PLACES`; `FALLBACK_REACH` (at `a8e8717`, gone at `30b365f`); `NUDGE`, the last resort's old step | `rg -n '^(export )?const (CAP_CHARS\|RULE_GAP\|LABEL_GAP\|NEARER\|SEARCH\|WEIGHED_PLACES) ' web/src/local-layout.ts`; `rg -n 'FALLBACK_REACH =' web/src/local-level.ts`; `rg -n '^const NUDGE ' web/src/local-layout.ts` (entry-figures.log) |
+| two thirds | how much of a name cut by characters comes from its end | `middleCut` in `web/src/local-layout.ts`: its head is `Math.floor(kept / 3)` characters, the rest from the end |
+| no Critical, 2 Important, 7 Minor; no Critical, 2, 3; no Critical, 1, 2 | the three reviews' findings | `sed -n 10p $R/review-1.md`, `sed -n 11p $R/review-2.md`, `sed -n 8p $R/review-3.md` (entry-figures.log) |
+| 60; 1690 × 613; 819 | review 1's relayouts a second and its window; its levels with two edges' labels under 3 px apart | `$R/review-1.md`, I1 and I2, the reviewer's figures |
+| 74, 1,516; 222, 1,768; 1, 3 | the test runs above | node.log, browser.log, scrollbars.log |
+| 32; `7a49354`; 18, 4,955, 127 | commits in `7085aa2..7a49354`; its last; files changed, insertions and deletions in it | `git rev-list --count 7085aa2..7a49354`, `git diff --shortstat 7085aa2..7a49354` (`$R/rebase2/entry-figures.log`) |
+| 34; `d8b9439` | commits in `7085aa2..d8b9439`; its last | `git rev-list --count 7085aa2..d8b9439` (`$R/rebase2/entry-figures.log`) |
+| no Critical, no Important, 7 Minor | review 6's findings | `sed -n 7p $R/review-6.md` |
+| 11.4 px; 5.8 px | the point under the pointer moved by 60 wheel events of −4 px on the old code, across in Chromium and down in Firefox | `$R/r6/fail/old3-chromium.log` and `old2-firefox.log`, their `across` and `down` lines |
+| about 300 × 950 to 1,080 px; 325 px | how far the level jumped at the next move after `0` during a drag: the review's figure, across and down; the new test's across, on the old code in Chromium | `sed -n 27p $R/review-6.md` (`$R/fc3/figures.log`); `$R/r6/fail/old3-chromium.log`, its `moved on by the drag, across` line |
+| about 330 px | how far the dropped wider rule left three drag tests' drags | `$R/r6/fail/new-chromium.log` and `new-firefox.log`, their `precondition: dragged` lines (330 and 333.3) |
+| ×1.07; `s^0.095`; ×2.7 | the level's zoom for a pinch that doubles the spread; for a spread scaled by `s`; Ctrl at `exp(−deltaY/100)` for a 100 px notch | `node -e 'console.log(1.1 ** Math.LN2, Math.log(1.1), Math.exp(1))'` prints 1.068…, 0.0953… and 2.718…: the zoom is `1.1^(−deltaY/100)` = `1.1^(ln s)` = `s^(ln 1.1)` |
+| 4.75 px | how far the panel moved up the page in Chromium during the small-wheel test's 60 events | `$R/r6/fail/diag2-chromium.log`, its `lv.top` from 2109.95 to 2105.20 |
+| 24; 21, 3 | the pan file's tests passing in Chromium; passing and skipped in Firefox | `$R/r6/fail/new5-chromium.log`, `new5-firefox.log` |
+| no Critical, 1 Important, 5 Minor; the same | review 4's findings; review 5's | `sed -n 8p $R/review-4.md`, `sed -n 9p $R/review-5.md` (`$R/fc3/figures.log`, as for every row below that names it) |
+| x 220 to 239 of a 185 px view | where review 4's I1 found the current state in its narrowest panel | `sed -n 23p $R/review-4.md`, the reviewer's figure |
+| 40 px | each empty outer column's gap before review 4's M4 | `rg -n '^const MIN_GAP ' web/src/local-layout.ts`; `sed -n 85p $R/review-4.md` |
+| 4 px; ×1.1; 100 px, 3 lines, a page; 300%; 50%; 5% | the drag's threshold; a notch's zoom; a notch's delta in each `deltaMode`; the zoom's top; its floor when the whole level fits at a larger scale; the least it goes to | `rg -n '^const (PAN_THRESHOLD\|NOTCH\|ZOOM_MAX\|ZOOM_FLOOR\|ZOOM_MIN\|PER_NOTCH) ' web/src/state-diagram.ts`: 4, 1.1, 3, 0.5, 0.05 and `[100, 3, 1]` |
+| 60 events of −4 px | the small-wheel test's run | `rg -n 'delta: \{ y: -4 \}, times: 60' web/tests/browser/state-diagram-local-pan.test.ts` |
+| fourteen; twelve | the zoom's sabotages; those that fired in both engines (the other two: Firefox alone, and the node test) | `grep -c '^z[0-9]* restored' $R/zoom/sab/summary.txt`, and its `exit 1` lines counted by sabotage |
+| seven; five | review 6's sabotages; those run in both engines (the other two, Chromium alone) | `grep -c '^s[0-9] restored' $R/r6/sab/summary.txt`, and its `chromium` and `firefox` `exit` lines |
+| 28; 30 | commits in `7085aa2..d6b7073` and in `7085aa2..f7d5c59`, the PR's figures | `git rev-list --count 7085aa2..d6b7073`, `git rev-list --count 7085aa2..f7d5c59` (`$R/rebase2/entry-figures.log`) |
+| "dragging works"; "yes zoom works well" | the user's words after trying the drag at any size and the zoom | the controller's ledger, `~/temp/redextape-ui-lanes-ledger.md` (`grep -n` for each, `$R/fc3/figures.log`) |
+| 36 | commits in `7085aa2..f43f1e5`, `f43f1e5` being this entry's correction after a fact-check | `git rev-list --count 7085aa2..f43f1e5` (`$R/rebase2/entry-figures.log`) |
+| 37; `d02504c` | commits in `7085aa2..d02504c`, the heading's range; its last | `git rev-list --count 7085aa2..d02504c` (`$R/rebase2/entry-figures.log`) |
+| 38 | commits in `7085aa2..e0ee65a`, `e0ee65a` being the docs commit that brings this entry to `d02504c` | `git rev-list --count 7085aa2..e0ee65a` (`$R/rebase2/entry-figures.log`) |
+| 39 | commits in `7085aa2..d8db404`, `d8db404` being the second, naming the new browser file | `git rev-list --count 7085aa2..d8db404` (`$R/rebase2/entry-figures.log`) |
+| 43 | commits in `7085aa2..HEAD` once the commit that updates this entry for the rebase onto `7085aa2` was committed | `git rev-list --count 7085aa2..HEAD`, run before (42) and after that commit (`$R/rebase2/count.log`) |

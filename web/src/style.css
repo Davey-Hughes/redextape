@@ -2617,19 +2617,47 @@ main {
 
 /* THE STATE DIAGRAM'S LOCAL LEVEL (Plan 7 part 4 spec §8): the current state and the states within two rules
    of it, in five columns by signed distance, as buttons over their SVG edges. The rule about to fire is the
-   thicker edge. */
+   thicker edge. `local-layout.ts` places everything inside `.local-content`, which `state-diagram.ts` sizes. */
+/* THE LEVEL MOVES LIKE A MAP (decisions 11 and 12): a mouse drag moves it at any size (`state-diagram.ts`'s
+   `#panLocal`), the wheel zooms it (`#zoomLocal`), the browser scrolls it for a finger. It draws NO SCROLL BAR: one
+   would show a range that is mostly the room around the drawing (`.local-content`), and one that took its width as the
+   level overflowed could lay it out narrower, shorter, without the bar, and wider again, every frame, since its height
+   depends on the width it is spread over. `container-type` gives that room its size. */
 .local-level {
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1 1 0;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: none;
+  container-type: size;
+}
+.local-level::-webkit-scrollbar {
+  display: none;
 }
 .local-level[hidden],
 .program-level[hidden] {
   display: none;
 }
-.local-nodes {
+/* HALF THE PANEL'S WIDTH AND HEIGHT OF ROOM ON EVERY SIDE, so the scroll goes exactly as far as puts a corner of the
+   drawing at the panel's middle: a drag can move any part of it there, and cannot lose it. Where the drawing sits in
+   that room is `state-diagram.ts`'s `#place`. The box is the drawing's size at its zoom, so the reach holds at any. */
+.local-content {
   position: relative;
+  flex: none;
+  margin: 50cqh 50cqw;
+}
+/* THE DRAWING AT THE SIZE IT WAS LAID OUT AT, scaled from its top left corner to fill `.local-content`. */
+.local-drawing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.local-nodes {
+  position: absolute;
+  inset: 0;
 }
 .local-edges {
   position: absolute;
@@ -2637,6 +2665,8 @@ main {
   left: 0;
   overflow: visible;
 }
+/* `height` MUST EQUAL `NODE_HEIGHT` in local-layout.ts, which joins the edges to the boxes at it. The ellipsis is
+   only a fallback: `local-layout.ts` cuts a long name in the middle and sizes the box to what it shows. */
 .local-node {
   position: absolute;
   height: 24px;
@@ -2665,6 +2695,16 @@ main {
 .local-node:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+/* A DRAWN LEVEL IS MOVED BY A MOUSE DRAG (`state-diagram.ts`'s `#panLocal`), AND THE POINTER SAYS SO: an open hand
+   over it, a closed one while it moves, as over a panel boundary. A node keeps its own, since a click links it, and
+   an emptied level, with nothing to move, the default. */
+.local-level[data-pans] {
+  cursor: grab;
+}
+.local-level[data-dragging],
+.local-level[data-dragging] .local-node {
+  cursor: grabbing;
 }
 .local-edge {
   fill: none;
