@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
+import { fieldWidths } from '../../../pkg/redextape_wasm.js'
 import { FIRST_LOAD } from '../../src/examples'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { PROGRAM_STORAGE_KEY, parseProgram } from '../../src/program-store'
@@ -46,9 +47,10 @@ describe('a first visit', () => {
   })
 
   it('stores it as its compile posts it', () => {
-    expect(parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['binary'])).toEqual({
+    expect(parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['binary'], fieldWidths() as number[])).toEqual({
       text: FIRST_LOAD.text,
       encoding: 'binary',
+      width: null,
     })
   })
 })

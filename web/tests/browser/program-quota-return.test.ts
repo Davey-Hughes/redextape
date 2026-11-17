@@ -25,7 +25,7 @@ const refused: StoredProgram[] = []
 const passthroughSetItem = localStorage.setItem.bind(localStorage)
 localStorage.setItem = (key: string, value: string): void => {
   if (refuse && key === PROGRAM_STORAGE_KEY) {
-    const program = parseProgram(value, ['unary', 'binary'])
+    const program = parseProgram(value, ['unary', 'binary'], [])
     if (program !== null) refused.push(program)
     throw new DOMException('quota', 'QuotaExceededError')
   }

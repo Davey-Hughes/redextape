@@ -64,9 +64,9 @@ fn call(obj: &JsValue, method: &str, args: &[JsValue]) -> JsValue {
     Reflect::apply(&f, obj, &arr).unwrap_or_else(|e| panic!("{method} threw: {e:?}"))
 }
 
-/// `compile(src, "unary")`, unwrapped into `(diagnostics, session)`.
+/// `compile(src, "unary")` at auto width, unwrapped into `(diagnostics, session)`.
 fn compile(src: &str) -> (Array, JsValue) {
-    let out = redextape_wasm::compile(src, "unary").expect("compile must not throw");
+    let out = redextape_wasm::compile(src, "unary", None).expect("compile must not throw");
     let diagnostics: Array = get(&out, "diagnostics").unchecked_into();
     (diagnostics, get(&out, "session"))
 }
@@ -427,10 +427,36 @@ fn a_lambda_limitation_program_reports_a_tm_only_session() {
 /// encoding is not a degraded answer, it is a different program's answer.
 #[wasm_bindgen_test]
 fn an_unknown_encoding_is_refused_at_the_boundary() {
-    assert!(redextape_wasm::compile("1 + 2", "trinary").is_err());
-    assert!(redextape_wasm::compile("1 + 2", "").is_err());
-    assert!(redextape_wasm::compile("1 + 2", "unary").is_ok());
-    assert!(redextape_wasm::compile("1 + 2", "binary").is_ok());
+    assert!(redextape_wasm::compile("1 + 2", "trinary", None).is_err());
+    assert!(redextape_wasm::compile("1 + 2", "", None).is_err());
+    assert!(redextape_wasm::compile("1 + 2", "unary", None).is_ok());
+    assert!(redextape_wasm::compile("1 + 2", "binary", None).is_ok());
+}
+
+/// A width outside `fieldWidths()` is refused here, as an unknown encoding is. Let through, it would reach the
+/// session as a TM leg declined as too large to build, which is a claim about the program, not about the request.
+#[wasm_bindgen_test]
+fn a_width_outside_field_widths_is_refused_at_the_boundary() {
+    for w in [0, 65, u32::MAX] {
+        assert!(redextape_wasm::compile("1 + 2", "binary", Some(w)).is_err(), "width {w}");
+    }
+    for w in [None, Some(1), Some(4), Some(64)] {
+        assert!(redextape_wasm::compile("1 + 2", "binary", w).is_ok(), "width {w:?}");
+    }
+}
+
+/// `fieldWidths()` lists exactly core's widths, narrowest first, and a width from it reaches the TM leg: `1 + 2`
+/// fits auto's first width under binary, so a leg at 16 can only be the pin's.
+#[wasm_bindgen_test]
+fn field_widths_lists_every_width_compile_pins() {
+    let widths: Array = redextape_wasm::field_widths().expect("marshals").unchecked_into();
+    let seen: Vec<f64> = widths.iter().map(|w| w.as_f64().expect("each width marshals as a number")).collect();
+    let expected: Vec<f64> = redextape_core::tm::PINNED_FIELD_WIDTHS.map(|w| w as f64).collect();
+    assert_eq!(seen, expected);
+
+    let out = redextape_wasm::compile("1 + 2", "binary", Some(16)).expect("compile must not throw");
+    let tm = call(&get(&out, "session"), "tmStatus", &[]);
+    assert_eq!(num(&tm, "width"), 16.0);
 }
 
 /// A program the front end rejects yields diagnostics and a null session, and the diagnostics carry
@@ -858,7 +884,7 @@ fn encodings_lists_every_name_compile_accepts() {
     for i in 0..names.length() {
         let name = names.get(i).as_string().expect("each encoding name marshals as a string");
         assert!(
-            redextape_wasm::compile("let x = 40; x + 2", &name).is_ok(),
+            redextape_wasm::compile("let x = 40; x + 2", &name, None).is_ok(),
             "`compile` rejected {name:?}, which `encodings()` advertises"
         );
         seen.push(name);
@@ -1284,7 +1310,7 @@ mod scratch_methods_that_must_not_exist {
     }
     const _: fn(&redextape_wasm::LambdaScratch) -> (Absent, Absent, Absent) = lambda_scratch_has_none_of_them;
 
-    /// `tmValue` reads `ty` + `final_tapes` + `kind`, none of which a `TmScratch` has — §3.3's row for
+    /// `tmValue` reads `ty` + `run_end` + `kind`, none of which a `TmScratch` has — §3.3's row for
     /// it. `sourceSpan`/`linkIndex` are off every scratch type for the same reason they are off the λ
     /// one. `tmStatus` is NOT in this list: it exists here, with a different return type
     /// (`TmScratchStatus`), which is a reshape rather than an absence — checked at run time by

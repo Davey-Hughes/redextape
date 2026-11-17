@@ -24,9 +24,10 @@ use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
 use redextape_core::run;
 use redextape_core::tm::{
-    BLANK, BOX, Binary, Encoding, EncodingKind, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, REG, SEP, TAPES,
-    TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, decode_tape, defunc, lower_program, lower_rxm,
-    lower_tm_guarded, n_slots_of, run_tm, run_tm_at, run_tm_fitted, simulate_counts, simulate_watched,
+    BLANK, BOX, Binary, Encoding, EncodingKind, MARK, MAX_FIELD_WIDTH, MIN_FIELD_WIDTH, PINNED_FIELD_WIDTHS, REG, SEP,
+    TAPES, TM_DEFAULT_CAPS, Tape, TmCaps, TmRun, TmStatus, Unary, WORK, ZERO, decode_tape, decode_tape_ty, defunc,
+    lower_program, lower_rxm, lower_tm_guarded, n_slots_of, run_tm, run_tm_at, run_tm_described_program_at,
+    run_tm_fitted, simulate_counts, simulate_watched,
 };
 
 mod common;
@@ -425,6 +426,80 @@ fn degenerate_widths_refuse_rather_than_miscompute_binary() {
         matches!(run_tm_at(&zero, &Binary::at(0), TM_DEFAULT_CAPS), TmRun::Overflow),
         "the literals 3 and 5 do not fit a 0-cell binary field even though the RESULT is 0"
     );
+}
+
+/// Every program the web app ships as an example, read from the directory the app bundles them from,
+/// so a new example is covered without being listed here.
+fn web_examples() -> Vec<(String, String)> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/src/examples");
+    let mut found: Vec<(String, String)> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "rxt"))
+        .map(|p| (p.file_stem().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+        .collect();
+    found.sort();
+    found
+}
+
+/// Programs small enough that some of them fit every width below `MIN_FIELD_WIDTH` in each encoding,
+/// reaching the heap, closures and return tags, so the narrow pins below give answers as well as
+/// overflows: the examples' own values outgrow nearly every width that narrow.
+const FITS_NARROW: &[&str] = &[
+    "0",
+    "1",
+    "true",
+    "nil",
+    "[1, 0]",
+    "[1, 2, 3]",
+    "head([2, 1])",
+    "let f = |x| x + 1; f(1)",
+    "fn id(x) { x } id(1) + id(0)",
+    "fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(2)",
+    "let mut c = 0; fn ap(f, x) { f(x) } ap(|x| { c = c + x; c }, 1) + c",
+    "fn k(x) { |y| x } k(1)(0)",
+    "fn a(x) { x } fn b(x) { a(x) } fn c(x) { b(x) } a(1) + b(1) + c(1) + a(0) + b(0) + c(0)",
+];
+
+/// **A RUN PINNED BELOW THE SEARCH'S LADDER GIVES THE REFERENCE ANSWER OR HALTS IN THE OVERFLOW GUARD**,
+/// for every web example and every `FITS_NARROW` program, at every pinnable width under
+/// `MIN_FIELD_WIDTH`, in both encodings, through the pinned entry point the web app runs. A field cut
+/// to its width decodes to a plausible wrong number, so an answer is checked against the reference; a
+/// refusal, a cap or a panic fails too. Each width and encoding must give at least one answer and one
+/// overflow, or the property was checked on one outcome only.
+#[test]
+fn every_example_pinned_below_the_search_gives_its_answer_or_overflows() {
+    let mut programs = web_examples();
+    assert!(!programs.is_empty(), "no examples read: the test would pass on nothing");
+    programs.extend(FITS_NARROW.iter().map(|s| (format!("`{s}`"), (*s).to_owned())));
+    let narrow = *PINNED_FIELD_WIDTHS.start()..MIN_FIELD_WIDTH;
+    assert!(!narrow.is_empty(), "no pinnable width is under the search's: nothing to check");
+    let mut seen = std::collections::BTreeMap::<(usize, &str), (u32, u32)>::new();
+    for (name, src) in &programs {
+        let (core, ty) = common::core_and_ty(src);
+        let reference = run(src).unwrap_or_else(|e| panic!("{name}: the reference run failed: {e:?}"));
+        let prog = lower_program(&core).unwrap_or_else(|e| panic!("{name}: no rxm lowering: {e:?}"));
+        for width in narrow.clone() {
+            for &kind in EncodingKind::ALL {
+                let at = format!("{name} under {} pinned at {width}", kind.name());
+                let d = run_tm_described_program_at(&prog, kind, ty.clone(), TM_DEFAULT_CAPS, width)
+                    .unwrap_or_else(|e| panic!("{at}: refused, {e:?}"));
+                let tally = seen.entry((width, kind.name())).or_default();
+                match &d.run {
+                    TmRun::Ran { tapes } => {
+                        let got = decode_tape_ty(tapes, &ty, &*kind.at(width));
+                        assert_eq!(got.as_ref(), Some(&reference), "{at}: halted with a wrong value");
+                        tally.0 += 1;
+                    }
+                    TmRun::Overflow => tally.1 += 1,
+                    other => panic!("{at}: neither an answer nor an overflow, {other:?}"),
+                }
+            }
+        }
+    }
+    for ((width, kind), (answers, overflows)) in &seen {
+        assert!(*answers > 0 && *overflows > 0, "{kind} at {width}: {answers} answers, {overflows} overflows");
+    }
 }
 
 // ================================================================================================

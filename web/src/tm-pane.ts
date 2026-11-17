@@ -1,6 +1,7 @@
 import type { ControlState } from './controls'
 import { CopyEditor } from './copy-editor'
 import type { EditablePane } from './editor-custody'
+import { fieldWidthControl } from './field-width'
 import { n } from './format'
 import type { Dir } from './layout'
 import type { PaneChoice, PaneEvents, SplitChoices } from './pane-chrome'
@@ -45,6 +46,24 @@ let gridsMinted = 0
  */
 export class TmPane implements EditablePane {
   #status: HTMLElement
+  /**
+   * The status line's first row, `state · step · width` (`#drawStatus`), apart from the sentences after it so that
+   * only the state name gives way to keep that row whole: an inline box as wide as the line at most, with its state
+   * name cut first (the TM width design, decision 25).
+   */
+  #line: HTMLElement
+  /** The current state's name on `#line`, cut with an ellipsis when the row is short of room; its tooltip is whole. */
+  #stateName: HTMLElement
+  /**
+   * Whether the step readout is shown — spec §8's `steps` switch. At `bar` the one step bar reads the steps, and this
+   * view's line drops its own, as the header drops its strip.
+   */
+  #stepsShown = true
+  /**
+   * The readout as it reads at the run's newest recorded step (`ControlState.stepTextAtNewest`), which `#drawStatus`
+   * gives the step part the room of, so the line's rows do not change while a playing run's count gains digits.
+   */
+  #stepAtNewest = ''
   #tapes: HTMLElement
   #steps: ReturnType<typeof stepControls>
   /** The view's header — `LambdaPane`'s `#header`, the same component. */
@@ -148,6 +167,8 @@ export class TmPane implements EditablePane {
   #display: TmDisplay
   #onDisplay: ((d: TmDisplay) => void) | undefined
   #reattach: HTMLButtonElement
+  /** The program's width box, in the view's header; absent where the view was built without a width. */
+  #width: ReturnType<typeof fieldWidthControl> | null
   #index: StateIndex | null = null
   #linked: Set<number> = new Set()
   /**
@@ -175,12 +196,19 @@ export class TmPane implements EditablePane {
     this.#header = viewHeader(on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
+    this.#line = document.createElement('span')
+    this.#line.className = 'tm-line'
+    this.#stateName = document.createElement('span')
+    this.#stateName.className = 'tm-state'
     this.#value = document.createElement('div')
     this.#value.className = 'tm-value'
     this.#value.setAttribute('role', 'status')
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     this.#steps = stepControls(on)
+    // THE READOUT LIVES ON THE STATUS LINE, NEVER IN THE STRIP (`#drawStatus` places it), so the bar holds no text
+    // whose width grows with the step count.
+    this.#steps.step.remove()
     // `detachProgram` carries no argument (`PaneEvents.detachProgram`'s own doc: a machine has no step-k
     // text to report), so the item's run is the handler itself rather than a closure over a frame.
     const detachProgram = on.detachProgram
@@ -280,6 +308,12 @@ export class TmPane implements EditablePane {
       onDrawn: () => this.#drawTable(),
     })
     this.#rulesPanel.actions.append(this.#reattach)
+    // THE PROGRAM'S WIDTH, ON THE VIEW'S HEADER BAR (the TM width design, decision 24): it sizes the whole machine the
+    // view shows, not one panel of it. AT THE BAR'S END, RIGHT BEFORE `⋯` (decision 27): the first of the view's own
+    // actions, as `LambdaPane`'s re-attach is, so it keeps `⋯`'s gap and order, and the Tab order follows the bar.
+    // Prepended, so it is first whether or not `viewMenu` has mounted `⋯` yet, which it puts after the view's own.
+    this.#width = on.fieldWidth === undefined ? null : fieldWidthControl(on.fieldWidth)
+    if (this.#width !== null) this.#header.actions.prepend(this.#width.el)
 
     // THE STATE DIAGRAM (Plan 7 part 4 spec §8): a panel beside the rules, open by default since it is the view's
     // map of the machine, with *program | local* and *arcs | chips* (Plan 7 part 4 spec amendment 11) among its
@@ -355,15 +389,16 @@ export class TmPane implements EditablePane {
     })
     this.#diagramPanel.actions.append(this.#diagramReattach, this.#levelChoice.el, this.#edgesChoice.el)
 
-    // `#body` CARRIES EVERYTHING BELOW THE HEADING, WITH THE TEXT PANEL FIRST — design §4.1's "editor
-    // region above, today's tape rows and δ-table below". On an attached pane (no editor mounted) the
-    // panel starts `hidden` and contributes no box to the flow, so it is invisible until `setEditor`
-    // gives it something to show.
+    // `#body` CARRIES EVERYTHING BELOW THE HEADING: THE STATUS LINE, THEN THE TEXT PANEL — design §4.1's "editor
+    // region above, today's tape rows and δ-table below". The line comes first in every TM view because it holds the
+    // step count the bar's step buttons move (the TM width design, decision 26); after the text panel, a copy's view
+    // would draw it a whole editor away from them. On an attached pane (no editor mounted) the panel starts `hidden`
+    // and contributes no box to the flow, so it is invisible until `setEditor` gives it something to show.
     this.#body = document.createElement('div')
     this.#body.className = 'tm-pane'
     this.#body.append(
-      this.#copy.textPanel,
       this.#status,
+      this.#copy.textPanel,
       this.#value,
       this.#tapes,
       this.#rulesPanel.el,
@@ -547,6 +582,9 @@ export class TmPane implements EditablePane {
   setDetached(detached: boolean): void {
     this.#header.setDetached(detached)
     this.#copy.setDetached(detached)
+    // A COPY RUNS AT THE WIDTH ITS HEADER RECORDS, so the program's width cannot apply to it, and a control that cannot
+    // apply is removed.
+    if (this.#width !== null) this.#width.el.hidden = detached
     // A PANE ON SOURCE DESCRIBES NO BUFFER, so nothing a buffer told it may stay on screen, whichever route moved it
     // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `SEED` doc lists
     // them), so this clear is a second line behind that seed rather than what tells a moved pane.
@@ -561,6 +599,9 @@ export class TmPane implements EditablePane {
   /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
   setStepsShown(shown: boolean): void {
     this.#header.setStepsShown(shown)
+    if (shown === this.#stepsShown) return
+    this.#stepsShown = shown
+    this.#drawStatus()
   }
 
   /**
@@ -690,6 +731,8 @@ export class TmPane implements EditablePane {
   render(frame: TmState | null, controls: ControlState): void {
     this.#frame = frame
     this.#steps.update(controls)
+    this.#stepAtNewest = controls.stepTextAtNewest
+    this.#width?.sync()
     this.#diagram.render(this.#program === null ? null : frame)
     this.#syncDiagramReattach()
     if (frame === null || this.#program === null) {
@@ -730,35 +773,66 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * The one writer of `#status.textContent`. Composes three independent parts:
+   * The one writer of `#status`. Composes four independent parts:
    *
-   *   * THE PER-FRAME HALF — `` `${name} · width ${n(width)}` `` — empty whenever there is no frame or
+   *   * THE PER-FRAME PARTS — the state's name and `` `width ${n(width)}` `` — absent whenever there is no frame or
    *     no program to name a state in, the condition `render`'s own frame-null branch tests.
-   *   * THE HEADERLESS SENTENCE, when `#scratch !== null && !#scratch.header` — `TmScratchStatus`'s own
-   *     doc has the argument for why this is worth a sentence: a headerless machine runs from blank
-   *     tapes at `MIN_FIELD_WIDTH` rather than the input the user pasted, and nothing else in the app
-   *     can say so.
+   *   * THE STEP READOUT between them (`stepControls`' `step`), alone before the first frame, as the strip shows it,
+   *     and absent while the `steps` switch puts the steps on the one bar (`#stepsShown`).
+   *   * THE HEADERLESS SENTENCE, when `#scratch !== null && !#scratch.header` — `TmScratchStatus`'s own doc has the
+   *     argument for why this is worth a sentence: a headerless machine runs from blank tapes at `MIN_FIELD_WIDTH`
+   *     rather than the input the user pasted, and nothing else in the app can say so.
    *   * THE REDUCED SENTENCE, `` `reduced: ${stages} · ${n(steps)} steps` ``, when `#scratch.reduction` is set: a
    *     file reduced through one or more stages, whose recorded step count is the run's whole budget.
    *
-   * **EMITTED ON THE FRAME-NULL BRANCH TOO**, which is the moment right after a `tm-scratch-compiled`
-   * reply — before `resetLegs` has produced a first frame to render — when the sentence matters most.
-   * The width is stated once, inside the sentence itself, rather than repeated ahead of it.
+   * **EMITTED ON THE FRAME-NULL BRANCH TOO**, right after a `tm-scratch-compiled` reply and before `resetLegs` has a
+   * first frame, when the sentence matters most. The width is stated once, inside the sentence, not repeated ahead.
    */
   #drawStatus(): void {
     const frame = this.#frame
     const program = this.#program
-    // A `StateId` past the end yields no name rather than an index nobody can read — the same
-    // no-fallback rule `TmState::source_node` follows one layer in.
-    const perFrame =
-      frame === null || program === null
-        ? ''
-        : `${program.states[frame.state]?.name ?? `state ${frame.state}`} · width ${n(program.width)}`
+    const named = frame !== null && program !== null
+    // EACH PART AFTER THE FIRST CARRIES ITS OWN ` · `, so that a part the row cannot fit takes its separator to the
+    // next row with it rather than leaving one hanging at the end of this one.
+    // A RESERVED PART TAKES THE ROOM `reserve` WOULD, whatever it shows (`.tm-reserved` in `style.css`): the shown
+    // content in a box of its own, and `reserve` beside it as generated content, so it is neither in the line's text
+    // nor read out.
+    const parts: Node[] = []
+    const part = (content: string | Node, reserve?: string): void => {
+      const lead = parts.length === 0 ? [] : [' · ']
+      const el = document.createElement('span')
+      el.className = 'tm-part'
+      if (reserve === undefined) el.append(...lead, content)
+      else {
+        const shown = document.createElement('span')
+        shown.className = 'tm-shown'
+        shown.append(...lead, content)
+        el.classList.add('tm-reserved')
+        el.dataset.reserve = [...lead, reserve].join('')
+        el.append(shown)
+      }
+      parts.push(el)
+    }
+    if (named) {
+      // A `StateId` past the end yields no name rather than an index nobody can read — the same
+      // no-fallback rule `TmState::source_node` follows one layer in.
+      const name = program.states[frame.state]?.name ?? `state ${frame.state}`
+      this.#stateName.textContent = name
+      this.#stateName.title = name
+      parts.push(this.#stateName)
+    }
+    if (this.#stepsShown && this.#steps.step.textContent !== '') part(this.#steps.step, this.#stepAtNewest)
+    if (named) part(`width ${n(program.width)}`)
+    this.#line.replaceChildren(...parts)
     const scratch = this.#scratch
     const headerless = scratch !== null && !scratch.header ? `no header — blank tapes at width ${n(scratch.width)}` : ''
     const reduction = scratch?.reduction ?? null
     const reduced = reduction === null ? '' : `reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`
-    this.#status.textContent = [perFrame, headerless, reduced].filter((s) => s !== '').join(' · ')
+    const sentences = [headerless, reduced].filter((s) => s !== '').join(' · ')
+    this.#status.replaceChildren(
+      ...(parts.length === 0 ? [] : [this.#line]),
+      ...(sentences === '' ? [] : [parts.length === 0 ? sentences : ` · ${sentences}`]),
+    )
   }
 
   /**

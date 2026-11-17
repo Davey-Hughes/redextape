@@ -1,3 +1,4 @@
+import type { FieldWidth } from './field-width'
 import { createPanel, type Panel } from './panel'
 import type { Shares } from './panel-stack'
 import type { Leg } from './protocol'
@@ -173,6 +174,11 @@ export type PaneEvents = {
   display?: (d: LambdaDisplay) => void
   /** A TM view's display settings changed — `display`'s twin. */
   tmDisplay?: (d: TmDisplay) => void
+  /**
+   * The program's one field width, which a TM view shows and sets in its header (`field-width.ts`).
+   * OPTIONAL for `panel`'s reason: a TM view built without it has no width box.
+   */
+  fieldWidth?: FieldWidth
   /**
    * Copy this view's PROGRAM, a TM view's machine or an rxm view's listing, into a copy on the view's leg — 5d-iv
    * design §4.3, Plan 7 part 5 spec §7.

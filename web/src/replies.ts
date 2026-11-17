@@ -384,7 +384,7 @@ export function createReplies(deps: {
         return
       case 'result':
         results.dataset.state = 'idle'
-        setProgram({ kind: 'result', gen: reply.gen, legs: reply.legs })
+        setProgram({ kind: 'result', gen: reply.gen, legs: reply.legs, pinned: reply.pinned })
         draw()
         return
       case 'worker-error':

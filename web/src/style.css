@@ -806,8 +806,14 @@ select option {
 .view-steps {
   flex: 1 1 auto;
 }
+/* THE ACTIONS WRAP, ON THE RIGHT, WHERE THEY DO NOT FIT ONE ROW. The TM view's width box with `⋯` and `✕` is wider
+   than a view in Explorer's two columns on a phone, and unwrapped would run past the view's edge; wrapped, the box
+   keeps a row of its own above `⋯ ✕`, the rows `var(--space-1)` apart as the strip's are, all on the right where the
+   actions sit, as a panel header's do (`.panel-actions`). */
 .view-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-1);
   margin-inline-start: auto;
@@ -1075,6 +1081,46 @@ button.view-title[aria-expanded="true"] {
   margin-bottom: var(--space-2);
 }
 
+/* THE TM STATUS LINE'S FIRST ROW, `state · step · width`, GIVES WAY BY ITS STATE NAME ALONE (the TM width design,
+   decision 25): the step and the width are never cut, and the name is, with an ellipsis, its tooltip whole. The name's
+   flex basis is 0 so it never sends the step or the width to a second row; it grows into the room they leave, up to
+   its own width. Only a step and width that outgrow the line on their own go on to another row, rather than be cut.
+   Inline and no wider than the line, so the sentences after it run on beside it while they fit, as text does. */
+.tm-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  vertical-align: top;
+}
+.tm-line > .tm-part {
+  white-space: pre-wrap;
+}
+.tm-line > .tm-state {
+  flex: 1 1 0;
+  min-width: 1ch;
+  max-width: max-content;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+/* THE STEP TEXT TAKES THE ROOM IT NEEDS AT THE RUN'S NEWEST STEP (the TM width design, decision 28), so the line's
+   rows are settled by the run's total and stay as they are while a playing run's count gains digits; a row gained
+   then would push the tapes and everything under them down mid-run. `TmPane` puts the readout at the newest step in
+   `data-reserve`, drawn here unseen in the same grid cell as the shown part, so the cell is as wide and as tall as the
+   larger: where the part wraps, the unseen copy, whose every word is at least as long, wraps to at least as many
+   rows. Generated content, so it is not in the line's text, and hidden, so it is not read out. */
+.tm-line > .tm-reserved {
+  display: grid;
+}
+.tm-line > .tm-reserved > .tm-shown,
+.tm-line > .tm-reserved::after {
+  grid-area: 1 / 1;
+}
+.tm-line > .tm-reserved::after {
+  content: attr(data-reserve);
+  visibility: hidden;
+}
+
 /* AN EMPTY VALUE LINE TAKES NO SPACE AND STAYS IN THE ACCESSIBILITY TREE. `TmPane` empties the line rather than
    hiding it (its `#value` doc has why: a live region is announced from that tree), so `display: none` is not an
    option here. `tm-pane-editor.test.ts` holds the gap. */
@@ -1169,8 +1215,9 @@ button.view-title[aria-expanded="true"] {
   color: var(--fg-dim);
 }
 /* AN ICON BUTTON IS AS WIDE AS A GLYPH BUTTON: 29px at 15px, where `.controls button`'s padding would make it 35. Its
-   icon is 1em and a Hack glyph 0.6em, so the padding gives back the 0.4em between them. Wider, the TM view's strip
-   would wrap at 1280px in Explorer, and a playing run's panels would drop a row once its count gained a digit. */
+   icon is 1em and a Hack glyph 0.6em, so the padding gives back the 0.4em between them. Wider, the λ and rxm views'
+   strips, which hold their step count, would wrap at 1280px in Explorer at counts they keep on one row, and a playing
+   run's panels would drop a row once its count gained a digit. */
 .controls .play,
 .controls .to-newest {
   display: inline-flex;
@@ -1628,6 +1675,72 @@ button.view-title[aria-expanded="true"] {
    header narrower than its name and the gap after it would put the empty box on a second row. */
 .panel-actions:empty {
   display: none;
+}
+/* THE TM VIEW'S WIDTH BOX (`field-width.ts`), in the view's header: its word dim and as small as the speed select,
+   and the box in that select's chrome (`.controls .speed`), so the two read as one kind of control. `color` is `--fg`
+   and not inherited, because the label is dim. Its `auto` is the dim word's colour at full opacity: every palette
+   holds that colour to the text floor (`palettes.test.ts`); nothing holds the browser's placeholder grey.
+   ITS ARROWS ARE ITS OWN (decision 30), the box being a text field (decision 33), which has none. They
+   fill a column inside its border at its end, in the border's colour, under the plain arrow pointer (decision 31),
+   not a link's hand. The text keeps clear of them by its padding: WIDE ENOUGH FOR `auto`, four characters, beside
+   them. */
+.field-width {
+  --field-width-arrows: 1.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--step--2);
+  color: var(--fg-dim);
+}
+.field-width[hidden] {
+  display: none;
+}
+.field-width-box {
+  position: relative;
+  display: inline-flex;
+}
+.field-width input {
+  font: inherit;
+  font-family: var(--font-mono);
+  line-height: normal;
+  block-size: calc(1lh + 0.2em + 2px);
+  width: calc(4ch + 0.6em + 2px + var(--field-width-arrows));
+  padding-block: 0.1em;
+  padding-inline: 0.3em calc(0.3em + var(--field-width-arrows));
+  border-radius: var(--radius);
+  border: 1px solid var(--fg-dim);
+  background: transparent;
+  color: var(--fg);
+}
+.field-width input::placeholder {
+  color: var(--fg-dim);
+  opacity: 1;
+}
+/* Inside the border: the column's edges are the border's 1px in from the box's. */
+.field-width-arrows {
+  position: absolute;
+  inset-block: 1px;
+  inset-inline-end: 1px;
+  inline-size: var(--field-width-arrows);
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  color: var(--fg-dim);
+  cursor: default;
+}
+.field-width-arrows > span {
+  display: grid;
+  place-items: center;
+  min-block-size: 0;
+}
+.field-width-arrows svg {
+  width: auto;
+  height: 100%;
+}
+/* THE SPEED SELECT BESIDE A WIDTH BOX IS THE BOX'S HEIGHT, its line, padding and border, so the two stand as tall on
+   the bar in both engines: left to itself, Chromium sets a select taller than a box of the same three. */
+.view-header:has(.field-width) .speed {
+  line-height: normal;
+  block-size: calc(1lh + 0.2em + 2px);
 }
 
 /* THE RULE TABLE TAKES A SHARE OF ITS VIEW'S HEIGHT (Plan 7 part 4 spec §9.1), not `40vh` of the window:

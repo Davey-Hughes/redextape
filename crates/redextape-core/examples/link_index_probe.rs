@@ -149,7 +149,7 @@ fn build(name: &str, src: &str) -> Option<Row> {
     let ty = typeck::result_type(&program).ok()?;
     let kind = EncodingKind::Binary;
     // The session's order: run first, then build the map at the width the run fitted, since the map keys
-    // on state names and names depend on the width (`Session::compile`'s doc). A map built at
+    // on state names and names depend on the width (`Session::compile_at`'s doc). A map built at
     // `MIN_FIELD_WIDTH` instead makes `own_st` read low.
     let described = tm::run_tm_described(&redextape_core::desugar::desugar(&program), kind, ty, tm::TM_DEFAULT_CAPS);
     let width = described.as_ref().map_or(tm::MIN_FIELD_WIDTH, |d| d.header.width);

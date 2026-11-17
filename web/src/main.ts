@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { lintGutter, setDiagnostics as setCmDiagnostics } from '@codemirror/lint'
 import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
-import init, { captureClasses, encodings, tokenClasses } from '../../pkg/redextape_wasm.js'
+import init, { captureClasses, encodings, fieldWidths, tokenClasses } from '../../pkg/redextape_wasm.js'
 import {
   addViewItems,
   exampleItems,
@@ -680,6 +680,8 @@ async function main(): Promise<EditorView> {
     opt.textContent = name
     picker.append(opt)
   }
+  /** The widths a run can be pinned to, read once: what the width boxes take, and what a stored or linked width may be. */
+  const widths = fieldWidths() as number[]
 
   /** The stored program's raw text, or `null` where storage refuses the read, guarded as the copies' read is. */
   const readProgramStorage = (): string | null => {
@@ -694,18 +696,21 @@ async function main(): Promise<EditorView> {
    * first-load example under the default encoding. A refusal is silent, since it cannot be told from a first visit
    * (`program-store.ts`'s own doc).
    */
-  const storedProgram = parseProgram(readProgramStorage(), encodings() as string[]) ?? {
+  const storedProgram = parseProgram(readProgramStorage(), encodings() as string[], widths) ?? {
     text: FIRST_LOAD.text,
     encoding: EXAMPLE_ENCODING,
+    width: null,
   }
   /**
    * A LINK IN THE PAGE'S FRAGMENT — Plan 7 part 6a spec §5.3, read before either store is taken from, since a link
    * takes precedence over both: what it opens, or `null` on a page with no link.
    */
-  const startLink = isLink(location.hash) ? await decodeLink(location.hash, encodings() as string[]) : null
+  const startLink = isLink(location.hash) ? await decodeLink(location.hash, encodings() as string[], widths) : null
   /**
    * THE PROGRAM THE PAGE OPENS ON: a link's, whole or alone, under its own encoding or, where the link's is not one this
-   * build has, the one storage opens on (spec §5.3); otherwise `storedProgram`.
+   * build has, the one storage opens on (spec §5.3); otherwise `storedProgram`. **A LINK'S WIDTH IS ALWAYS ITS OWN**,
+   * never storage's: a link without one is an auto run, whose positions are that run's steps (the TM width design,
+   * decision 16).
    *
    * **CHOSEN HERE, AFTER `init()`, BECAUSE AN ENCODING IS VALID ONLY IF `encodings()` LISTS IT**, and before anything
    * reads it: the editor's document, the language server's first text and the start-up compile are its three uses.
@@ -715,8 +720,13 @@ async function main(): Promise<EditorView> {
   const loaded: StoredProgram =
     startLink === null || startLink.kind === 'unreadable'
       ? storedProgram
-      : { text: startLink.program, encoding: startLink.encoding ?? storedProgram.encoding }
+      : { text: startLink.program, encoding: startLink.encoding ?? storedProgram.encoding, width: startLink.width }
   picker.value = loaded.encoding
+  /**
+   * THE PROGRAM'S FIELD WIDTH (`field-width.ts`): `null` for auto. A TM view's width box sets it, a pick, a link or
+   * an undo replaces it with the program they put in, and a compile reads it when it posts, as it reads the picker.
+   */
+  let fieldWidth: number | null = loaded.width
 
   let view: EditorView
   /** The source editor's document. Per view, never fetched, never parsed — see `documentUri`. */
@@ -904,6 +914,13 @@ async function main(): Promise<EditorView> {
       ws = { ...ws, speed: s }
       persistWorkspace()
       draw()
+    },
+    // `choose` IS A THUNK over `chooseFieldWidth`, declared below with the notices it ends, and called only at a
+    // gesture, long after `main()` has run.
+    fieldWidth: {
+      widths,
+      current: () => fieldWidth,
+      choose: (width) => chooseFieldWidth(width),
     },
     linkWiring: () => linkWiring,
     // A THUNK FOR THE SAME REASON `draw` IS ONE, one step further down the file: `refreshBuffers` is
@@ -1221,8 +1238,8 @@ async function main(): Promise<EditorView> {
   let restorable: StoredProgram = storedProgram
 
   /**
-   * Store the program — `compile.ts` calls this as each compile posts, with the text and the encoding it posted (Plan 7
-   * part 6a spec §4.3).
+   * Store the program — `compile.ts` calls this as each compile posts, with the text, the encoding and the width it
+   * posted (Plan 7 part 6a spec §4.3).
    *
    * **A REFUSED WRITE IS REPORTED ONLY WHILE THE PROGRAM DIFFERS FROM WHAT A RELOAD WOULD RESTORE** (spec row 17), as
    * the copies' writer reports only when there are copies to lose (`hasBuffers`, above). A program a reload would not
@@ -1233,13 +1250,14 @@ async function main(): Promise<EditorView> {
    * shows. That refines row 17's "changed from what was loaded", under which a change once made was reported for the
    * rest of the page load.
    */
-  const writeProgramStorage = (text: string, encoding: string): void => {
+  const writeProgramStorage = (text: string, encoding: string, width: number | null): void => {
     try {
-      localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text, encoding }))
-      restorable = { text, encoding }
+      localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text, encoding, width }))
+      restorable = { text, encoding, width }
       unsaved.saved('program')
     } catch (thrown) {
-      if (text !== restorable.text || encoding !== restorable.encoding) unsaved.refused('program', refusalOf(thrown))
+      const differs = text !== restorable.text || encoding !== restorable.encoding || width !== restorable.width
+      if (differs) unsaved.refused('program', refusalOf(thrown))
       else unsaved.saved('program')
     }
   }
@@ -1917,12 +1935,14 @@ async function main(): Promise<EditorView> {
   wireMenu(addViewButton, addViewMenu, fillAddViewMenu)
 
   /**
-   * Put `program` in the source editor: its encoding into the picker, and its text in one dispatch, whose update
-   * listener clears the link state and schedules the compile as it does for any edit. The compile reads the picker
-   * when it posts, `DEBOUNCE_MS` later, so it posts the two together.
+   * Put `program` in the source editor: its encoding into the picker, its width into `fieldWidth`, and its text in one
+   * dispatch, whose update listener clears the link state and schedules the compile as it does for any edit. The
+   * compile reads the picker and the width when it posts, `DEBOUNCE_MS` later, so it posts the three together, and the
+   * `supersede` that schedule claims draws every view, which brings each width box to the width.
    */
   const replaceProgram = (program: StoredProgram): void => {
     picker.value = program.encoding
+    fieldWidth = program.width
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: program.text } })
   }
 
@@ -1980,11 +2000,23 @@ async function main(): Promise<EditorView> {
     pick?.dismiss()
     withdrawOffer()
   })
+  /**
+   * A WIDTH CHOSEN IN A TM VIEW IS THE PROGRAM'S, so it recompiles the program, once, and the `supersede` that compile
+   * claims draws every view, which brings each view's width box to it. It ends a pick's and a link's notice as an
+   * encoding chosen does: their undo restores the program as it ran when they were offered, and a width chosen since
+   * changes that run.
+   */
+  const chooseFieldWidth = (width: number | null): void => {
+    fieldWidth = width
+    pick?.dismiss()
+    withdrawOffer()
+    compile.schedule(view.state.doc.toString())
+  }
 
   /**
-   * PICK AN EXAMPLE — Plan 7 part 6a spec §4.5. It replaces the program at once, under the default encoding, since the
-   * manifest's outcomes and descriptions are that encoding's; the workspace is untouched. The notice's `undo` puts back
-   * the text and the encoding it replaced, and so recompiles.
+   * PICK AN EXAMPLE — Plan 7 part 6a spec §4.5. It replaces the program at once, under the default encoding at auto,
+   * since the manifest's outcomes and descriptions are theirs (the TM width design, decision 7); the workspace is
+   * untouched. The notice's `undo` puts back the text, encoding and width it replaced, and so recompiles.
    *
    * **THE UNDO IS WITHDRAWN AT THE NEXT EDIT THAT CHANGES THE PROGRAM**, typed or otherwise, and by the next pick,
    * whose own replacement is such an edit. It puts back the whole document the pick replaced, so offered past an edit
@@ -1993,10 +2025,10 @@ async function main(): Promise<EditorView> {
    * PICKER**, which the undo would take back with the encoding the pick replaced.
    *
    * **THE EDITOR'S OWN UNDO STEPS BACK THROUGH A PICK TOO, AND PUTS BACK THE TEXT ALONE**, leaving the encoding at
-   * `EXAMPLE_ENCODING`, the one the pick set. That is left as it is: the editor's history holds the text, and no
-   * encoding chosen in the picker has ever been in it — undoing in the editor after choosing another encoding by hand
-   * does not put the earlier one back either — so a pick's encoding is the notice's `undo` to put back, and otherwise
-   * the picker's to change.
+   * `EXAMPLE_ENCODING` and the width at auto, as the pick set them. That is left as it is: the editor's history holds
+   * the text, and no encoding or width chosen by hand has ever been in it — undoing in the editor after choosing
+   * another encoding by hand does not put the earlier one back either — so a pick's encoding and width are the
+   * notice's `undo` to put back, and otherwise the picker's and the width boxes' to change.
    *
    * **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE**, as a delete's undo does: the
    * source editor, where the program came back — or, where no view shows the source and the editor is off the page,
@@ -2010,8 +2042,8 @@ async function main(): Promise<EditorView> {
    * focus lands, so the sentence is not spoken over by the editor or the button taking it.
    */
   const openExample = (example: Example): void => {
-    const before: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value }
-    replaceProgram({ text: example.text, encoding: EXAMPLE_ENCODING })
+    const before: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value, width: fieldWidth }
+    replaceProgram({ text: example.text, encoding: EXAMPLE_ENCODING, width: null })
     pick = notices.notify(`opened the example ${example.title}`, {
       action: {
         label: 'undo',
@@ -2031,7 +2063,7 @@ async function main(): Promise<EditorView> {
 
   /**
    * WHAT A LINK CARRIES — Plan 7 part 6a spec §5.1: the source editor's text, the encoding in the picker, the
-   * workspace as `serializeWorkspace` writes it, and the step of each program leg with frames.
+   * program's width, the workspace as `serializeWorkspace` writes it, and the step of each program leg with frames.
    *
    * **A POSITION IS TAKEN ONLY WHILE THE PROGRAM SESSION IS NOT AWAITING A RUN** (`SessionClient.awaitingRun`).
    * Positions describe the frames on screen, and while the editor's text is compiling those are the last program's, so
@@ -2054,6 +2086,7 @@ async function main(): Promise<EditorView> {
     return {
       program: view.state.doc.toString(),
       encoding: picker.value,
+      width: fieldWidth,
       // **THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7): a reader needs what the sender saw, and
       // a link has a size to keep down. Emptied here, `serializeWorkspace` writes no `arrangements` and no state of a
       // view only a remembered arrangement held.
@@ -2107,7 +2140,7 @@ async function main(): Promise<EditorView> {
   }
 
   /**
-   * Undo an open — spec §5.5: the program's text and encoding, and where it opened whole the tree, the workspace and
+   * Undo an open — spec §5.5: the program as it ran, and where it opened whole the tree, the workspace and
    * each view that showed a copy, moved back onto it as a delete's undo moves them (`PaneHost.moveBack`). A copy the
    * open left cold, at start-up, is warmed first; one the cap refuses stays paused, and its views on the program.
    *
@@ -2201,21 +2234,22 @@ async function main(): Promise<EditorView> {
   let linkTicket = 0
   const openLink = async (fragment: string): Promise<void> => {
     const ticket = ++linkTicket
-    const opened = await decodeLink(fragment, encodings() as string[])
+    const opened = await decodeLink(fragment, encodings() as string[], widths)
     // COMPARED AFTER THE READ, NOT BEFORE IT: before it, every call's ticket is the latest.
     if (ticket !== linkTicket) return
     if (opened.kind !== 'unreadable') shareMenu.hidePopover()
-    const program: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value }
+    const program: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value, width: fieldWidth }
     if (opened.kind === 'whole') {
       const copies = panes
         .all()
         .flatMap((p) => (p.slot.binding.session === SOURCE_SESSION ? [] : [[p.id, p.slot.binding.session] as const]))
       const before: Replaced = { program, workspace: { tree, ...ws }, copies }
-      replaceProgram({ text: opened.program, encoding: opened.encoding })
+      replaceProgram({ text: opened.program, encoding: opened.encoding, width: opened.width })
       showWorkspace(opened.workspace)
       announceOpen(opened, before)
     } else {
-      if (opened.kind === 'program') replaceProgram({ text: opened.program, encoding: opened.encoding ?? picker.value })
+      if (opened.kind === 'program')
+        replaceProgram({ text: opened.program, encoding: opened.encoding ?? picker.value, width: opened.width })
       announceOpen(opened, { program, workspace: null, copies: [] })
     }
   }
@@ -2625,6 +2659,7 @@ async function main(): Promise<EditorView> {
     sessions,
     results,
     picker,
+    width: () => fieldWidth,
     view: () => view,
     sourceSession: SOURCE_SESSION,
     persist: writeProgramStorage,

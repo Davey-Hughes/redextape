@@ -5,10 +5,10 @@
 **The compiler is built, and the thing you watch it run in has four kinds of pane: source, λ, rxm
 and Turing machine.** The front end and three backends — λ, Turing machine, and native — all work,
 and each is checked against the others on every commit. `crates/redextape-wasm` compiles the
-compiler to WASM through **ten exported functions** — the tenth, `tapeNames()`, labels the five
+compiler to WASM through **eleven exported functions** — the eleventh, `tapeNames()`, labels the five
 Turing-machine tape rows from the lowering's own constants (`build.rs`) rather than a hand-copied
 list, so it can only speak for machines this compiler produced. The module's `start` function,
-`init`, runs when the module loads and is not among the ten. `web/` is a real app: a source pane
+`init`, runs when the module loads and is not among the eleven. `web/` is a real app: a source pane
 with lint diagnostics and syntax highlighting driven by a committed tree-sitter grammar — the same
 colourer the λ, TM and rxm copy editors take, whose grammar loads asynchronously so only the first
 paint waits on it, while every reparse and rebuild after that runs inside the same `ViewUpdate` as

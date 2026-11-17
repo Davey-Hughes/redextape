@@ -31,7 +31,7 @@ pub fn init() {
 #[wasm_bindgen]
 pub struct Session(session::Session);
 
-/// `compile(src, encoding)` -> `{ diagnostics: Diagnostic[], session: Session | null }`.
+/// `compile(src, encoding, width?)` -> `{ diagnostics: Diagnostic[], session: Session | null }`.
 ///
 /// BUILT WITH `js_sys::Object` RATHER THAN SERIALIZED WHOLE, because the two halves cross the boundary
 /// differently and cannot both go through serde: `diagnostics` is plain data, while `session` is an
@@ -39,21 +39,30 @@ pub struct Session(session::Session);
 /// `serde_wasm_bindgen` has no way to place that handle inside a serialized object, which is what
 /// `js-sys` is in the dependency table for.
 ///
-/// `encoding` parses through `EncodingKind::parse`, which answers `None` for an unknown name — a
-/// renderer sending a typo gets an error rather than a silent default decoding the tape as something
-/// else entirely.
+/// An unknown `encoding` is an error rather than a silent default decoding the tape as something else, and a
+/// `width` (absent or `null` fits one) outside `fieldWidths()` an error rather than a TM leg declined as too
+/// large to build, which would be a claim about the program rather than about the request.
 ///
 /// # Errors
 ///
-/// Returns `Err` when `encoding` is not a name `EncodingKind::parse` recognizes; the JS caller receives
-/// a thrown string naming the value it sent (`unknown encoding "..."`) — see `encodings()` for the
-/// accepted set. A `to_value`/`Reflect::set` marshalling failure is also possible in principle but not
-/// expected for the types this crate marshals; either way it crosses as a thrown JS exception.
+/// Returns `Err` when `encoding` is not a name `EncodingKind::parse` recognizes, or `width` is not one of
+/// `fieldWidths()`; the JS caller receives a thrown string naming the value it sent (`unknown encoding "..."`,
+/// `width ... is not one of fieldWidths()`). A `to_value`/`Reflect::set` marshalling failure is also possible in
+/// principle but not expected for the types this crate marshals; either way it crosses as a thrown JS exception.
 #[wasm_bindgen]
-pub fn compile(src: &str, encoding: &str) -> Result<JsValue, JsValue> {
+pub fn compile(src: &str, encoding: &str, width: Option<u32>) -> Result<JsValue, JsValue> {
     let kind =
         EncodingKind::parse(encoding).ok_or_else(|| JsValue::from_str(&format!("unknown encoding {encoding:?}")))?;
-    let compiled = session::Session::compile(src, kind);
+    let width = match width {
+        None => None,
+        Some(w) => Some(
+            usize::try_from(w)
+                .ok()
+                .filter(|w| session::FIELD_WIDTHS.contains(w))
+                .ok_or_else(|| JsValue::from_str(&format!("width {w} is not one of fieldWidths()")))?,
+        ),
+    };
+    let compiled = session::Session::compile_at(src, kind, width);
 
     let out = js_sys::Object::new();
     let diagnostics = to_value(&compiled.diagnostics)?;
@@ -280,6 +289,20 @@ pub fn encodings() -> Result<JsValue, JsValue> {
     to_value(&EncodingKind::ALL.iter().map(|k| k.name()).collect::<Vec<_>>())
 }
 
+/// `fieldWidths()` -> every width `compile` pins, narrowest first.
+///
+/// EXPORTED RATHER THAN HARDCODED IN THE UI, for `encodings()`'s reason: a TypeScript range would be a second copy
+/// of core's width bounds that nothing checks. Read off the same `FIELD_WIDTHS` `compile` checks a width against.
+///
+/// # Errors
+///
+/// Returns `Err` only if `to_value` cannot marshal the list to a JS value; not expected for the types this crate
+/// marshals. It crosses as a thrown JS exception like any other failure at this boundary.
+#[wasm_bindgen(js_name = fieldWidths)]
+pub fn field_widths() -> Result<JsValue, JsValue> {
+    to_value(&session::FIELD_WIDTHS.collect::<Vec<_>>())
+}
+
 /// `tokenClasses()` -> every `TokenClass` variant's name, in declaration order.
 ///
 /// THE INDEX IS THE DISCRIMINANT, which is the whole reason this exists. `linkIndex` ships span
@@ -326,7 +349,7 @@ pub fn capture_classes() -> Result<JsValue, JsValue> {
     to_value(&tables)
 }
 
-/// The lowering's tape names, in tape order. The TENTH export.
+/// The lowering's tape names, in tape order. The ELEVENTH export.
 ///
 /// EXPORTED RATHER THAN HARDCODED, for the reason `encodings()` gives: a TypeScript array of names is
 /// a second authoritative registry that not even the compiler is watching. Five unlabeled tape rows
@@ -917,7 +940,7 @@ impl LambdaScratch {
 /// not exist here at all. `tapeNames` is on this type because the fixed export's names are wrong for a file reduced to
 /// one tape, and only the scratch knows its own stage list.
 ///
-/// `tmValue` is absent (it reads `ty` + `final_tapes` + `kind`), and so are `sourceSpan` and
+/// `tmValue` is absent (it reads `ty` + `run_end` + `kind`), and so are `sourceSpan` and
 /// `linkIndex`. `tmStatus` is present with a DIFFERENT RETURN SHAPE — see `redextape_wire::TmScratchStatus`.
 /// `tests/browser.rs` pins the absences at compile time.
 ///

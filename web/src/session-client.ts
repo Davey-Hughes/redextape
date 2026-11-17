@@ -88,9 +88,12 @@ export class SessionClient {
    * applies, and a future caller that posts without `schedule`'s clearTimeout discipline should not get
    * to skip the generation check because one call site makes it redundant.
    */
-  request(gen: number, src: string, encoding: string): void {
+  request(gen: number, src: string, encoding: string, width: number | null = null): void {
     if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'run', gen, src, encoding })
+    // A `null` WIDTH IS AUTO, POSTED AS NO `width` KEY, NOT `width: undefined`: an auto request carries none.
+    this.#port.postMessage(
+      width === null ? { kind: 'run', gen, src, encoding } : { kind: 'run', gen, src, encoding, width },
+    )
   }
 
   /**

@@ -29,7 +29,16 @@ import { isSpeed, SPEEDS } from './workspace'
  */
 export function stepControls(
   on: Pick<PaneEvents, 'back' | 'forward' | 'toNewest' | 'play' | 'restart' | 'extend' | 'speed' | 'setSpeed'>,
-): { readonly el: HTMLElement; update(c: ControlState): void } {
+): {
+  readonly el: HTMLElement
+  /**
+   * The step readout, a child of `el` until a view moves it: the TM view shows it on its status line, under its header
+   * bar, so that the bar keeps one row at every step count (the TM width design, decision 25). `update` writes it
+   * wherever it is.
+   */
+  readonly step: HTMLElement
+  update(c: ControlState): void
+} {
   const el = document.createElement('div')
   el.className = 'controls'
 
@@ -148,6 +157,7 @@ export function stepControls(
 
   return {
     el,
+    step,
     update(c: ControlState): void {
       // **`[continue]` GOING AWAY UNDER THE FOCUS AS ITS RECORDING STARTS HANDS IT TO `▶` FIRST**, live as `[continue]`
       // was, the two being one operation (`controls.ts`'s `canRecordFurther`): `▶` then takes its state as the button

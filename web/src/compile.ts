@@ -26,12 +26,14 @@ export function createCompile(deps: {
   sessions: SessionRegistry
   results: HTMLElement
   picker: HTMLSelectElement
+  /** The program's field width, read at each post: `null` for auto (`field-width.ts`). */
+  width: () => number | null
   view: () => EditorView
   sourceSession: SessionId
-  /** Store the program as it is posted: its text, and the encoding the compile was given. */
-  persist: (text: string, encoding: string) => void
+  /** Store the program as it is posted: its text, and the encoding and width the compile was given. */
+  persist: (text: string, encoding: string, width: number | null) => void
 }): { schedule(src: string): void } {
-  const { sessions, results, picker, view, sourceSession, persist } = deps
+  const { sessions, results, picker, width: widthNow, view, sourceSession, persist } = deps
 
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -74,11 +76,12 @@ export function createCompile(deps: {
     const gen = client.supersede()
     timer = setTimeout(() => {
       const encoding = picker.value
-      client.request(gen, src, encoding)
-      // **THE PROGRAM IS STORED WHERE IT IS POSTED — Plan 7 part 6a spec §4.3.** A keystroke, an encoding change, a
+      const width = widthNow()
+      client.request(gen, src, encoding, width)
+      // **THE PROGRAM IS STORED WHERE IT IS POSTED — Plan 7 part 6a spec §4.3.** A keystroke, an encoding or width change, a
       // picked example and the start-up program all arrive here, so this is the one write site and there is one write
       // per pause. A keystroke in the last `DEBOUNCE_MS` before the tab closes is not stored, as a copy's is not.
-      persist(src, encoding)
+      persist(src, encoding, width)
     }, DEBOUNCE_MS)
   }
 

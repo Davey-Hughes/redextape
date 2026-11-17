@@ -129,7 +129,7 @@ fn programs() -> Vec<(String, String)> {
     v
 }
 
-/// `Session::compile`'s pipeline, replicated. The wasm crate is a cdylib and cannot be an example's
+/// `Session::compile_at`'s pipeline, replicated. The wasm crate is a cdylib and cannot be an example's
 /// dependency, so this mirrors `crates/redextape-wasm/src/session.rs`'s `compile_with_caps` — parse,
 /// typecheck, result type, source map, λ lower, `run_tm_described` — and returns the two cursors a
 /// stepping UI would hold.
@@ -157,7 +157,7 @@ fn compile(src: &str, kind: EncodingKind) -> Option<Compiled> {
     let ty = typeck::result_type(&program).ok()?;
 
     // The session's order: run first, then build the map at the width the run fitted, since the map keys
-    // on state names and names depend on the width (`Session::compile`'s doc).
+    // on state names and names depend on the width (`Session::compile_at`'s doc).
     let (core, spans) = desugar_mapped(&program);
     let described = tm::run_tm_described(&core, kind, ty, tm::TM_DEFAULT_CAPS);
     let width = described.as_ref().map_or(tm::MIN_FIELD_WIDTH, |d| d.header.width);

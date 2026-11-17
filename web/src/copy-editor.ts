@@ -27,8 +27,8 @@ export type CopyEditorOptions = {
 /**
  * The part of a machine view that edits a copy — the TM view's and the rxm view's (spec amendment 28: the rxm view
  * holds a copy's editor as the TM view does). It owns the editor's host and the text panel around it, the outline,
- * and the facts behind the view menu's *format* and *edit a copy*; the view puts `textPanel` first in its body and
- * `outline` last, and delegates `EditablePane`'s members here.
+ * and the facts behind the view menu's *format* and *edit a copy*; the view puts `textPanel` first in its body (the TM
+ * view after its status line) and `outline` last, and delegates `EditablePane`'s members here.
  *
  * **ONE PART, SO A FIX TO THE HANDOFF IS MADE ONCE.** With a copy in each view, every fix to this code — a control
  * outliving the fork it performed, an editor outliving the session it edits, edits following the view that built an

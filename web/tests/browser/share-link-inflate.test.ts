@@ -45,7 +45,7 @@ it('refuses a link inflating to 64 MiB having handed the inflate under 16 KiB of
   }
   globalThis.DecompressionStream = Counted as unknown as typeof DecompressionStream
   try {
-    expect(await decodeLink(`${LINK_PREFIX}${base64url(bomb)}`, ['unary'])).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(`${LINK_PREFIX}${base64url(bomb)}`, ['unary'], [])).toEqual({ kind: 'unreadable' })
   } finally {
     globalThis.DecompressionStream = Real
   }

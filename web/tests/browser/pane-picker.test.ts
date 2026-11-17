@@ -172,7 +172,8 @@ describe('a split creates what the split menu was asked for', () => {
     const created = leafIds().find((id) => !before.includes(id)) ?? ''
     expect(created).not.toBe('')
     expect(leafKind(created)).toBe('tm')
-    expect(showing(created)).toEqual({ tapes: '', rows: 0, status: '' })
+    // THE STATUS LINE HOLDS THE VIEW'S STEP TEXT, which says why the leg cannot step before it has a frame.
+    expect(showing(created)).toEqual({ tapes: '', rows: 0, status: 'not compiled' })
 
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let y = 7; y + 1' } })
     await until(

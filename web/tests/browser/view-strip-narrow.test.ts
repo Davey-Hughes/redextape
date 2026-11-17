@@ -35,7 +35,12 @@ const headerOf = (leaf: Leaf) => leafEl(leaf).querySelector<HTMLElement>('.view-
 const headingOf = (leaf: Leaf) => headerOf(leaf).querySelector<HTMLElement>('.view-title-heading') as HTMLElement
 const stripOf = (leaf: Leaf) => leafEl(leaf).querySelector<HTMLElement>('.view-steps') as HTMLElement
 const controlsOf = (leaf: Leaf) => stripOf(leaf).querySelector<HTMLElement>('.controls') as HTMLElement
-const stepOf = (leaf: Leaf) => controlsOf(leaf).querySelector<HTMLElement>('.step') as HTMLElement
+/**
+ * A view's step text: in its strip, but the TM view's, which its status line holds (the TM width design,
+ * decision 25).
+ */
+const stepOf = (leaf: Leaf) =>
+  leafEl(leaf).querySelector<HTMLElement>(leaf === 'tm-0' ? '.tm-status .step' : '.view-steps .step') as HTMLElement
 const extendOf = (leaf: Leaf) => controlsOf(leaf).querySelector<HTMLButtonElement>('.extend') as HTMLButtonElement
 const stepText = (leaf: Leaf) => stepOf(leaf).textContent ?? ''
 const SHORT = /^step [\d,]+ of [\d,]+$/
@@ -59,7 +64,10 @@ const boxNameOf = (leaf: Leaf, el: HTMLElement): string =>
   el === stepOf(leaf) ? 'the step text' : (el.getAttribute('aria-label') ?? el.textContent ?? '')
 /** The boxes a strip draws, by name, in the order it draws them. */
 const namesOf = (leaf: Leaf): string[] => drawn(leaf).map((el) => boxNameOf(leaf, el))
-/** What a strip draws: the transport, the speed and the step text, and `keep recording` under a long line. */
+/**
+ * What a strip draws: the transport, the speed and the step text, and `keep recording` under a long line. The TM view's
+ * strip draws no step text.
+ */
 const boxesFor = (line: Line, leaf: Leaf): string[] => [
   'back to step 0',
   'one step back',
@@ -67,7 +75,7 @@ const boxesFor = (line: Line, leaf: Leaf): string[] => [
   'to the newest recorded step',
   'play',
   'playback speed',
-  'the step text',
+  ...(leaf === 'tm-0' ? [] : ['the step text']),
   ...(leaf === line.long ? ['keep recording'] : []),
 ]
 /**
@@ -262,7 +270,8 @@ describe.each(LINES)('Explorer’s step strips, under $name', (line) => {
           expect.soft(box.left, `${nameOf(leaf, el)}’s left`).toBeGreaterThanOrEqual(inner.left)
           expect.soft(box.right, `${nameOf(leaf, el)}’s right`).toBeLessThanOrEqual(inner.right)
         }
-        if (linesOf(stepOf(leaf)) > 1) {
+        // THE TM VIEW'S STEP TEXT IS ON ITS STATUS LINE, NOT A ROW OF THE HEADER, so the header's width is not its own.
+        if (leaf !== 'tm-0' && linesOf(stepOf(leaf)) > 1) {
           expect
             .soft(stepOf(leaf).getBoundingClientRect().width, `${leaf}’s wrapped step text’s width`)
             .toBeGreaterThanOrEqual(roomOf(leaf) - 0.5)

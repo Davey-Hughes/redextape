@@ -31,17 +31,18 @@ const LINK = `${LINK_PREFIX}${deflateRawSync(
 
 describe('a link whose reading throws', () => {
   it('opens whole when nothing throws', async () => {
-    expect(await decodeLink(LINK, ['unary', 'binary'])).toMatchObject({ kind: 'whole' })
+    expect(await decodeLink(LINK, ['unary', 'binary'], [4, 8])).toMatchObject({ kind: 'whole' })
   })
 
   it('opens the program alone when reading its workspace throws', async () => {
     vi.mocked(parseWorkspace).mockImplementationOnce(() => {
       throw new RangeError('Maximum call stack size exceeded')
     })
-    expect(await decodeLink(LINK, ['unary', 'binary'])).toEqual({
+    expect(await decodeLink(LINK, ['unary', 'binary'], [4, 8])).toEqual({
       kind: 'program',
       program: 'let x = 40; x + 2',
       encoding: 'binary',
+      width: null,
     })
     expect(vi.mocked(parseWorkspace).mock.results.at(-1)?.type).toBe('throw')
   })
@@ -55,7 +56,7 @@ describe('a link whose reading throws', () => {
       }
     } as unknown as typeof DecompressionStream
     try {
-      expect(await decodeLink(LINK, ['unary', 'binary'])).toEqual({ kind: 'unreadable' })
+      expect(await decodeLink(LINK, ['unary', 'binary'], [4, 8])).toEqual({ kind: 'unreadable' })
     } finally {
       globalThis.DecompressionStream = Real
     }

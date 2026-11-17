@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
+import { fieldWidths } from '../../../pkg/redextape_wasm.js'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { decodeLink } from '../../src/share-link'
 import { PRESETS, parseWorkspace } from '../../src/workspace'
@@ -117,11 +118,12 @@ describe('share', () => {
   })
 
   it('links to what is on the page: the program, its encoding, the workspace, and each leg’s step', async () => {
-    const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS)
+    const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS, fieldWidths() as number[])
     expect(opened).toEqual({
       kind: 'whole',
       program: 'let x = 40; x + 2',
       encoding: 'unary',
+      width: null,
       workspace: parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY)),
       // STEP 0 IN EVERY LEG, where a run opens (`History`), and where each head is.
       positions: { lambda: 0, rxm: 0, tm: 0 },
@@ -138,7 +140,7 @@ describe('share', () => {
     await userEvent.click(
       document.querySelector('[data-leaf="lambda-0"] button[aria-label="one step back"]') as HTMLButtonElement,
     )
-    const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS)
+    const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS, fieldWidths() as number[])
     expect(opened.kind === 'whole' && opened.positions).toEqual({ lambda: 6, rxm: 0, tm: 0 })
   })
 
@@ -149,7 +151,7 @@ describe('share', () => {
     // could land after it answers.
     shareButton().click()
     await until(() => shareLinkField().value !== '', 'the link')
-    const opened = await decodeLink(fragmentOf(shareLinkField().value), ENCODINGS)
+    const opened = await decodeLink(fragmentOf(shareLinkField().value), ENCODINGS, fieldWidths() as number[])
     // `toEqual` ON THE POSITIONS THEMSELVES: `toMatchObject` would take `{}` as a subset every positions object has.
     expect(opened.kind === 'whole' && opened.program).toBe('let y = 1; y + 2')
     expect(opened.kind === 'whole' && opened.positions).toEqual({})
@@ -272,7 +274,7 @@ describe('share', () => {
       'the compile',
     )
     expect(document.querySelector('#workspace')?.textContent).toBe('Debugger ▾')
-    const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS)
+    const opened = await decodeLink(fragmentOf(await openShare()), ENCODINGS, fieldWidths() as number[])
     expect(opened.kind).toBe('whole')
     if (opened.kind !== 'whole') return
     expect(opened.encoding).toBe('binary')

@@ -278,7 +278,7 @@ let latest = 0
  * `RxmScratchHandle` carries the rxm leg's alone. See `liveHandle`.
  */
 type Live =
-  | { gen: number; kind: 'session'; session: Session }
+  | { gen: number; kind: 'session'; session: Session; pinned: boolean }
   | { gen: number; kind: 'scratch'; leg: 'lambda'; session: LambdaScratchHandle }
   | { gen: number; kind: 'scratch'; leg: 'tm'; session: TmScratchHandle; value: TmValueRunHandle | null }
   | { gen: number; kind: 'scratch'; leg: 'rxm'; session: RxmScratchHandle }
@@ -516,12 +516,13 @@ function rxmLeg(session: Session): RxmLeg {
 /**
  * Post the live session's `result`, through `keepInFlight` so that a leg a rewind is recording again is not read
  * mid-fill, and `keepDecided` so that a value decided before a rewind is not taken away by the rewound cursor's
- * `Unfinished`, and keep what it posted as `posted`. `onRun` and `onExtend` both post here.
+ * `Unfinished`, and keep what it posted as `posted`. `onRun` and `onExtend` both post here, `pinned` as the session's
+ * `run` request carried a width.
  */
-function postResult(gen: number, session: Session): void {
+function postResult(gen: number, session: Session, pinned: boolean): void {
   const read = mapLegs<ResultLegs>((leg) => PART[leg](session))
   posted = keepDecided(posted, keepInFlight(posted ?? rewoundFrom, read, recording))
-  ctx.postMessage({ kind: 'result', gen, legs: posted })
+  ctx.postMessage({ kind: 'result', gen, legs: posted, pinned })
 }
 
 async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
@@ -529,7 +530,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
 
   // `compile` RUNS THE WHOLE TM LEG and is one uninterruptible call. Off the main thread that can only
   // delay the next result; it can never block input, highlighting or linting.
-  const { diagnostics, session } = compile(req.src, req.encoding) as CompileResult
+  const { diagnostics, session } = compile(req.src, req.encoding, req.width ?? null) as CompileResult
   if (session === null) {
     ctx.postMessage({ kind: 'no-session', gen: req.gen, diagnostics })
     return
@@ -540,7 +541,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
     session.free()
     return
   }
-  live = { gen: req.gen, kind: 'session', session }
+  live = { gen: req.gen, kind: 'session', session, pinned: req.width !== undefined }
 
   const lambda = session.lambdaStatus()
   const rxm = session.rxmStatus()
@@ -607,7 +608,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   // Deliberate silence: superseded while recording ran. The generation that wanted this result is gone.
   // The `kind` half is the type restating the `gen` half — see `liveHandle`'s doc for the argument.
   if (live?.gen !== req.gen || live.kind !== 'session') return
-  postResult(req.gen, live.session)
+  postResult(req.gen, live.session, live.pinned)
 }
 
 /** Each leg's copy as its build makes it: the handle, and what its reply or its free needs beside it. */
@@ -780,7 +781,7 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
     return
   }
   if (live.kind !== 'session') return
-  postResult(req.gen, live.session)
+  postResult(req.gen, live.session, live.pinned)
 }
 
 /**

@@ -62,7 +62,7 @@ gate holds them. The figures above read 841/716/48 until 2026-08-24, having drif
 lost three crates from the breakdown entirely. Recount rather than trust them.
 
 **Two tiers sit outside that count**, because neither runs under `cargo nextest`. The wasm boundary
-has **34** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
+has **36** browser tests (`wasm-pack test --headless --chrome crates/redextape-wasm`), run by CI's
 `rust-browser` job. `web/` has tests of its own across two Vitest projects — Node for the pure
 modules, real Chromium for the worker and the app end to end — run by CI's `web` job under the
 coverage gate. Count them with `pnpm test`. `pnpm test:firefox` runs the browser tier in

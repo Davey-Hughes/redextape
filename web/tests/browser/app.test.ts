@@ -507,9 +507,9 @@ describe('the app, end to end', () => {
      * name a state in.
      */
     const currentStateName = () => {
-      const text = document.querySelector('[data-leaf="tm-0"] .tm-status')?.textContent ?? ''
-      const i = text.indexOf(' · width ')
-      return i < 0 ? null : text.slice(0, i)
+      // THE NAME'S OWN BOX, not the line's text up to its width: the step count sits between the two, and changes on
+      // every step.
+      return document.querySelector('[data-leaf="tm-0"] .tm-status .tm-state')?.textContent ?? null
     }
 
     /**

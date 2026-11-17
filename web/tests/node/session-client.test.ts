@@ -77,6 +77,23 @@ describe('SessionClient', () => {
     expect(sent[1]).toEqual({ kind: 'run', gen: 2, src: 'b', encoding: 'unary' })
   })
 
+  /**
+   * **AN AUTO REQUEST HAS NO `width` KEY AT ALL**, so it is the same message whether or not its sender knows about
+   * widths: `toStrictEqual`, since `toEqual` passes an explicit `width: undefined`. The worker reads an absent width as auto.
+   */
+  it('posts a pinned width, and no width key for auto', () => {
+    const { port, sent } = fakePort()
+    const c = new SessionClient(port, () => {})
+    c.request(c.supersede(), 'a', 'binary', 8)
+    c.request(c.supersede(), 'b', 'binary', null)
+    c.request(c.supersede(), 'c', 'binary')
+    expect(sent).toStrictEqual([
+      { kind: 'run', gen: 1, src: 'a', encoding: 'binary', width: 8 },
+      { kind: 'run', gen: 2, src: 'b', encoding: 'binary' },
+      { kind: 'run', gen: 3, src: 'c', encoding: 'binary' },
+    ])
+  })
+
   it('delivers a reply whose generation is current', () => {
     const { port, deliver } = fakePort()
     const onReply = vi.fn()
@@ -216,6 +233,7 @@ describe('SessionClient streaming', () => {
         },
         tm: TM_LEG_OK,
       },
+      pinned: false,
     })
     expect(seen).toEqual(['compiled', 'frames', 'frames', 'result'])
   })

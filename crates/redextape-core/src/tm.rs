@@ -27,7 +27,7 @@ pub mod universal;
 pub use attribute::{Attribution, StepBucket, attribute, attribute_at, attribute_steps};
 pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, OVERFLOWING_NUMBER,
-    REG, RuleSpec, SEP, STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
+    PINNED_FIELD_WIDTHS, REG, RuleSpec, SEP, STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
 };
 pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason};
 pub use defunc::{defunc, defunc_mapped};
@@ -81,11 +81,11 @@ pub enum TmRun {
     /// rather than of the program's semantics.
     ///
     /// Which widths were tried depends on the producer: `run_tm_fitted` and `run_tm_described` search,
-    /// but `run_tm_described_at` attempts exactly the width its caller pinned, so its `Overflow` says
-    /// nothing about any other width. A consumer that reports this variant to a user must therefore name
-    /// the width it actually ran at rather than `MAX_FIELD_WIDTH`, and must not suggest a remedy that
-    /// only holds for the searching case, such as recommending a different encoding for a program a
-    /// wider field would have accepted.
+    /// but `run_tm_described_at` and `run_tm_described_program_at` attempt exactly the width their
+    /// caller pinned, so their `Overflow` says nothing about any other width. A consumer that reports
+    /// this variant to a user must therefore name the width it actually ran at rather than
+    /// `MAX_FIELD_WIDTH`, and must not suggest a remedy that only holds for the searching case, such
+    /// as recommending a different encoding for a program a wider field would have accepted.
     Overflow,
     /// `lower_tm` REFUSED to build a machine for this program at all. FOUR conditions produce it: an
     /// absurd register file (`lower_tm::MAX_SLOTS`), an absurd `Loc` bank in a call-containing program
@@ -451,8 +451,8 @@ pub fn run_tm_described_program(
 ///
 /// # Errors
 ///
-/// `Err(TmRun::TooLarge)` when `width` is outside `MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH`, checked first
-/// and before `core` is even lowered: no machine can be built at such a width, which is exactly what
+/// `Err(TmRun::TooLarge)` when `width` is outside `PINNED_FIELD_WIDTHS`, checked first
+/// and before `core` is even lowered: no machine is built at such a width, which is exactly what
 /// that variant means. Then the same two as `run_tm_described`: `Err(TmRun::LowerError(_))` when
 /// `core` has no rxm lowering, and `Err(TmRun::TooLarge)` when `lower_tm` refuses to build a machine
 /// at all.
@@ -463,11 +463,39 @@ pub fn run_tm_described_at(
     caps: TmCaps,
     width: usize,
 ) -> Result<DescribedRun, TmRun> {
-    if !(MIN_FIELD_WIDTH..=MAX_FIELD_WIDTH).contains(&width) {
-        return Err(TmRun::TooLarge);
-    }
-    let (prog, sm) = lower_and_size(core)?;
-    describe_at(&prog, sm.n_slots(), kind, result, caps, width).ok_or(TmRun::TooLarge)
+    in_field_range(width)?;
+    run_tm_described_program_at(&lower_program(core).map_err(TmRun::LowerError)?, kind, result, caps, width)
+}
+
+/// `run_tm_described_at` over a program the caller has already lowered: the pinned twin of
+/// `run_tm_described_program`, for a caller that also steps or maps that program and so lowers once.
+/// Hand it `lower_program`'s program, for the reason `run_tm_described_program` gives.
+///
+/// **THE WIDTH CHECK IS ITS OWN, NOT LEFT TO `run_tm_described_at`.** This is public, and a caller
+/// holding a `Program` never passes through that function; without the check here a width past
+/// `MAX_FIELD_WIDTH` such as `usize::MAX` reaches `Unary::init_reg` and panics on a capacity overflow.
+///
+/// # Errors
+///
+/// `Err(TmRun::TooLarge)` when `width` is outside `PINNED_FIELD_WIDTHS`, checked first,
+/// and when `lower_tm` refuses to build a machine at all. `TmRun::Overflow` is `Ok`, as from
+/// `run_tm_described_at`.
+pub fn run_tm_described_program_at(
+    prog: &Program,
+    kind: EncodingKind,
+    result: Ty,
+    caps: TmCaps,
+    width: usize,
+) -> Result<DescribedRun, TmRun> {
+    in_field_range(width)?;
+    let n_slots = sized(prog)?.n_slots();
+    describe_at(prog, n_slots, kind, result, caps, width).ok_or(TmRun::TooLarge)
+}
+
+/// `Err(TmRun::TooLarge)` for a width outside `PINNED_FIELD_WIDTHS`: the search keeps to its own ladder by
+/// construction, and a caller-chosen width does not.
+fn in_field_range(width: usize) -> Result<(), TmRun> {
+    if PINNED_FIELD_WIDTHS.contains(&width) { Ok(()) } else { Err(TmRun::TooLarge) }
 }
 
 /// Lower then simulate ONCE, at `enc`'s own width, with no search. What the step-count goldens and the
@@ -526,7 +554,7 @@ mod run_tm_tests {
     ///     `parse_heap_cells` and its pointer chain are covered too, not just `decode_nat` on slot 0.
     ///
     /// The values are load-bearing. A corpus of `1 + 2 * 3`, `[1, 2, 3]` and `sum(4)` fits BINARY at 4
-    /// for every program — `MIN_FIELD_WIDTH`, the narrowest width there is — so `MIN_FIELD_WIDTH` in
+    /// for every program — `MIN_FIELD_WIDTH`, the narrowest width the search tries — so `MIN_FIELD_WIDTH` in
     /// the reader list would never be narrower than the tape, and the narrower direction would go
     /// unexercised for the very encoding this test exists for. Values in [16, 31] are what put unary at
     /// 32 and binary at 8 simultaneously, and the `MIN_FIELD_WIDTH < width` assertion below is what
@@ -854,25 +882,90 @@ mod run_tm_tests {
     /// **A WIDTH OUTSIDE THE ENCODINGS' RANGE IS A `TooLarge`, NEVER A PANIC.** Unchecked, `usize::MAX`
     /// would reach `Unary::init_reg` and abort the process on a `capacity overflow`, breaking the
     /// workspace manifest's "no library path may panic" rule. Both directions are pinned: below
-    /// `MIN_FIELD_WIDTH`, above `MAX_FIELD_WIDTH`, and `usize::MAX`.
+    /// `PINNED_FIELD_WIDTHS`, above it, and `usize::MAX`.
     #[test]
     fn a_width_outside_the_encodings_range_is_refused_rather_than_panicking() {
         let core = desugar(&crate::parser::parse("1 + 2").0.unwrap());
-        for width in [0, MIN_FIELD_WIDTH - 1, MAX_FIELD_WIDTH + 1, usize::MAX] {
+        for width in [PINNED_FIELD_WIDTHS.start() - 1, MAX_FIELD_WIDTH + 1, usize::MAX] {
             let got = run_tm_described_at(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS, width);
             assert!(matches!(got, Err(TmRun::TooLarge)), "width {width} must be refused, got {got:?}");
         }
     }
 
-    /// And both bounds themselves are still admitted, so the guard above is not an off-by-one that
-    /// refuses the widths the search itself uses.
+    /// And both bounds themselves are still admitted, with the search's first rung between them, so the
+    /// guard above is not an off-by-one that refuses its own floor or a width the search uses.
     #[test]
     fn the_pinned_width_bounds_themselves_are_accepted() {
+        assert_eq!(
+            PINNED_FIELD_WIDTHS,
+            1..=64,
+            "the pinnable widths, by value, so a moved floor or ceiling shows here"
+        );
         let core = desugar(&crate::parser::parse("1 + 2").0.unwrap());
-        for width in [MIN_FIELD_WIDTH, MAX_FIELD_WIDTH] {
+        for width in [*PINNED_FIELD_WIDTHS.start(), MIN_FIELD_WIDTH, MAX_FIELD_WIDTH] {
             let got = run_tm_described_at(&core, EncodingKind::Unary, crate::ty::Ty::Nat, TM_DEFAULT_CAPS, width)
                 .unwrap_or_else(|e| panic!("width {width} must be accepted, got {e:?}"));
             assert_eq!(got.header.width, width);
+        }
+    }
+
+    /// The program-taking pinned path builds the same machine, header and run as the program-taking
+    /// search at the width the search settled on. `40 + 2` under binary must widen past
+    /// `MIN_FIELD_WIDTH`, so the search ran more than one attempt and the pin ran one: agreement here
+    /// means the pin skips the ladder and nothing else.
+    #[test]
+    fn the_pinned_program_path_agrees_with_the_fitted_one_at_the_width_fitting_chose() {
+        let prog = lower_program(&core_of("40 + 2")).unwrap();
+        let fitted = run_tm_described_program(&prog, EncodingKind::Binary, Ty::Nat, TM_DEFAULT_CAPS).unwrap();
+        let width = fitted.header.width;
+        assert!(width > MIN_FIELD_WIDTH, "fitted to {width}: the search must have widened for this to test anything");
+        let pinned = run_tm_described_program_at(&prog, EncodingKind::Binary, Ty::Nat, TM_DEFAULT_CAPS, width).unwrap();
+        assert!(matches!(pinned.run, TmRun::Ran { .. }), "got {:?}", pinned.run);
+        assert_eq!(pinned.header, fitted.header);
+        assert_eq!(pinned.steps, fitted.steps, "the same machine must take the same number of steps");
+        assert_eq!(pinned.machine.states.len(), fitted.machine.states.len());
+        assert!(pinned.machine == fitted.machine, "the pinned and fitted machines differ");
+    }
+
+    /// A width too narrow for the program's values is `Ok` carrying `Overflow`, as from
+    /// `run_tm_described_at`: the web keeps that run as a TM halting in `overflow`, so it must come
+    /// back with a machine and a header, not as an `Err`.
+    #[test]
+    fn a_pinned_program_width_that_is_too_narrow_returns_ok_with_overflow() {
+        let prog = lower_program(&core_of("40 + 2")).unwrap();
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            let got = run_tm_described_program_at(&prog, kind, Ty::Nat, TM_DEFAULT_CAPS, MIN_FIELD_WIDTH).unwrap();
+            assert!(matches!(got.run, TmRun::Overflow), "{kind:?}: got {:?}", got.run);
+            assert_eq!(got.header.width, MIN_FIELD_WIDTH, "{kind:?}: the header records the pinned width");
+        }
+    }
+
+    /// A width outside the encodings' range is a `TooLarge`, never a panic, on the program-taking path
+    /// too: it is public, and an unchecked `usize::MAX` reaches `Unary::init_reg`.
+    #[test]
+    fn a_pinned_program_width_outside_the_encodings_range_is_refused_rather_than_panicking() {
+        let prog = lower_program(&core_of("1 + 2")).unwrap();
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            for width in [PINNED_FIELD_WIDTHS.start() - 1, MAX_FIELD_WIDTH + 1, usize::MAX] {
+                let got = run_tm_described_program_at(&prog, kind, Ty::Nat, TM_DEFAULT_CAPS, width);
+                assert!(matches!(got, Err(TmRun::TooLarge)), "{kind:?} width {width} must be refused, got {got:?}");
+            }
+        }
+    }
+
+    /// Both bounds and the search's first rung are admitted on the program-taking path, so its range
+    /// check is not an off-by-one that refuses its own floor or a width the search uses. `0` fits a
+    /// one-cell field in both encodings, so the run at each completes.
+    #[test]
+    fn the_pinned_program_width_bounds_themselves_are_accepted() {
+        let prog = lower_program(&core_of("0")).unwrap();
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            for width in [*PINNED_FIELD_WIDTHS.start(), MIN_FIELD_WIDTH, MAX_FIELD_WIDTH] {
+                let got = run_tm_described_program_at(&prog, kind, Ty::Nat, TM_DEFAULT_CAPS, width)
+                    .unwrap_or_else(|e| panic!("{kind:?} width {width} must be accepted, got {e:?}"));
+                assert_eq!(got.header.width, width);
+                assert!(matches!(got.run, TmRun::Ran { .. }), "{kind:?} width {width}: got {:?}", got.run);
+            }
         }
     }
 

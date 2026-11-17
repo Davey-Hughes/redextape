@@ -4,7 +4,19 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { example } from './examples-fixture'
-import { examplesButton, noticeText, picker, SHELL, segments, stateIdle, undoButton, until } from './harness'
+import {
+  enterWidth,
+  examplesButton,
+  noticeText,
+  picker,
+  SHELL,
+  segments,
+  settled,
+  stateIdle,
+  undoButton,
+  until,
+  widthShown,
+} from './harness'
 
 /**
  * **`examples ▾`: THE MENU, A PICK AND ITS UNDO** — Plan 7 part 6a spec §4.2, §4.5 and §6. Driven by real pointer
@@ -17,6 +29,8 @@ const open = () => menu().matches(':popover-open')
 const items = () => [...menu().querySelectorAll<HTMLButtonElement>('button.example')]
 const item = (id: string) =>
   menu().querySelector<HTMLButtonElement>(`button[data-example="${id}"]`) as HTMLButtonElement
+/** The TM leg's segment of the results strip. */
+const tmSegment = () => segments()[2] ?? ''
 
 let view: EditorView
 
@@ -145,6 +159,32 @@ describe('examples ▾', () => {
     expect(view.state.doc.toString()).toBe(example('map-fold').text)
     expect(undoButton()).toBeNull()
     expect(noticeText()).toBe('')
+  })
+
+  /**
+   * **A PICK RESETS THE WIDTH TO AUTO, AND ITS UNDO PUTS BACK THE WIDTH IT REPLACED** (the TM width design, decision
+   * 7): the manifest's outcomes and descriptions hold under auto, as they do under binary. `fact(4)` is 24, which
+   * outgrows a 4-cell field and which auto fits at 8, so the TM's own line tells a pick that reset the width from one
+   * that kept it. The width is chosen with the pointer on the TM view's header bar, as a user chooses it.
+   */
+  it('resets the width to auto, and its undo puts back the width it replaced', async () => {
+    await userEvent.selectOptions(picker(), 'binary')
+    await settled(view, 'let x = 40; x + 2')
+    await enterWidth('4')
+    await until(stateIdle, 'the compile at width 4')
+    expect(tmSegment(), 'precondition: the program runs at width 4').toMatch(/· width 4 \(pinned\)$/)
+
+    await userEvent.click(examplesButton())
+    await userEvent.click(item('fact'))
+    expect(widthShown()).toBe('auto')
+    await until(() => stateIdle() && (segments()[1] ?? '').startsWith('rxm 24'), 'the example’s compile')
+    expect(tmSegment()).toMatch(/^TM 24 · [\d,]+ transitions · width 8$/)
+
+    await userEvent.click(undoButton() as HTMLButtonElement)
+    expect(view.state.doc.toString()).toBe('let x = 40; x + 2')
+    expect(widthShown()).toBe('4')
+    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    expect(tmSegment()).toMatch(/· width 4 \(pinned\)$/)
   })
 
   it('opens and picks by keys: Enter opens it, Tab moves on, Enter picks', async () => {

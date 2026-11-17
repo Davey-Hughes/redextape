@@ -117,6 +117,7 @@ describe('the step controls', () => {
       playing: false,
       continueLabel: null,
       stepText: 'the copy failed',
+      stepTextAtNewest: 'the copy failed',
     })
     expect(document.activeElement).not.toBe(document.body)
     expect(document.activeElement).toBe(s.el.querySelector('select.speed'))
@@ -361,6 +362,7 @@ describe('a step button a state change turns off hands the focus on', () => {
       playing: false,
       continueLabel: null,
       stepText: 'the copy failed',
+      stepTextAtNewest: 'the copy failed',
     })
     expect.soft(seen, 'the focus when ↺ was disabled').toEqual(['playback speed'])
     expect.soft(await settledFocus(), 'where the focus settles').toBe('playback speed')
@@ -392,6 +394,7 @@ describe('↺ that its own rewind turns off waits with the focus', () => {
         playing: false,
         continueLabel: null,
         stepText: 'step 0 of 0…',
+        stepTextAtNewest: 'step 0 of 0…',
       })
       expect.soft(await settledFocus(), 'where the focus settles while the rewind records').toBe(controlName(restart))
       expect.soft({ waiting: waiting(restart), disabledEver: seen }).toEqual({ waiting: true, disabledEver: [] })

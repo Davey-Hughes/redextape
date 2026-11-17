@@ -36827,3 +36827,383 @@ this update was committed. Every other row was measured before the rebase, on `8
 | seven | review-fix sabotages, each exiting 100 | `rg -c '^== .* rc=100$' fix1/sabotage.log` (figures-a4fc8a1.log) |
 | 100, 2; 0, 9; 100, 1 | the stray check's runs: without it, exit and failing tests; with it, exit and passing tests; sabotaged, exit and failing tests | `rg '^exit\|Summary' fc1fix/red.log fc1fix/green.log fc1fix/sabotage-sibling.log` (fc1fix/entry-figures.log) |
 | 41; 9 | the harness's case lines, ok, at `fe907ca`; its tests passed | `rg -c '^tests/cmd/[a-z_]+\.toml \.\.\. ok$' fc1fix/after-cli-fe907ca.log`; `rg '^test result' fc1fix/after-cli-fe907ca.log` (fc1fix/entry-figures.log) |
+
+#### TM FIELD WIDTH: EACH TM VIEW'S HEADER BAR HAS A `width` BOX, EMPTY FOR `auto` OR A WIDTH FROM 1 TO 64 CELLS, THAT RE-RUNS THE PROGRAM AT EXACTLY THAT WIDTH; A PINNED RUN THAT OVERFLOWS KEEPS ITS TM, WHICH STEPS TO ITS HALT IN `overflow` AND SAYS IT OUTGREW THE WIDTH CHOSEN; THE WIDTH IS STORED AND SHARED BESIDE THE ENCODING, AN EXAMPLE RESETS IT TO AUTO, AND THE RESULTS STRIP MARKS A PINNED WIDTH; THE TM VIEW'S STEP COUNT MOVES TO THE LINE UNDER ITS BAR, WHICH KEEPS ONE ROW (2026-11-16 and 17, branch `tm-width`, `538b211..9bd8a4d`, 34 commits, ten of them this entry's earlier versions, plus this rebuild of it, its correction and its update for the rebase onto `538b211`, 37 in all)
+
+The user asked for a live control over the bit width of a TM program's numbers, for teaching: a narrow
+width makes a run small enough to follow by eye, and lets you watch a value run out of bits. The lane's
+record is `~/temp/redextape-tm-width-record/`, `$R` below: `brief.md` holds the user's decisions and the
+controller's calls, `progress.md` the work and its logs, `review-tasks12.md`, `review-tasks34.md` and
+`review-branch.md` the three reviews of the plan's work, `review-hb.md` the review of the header round and
+`review-box.md` that of the width box's rounds. The design doc is
+`docs/superpowers/specs/2026-11-16-tm-width-design.md`, whose decisions 1 to 33 this entry cites as D1 to D33; the
+plan is `docs/superpowers/plans/2026-11-16-tm-width.md`.
+
+The lane's first step probed a suspected wrong value on `main` and found it: under binary auto-fit, a program
+whose values fit four bits but which has more than sixteen call sites ran at width 4, and a return tag cut to
+four bits resumed after the wrong call. The user ruled that its fix ship first, as its own PR, and put a second
+fix in that PR: the fault a run continued into `overflow` reports. Both shipped as #179 (`486df8d`, branch
+`tm-return-tag`, which has its own entry); this branch was rebased onto it, and then onto `538b211`.
+
+A SHA this entry gives for a run, a measurement, a screenshot, a review or a trial of the user's is that
+commit's SHA before the rebase onto `538b211`, measured before the rebase, on `486df8d`, and
+`$R/rebase2/sha-map.txt` maps each to its SHA after it (the local branch `tm-width-pre-rebase-2` keeps them);
+a SHA that names what a commit changes, the branch's range or a count of its commits is its SHA after it.
+
+##### WHAT CHANGED AND WHY
+
+- **The width box.** Each TM view's header bar has `width` and a box at its end, right before `⋯`: empty for
+  `auto`, the default, where `auto` stands in grey, or a width from 1 to 64, the range `fieldWidths()` lists. A
+  width typed applies on Enter or on leaving the box; a step of ↑/↓ or of the box's arrows applies 400ms after the
+  last, through one plain order, auto, 1, 2, ..., 64, so ↑ from auto is 1 and ↓ past 1 is auto (D32); Escape puts
+  the box back, and an entry that is not a listed width is put back (D29). The arrows are the box's own, an up half
+  over a down half inside its border at its end, drawn as `icons.ts` chevrons (D30). The box is a text field that
+  is a spin button, so each entry is judged on the text it shows (D33). The control started as a select in the
+  rules panel's header, moved to the bar after the title when the user tried the branch (D24), to the bar's end
+  when they tried it again (D27), became a number box the third time (D29), drew its own arrows the fourth (D30),
+  went down to 1 under the plain arrow pointer the fifth (D31), stepped from auto to 1, not from the width auto
+  fitted, the sixth (D32), and became a text field on the review of those rounds (D33). wasm's new `fieldWidths()`
+  export and the `compile` export's third argument (`null` for auto) share one range, `session::FIELD_WIDTHS`. An
+  entry recompiles once however many TM views show it, and every view's box follows; a view showing a TM copy has
+  none, since a copy runs at the width its own header records (D19). The box's accessible description says what the
+  bare word leaves to the eye: "tape field width in cells for the program’s TM, shared by every TM view; empty for
+  auto". Its last words are how a screen reader in Chromium learns what the empty box means: Chromium hands on no
+  native input's `aria-valuetext`, which in Firefox makes `auto` the empty box's value as well (D33).
+- **A pinned width runs at exactly that width.** Core gains `run_tm_described_program_at` for an already-lowered
+  program, with the range check and the one build site `run_tm_described_at` already used. `auto` is unchanged,
+  its decline at 64 included (D4).
+- **Widths under auto's 4.** What held the floor at 4 was the pinned entry points' range check alone (D31): auto's
+  first rung, `MIN_FIELD_WIDTH`, is no limit of the encodings, which already ran at widths 0 to 3 under test. Pinned
+  at 1, 2 and 3, the seven examples halt in `overflow` in 41 runs of 42 and answer `true` in the other (`is-even`
+  under binary at 3), and no run gives a wrong value. Core names the range `PINNED_FIELD_WIDTHS`, `1..=64`, which
+  the pinned entry points and the `.tm` header reader both check and wasm's `FIELD_WIDTHS` takes; `MIN_FIELD_WIDTH`
+  stays 4, so auto is unchanged.
+- **A pinned run that overflows keeps its TM.** Where auto would widen, a pinned run's `overflow` halt is kept:
+  the TM view steps to it, and its value is a fault from the moment `compile` returns: "a number the machine
+  stores (a value, an address or a call's return tag) outgrew the 4-cell tape field chosen for this run; try a
+  wider width, or auto". At 64 it names the encoding's limit instead. `tm_value` never decodes the tapes of a run
+  that halted in `overflow` (D11, D12). A copy of a kept overflow halts there too, in its header's words.
+- **Stored and shared beside the encoding.** `StoredProgram` and share links carry `width` only when pinned, so an
+  auto payload has no `width` and no version is bumped (D14). A width this build does not list reads as auto,
+  checked in the web code as an integer `fieldWidths()` lists (D15). A link carries the width because its TM
+  position is a step of one run, and another width is another run (D16); a link's width is always its own, never
+  the stored program's (D22). A whole link whose width this build does not list opens at auto **without its TM
+  position**, which belongs to the run at the width it named (D15, the branch review's M3).
+- **An example resets the width to auto**, as it resets the encoding, since the example manifest's outcomes hold
+  under auto; the pick's undo puts back the width it replaced.
+- **The results strip marks a pinned width**: `let x = 2; x + 3` pinned at 4 reads
+  `TM 5 · 233 transitions · width 4 (pinned)` where auto's fit stays `width 4`, and the inspector's row reads
+  `4 cells (pinned)` (D23). With no TM view open there is no box, so the strip is all the page says of the
+  width. The mark comes from the `result` reply's new `pinned`, set by the worker from whether the `run` request
+  carried a width, so a result still on screen while a new width compiles is marked as its own compile ran.
+- **The TM view's step count is on the line under its bar** (D25). With the select on the bar, the bar wrapped at
+  1280px in Explorer at every step count; now the bar holds the title, the step buttons, the speed select, the width
+  box and `⋯ ✕`, one row at every count in each style, and the status line reads
+  `pc0 · step 0 of 12,976 · width 4`. On a phone the line stays one row by cutting the state's name with an
+  ellipsis, its whole name in a tooltip; the step text and the width are never cut. The step text takes the room it
+  needs at the run's newest step, so where the line wraps, in Explorer's two columns on a phone, its rows do not
+  change while a run plays (D28). The λ and rxm views keep their step text on their bar. In a copy's view too the
+  line sits directly under the bar, above the copy's text panel (D26).
+
+##### DECISIONS
+
+The user's, on 2026-11-16 (`$R/brief.md`, and the controller's dispatches after it, which its ledger
+`~/temp/redextape-ui-lanes-ledger.md` records):
+
+- **A width select**, `auto` (the default, today's behaviour) and every width from 4 to 64.
+- **A pinned width runs at exactly that width.**
+- **A pinned run that overflows keeps its TM**, steppable to its halt in `overflow`, and the status says it
+  overflowed at width N, with a pointer to a wider width or auto. This is the demo.
+- **The select lived first in each TM view's rules panel header**, not the top bar beside `encoding`: at 1280 the top
+  bar had no room for it (Task 3's probe, `$R/task3-room-probe.log`). On 2026-11-17, after trying the branch: "I
+  think the width should be on the same bar as TM - program not in the rules section" (D24). After trying `bfae654`:
+  "I think width should be on the right side next to the ... button" (D27).
+- **A number box instead of the select** (2026-11-17, after trying `7b61933`, the "Number box" of three controls shown;
+  D29 quotes its description): type a width or step it, empty for auto, applied on Enter or on leaving the box.
+- **The box's own arrows** (2026-11-17, after trying `f921888` in Firefox: "the arrows look bad, they go outside the
+  box. they do work but we should probably draw our own"), D30.
+- **A plain pointer on the arrows, and widths down to auto past 1 or 2** (2026-11-17, after trying `b149c7a`: "can we
+  make it use a regular pointer instead of the hand pointer? can we also make it go down to "auto" after 1 or 2?
+  whatever makes sense (even though 1 and 2 will overflow most programs, it's good for demo)"), D31.
+- **Auto is the bottom of one plain order** (2026-11-17, after trying `036a198`: "it's confusing that after you go to
+  auto it jumps back to up to 9 or 7 depending on what you press. it should just go up to 1 in this case"), D32.
+- **The step count leaves the TM view's bar for the line under it** (2026-11-17, option B of three measured and
+  shown to the user, D25 quotes it), so that the bar keeps one row; λ and rxm unchanged.
+- **The strip marks a pinned width** (after the branch review's M4), "width 4 (pinned)"; auto stays "width N".
+
+The controller's:
+
+- From the brief: `auto` exactly as today; the floor stays 4 (until D31); the width stored and shared the way the
+  encoding is, a payload without it reading as auto; picking an example resets it to auto; TM copies keep their own
+  header width.
+- **The pinned fault's pointer reads "try a wider width, or auto"** (the Tasks 1-2 review's M2): the controller's
+  wording of the user's pointer.
+- **The inspector's width row marks a pinned width too**, `4 cells (pinned)`: the controller's extension of the
+  user's strip ruling, in its dispatch.
+- **No version bump (D14), and a width this build does not list read as auto (D15)**, both proposed in the plan.
+  D14's cost is named there and below: an older deployment opens a pinned link at auto.
+- **Integers only** (the Tasks 1-2 review's M4): the web code accepts a width only as an integer `fieldWidths()`
+  lists, because wasm-bindgen's `u32` glue turns `16.7`, `2 ** 32 + 16` and `"8"` into 16, 16 and 8 before Rust's
+  range check runs. One function, `field-width.ts`'s `listedWidth`, is the check (D15).
+- **D21 and D22**, the implementer's proposals, kept: writers may leave the width out (a width left out is auto),
+  so the test files that store or encode a program for other reasons pass none, while `main.ts`'s three writers
+  always pass it; and a link's width is always its own.
+- **A link whose width this build does not list drops its TM position** (the branch review's M3), test-first.
+- **The select right after the title** on the bar (D24), until the user's D27; **the step text between the state and
+  the width, its endings with it, and the name cut at its end** (D25), a middle cut's helper being then on the unmerged
+  state-diagram branch, since merged as #182.
+- **A copy's status line under its bar too** (D26), following the user's D25: under the copy's text panel it sat
+  237px below the bar at 1280, a whole editor away from the step buttons.
+- **The box's behaviour** (D29): a step applies after a 400ms pause, so stepping 8 to 12 runs once; Escape puts the
+  box back; an entry that is not a listed width is put back on Enter or leave, with no notice; from auto the first
+  step started at the width auto fitted, until the user's D32.
+- **The arrows' terms** (D30): each half steps as ↑/↓ do, out of the Tab order, the focus kept in the box, nothing
+  drawn outside it, 3:1 or more in every style and theme and visible in forced colours; the box as tall as the speed
+  select in both engines; letters put back in both; an entry kept through a playing run's frames. The implementer's
+  calls: chevrons at stroke 3 in `--fg-dim`; no hover or pressed look, as `⋯` has none; a TM view's speed select held
+  to the box's height, 2px shorter in Chromium, its bar no shorter; Chromium's refused letters read from
+  `beforeinput` (until D33); a 1.1em column.
+- **A text field that is a spin button, its description ending "; empty for auto"** (D33, on `review-box.md`'s I1,
+  I2 and M1): the text field judges each entry on the text it shows and has no browser step to leave the plain
+  order by. The controller's first call was the text field alone, its `aria-valuetext` saying `auto`; measured over
+  AT-SPI, Chromium hands on no native input's `aria-valuetext`, text or number, so on that measurement the
+  controller added the description's last words, the name staying `width`.
+- **The step text sized by the run's total** (D28, on review-hb's I1), under the user's rule that nothing moves the
+  page on its own: in Explorer's two columns on a phone the line gained rows as a playing run's count gained digits,
+  pushing the tapes 39px down mid-run. A line that gains a row when the total itself grows is accepted.
+
+The implementer's, each with its reason in the design doc: the kept overflow recorded as one field, `run_end`
+(`Halted`, `Overflowed` or `NoHalt`), beside `width_from`, which only picks the words (D12); `tm_status` and the
+wire types unchanged (D13); a pinned `TooLarge` keeps the generic words (D18); the width as `main.ts` state handed
+to every view as the speed is (D20); the strip's mark carried on the `result` reply rather than read from the page
+(D23); the select a child of the bar between the heading and the step slot, in the speed select's chrome (D24); the
+TM-only status line built by `TmPane` from the readout `stepControls` hands it rather than scoped by `data-kind`,
+the line dropping the readout at the `steps` switch's `bar`, and the step and the width taking another row rather
+than being cut where the two alone outgrow the line (D25); the select first among the view's own actions, at their
+`var(--space-1)` before `⋯`, and the actions wrapping on the right where they do not fit one row (D27); the room
+reserved by drawing the readout at the newest step unseen in the step part's grid cell, not by a width in `ch`, which
+would not hold the part's rows where it wraps (D28); the box applying on Enter's `keydown` and `focusout`, not on
+`change`, which both browsers fire at every step; ↑/↓ handled by the box and a step of its arrows from empty moved to
+the fitted width (until D32), since both browsers step an empty box to its `min`; the wheel's default prevented
+over the focused box, which Chromium would step (until D33); an entry kept through the run's frames;
+`aria-valuetext` `auto`; the box's line and width (D29); a number written in digits, with a fraction if any, so
+`1e1`, `+3` and `0x10` are put back; `autocomplete` off and `spellcheck` false; Ctrl, Alt and Meta with ↑/↓ left to
+the browser, which steps no text field (D33).
+
+##### WHAT THE REVIEWS CAUGHT
+
+- **Tasks 1-2** (`review-tasks12.md`, 6 Minor): the fault said "a value outgrew" when a return tag had; "pick a wider
+  width, or auto" promised a remedy where no width fits, so it reads "try" by the controller's ruling; a copy of a
+  kept overflow claimed the encoding's limit at width 4; the export took widths the caller never sent (the
+  integers-only rule above); stale doc pointers; no test of a width off auto's ladder.
+- **Tasks 3-4** (`review-tasks34.md`, 1 Important, 4 Minor): D22 had no test on any open path (I1), now one browser
+  file, `share-open-width-own.test.ts`; a width choice withdrawing a link's undo was untested; the select's handler
+  was a second copy of `listedWidth`'s rule; D14's cost was unnamed; the select had no description.
+- **The branch** (`review-branch.md`, 4 Minor, all fixed in the last four commits): `check-doc-figures.sh`'s ordinal
+  comment said "the tenth" (M1); the no-bump comments told history rather than the reason (M2); an unlisted width's
+  link kept its TM position (M3); with no TM view open, a pinned width could not be seen (M4, the strip's mark).
+- **The header round** (`review-hb.md`, `e054a38..bfae654`, 1 Important, 5 Minor, all fixed): in Explorer's two
+  columns on a phone the status line gained rows while a run played (I1, D28); `#rulesPanel`'s doc still named the
+  width (M1); a style comment gave a TM reason that no longer held, and now gives the λ and rxm strips' reason,
+  which holds: at `.controls button`'s padding, λ's bar wraps at a five-digit count in Instrument and rxm's at three
+  digits in Paper and Terminal, all one row as built (M2, `node r5/m2.mjs` in `$R`, `r5/m2.log`); the PR draft
+  lagged D26 (M3); the line at the `steps` switch's `bar` had no test (M4); comments ran past 120 columns (M5).
+- **The width box's rounds** (`review-box.md`, `7b61933..ec2348e`, 2 Important, 3 Minor, all fixed in `be683e9` and
+  `9bd8a4d`): in Chromium a screen reader heard the empty number box as a spin button with no value, where the
+  select said "auto", and D29's claim and the tests read only the DOM attribute (I1, D33); one refused character
+  made every later entry refuse until a deletion, so `16` typed over `1x` put the width back, in both engines (I2);
+  Ctrl+↓ at auto pinned 1, past the plain order (M1); two comments still said "select" and a style comment held a
+  measurement (M2); D9 and D29 still gave the floor as 4 (M3). The review's own property test, run and deleted, had
+  every one of 2,005 generated programs at widths 1 to 4 in both encodings give the reference answer or `overflow`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **At 1280 the strip cuts a pinned overflow's fault with an ellipsis, and the `(pinned)` mark with it.** With the TM
+  view off, `let a = 9; let b = 9; a + b` pinned at 4 draws its mark from x 1495.2 to 1557.9 in a segment that ends
+  at 1264. The full text is in the segment's `title` and the inspector; a short value's mark is drawn whole.
+- **With no TM view open the width can be seen but not changed**: turning a TM view on, or picking an example
+  (which resets it to auto), is the way back.
+- **D14's cost**: a tab still on an older deployment opens a pinned link whole at auto and applies its TM position,
+  a step of the pinned run, to the auto run. Writing pinned links alone at a new version would avoid it.
+- **`keep recording` and `continue — raise the step cap` still wrap the TM view's bar** at 1280 in Explorer: with
+  either shown, the bar is two rows, three with the longer label (`$R/hb/ext-B.log`). They stay where they are;
+  their room belongs to a later change to the page's layout.
+- **The state's name is cut at its end**, where a middle cut would keep the part that differs between two names; the
+  helper for that, `middleCut` in `local-layout.ts`, came to `main` with #182 and is not used here.
+- **In a TM view narrower than the step text and the width** (Explorer's two columns at 320 to 390px, 154 to
+  189px), the status line takes more than one row: the width, and there the readout too, wrap rather than being cut.
+  Its rows are those of the run's newest step from step 0 (D28), 78px at 375 and 390px where at step 0 the readout
+  needs 39, and blank room follows a count shorter than the total wherever the line is.
+- **A held press on the width box's arrows steps once**, where the browser's arrows repeated while held (D30).
+- **In Chromium the empty box has no value**: a screen reader hears a spin button named `width` with no value text,
+  and `auto` only at the end of its description; in Firefox `auto` is its value too (D33). Only an element that is
+  not a native input would carry `aria-valuetext` in Chromium.
+- **A step from text that is no number**, ↑ to 1 and ↓ to auto (D32), has no test.
+- **In Firefox's forced colours over dark content** the box's text, its `auto` and its focus ring come out
+  near-white on white, as the speed and encoding selects' do (the box review, which left it as not this branch's).
+- **The CLI pins 4 to 64 only**: `--field-width` and `emit.field-width` still check `MIN_FIELD_WIDTH`, the CLI being
+  a non-goal of this lane, where the app pins down to 1 (D31).
+- **A copy's status line and its text panel are 16px apart**, the line's 8px under itself and the panel's 8px above
+  itself added in the view's flex column (D26). Closing it to 8px would raise everything under the text panel by
+  8px, so it was left.
+- **A pinned run continued past its cap into `overflow` is held only by a session test**,
+  `a_pinned_run_raised_past_its_cap_into_overflow_answers_the_pinned_fault`. The branch review drove a counter
+  through the page at width 16, raising the cap, and stopped before the run reached the overflow.
+- **A pinned `TooLarge` says "too large to build"** whatever the width (D18), though a narrower width can help a
+  state-ceiling refusal; telling the refusals apart needs plumbing nothing else needs.
+- **A pinned 64 compiles more slowly than auto** on programs auto fits narrow; Task 5's timing is in
+  `$R/t5/measure/RESULTS.md` (not re-run for this entry, so no figure here).
+- **No test sees a map built wider than its run.** In the Tasks 1-2 fix round, a sabotage rounding a pinned width
+  of 13 up to 16 for the map failed nothing (`$R/fix-sabotage2.log`): a narrower width's state names all appear in a
+  wider width's map, so the billed-state check cannot tell, and no observable effect of the wider map was found.
+
+##### VERIFICATION
+
+The gate after the rebase onto `538b211`, run on 2026-11-17 in the lane's worktree at `28c7711`, the last commit
+before this update (its code as `be683e9`, the last code commit), with nothing uncommitted. Every command below ran
+in one `systemd-run --user` unit, `tm-width-gate-rb2`, with `MemoryMax=16G` and `MemorySwapMax=0`
+(`$R/rebase2/gate/unit.txt`; its result, exit 0, in `unit.log`), each into its log in `$R/rebase2/gate/`, with
+`summary.txt` holding each exit status (`$R/rebase2/gate/gate.zsh` runs them); `pnpm run build:wasm`,
+`build:lsp-wasm` and `build:bindings` ran first (exit 0 each). `<pinned>` is tree-sitter 0.25.10, the repo's pin, at
+`~/temp/redextape-tm-return-tag-record/tools/tree-sitter`.
+
+```
+TREE_SITTER=<pinned> scripts/check-all.sh
+  --no-llvm                                  → exit 0; 42 commands, the largest nextest run "1991 tests
+                                               run: 1991 passed, 33 skipped" (check-all.log)
+pnpm exec biome ci --error-on-warnings       → exit 0; 469 files (biome.log)
+pnpm run typecheck                           → exit 0 (typecheck.log)
+pnpm run test:coverage                       → exit 0; "Test Files 307 passed (307)",
+                                               "Tests 3433 passed (3433)" (test-coverage.log)
+pnpm run build:app                           → exit 0 (build-app.log)
+VITEST_MAX_WORKERS=4 pnpm run test:browser   → exit 0; "Test Files 233 passed (233)",
+                                               "Tests 1888 passed (1888)" (browser.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2
+  pnpm exec vitest run --project firefox
+  tests/browser/field-width.test.ts
+  tests/browser/tm-status-line.test.ts
+  tests/browser/strip-pinned-width.test.ts   → exit 0; "Test Files 3 passed (3)", "Tests 42
+                                               passed | 2 skipped (44)" (firefox-width.log)
+the same on
+  tests/browser/recompile-swap.test.ts
+  tests/browser/tm-pane-editor.test.ts       → exit 0; "Test Files 2 passed (2)", "Tests 22
+                                               passed (22)" (firefox-recompile.log)
+cargo llvm-cov nextest --workspace
+  --fail-under-lines 90                      → exit 0; "1991 tests run: 1991 passed, 33 skipped",
+                                               lines 95.71% (llvm-cov.log)
+scripts/check-slow.sh                        → exit 0; "slow tier green", 33 tests passed (check-slow.log)
+cargo deny --locked check advisories         → exit 0; "advisories ok", cargo-deny 0.20.2
+                                               (deny-advisories.log)
+```
+
+Each of the nine scans exits 0 with `--self-test` and then alone, and `node scripts/check-comments.mjs` with
+`--self-test` and then `--base 538b211` (`scan-*.log`, `comments-*.log`). The rebase changed no commit's diff but
+the roadmap's: 28 of the 36 commits keep their `git patch-id --stable`, and each of the other 8, where git stopped
+on one conflict block in the roadmap and nothing else, has the same diff outside the roadmap, and its roadmap is
+`main`'s with that commit's own version of this entry appended (`$R/rebase2/resolve.log`, `sha-map.txt`,
+`roadmap-commits-rest.log`). What #180 put in `tm-pane.ts` is in the tree (`git apply
+--check -R` of `git diff 486df8d 538b211 -- web/src/tm-pane.ts` exits 0), and its tests pass in both engines:
+`recompile-swap.test.ts`, a swap in one frame for each trigger, and `tm-pane-editor.test.ts`, whose "keeps one
+line’s room while a headered copy’s value is not in" holds a headered copy's value line.
+
+The gate before the rebase, measured before the rebase, on `486df8d`: run on 2026-11-17 in the lane's worktree at
+`1999a4c`, the last commit before this rebuild of the entry (its code as `dee6915`, the last code commit), with
+nothing uncommitted. The code block's commands but its last, and the scans
+after it, ran in one `systemd-run --user` unit, `tm-width-gate-r10`, which the user journal records starting
+`$R/r10/gate/gate.zsh` (`$R/fc3fix/journal-gate-r10.log`), each into its log in `$R/r10/gate/`, with
+`$R/r10/gate/summary.txt` holding each exit status; `pnpm run build:wasm`, `build:lsp-wasm` and `build:bindings`
+ran first (exit 0 each). `<pinned>` is tree-sitter 0.25.10, the repo's pin, at
+`~/temp/redextape-tm-return-tag-record/tools/tree-sitter`. The branch changes Rust, so the Rust jobs ran too:
+
+```
+TREE_SITTER=<pinned> scripts/check-all.sh
+  --no-llvm                                  → exit 0; 42 commands, the largest nextest run "1983 tests
+                                               run: 1983 passed, 33 skipped" (check-all.log)
+pnpm exec biome ci --error-on-warnings       → exit 0; 459 files (biome.log)
+pnpm run typecheck                           → exit 0 (typecheck.log)
+pnpm run test:coverage                       → exit 0; "Test Files 298 passed (298)",
+                                               "Tests 3321 passed (3321)" (test-coverage.log)
+pnpm run build:app                           → exit 0 (build-app.log)
+pnpm run test:firefox                        → exit 1; "Test Files 24 failed | 203 passed (227)",
+                                               "Tests 89 failed | 1699 passed | 24 skipped
+                                               (1812)" (firefox.log; below)
+cargo llvm-cov nextest --workspace
+  --fail-under-lines 90                      → exit 0; "1983 tests run: 1983 passed, 33 skipped",
+                                               lines 95.70% (llvm-cov.log)
+scripts/check-slow.sh                        → exit 0; "slow tier green", 33 tests passed (check-slow.log)
+cargo-deny --locked check advisories         → exit 1; "advisories FAILED", RUSTSEC-2026-0542 through
+                                               trycmd 1.2.1 (deny-advisories2.log; below)
+```
+
+Each of `scripts/check-text-bytes.sh`, `check-citations.sh`, `check-attributions.sh`, `check-doc-figures.sh`,
+`check-shared-docs.sh`, `check-colours.sh`, `check-lua.sh`, `check-grammar-wasm.sh` and `check-licences.sh` exits 0
+with `--self-test` and then alone, and `node scripts/check-comments.mjs` with `--self-test` and then `--base
+486df8d` (`scan-*.log`, `comments-*.log`).
+
+Firefox, which the user uses, ran the whole browser suite in that gate, and 24 files failed, 89 tests. The two of
+them this branch touches, `app.test.ts` and `tm-view-narrow.test.ts`, failed 12 tests in that run, and the same 12 in two runs
+of their own on `1999a4c` and in one on `main`'s tree at `486df8d`, a copy given this branch's `pkg/`
+(`r10/ff-touched-head-1.log`, `r10/ff-touched-head-2.log`, `r10/ff-touched-base.log`, all by `r10/ff-reruns.sh`).
+The other 22 failed 77 tests in that run and 75 in each of two runs of their own (`r10/ff-untouched-1.log`,
+`r10/ff-untouched-2.log`), 72 of them in all three runs; they were not run on `main`. The failing tests are compared
+by name in `fc3fix/ff-compare.log`. The branch's width files pass in both engines: `field-width`, `tm-status-line` and
+`strip-pinned-width`, 86 passed and 2 skipped, Chromium's CDP case and forced-colours case being skipped in Firefox
+(`r10/green2.log`, on `dee6915`'s code).
+
+That gate's `cargo deny` step found no such command on its `PATH` (`deny-advisories.log`, exit 101), so the
+drop-trycmd lane's checked `cargo-deny` 0.20.2 ran it after the gate, in the worktree: it fails on RUSTSEC-2026-0542
+through `trycmd`, as `main` does, which that lane fixes (`deny-advisories2.log`).
+
+The runs that saw the later rounds' tests fail, and their sabotages, are recorded for D25 to D31 in
+`$R/progress.md`, dispatches 15 to 20, with their logs in `$R/b/`, `c/` and `r5/` to `r8/`, and for D32 and D33 in
+the design doc under each decision; the plan's tasks and the first fix rounds are in the rows below. The box
+review's fixes (D33): on `ec2348e`'s code the three new tests failed, the CDP case in Chromium and the other two in
+both engines, 5 failures (`r10/red.log`), and with the finished tests the old code failed 19 cases across the two
+engines (`r10/red-final.log`); three sabotages, one at a time, each restored and `cmp`-checked, failed 3, 2 and 4
+(`r10/sab-s1.log` to `r10/sab-s3.log`). What a screen reader is handed was read over AT-SPI in both engines
+(`r10/probe/atspi-variants.log`, `r10/probe/a11y-app.log`; D33 has the command).
+
+Not run: the Docker image, since nothing here adds a build output the web app imports. Nothing has been pushed,
+so no CI run has seen the branch.
+
+**Every count this entry quotes, with what produces it.** Logs named in a row are in `$R` unless a path says otherwise.
+A row whose log is in `rebase2/` was counted on the rebased tree, its commits named by their SHAs after the
+rebase; every other row was measured before the rebase, on `486df8d`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 34; `d4243be`, `9bd8a4d`; 10 | commits in the range; its first and last; of them those that change this file: this entry's first three versions and the design commits that carried it along | `git rev-list --count 538b211..9bd8a4d`; `git rev-list --reverse 538b211..9bd8a4d \| head -1`; `git rev-list --count 538b211..9bd8a4d -- docs/superpowers/plans/2026-07-19-redextape-roadmap.md` (rebase2/figures.log) |
+| 37 | the branch's commits, this entry's rebuild, `28fed6a`, its correction and this update among them | `git rev-list --count 538b211..HEAD`, run once this update was committed (rebase2/count-after.log) |
+| 66, 3954, 388 | files changed, insertions and deletions in the range, the roadmap aside | `git diff --stat 538b211..9bd8a4d -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md'`, its last line (rebase2/figures.log) |
+| 11, 638, 180; 50, 2448, 202 | the same under `crates/`; under `web/` | `git diff --stat 538b211..9bd8a4d -- crates` and `-- web`, their last lines (rebase2/figures.log) |
+| 4; 1, 64 | auto's first width; the narrowest and widest a run can be pinned to | `rg -n 'const (MIN\|MAX)_FIELD_WIDTH\|PINNED_FIELD_WIDTHS: ' crates/redextape-core/src/tm/build.rs` (r10/figures.log) |
+| 400 | the step's pause, in ms | `rg -n 'STEP_PAUSE_MS =' web/src/field-width.ts` (r10/figures.log) |
+| 41, 42 | runs of the seven examples pinned at 1, 2 and 3 in both encodings that halt in `overflow`; all the runs | `cargo nextest run -p redextape-core --test tm_width_equivalence --no-capture` with the range check opened for the probe, on `b149c7a`, `4d3e4ac`'s parent (r8/probe1.log) |
+| 67.73, 37.94, 35.63; 1 | the TM view's bar's spare px at 1280 in Explorer in Instrument, Paper and Terminal at 1, 3, 5 and 7 digits; its rows at each | `node $R/b/probe.mjs r7-1280` against `pnpm exec vite --port 5184`, on `0a88bb6`'s tree, which D31 to D33 do not resize (r7/bar-1280.log) |
+| `pc0 · step 0 of 12,976 · width 4` | the default example's status line at 1280 | `node $R/b/probe.mjs B-1280 1280` against `pnpm exec vite --port 5184`, on `703a5f7`'s tree (b/probe-1280.log, its `status` lines) |
+| 237; 8 | a copy's status line's px under its bar at 1280 before D26; the program view's | `VITEST_MAX_WORKERS=3 pnpm exec vitest run --project browser tests/browser/tm-status-line.test.ts` on `9ad210a`, `486dbed`'s parent, with the new test (c/red.log) |
+| 39, 78; 154, 189; 375, 390 | the status line's px at step 0 and from step 1,000 in Explorer's two columns; the TM view's px at 320 and 390; the phone widths | review-hb's probe (`review-hb.md`, its I1, and `rv-hb/phone.log`) and `r5/phone.log` |
+| 6; 1, 4; 4; 1, 5; 2, 3 | the Tasks 1-2 review's Minor findings; the Tasks 3-4 review's Important and Minor; the branch review's Minor; the header round review's Important and Minor; the box review's | each review's "Counts" line (fin/figures.log; `review-hb.md`; `review-box.md`) |
+| 2,005 | the box review's generated programs | `review-box.md`, "The Rust change, checked hard" (its log `rv9-probe1.log`) |
+| 5, 233 | `let x = 2; x + 3`'s answer under binary and its TM's transitions, pinned at 4 | `node $R/fin/shots/strip.mjs light $R/fin/shots` against `pnpm exec vite --port 5184` (fin/shots/shoot-light.log, and `-dark`) |
+| 1495.2, 1557.9; 1264 | the `(pinned)` mark's left and right edges for `let a = 9; let b = 9; a + b` pinned at 4, TM view off, at 1280; its segment's right edge | the same command, its "overflow, TM off" line |
+| 16, 16, 8 | what wasm-bindgen's `u32` glue makes of `16.7`, `2 ** 32 + 16` and `"8"` | the `>>> 0` in `pkg/redextape_wasm.js`'s `compile`; `node -e 'console.log(16.7 >>> 0, (2 ** 32 + 16) >>> 0, "8" >>> 0)'` (fin/figures2.log) |
+| 12 | the M3 tests failing before the fix | `pnpm exec vitest run --project node tests/node/share-link.test.ts` before `8ef6f5c` (fin-m3-red.log) |
+| 3 | tests failing with M3's fix sabotaged to drop the TM position of a link with no width as well | the same command (fin-m3-sab.log); restored and `cmp`-checked |
+| 1 each | tests failing under M4's four sabotages, one at a time: the strip's mark off (the node test, and the browser test), the inspector row's mark off (the node test), the worker's `pinned` always false (the browser test), the segment capped at 200 px (the browser test, on the geometry: "expected 696 to be less than or equal to 568.5") | `pnpm exec vitest run --project node tests/node/readout.test.ts`; `pnpm exec vitest run --project browser tests/browser/strip-pinned-width.test.ts` (fin-m4-sab1-node.log, fin-m4-sab1-browser.log, fin-m4-sab2-node.log, fin-m4-sab3-browser.log, fin-m4-sab4-browser.log); each restored and `cmp`-checked |
+| 3; 1; 2 | tests failing under three more sabotages, one at a time: `main.ts`'s refused-write check counting an equal width as different (`program-quota-width`'s three cases, "says nothing while the page shows the program it loaded" among them); its take-back of a refused write that equals the stored program dropped (only "takes it back once auto, the stored width, is chosen again"); the worker reading an auto `run`, which has no `width`, as pinned, `!== null` for `!== undefined` ("reads auto’s fit as `width N`, unmarked", on the strip's `width 4 (pinned)`, and the pinned case after it, which then finds no TM view) | `VITEST_MAX_WORKERS=2 pnpm exec vitest run --project browser tests/browser/program-quota-width.test.ts`, and the same on `strip-pinned-width.test.ts` (d13/sab-a.log, d13/sab-b.log, d13/sab-c.log); each restored and `cmp`-checked, both files then 5 of 5 (d13/green.log) |
+| 6; 2 | `tm-status-line.test.ts`'s tests failing with `a7fc404`'s `step-controls.ts`, `tm-pane.ts` and `style.css` written in; `field-width.test.ts`'s placement and Tab-order cases failing with `e054a38`'s `tm-pane.ts`, `style.css`, `field-width.ts` and `pane-chrome.ts` | `VITEST_MAX_WORKERS=3 pnpm exec vitest run --project browser` on each file (b/red-a7fc404-2.log, b/red-e054a38.log); each source restored and `cmp`-checked |
+| 6, 1, 2, 2, 1 | tests failing under five sabotages, one at a time: the TM readout put back in the strip (all of `tm-status-line`); no strip holding its readout (its λ and rxm case); the name's flex basis `auto` (its two phone cases, "the line’s rows: expected 2 to be 1"); the select placed after the strip (`field-width`'s placement and Tab-order cases); the select shown on a copy (its copy case, which passes on `a7fc404` and `e054a38` alike, the rule being older) | `python3 $R/b/sab.py` (b/sab.out, b/s1-*.log to b/s5-*.log); each restored and `cmp`-checked |
+| 3, 5; 19; 3, 2, 4 | the box review's new tests failing on `ec2348e`'s code, and their failures in the two engines together; the finished file's cases failing on that code, both engines together; tests failing under the three sabotages (the description's last words dropped, a non-digit flag kept until the box is shown again, the modifier guard dropped) | `REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project browser --project firefox tests/browser/field-width.test.ts` in `web/` (r10/red.log, r10/red-final.log, r10/sab-s1.log to r10/sab-s3.log, their `×` lines); each source restored and `cmp`-checked |
+| 42; 47 | `check-all`'s commands: its `==>` lines less the five that report a tool it found; all its `==>` lines | `grep '^==> ' r10/gate/check-all.log \| grep -vc -e '^==> using ' -e '^==> chromedriver .* already matches'`; `grep -c '^==> '` |
+| 1983, 33; 459; 298, 3321; 95.70%; 33 | Rust tests run and skipped; files biome checked; web test files and tests; line coverage; slow-tier tests | the commands above, their summary lines (`$R/r10/gate/`); the slow tier's is the sum of its `test result: ok. N passed` lines |
+| 24, 203, 227; 89, 1699, 24, 1812 | Firefox's full run: files failed, passed and all; tests failed, passed, skipped and all | `pnpm run test:firefox` (r10/gate/firefox.log), its summary lines |
+| 22, 77, 75, 261, 72; 12 | the failing files this branch does not touch, their failures in the full run and in each of two runs of their own, their passes in each of those two, their failures in all three; the failures of the two it touches, the same by name in the full run, on `1999a4c` twice and on `486df8d`'s tree | `r10/ff-reruns.sh` (r10/ff-untouched-1.log, -2.log, r10/ff-touched-head-1.log, -2.log, r10/ff-touched-base.log), their summary lines; `zsh $R/fc3fix/ff-compare.zsh`, comparing each log's `FAIL` lines by name (fc3fix/ff-compare.log) |
+| 86, 2 | the width files' tests passing and skipped across both engines | `$R/r10/fw.sh $R/r10/green2.log` on `field-width`, `tm-status-line` and `strip-pinned-width` (r10/green2.log) |
+| 45; 12, 4, 3 | figures `check-doc-figures.sh` pins; shared regions, files and sources | `scripts/check-doc-figures.sh`; `scripts/check-shared-docs.sh` (r10/gate/scan-doc-figures.log, scan-shared-docs.log) |
+| 42; 47 | after the rebase: `check-all`'s commands, its `==>` lines less the five that report a tool it found; all its `==>` lines | the same two commands on `rebase2/gate/check-all.log` (rebase2/gate-figures.log) |
+| 1991, 33; 469; 307, 3433; 95.71%; 33 | after the rebase: Rust tests run and skipped; files biome checked; web test files and tests; line coverage; slow-tier tests | the commands above, their summary lines (`$R/rebase2/gate/`); the slow tier's is the sum of its `test result: ok. N passed` lines (rebase2/gate-figures.log) |
+| 233, 1888 | after the rebase: Chromium's browser projects in full, files and tests passed | `VITEST_MAX_WORKERS=4 pnpm run test:browser`, its summary lines (rebase2/gate/browser.log) |
+| 3, 42, 2; 2, 22 | after the rebase, in Firefox: the width files, their tests passed and skipped; #180's two files, their tests passed | the two `--project firefox` commands above, their summary lines (rebase2/gate/firefox-width.log, firefox-recompile.log) |
+| 0 | after the rebase: `cargo deny --locked check advisories`'s exit, cargo-deny 0.20.2 | `rebase2/gate/summary.txt`'s `deny-advisories` line (rebase2/gate-figures.log) |
+| 28, 8; 8 | commits whose `git patch-id --stable` the rebase kept; those git stopped on, the roadmap alone conflicting; the conflict blocks it showed in them | `awk '!/^#/{print $4}' rebase2/sha-map.txt \| sort \| uniq -c`; `grep -c 'conflict-blocks=1' rebase2/resolve.log` (rebase2/gate-figures.log) |

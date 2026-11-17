@@ -59,6 +59,13 @@ export type ControlState = {
    */
   continueLabel: string | null
   stepText: string
+  /**
+   * `stepText` as it reads at the newest recorded step: every part of it but the current step, which can only be at or
+   * before that one, so this is never shorter. A view that must not reflow as a playing run's count gains digits sizes
+   * its readout by this (the TM width design, decision 28); it changes only with the total, the ending or the oldest
+   * step kept.
+   */
+  stepTextAtNewest: string
 }
 
 /**
@@ -128,6 +135,7 @@ export function controlState(v: LegView): ControlState {
       playing: false,
       continueLabel: null,
       stepText: v.reason,
+      stepTextAtNewest: v.reason,
     }
   }
 
@@ -160,7 +168,8 @@ export function controlState(v: LegView): ControlState {
       : v.done === null
         ? ''
         : doneText(v.done)
-  const stepText = v.length === 0 && !v.rewinding ? 'not run' : `step ${n(v.currentStep)} of ${of}${tail}${oldest}`
+  const readout = (at: number) =>
+    v.length === 0 && !v.rewinding ? 'not run' : `step ${n(at)} of ${of}${tail}${oldest}`
 
   return {
     canBack: v.head > 0,
@@ -175,6 +184,7 @@ export function controlState(v: LegView): ControlState {
     recording,
     playing: v.playing,
     continueLabel,
-    stepText,
+    stepText: readout(v.currentStep),
+    stepTextAtNewest: readout(v.newestStep),
   }
 }

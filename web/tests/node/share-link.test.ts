@@ -8,6 +8,7 @@ import {
   isLink,
   LINK_PREFIX,
   MAX_LINK_BYTES,
+  type OpenedLink,
   type Positions,
   type SharePayload,
 } from '../../src/share-link'
@@ -24,11 +25,22 @@ import { seededRandom } from './seeded-random'
 /** The encodings `main.ts` hands in, as `encodings()` lists them. */
 const ENCODINGS = ['unary', 'binary']
 
+/** The widths `main.ts` hands in, as `fieldWidths()` lists them. */
+const WIDTHS = Array.from({ length: 64 }, (_, i) => i + 1)
+
 const WORKSPACE = serializeWorkspace(defaultWorkspace('wide'))
 
 /** A link carrying `text` as its payload's JSON, deflated by node's own encoder: any payload, valid or not. */
 const linkOf = (text: string | Uint8Array): string =>
   `${LINK_PREFIX}${deflateRawSync(typeof text === 'string' ? Buffer.from(text) : text).toString('base64url')}`
+
+/** The JSON `fragment` carries, inflated: what `encodeLink` wrote before it compressed it. */
+const inflatedOf = (fragment: string): Promise<string> =>
+  new Response(
+    new Blob([Buffer.from(fragment.slice(LINK_PREFIX.length), 'base64url')])
+      .stream()
+      .pipeThrough(new DecompressionStream('deflate-raw')),
+  ).text()
 
 /** A link whose payload is a valid one with `fields` merged over it — the shape a hand-edit or a later version makes. */
 const payloadLink = (fields: Record<string, unknown>): string =>
@@ -62,19 +74,28 @@ describe('encodeLink and decodeLink', () => {
       if (next() < 0.5) continue
       positions[leg] = pick([0, 1, Math.floor(next() * 100_000), Number.MAX_SAFE_INTEGER])
     }
-    return { program, encoding: pick(ENCODINGS), workspace, positions }
+    return { program, encoding: pick(ENCODINGS), width: pick([null, 4, 13, 64]), workspace, positions }
   }
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8])('reads back whole what it wrote, generated from seed %i', async (seed) => {
     const payload = generated(seed)
     const fragment = await encodeLink(payload)
-    expect(await decodeLink(fragment, ENCODINGS)).toEqual({
+    expect(await decodeLink(fragment, ENCODINGS, WIDTHS)).toEqual({
       kind: 'whole',
       program: payload.program,
       encoding: payload.encoding,
+      width: payload.width,
       workspace: parseWorkspace(payload.workspace),
       positions: payload.positions,
     })
+  })
+
+  /** Whether a seed picks a width is the generator's business, so a pinned width and auto are each held here too. */
+  it('reads back a pinned width, and auto', async () => {
+    for (const width of [4, 64, null]) {
+      const opened = await decodeLink(await encodeLink({ ...generated(1), width }), ENCODINGS, WIDTHS)
+      expect(opened.kind === 'whole' && opened.width, String(width)).toBe(width)
+    }
   })
 
   /** Over every seed, since one payload's deflated length needs no padding in two of three cases. */
@@ -86,15 +107,24 @@ describe('encodeLink and decodeLink', () => {
     }
   })
 
-  it('writes version 1, the program, the encoding, the workspace string and the positions', async () => {
-    const payload = generated(10)
-    const fragment = await encodeLink(payload)
-    const inflated = await new Response(
-      new Blob([Buffer.from(fragment.slice(LINK_PREFIX.length), 'base64url')])
-        .stream()
-        .pipeThrough(new DecompressionStream('deflate-raw')),
-    ).text()
-    expect(JSON.parse(inflated)).toEqual({ version: 1, ...payload })
+  it('writes version 1, the program, the encoding, a pinned width, the workspace and the positions', async () => {
+    const payload = { ...generated(10), width: 13 }
+    expect(JSON.parse(await inflatedOf(await encodeLink(payload)))).toEqual({ version: 1, ...payload })
+  })
+
+  /**
+   * **AN AUTO LINK'S PAYLOAD HAS NO `width` KEY** (the TM width design, decision 14), so it is the version-1 payload
+   * every build at this version reads alike, its keys in `encodeLink`'s order. A width left out is auto, as `null` is.
+   * Pinned, the width sits beside the encoding.
+   */
+  it('writes auto with no width key, and a pinned width beside the encoding', async () => {
+    const payload = { program: 'let x = 40; x + 2', encoding: 'binary', workspace: '{}', positions: { tm: 3 } }
+    const auto = '{"version":1,"program":"let x = 40; x + 2","encoding":"binary","workspace":"{}","positions":{"tm":3}}'
+    expect(await inflatedOf(await encodeLink({ ...payload, width: null }))).toBe(auto)
+    expect(await inflatedOf(await encodeLink(payload))).toBe(auto)
+    expect(await inflatedOf(await encodeLink({ ...payload, width: 4 }))).toBe(
+      '{"version":1,"program":"let x = 40; x + 2","encoding":"binary","width":4,"workspace":"{}","positions":{"tm":3}}',
+    )
   })
 })
 
@@ -112,11 +142,12 @@ describe('the frozen format of a version 1 link', () => {
     '#s=tZLRTsIwFIZfpemVxGGKkURH9Mq3oMSU7oAN6-nSdkwke3dPO4igEeOFS7aefDv_378n3fMt-GAc8nJS8Ma7tVeWl3yFLLT2JborHLG9REZPDZHZNjKlNXtkYjbQ7tXUwJA9MXFsTM_QlL7XDGefHIkiG7PJgfXDQo0SqT5sOh1J5AUH1K4yuKZAS4PK74h1zm9CozQQ3MtjfMnL20Ly6AGoJL4xWFEleWhqEyWnn5XxmWhXtxYzCuYdAsG5uJkW9C6IaTpQ5SFZzi8bedf92aUGtcoic3B1rdeQSaMQzlhfXFLWyi4rNRbn2oGSdnGu_p_0_s1-DUDot-TxmyjanJgyU57ORP2aI5FJiNCE3LNUPou2BrqBRLp5ITMPqnJtzNRgaEBH51OMdHCAtO091Sun2wA_jK_OOybJiUMZfQt5aDRAtTt2RPt8Anq6lo0LJtJFDAQO3rycClGkgfDyjopI64MQou8_AA'
 
   it('opens whole, as the program, the encoding, the workspace and the positions it was written with', async () => {
-    expect(await decodeLink(FROZEN, ENCODINGS)).toEqual({
+    expect(await decodeLink(FROZEN, ENCODINGS, WIDTHS)).toEqual({
       kind: 'whole',
       program:
         'fn sum_to(n) {\n    let mut acc = 0;\n    while n > 0 {\n        acc = acc + n;\n        n = n - 1;\n    }\n    acc\n}\nsum_to(5)\n',
       encoding: 'binary',
+      width: null,
       workspace: {
         tree: {
           kind: 'split',
@@ -167,20 +198,20 @@ describe('a link nothing can be read from', () => {
     ['a length base64 cannot end on', '#s=YWJjZ'],
     ['nothing after the prefix, as a paste cut short leaves it', '#s='],
   ])('refuses %s', async (_, fragment) => {
-    expect(await decodeLink(fragment, ENCODINGS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(fragment, ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
   })
 
   it('refuses bytes that are not a deflate stream', async () => {
     const plain = Buffer.from(JSON.stringify({ version: 1, program: 'x' })).toString('base64url')
-    expect(await decodeLink(`${LINK_PREFIX}${plain}`, ENCODINGS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(`${LINK_PREFIX}${plain}`, ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
   })
 
   it('refuses a stream cut short, and one with bytes after its end', async () => {
     const whole = deflateRawSync(Buffer.from(JSON.stringify({ version: 1, program: 'let x = 40; x + 2' })))
     const cut = `${LINK_PREFIX}${whole.subarray(0, whole.length - 4).toString('base64url')}`
     const trailing = `${LINK_PREFIX}${Buffer.concat([whole, Buffer.from([0, 1, 2])]).toString('base64url')}`
-    expect(await decodeLink(cut, ENCODINGS)).toEqual({ kind: 'unreadable' })
-    expect(await decodeLink(trailing, ENCODINGS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(cut, ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(trailing, ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
   })
 
   /**
@@ -190,14 +221,16 @@ describe('a link nothing can be read from', () => {
   it('refuses a payload that is not UTF-8, or not JSON, or JSON that is not an object', async () => {
     const bytes = new TextEncoder().encode('{"program":"let x = 40; x + 2"}')
     bytes[13] = 0xff
-    expect(await decodeLink(linkOf(bytes), ENCODINGS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(linkOf(bytes), ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
     for (const text of ['{"version": 1, "program"', 'null', '[]', '"let x = 1"', '42'])
-      expect(await decodeLink(linkOf(text), ENCODINGS), text).toEqual({ kind: 'unreadable' })
+      expect(await decodeLink(linkOf(text), ENCODINGS, WIDTHS), text).toEqual({ kind: 'unreadable' })
   })
 
   it('refuses a payload whose program is missing or not a string', async () => {
     for (const program of [undefined, 42, null, ['let x = 1']])
-      expect(await decodeLink(payloadLink({ program }), ENCODINGS), String(program)).toEqual({ kind: 'unreadable' })
+      expect(await decodeLink(payloadLink({ program }), ENCODINGS, WIDTHS), String(program)).toEqual({
+        kind: 'unreadable',
+      })
   })
 
   /**
@@ -209,27 +242,29 @@ describe('a link nothing can be read from', () => {
       const shell = JSON.stringify({ program: '' })
       return linkOf(JSON.stringify({ program: 'a'.repeat(bytes - shell.length) }))
     }
-    expect(await decodeLink(around(MAX_LINK_BYTES), ENCODINGS)).toMatchObject({ kind: 'program' })
-    expect(await decodeLink(around(MAX_LINK_BYTES + 1), ENCODINGS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink(around(MAX_LINK_BYTES), ENCODINGS, WIDTHS)).toMatchObject({ kind: 'program' })
+    expect(await decodeLink(around(MAX_LINK_BYTES + 1), ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
   })
 })
 
 describe('a link that opens the program alone', () => {
-  const alone = (encoding: string | null) => ({ kind: 'program', program: 'let x = 40; x + 2', encoding })
+  const alone = (encoding: string | null) => ({ kind: 'program', program: 'let x = 40; x + 2', encoding, width: null })
 
   it('opens the program alone, under its encoding, for a version other than 1', async () => {
     for (const version of [2, '1', undefined])
-      expect(await decodeLink(payloadLink({ version }), ENCODINGS), String(version)).toEqual(alone('binary'))
+      expect(await decodeLink(payloadLink({ version }), ENCODINGS, WIDTHS), String(version)).toEqual(alone('binary'))
   })
 
   it('opens the program alone, with no encoding, for an encoding this build does not have', async () => {
     for (const encoding of ['ternary', 3, undefined])
-      expect(await decodeLink(payloadLink({ encoding }), ENCODINGS), String(encoding)).toEqual(alone(null))
+      expect(await decodeLink(payloadLink({ encoding }), ENCODINGS, WIDTHS), String(encoding)).toEqual(alone(null))
   })
 
   it("opens the program alone for a workspace that is not `serializeWorkspace`'s string, or that it refuses", async () => {
     for (const workspace of [JSON.parse(WORKSPACE), undefined, '{}', 'not json'])
-      expect(await decodeLink(payloadLink({ workspace }), ENCODINGS), String(workspace)).toEqual(alone('binary'))
+      expect(await decodeLink(payloadLink({ workspace }), ENCODINGS, WIDTHS), String(workspace)).toEqual(
+        alone('binary'),
+      )
   })
 
   it.each([
@@ -243,12 +278,70 @@ describe('a link that opens the program alone', () => {
     ['an object whose only key is `__proto__`', JSON.parse('{"__proto__":1}')],
     ['an object whose only key is `constructor`', { constructor: 1 }],
   ])('opens the program alone for positions that are %s', async (_, positions) => {
-    expect(await decodeLink(payloadLink({ positions }), ENCODINGS)).toEqual(alone('binary'))
+    expect(await decodeLink(payloadLink({ positions }), ENCODINGS, WIDTHS)).toEqual(alone('binary'))
+  })
+
+  it('opens the program alone at its width, where it carries one this build lists', async () => {
+    const alone8 = { ...alone('binary'), width: 8 }
+    expect(await decodeLink(payloadLink({ version: 2, width: 8 }), ENCODINGS, WIDTHS)).toEqual(alone8)
+    expect(await decodeLink(payloadLink({ positions: [], width: 8 }), ENCODINGS, WIDTHS)).toEqual(alone8)
   })
 
   it('opens whole with no positions at all, and with a step of 0', async () => {
     for (const positions of [{}, { tm: 0 }] as Positions[])
-      expect(await decodeLink(payloadLink({ positions }), ENCODINGS)).toMatchObject({ kind: 'whole', positions })
+      expect(await decodeLink(payloadLink({ positions }), ENCODINGS, WIDTHS)).toMatchObject({
+        kind: 'whole',
+        positions,
+      })
+  })
+})
+
+/**
+ * **A WIDTH THE BUILD DOES NOT LIST READS AS AUTO, AND THE LINK STAYS WHOLE, LESS ITS TM POSITION** (the TM width
+ * design, decision 15): demoting it to the program alone would drop its workspace for a field a hand-edit or another
+ * build wrote, but its TM position is a step of the run at the width it names, and auto is another run. Only an
+ * integer `widths` lists is a width: wasm-bindgen's `u32` glue would turn `16.7`, `2 ** 32 + 16` and `"8"` into widths
+ * before Rust's own check could refuse them. `toEqual` on the positions, since `toMatchObject` passes extra keys.
+ */
+describe('a link carrying a width', () => {
+  const whole = { kind: 'whole', program: 'let x = 40; x + 2', encoding: 'binary' }
+  const positions = { lambda: 7, rxm: 3, tm: 12 }
+  const opened = (fields: Record<string, unknown>, widths = WIDTHS) =>
+    decodeLink(payloadLink({ positions, ...fields }), ENCODINGS, widths)
+  const positionsOf = (link: OpenedLink) => (link.kind === 'whole' ? link.positions : null)
+
+  it('opens whole at a width this build lists, and at auto with none, with every position', async () => {
+    const pinned = await opened({ width: 4 })
+    expect(pinned).toMatchObject({ ...whole, width: 4 })
+    expect(positionsOf(pinned)).toEqual(positions)
+    const auto = await opened({})
+    expect(auto).toMatchObject({ ...whole, width: null })
+    expect(positionsOf(auto)).toEqual(positions)
+  })
+
+  it.each([65, 0, -8, 16.7, 2 ** 32 + 16, '8', null, true, [8], { width: 8 }])(
+    'opens whole at auto for a width of %j, with its workspace and every position but the TM’s',
+    async (width) => {
+      const link = await opened({ width })
+      expect(link).toMatchObject({ ...whole, width: null })
+      expect(link.kind === 'whole' && link.workspace).toEqual(parseWorkspace(WORKSPACE))
+      expect(positionsOf(link)).toEqual({ lambda: 7, rxm: 3 })
+    },
+  )
+
+  it('opens whole at auto, less its TM position, for a width the list handed in does not hold', async () => {
+    const link = await opened({ width: 8 }, [4, 16])
+    expect(link).toMatchObject({ ...whole, width: null })
+    expect(positionsOf(link)).toEqual({ lambda: 7, rxm: 3 })
+  })
+
+  it('opens the program alone at auto for a width it does not list', async () => {
+    expect(await decodeLink(payloadLink({ version: 2, width: '8' }), ENCODINGS, WIDTHS)).toEqual({
+      kind: 'program',
+      program: 'let x = 40; x + 2',
+      encoding: 'binary',
+      width: null,
+    })
   })
 })
 
@@ -277,7 +370,7 @@ describe('a link whose workspace carries remembered arrangements', () => {
     expect(parseWorkspace(workspace)?.panels, 'precondition: and the panel state of a view only it holds').toEqual(
       carried.panels,
     )
-    const opened = await decodeLink(payloadLink({ workspace }), ENCODINGS)
+    const opened = await decodeLink(payloadLink({ workspace }), ENCODINGS, WIDTHS)
     if (opened.kind !== 'whole') throw new Error(`the link opened as ${opened.kind}`)
     expect(opened.workspace.arrangements, 'the link’s arrangements were read').toEqual({})
     expect(opened.workspace.panels, 'the state of a view only they held was read').toEqual({ 'tm-0': { rules: false } })
@@ -297,7 +390,7 @@ describe('a link whose workspace carries remembered arrangements', () => {
  * leaves, and leaf ids whose numbers the leaf counter can step past. A workspace past it opens the program alone.
  */
 describe("a link whose workspace's tree is past the bound", () => {
-  const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary' }
+  const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary', width: null }
   /** The default workspace's string with `tree` in place of its tree, and `pane-1` focused. */
   const holding = (tree: unknown): string => JSON.stringify({ ...JSON.parse(WORKSPACE), tree, focused: 'pane-1' })
   const lambda = (n: number) => ({ kind: 'leaf', id: `pane-${n}`, pane: 'lambda' })
@@ -332,26 +425,31 @@ describe("a link whose workspace's tree is past the bound", () => {
   ])(
     'opens the program alone, and does not throw, for a tree 10,000 splits deep down its %s children',
     async (_, deep) => {
-      await expect(decodeLink(payloadLink({ workspace: holding(deep(10_000)) }), ENCODINGS)).resolves.toEqual(alone)
+      await expect(decodeLink(payloadLink({ workspace: holding(deep(10_000)) }), ENCODINGS, WIDTHS)).resolves.toEqual(
+        alone,
+      )
     },
   )
 
   it('opens whole with 64 leaves, and the program alone with 65', async () => {
-    expect(await decodeLink(payloadLink({ workspace: holding(flat(64)) }), ENCODINGS)).toMatchObject({
+    expect(await decodeLink(payloadLink({ workspace: holding(flat(64)) }), ENCODINGS, WIDTHS)).toMatchObject({
       kind: 'whole',
       workspace: { tree: flat(64) },
     })
-    expect(await decodeLink(payloadLink({ workspace: holding(flat(65)) }), ENCODINGS)).toEqual(alone)
+    expect(await decodeLink(payloadLink({ workspace: holding(flat(65)) }), ENCODINGS, WIDTHS)).toEqual(alone)
   })
 
   /** A tree 64 splits deep has at least 65 leaves, so 63 is the deepest that opens whole. */
   it('opens whole 63 splits deep, and the program alone 64 and 65 deep', async () => {
-    expect(await decodeLink(payloadLink({ workspace: holding(spine(63)) }), ENCODINGS)).toMatchObject({
+    expect(await decodeLink(payloadLink({ workspace: holding(spine(63)) }), ENCODINGS, WIDTHS)).toMatchObject({
       kind: 'whole',
       workspace: { tree: spine(63) },
     })
     for (const depth of [64, 65])
-      expect(await decodeLink(payloadLink({ workspace: holding(spine(depth)) }), ENCODINGS), `${depth}`).toEqual(alone)
+      expect(
+        await decodeLink(payloadLink({ workspace: holding(spine(depth)) }), ENCODINGS, WIDTHS),
+        `${depth}`,
+      ).toEqual(alone)
   })
 
   it('opens the program alone for a leaf id whose number the leaf counter cannot step past', async () => {
@@ -361,9 +459,11 @@ describe("a link whose workspace's tree is past the bound", () => {
       sizes: [0.5, 0.5],
       children: [lambda(1), { ...lambda(2), id: 'pane-1e300' }],
     }
-    expect(await decodeLink(payloadLink({ workspace: holding(tree) }), ENCODINGS)).toEqual(alone)
+    expect(await decodeLink(payloadLink({ workspace: holding(tree) }), ENCODINGS, WIDTHS)).toEqual(alone)
     tree.children[1] = lambda(2)
-    expect(await decodeLink(payloadLink({ workspace: holding(tree) }), ENCODINGS)).toMatchObject({ kind: 'whole' })
+    expect(await decodeLink(payloadLink({ workspace: holding(tree) }), ENCODINGS, WIDTHS)).toMatchObject({
+      kind: 'whole',
+    })
   })
 })
 
@@ -375,6 +475,6 @@ describe('isLink', () => {
   })
 
   it('reads a fragment that is not a link as nothing to open', async () => {
-    expect(await decodeLink('#section', ENCODINGS)).toEqual({ kind: 'unreadable' })
+    expect(await decodeLink('#section', ENCODINGS, WIDTHS)).toEqual({ kind: 'unreadable' })
   })
 })

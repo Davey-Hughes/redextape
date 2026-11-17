@@ -1,13 +1,14 @@
+import { listedWidth } from './field-width'
 import { LEGS } from './legs'
 import type { Leg } from './protocol'
 import { parseWorkspace, serializeWorkspace, type Workspace } from './workspace'
 
 /**
- * SHARE LINKS — Plan 7 part 6a spec §5.1 and §5.3: the program, its encoding, the workspace and where each leg stands,
- * carried in the page's fragment, so a link is never sent to a server. Section citations here are the Plan 7 part 6a
- * spec's unless they name another.
+ * SHARE LINKS — Plan 7 part 6a spec §5.1 and §5.3: the program, its encoding and width, the workspace and where each
+ * leg stands, carried in the page's fragment, so a link is never sent to a server. Section citations here are the Plan
+ * 7 part 6a spec's unless they name another.
  *
- *     #s= base64url, unpadded ( deflate-raw ( UTF-8 ( JSON { version: 1, program, encoding, workspace, positions } ) ) )
+ *     #s= base64url, unpadded (deflate-raw (UTF-8 (JSON { version: 1, program, encoding, width?, workspace, positions })))
  *
  * **`workspace` IS `serializeWorkspace`'s STRING, NOT ITS OBJECT**, so a link's workspace reaches `parseWorkspace`
  * exactly as a stored one does, and is held to the same checks. The object would save 26 to 30 characters a link and
@@ -20,7 +21,11 @@ import { parseWorkspace, serializeWorkspace, type Workspace } from './workspace'
 /** What a link's fragment starts with; the payload's base64url follows it. */
 export const LINK_PREFIX = '#s='
 
-/** The payload's version. A link of any other opens the program alone (spec §5.3). */
+/**
+ * The payload's version. A link of any other opens the program alone (spec §5.3). **`width` NEEDS NO BUMP**, for
+ * `PROGRAM_VERSION`'s reason: an auto link carries no `width`, and a bump would open every version-1 link as its
+ * program alone.
+ */
 export const LINK_VERSION = 1
 
 /**
@@ -46,27 +51,38 @@ const INFLATE_PIECE = 1024
 /** A leg's step, per leg, as a link carries it; a leg with no step to share is left out (spec §5.1). */
 export type Positions = { readonly [L in Leg]?: number }
 
-/** What `encodeLink` writes: the program, its encoding, the workspace as `serializeWorkspace` wrote it, and positions. */
+/**
+ * What `encodeLink` writes: the program, its encoding and width, the workspace as `serializeWorkspace` wrote it, and
+ * positions. A `width` left out is auto, as `null` is, and neither writes one.
+ */
 export type SharePayload = {
   readonly program: string
   readonly encoding: string
+  readonly width?: number | null | undefined
   readonly workspace: string
   readonly positions: Positions
 }
 
 /**
  * What a link opens (spec §5.3): the whole of it; the program alone, under its encoding where that is one of this
- * build's (`null` where it is not); or nothing, where no program can be read from it.
+ * build's (`null` where it is not); or nothing, where no program can be read from it. Either of the first two carries
+ * its width, `null` for auto.
  */
 export type OpenedLink =
   | {
       readonly kind: 'whole'
       readonly program: string
       readonly encoding: string
+      readonly width: number | null
       readonly workspace: Workspace
       readonly positions: Positions
     }
-  | { readonly kind: 'program'; readonly program: string; readonly encoding: string | null }
+  | {
+      readonly kind: 'program'
+      readonly program: string
+      readonly encoding: string | null
+      readonly width: number | null
+    }
   | { readonly kind: 'unreadable' }
 
 /** Whether `fragment` — `location.hash` — is a share link rather than any other fragment. */
@@ -139,12 +155,17 @@ async function inflate(bytes: Uint8Array): Promise<Uint8Array | null> {
   return out
 }
 
-/** The fragment carrying `payload`: `#s=` and the payload, deflated and in base64url. */
+/**
+ * The fragment carrying `payload`: `#s=` and the payload, deflated and in base64url. **A `width` ONLY WHEN PINNED**
+ * (the TM width design, decisions 14 and 16): a link without one means auto, so an auto link has no `width` and reads
+ * the same to every build at this version. It is carried because a TM position is a step of one run, and the program at another width is another run.
+ */
 export async function encodeLink(payload: SharePayload): Promise<string> {
   const json = JSON.stringify({
     version: LINK_VERSION,
     program: payload.program,
     encoding: payload.encoding,
+    ...(typeof payload.width === 'number' ? { width: payload.width } : {}),
     workspace: payload.workspace,
     positions: payload.positions,
   })
@@ -164,7 +185,7 @@ function parsePositions(v: unknown): Positions | null {
 }
 
 /**
- * What the link `fragment` opens, given this build's `encodings` (spec §5.3).
+ * What the link `fragment` opens, given this build's `encodings` and `widths` (spec §5.3).
  *
  * **WHOLE ONLY WHEN EVERY FIELD HOLDS**: version 1, a string program, an encoding this build has, a workspace
  * `parseWorkspace` takes, and positions whose keys are legs and whose values are safe integers of 0 or more. With
@@ -179,9 +200,13 @@ function parsePositions(v: unknown): Positions | null {
  * still on the page. The bound on a tree in `layout.ts`'s `parseTree` stops a deep tree's throw; the two `try`s hold
  * for any other, such as a decompressor without `deflate-raw`.
  */
-export async function decodeLink(fragment: string, encodings: readonly string[]): Promise<OpenedLink> {
+export async function decodeLink(
+  fragment: string,
+  encodings: readonly string[],
+  widths: readonly number[],
+): Promise<OpenedLink> {
   try {
-    return await readLink(fragment, encodings)
+    return await readLink(fragment, encodings, widths)
   } catch {
     return { kind: 'unreadable' }
   }
@@ -206,7 +231,11 @@ function readWorkspace(raw: string): Workspace | null {
 }
 
 /** What `decodeLink` returns, where nothing throws. */
-async function readLink(fragment: string, encodings: readonly string[]): Promise<OpenedLink> {
+async function readLink(
+  fragment: string,
+  encodings: readonly string[],
+  widths: readonly number[],
+): Promise<OpenedLink> {
   const unreadable: OpenedLink = { kind: 'unreadable' }
   if (!isLink(fragment)) return unreadable
   const bytes = fromBase64url(fragment.slice(LINK_PREFIX.length))
@@ -223,10 +252,18 @@ async function readLink(fragment: string, encodings: readonly string[]): Promise
   const e = parsed as Record<string, unknown>
   if (typeof e.program !== 'string') return unreadable
   const encoding = typeof e.encoding === 'string' && encodings.includes(e.encoding) ? e.encoding : null
+  // A WIDTH IT DOES NOT LIST READS AS AUTO, AND DEMOTES NOTHING (the TM width design, decision 15): a link demoted over
+  // it would drop its workspace for a field that only says how its TM runs. ITS TM POSITION IS DROPPED: it is a step
+  // of the run at the width the link names, and the auto run here is another run.
+  const width = listedWidth(e.width, widths)
   const workspace = typeof e.workspace === 'string' ? readWorkspace(e.workspace) : null
   const positions = parsePositions(e.positions)
   if (e.version !== LINK_VERSION || encoding === null || workspace === null || positions === null) {
-    return { kind: 'program', program: e.program, encoding }
+    return { kind: 'program', program: e.program, encoding, width }
   }
-  return { kind: 'whole', program: e.program, encoding, workspace, positions }
+  if (e.width === undefined || width !== null) {
+    return { kind: 'whole', program: e.program, encoding, width, workspace, positions }
+  }
+  const { tm: _ranAtAnotherWidth, ...rest } = positions
+  return { kind: 'whole', program: e.program, encoding, width, workspace, positions: rest }
 }

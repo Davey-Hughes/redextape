@@ -277,7 +277,11 @@ async function following(detached: boolean): Promise<void> {
 }
 
 const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''
-const stepOf = (leaf: string) => leafEl(leaf).querySelector('.view-steps .step')?.textContent ?? ''
+/**
+ * A view's step text: in its strip, and in the TM view on its status line, under the bar (the TM width design,
+ * decision 25).
+ */
+const stepOf = (leaf: string) => leafEl(leaf).querySelector('.view-steps .step, .tm-status .step')?.textContent ?? ''
 
 /**
  * Mount, and pick `sum_to(5)` from `examples ▾`; wait for its text in the editor, then for the λ and TM views' lines
@@ -486,7 +490,8 @@ describe('the TM view, on sum_to(5)', () => {
    * browser tier loads.
    *
    * **THEY INCLUDE THE MAXIMISE BUTTON** at the right end of each header's actions (the view layouts spec §11.3),
-   * 24.78px wide with the 8px gap before it.
+   * 24.78px wide with the 8px gap before it; the rules' header holds no other action while the table follows, the
+   * program's width box being on the view's bar (the TM width design, decision 24).
    */
   it('at 1280 px, the TM view’s panels are where the figures put them, each header with its maximise button', async () => {
     await at(1280, 800, false)

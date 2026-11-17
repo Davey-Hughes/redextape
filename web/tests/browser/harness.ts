@@ -151,9 +151,9 @@ export function walkInParts(walk: Walk, shares: readonly number[]): (() => Promi
 
 /**
  * A walk of a TM view by its own controls: ▶ and ↺ among the view's `.controls` by their text, the state's name at
- * the start of its status line, and the step in its strip's `step N of M`. The walk ends at the first state whose
- * status matches `arrived`; `restart` starts it from ↺, step 0, and its clicks after ↺ rely on ↺ being a seek, with
- * nothing evicted.
+ * the start of its status line, and the step after it on that line, `step N of M`. The walk ends at the first state
+ * whose status matches `arrived`; `restart` starts it from ↺, step 0, and its clicks after ↺ rely on ↺ being a seek,
+ * with nothing evicted.
  */
 export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, restart = false): Walk {
   const control = (label: string) =>
@@ -166,7 +166,7 @@ export function tmWalk(pane: () => HTMLElement, arrived: RegExp, to: string, res
     arrived: () => arrived.test(status()),
     step: () =>
       Number(
-        (/^step ([\d,]+)/.exec(pane().querySelector('.view-steps .step')?.textContent ?? '')?.[1] ?? '').replaceAll(
+        (/^step ([\d,]+)/.exec(pane().querySelector('.tm-status .step')?.textContent ?? '')?.[1] ?? '').replaceAll(
           ',',
           '',
         ),
@@ -801,6 +801,23 @@ export const undoButton = () => document.querySelector<HTMLButtonElement>('#noti
 
 /** The encoding picker, `#encoding`. */
 export const picker = () => document.querySelector<HTMLSelectElement>('#encoding') as HTMLSelectElement
+
+/** The width box on `leaf`'s TM view's header bar (`field-width.ts`). */
+export const widthBox = (leaf = 'tm-0'): HTMLInputElement =>
+  document.querySelector<HTMLInputElement>(`[data-leaf="${leaf}"] .field-width input`) as HTMLInputElement
+/** What `leaf`'s width box shows: its number, or `auto`, its placeholder, when it is empty. */
+export const widthShown = (leaf = 'tm-0'): string => widthBox(leaf).value || 'auto'
+/**
+ * Enter `value` in `leaf`'s width box as a user does: a click in it, its text selected, `value` typed over it, or the
+ * text deleted for `auto`, and Enter, which applies it.
+ */
+export async function enterWidth(value: string, leaf = 'tm-0'): Promise<void> {
+  const { userEvent } = await import('vitest/browser')
+  await userEvent.click(widthBox(leaf))
+  await userEvent.keyboard('{Control>}a{/Control}')
+  await userEvent.keyboard(value === 'auto' ? '{Backspace}' : value)
+  await userEvent.keyboard('{Enter}')
+}
 
 /** The text of each segment of the results line, in order. */
 export const segments = () => [...document.querySelectorAll('#results .segment')].map((s) => s.textContent ?? '')
@@ -1438,7 +1455,7 @@ export async function drag(host: HTMLElement, handle: HTMLElement, dy: number): 
 /**
  * A transport strip's state for a pane rendered by hand: restart enabled, back, forward, to-newest and play as
  * `canBack`, `canForward`, `canToNewest` and `canPlay` (the last three enabled unless passed `false`), nothing
- * playing, no continue button, and `stepText` on the step line.
+ * playing, no continue button, and `stepText` on the step line, which it also reads at the newest step.
  */
 export const controlState = (
   canBack: boolean,
@@ -1455,6 +1472,7 @@ export const controlState = (
   recording: false,
   playing: false,
   stepText,
+  stepTextAtNewest: stepText,
   continueLabel: null,
 })
 

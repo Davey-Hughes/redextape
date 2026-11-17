@@ -103,6 +103,29 @@ describe('controlState', () => {
     expect(controlState(view({ available: false, length: 5 })).recording).toBe(false)
   })
 
+  // A view that must not reflow as the count grows sizes its readout by this (the TM width design, decision 28): every
+  // part of the readout but the current step, which it reads at the newest recorded step.
+  it('reads the readout at the newest recorded step, endings and all, for the room it needs', () => {
+    expect(controlState(view({ length: 5, head: 2, currentStep: 2, newestStep: 1234 })).stepTextAtNewest).toBe(
+      'step 1,234 of 1,234…',
+    )
+    const c = controlState(
+      view({
+        done: 'budget',
+        evicted: true,
+        length: 100,
+        head: 7,
+        oldestStep: 412,
+        currentStep: 419,
+        newestStep: 12511,
+      }),
+    )
+    expect(c.stepText).toBe('step 419 of 12,511 — history is full (oldest kept: step 412)')
+    expect(c.stepTextAtNewest).toBe('step 12,511 of 12,511 — history is full (oldest kept: step 412)')
+    expect(controlState(view({ length: 0 })).stepTextAtNewest).toBe('not run')
+    expect(controlState(view({ available: false, reason: 'no TM leg', length: 0 })).stepTextAtNewest).toBe('no TM leg')
+  })
+
   // Scrubbing past the eviction point must SAY where history begins. The alternatives are lying
   // about where you are, or silently re-deriving at a cost nobody asked for.
   it('names the oldest retained step once frames have been evicted', () => {

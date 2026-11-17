@@ -49,14 +49,14 @@ describe('a stored program', () => {
   it('is stored again under the encoding a change picks', async () => {
     await userEvent.selectOptions(picker(), 'unary')
     await until(() => stored()?.encoding === 'unary', 'the new encoding, stored')
-    expect(stored()).toEqual({ text: STORED.text, encoding: 'unary' })
+    expect(stored()).toEqual({ text: STORED.text, encoding: 'unary', width: null })
   })
 
   it('is stored with the text an edit leaves', async () => {
     const edited = 'fn times4(y) {\n    y * 4\n}\ntimes4(6)\n'
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: edited } })
     await until(() => stored()?.text === edited, 'the edit, stored')
-    expect(stored()).toEqual({ text: edited, encoding: 'unary' })
+    expect(stored()).toEqual({ text: edited, encoding: 'unary', width: null })
   })
 
   /**
@@ -76,7 +76,7 @@ describe('a stored program', () => {
       for (const key of '// seven') view.dispatch({ changes: { from: view.state.doc.length, insert: key } })
       const typed = view.state.doc.toString()
       await until(() => stateIdle() && stored()?.text === typed, 'the burst, stored')
-      expect(writes.map((w) => parseProgram(w, ['unary'])?.text)).toEqual([typed])
+      expect(writes.map((w) => parseProgram(w, ['unary'], [])?.text)).toEqual([typed])
     } finally {
       localStorage.setItem = setItem
     }

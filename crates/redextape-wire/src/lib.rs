@@ -45,7 +45,7 @@ pub enum RunStatus {
 /// | | `Value` | `TooLargeToPrint` | `Undecodable` | `Unfinished` | `Fault` |
 /// | --- | --- | --- | --- | --- | --- |
 /// | `lambda_value` | ✅ | ✅ | ✅ | the cursor has not reached `Ended` | — |
-/// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | a raised cap ran it into `overflow` |
+/// | `tm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since halted | a pinned width, or a raised cap, ran it into `overflow` |
 /// | `rxm_value` | ✅ | ✅ | ✅ | a capped compile whose cursor has not since ended | ✅ |
 /// | `evaluate` | ✅ | ✅ | — | — | ✅ |
 ///

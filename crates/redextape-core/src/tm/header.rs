@@ -20,7 +20,7 @@
 //! encoding's semantics, and a name cannot convey them.
 
 use crate::Span;
-use crate::tm::build::{BOX, HEAP, MAX_FIELD_WIDTH, REG, STACK, WORK};
+use crate::tm::build::{BOX, HEAP, PINNED_FIELD_WIDTHS, REG, STACK, WORK};
 use crate::tm::encoding::{Binary, Encoding, Unary};
 use crate::tm::lower_tm::MAX_SLOTS;
 use crate::tm::machine::{BLANK, Symbol};
@@ -264,11 +264,11 @@ impl TmHeader {
     /// information. Normalizing at construction makes the round-trip exact instead of approximate.
     ///
     /// **PRECONDITION for the round-trip, unenforced here.** This constructor accepts any `width` and
-    /// `slots`, but `parse_tm_nav` caps them at `MAX_FIELD_WIDTH` and `MAX_SLOTS` (totality guards on
+    /// `slots`, but `parse_tm_nav` caps them at `PINNED_FIELD_WIDTHS` and `MAX_SLOTS` (totality guards on
     /// untrusted input). So a header built with `width: 0`, `width > MAX_FIELD_WIDTH` or
     /// `slots > MAX_SLOTS` will PRINT and then fail to parse back — optionality property 2 holds for
     /// headers within those caps, not for every value this constructor admits. `run_tm_described`
-    /// cannot exceed them: its width comes from the auto-fit search, which clamps at `MAX_FIELD_WIDTH`,
+    /// cannot exceed them: its width comes from the search or from a pin checked against the range,
     /// and its slot count from `sized`, which refuses above `MAX_SLOTS` before a machine is
     /// ever built; `reduce` (in `reduced_file.rs`) copies `width` and `slots` from the `DescribedRun` it
     /// reduces. The caps are not re-checked here because doing so would make a pure normalizer
@@ -563,20 +563,25 @@ impl HeaderParts {
                 }
                 (None, None) => Err(format!("unknown `encoding` name `{val}` (expected `unary` or `binary`)")),
             }),
-            // Capped at the auto-fit search's OWN ceiling: `run_tm_fitted` doubles from
-            // `MIN_FIELD_WIDTH` and clamps at `MAX_FIELD_WIDTH`, so a file naming a wider field
-            // describes a bank this build could not have produced and whose recipe it cannot evaluate.
+            // The widths a run can be pinned to, so every file a pinned run prints reads back. Their
+            // ceiling is the auto-fit search's OWN: `run_tm_fitted` doubles from `MIN_FIELD_WIDTH` and
+            // clamps at `MAX_FIELD_WIDTH`, so a file naming a wider field describes a bank this build
+            // could not have produced and whose recipe it cannot evaluate.
             // (NOT, despite the sibling arm below, a ceiling `lower_and_size` enforces — that function
             // checks `MAX_SLOTS`, `frame_bank_unrepresentable` and `mul_count_unrepresentable`, and
             // nothing about field width.) With `slots`, this bounds `init_reg`'s
             // `slots * (width + 1)` allocation. A TOTALITY guard on untrusted input, not a language limit.
             "width" => Some(match (self.width, val.parse::<usize>()) {
                 (Some(_), _) => Err("duplicate `width` directive".into()),
-                (None, Ok(n)) if (1..=MAX_FIELD_WIDTH).contains(&n) => {
+                (None, Ok(n)) if PINNED_FIELD_WIDTHS.contains(&n) => {
                     self.width = Some(n);
                     Ok(())
                 }
-                (None, _) => Err(format!("expected `width <1..={MAX_FIELD_WIDTH}>`, found `{val}`")),
+                (None, _) => Err(format!(
+                    "expected `width <{}..={}>`, found `{val}`",
+                    PINNED_FIELD_WIDTHS.start(),
+                    PINNED_FIELD_WIDTHS.end()
+                )),
             }),
             // Capped at the same ceiling `lower_and_size` enforces for in-memory programs, so the file
             // path and the in-memory path cannot disagree about one named limit. With `width`, this

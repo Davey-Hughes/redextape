@@ -77,7 +77,7 @@ describe('a link pasted into a page that started on unary, whose encoding this b
     expect(runs, 'precondition: the start-up compile is heard').toEqual([{ src: PAGE, encoding: 'unary' }])
     // THE ENCODING ALONE KEEPS IT FROM OPENING WHOLE: the same link under an encoding this build has opens whole.
     const known = [...picker().options].map((o) => o.value)
-    const asKnown = await decodeLink(await encodeLink({ ...LINK, encoding: 'unary' }), known)
+    const asKnown = await decodeLink(await encodeLink({ ...LINK, encoding: 'unary' }), known, [])
     expect(asKnown.kind, 'precondition: the link is whole but for its encoding').toBe('whole')
     const from = runs.length
     location.hash = await encodeLink(LINK)
@@ -169,6 +169,7 @@ describe('a link pasted into a page that started on unary, whose encoding this b
     expect(stored(), 'precondition: the last program stored is under binary').toEqual({
       text: LINKED,
       encoding: 'binary',
+      width: null,
     })
     let refused = 0
     const setItem = localStorage.setItem
@@ -185,6 +186,7 @@ describe('a link pasted into a page that started on unary, whose encoding this b
       expect(stored(), 'precondition: the last program stored is still under binary').toEqual({
         text: LINKED,
         encoding: 'binary',
+        width: null,
       })
       from = runs.length
       location.hash = await encodeLink({ ...LINK, program: OTHER })

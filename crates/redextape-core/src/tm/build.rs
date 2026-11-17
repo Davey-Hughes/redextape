@@ -71,6 +71,14 @@ pub const MIN_FIELD_WIDTH: usize = 4;
 /// overflow guard (see `Builder::overflow`), for either encoding.
 pub const MAX_FIELD_WIDTH: usize = 64;
 
+/// The widths a caller may pin a run to, and the widths a `.tm` header may name, so the file a pinned
+/// run prints reads back. They reach below `MIN_FIELD_WIDTH`, where the search never goes: a machine
+/// still lays out there, and a number that does not fit its field sends the run to the overflow guard
+/// as at any width, so a narrow pin overflows rather than computing a wrong value. The floor is one
+/// cell because a field of none holds no unary value at all and is the empty `##` the decoders treat
+/// as degenerate.
+pub const PINNED_FIELD_WIDTHS: std::ops::RangeInclusive<usize> = 1..=MAX_FIELD_WIDTH;
+
 /// The name of the state the overflow guard halts in. A parsed `.tm` file has state names but no state
 /// ids from a lowering, so `value_of_run` knows a lowered machine's overflow halt by this name on a
 /// non-accept state, which is what `Builder::state` always allocates.

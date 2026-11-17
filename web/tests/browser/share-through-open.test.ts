@@ -73,7 +73,7 @@ async function sharedPositions(): Promise<Positions | null> {
   expect(shareMenuOpen()).toBe(true)
   await until(() => (shareLinkField()?.value ?? '') !== '', 'the link')
   const value = shareLinkField()?.value ?? ''
-  const opened = await decodeLink(value.slice(value.indexOf('#')), ENCODINGS)
+  const opened = await decodeLink(value.slice(value.indexOf('#')), ENCODINGS, [])
   shareMenu().hidePopover()
   return opened.kind === 'whole' ? opened.positions : null
 }

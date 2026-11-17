@@ -61,6 +61,9 @@ pub const MAX_PRINT_DEPTH: u32 = 1_000;
 /// stores does not fit the encoding at any width up to the ceiling; `Lower` means it could not be lowered at all.
 /// `HitCap` is deliberately NOT here — a run that started and ran out of budget produces a working
 /// cursor, which is what `raise_cap` exists for.
+///
+/// `Overflow` IS AUTO-FIT'S ONLY. A pinned width that a number outgrows keeps its leg, a machine that halts in its
+/// overflow guard, because watching a value run out of bits at a width the user chose is what pinning is for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TmDecline {
     TooLarge,
@@ -98,7 +101,7 @@ impl std::fmt::Display for SessionError {
     }
 }
 
-/// The result of `Session::compile`. `diagnostics` is non-empty for a program the front end objected
+/// The result of `Session::compile_at`. `diagnostics` is non-empty for a program the front end objected
 /// to; `session` is `None` only when nothing could be built at all.
 ///
 /// A SESSION WITH EVERY LEG DECLINED IS STILL A SESSION. Declining is a backend's answer about a
@@ -166,15 +169,17 @@ pub struct Session {
     /// opened from, for `rewind_tm` to open again.
     pub(crate) tm: Result<TmLegParts, TmDecline>,
     pub(crate) map: SourceMap,
-    /// The halted run's final tapes, from `TmRun::Ran`. `None` for `HitCap` — a capped run never
-    /// reached a final configuration, which is what `tm_value` reports as `Unfinished` rather than
-    /// as `Undecodable`.
+    /// How the run `compile` performed ended: see `RunEnd`.
     ///
     /// **WRITTEN ONCE, BY `compile`, AND NEVER UPDATED.** A cap raised afterwards can carry the CURSOR
     /// to a halt, and that halt is not recorded here; `tm_value` reads the cursor as a fallback for
     /// exactly that case. Nothing else may treat this field as "has the run finished" — `tm_status().run`
     /// is the only honest answer to that question.
-    pub(crate) final_tapes: Option<Vec<Tape>>,
+    pub(crate) run_end: RunEnd,
+    /// `Pinned` when `compile_at` was handed its width, `Fit` when it fitted one; never `Header`. Only the words of
+    /// `tm_value`'s overflow fault depend on it: a caller who pinned a width gets a wider width or auto to choose
+    /// from, while an auto-fit run is not fitted again.
+    pub(crate) width_from: FieldFrom,
     /// The encoding the tapes were produced under. NO WIDTH IS KEPT ALONGSIDE IT: `TmRun::Ran`'s own
     /// doc records that both encodings decode structurally, delimiter to delimiter, so any instance
     /// decodes tapes produced at any width. There is therefore no second object that can disagree
@@ -184,7 +189,8 @@ pub struct Session {
     /// `run_tm_described_program` answered `Err`, which is exactly the program that never ran a step.
     ///
     /// **`Some` HERE DOES NOT MEAN THE LEG IS AVAILABLE.** `Overflow` and `TooLarge` arrive inside an
-    /// `Ok`, carrying the real count of the attempt that produced them, and still decline the leg.
+    /// `Ok`, carrying the real count of the attempt that produced them, and decline the leg (`Overflow`
+    /// only under auto-fit: a pinned width keeps it).
     /// `tm_status` is where that is withheld: a declined leg reports `None` however this field reads,
     /// because a length beside `available: false` describes a run the caller has no cursor to reach.
     pub(crate) total_steps: Option<u64>,
@@ -194,21 +200,39 @@ pub struct Session {
     pub(crate) rxm: Result<RxmLeg, tm::LowerError>,
 }
 
-/// The shared tail of `compile`'s two non-declining arms. `Ran` and `HitCap` build the same cursor
-/// and the same projected program; they differ only in whether a final configuration exists.
+/// How the run `compile` performed ended, which is all `tm_value` needs of it.
 ///
-/// **THE FINAL TAPES ARE PAIRED ON AT THE CALL SITE RATHER THAN PASSED THROUGH HERE.** Taking them as a
-/// third parameter and returning them untouched, purely to shape the return tuple, would add a parameter
-/// that cannot affect the result and reads as though it might. What the helper is actually for is that
-/// both arms build the leg identically, so the `match` in `compile` can stay exhaustive with no catch-all;
-/// that property is unaffected by where the tapes are attached.
+/// **ONE FIELD, NOT THE FINAL TAPES BESIDE AN OVERFLOW FLAG.** Two fields for one fact can disagree, and "final
+/// tapes from a run that overflowed" is a state no run reaches but two fields could spell.
+#[derive(Debug)]
+pub(crate) enum RunEnd {
+    /// `TmRun::Ran`: the run halted, and these are its final tapes.
+    Halted(Vec<Tape>),
+    /// A pinned width's run halted in its overflow guard. Its tapes are not kept: they hold fields cut to the width,
+    /// which decode without complaint to a wrong value.
+    Overflowed,
+    /// No final configuration: the run hit a cap, or there is no leg. `tm_value` answers `Unfinished` for the first
+    /// rather than `Undecodable`.
+    NoHalt,
+}
+
+/// The widths `compile_at` builds a machine at, narrowest first: core's own pinnable range, so the width box cannot
+/// offer a width the encodings refuse.
+pub const FIELD_WIDTHS: std::ops::RangeInclusive<usize> = tm::PINNED_FIELD_WIDTHS;
+
+/// The TM leg of every run `compile` keeps: `Ran`, `HitCap` and a pinned width's `Overflow` build the same
+/// cursor and the same projected program, and differ only in how the run ended.
+///
+/// **HOW THE RUN ENDED IS PAIRED ON AT THE CALL SITE RATHER THAN PASSED THROUGH HERE.** Taking it as a
+/// parameter and returning it untouched, purely to shape the return tuple, would add a parameter that
+/// cannot affect the result and reads as though it might.
 ///
 /// `caps` IS THE BUDGET THE DESCRIBED RUN ALREADY SPENT, handed on so the cursor starts life with the
 /// same one. A cursor budgeted differently from the run whose outcome the session reports would stop
 /// somewhere that outcome never mentions.
 ///
-/// `header` BY REFERENCE: both uses (`init`, `.width`) only ever read it, and both call sites still own
-/// their `TmHeader` afterward — there is nothing here for taking it by value to buy.
+/// `header` BY REFERENCE: both uses (`init`, `.width`) only ever read it, and the call site still owns
+/// its `TmHeader` afterward — there is nothing here for taking it by value to buy.
 ///
 /// **`&TmHeader` AND NOT `Option<&TmHeader>`, WHICH IS THE OPPOSITE CALL FROM `TmState::window`'S, AND
 /// DELIBERATELY SO.** `TmScratch` also has to build a leg and may have no header (§3.4), so widening this
@@ -219,7 +243,7 @@ pub struct Session {
 /// invented tapes one accidental `None` away from a compiled program. The shared part is factored into
 /// `tm_leg_at` instead, which knows nothing about headers.
 ///
-/// `map` IS THE SESSION'S OWN, BUILT AT `header.width` — `compile`'s doc says why it has to be — and gives
+/// `map` IS THE SESSION'S OWN, BUILT AT `header.width` — `compile_at`'s doc says why it has to be — and gives
 /// the projection each state's instruction and the listing. A scratch has none.
 fn build_tm_leg(
     header: &tm::TmHeader,
@@ -505,27 +529,33 @@ fn tm_run_status(status: Option<tm::TmStatus>) -> RunStatus {
 }
 
 /// Where the width of a machine that halted in its overflow guard came from, which `overflowed_at` names.
-#[derive(Clone, Copy, Debug)]
-enum FieldFrom {
-    /// The session's leg: auto-fit chose it from `compile`'s run, which a raised cap carried further.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FieldFrom {
+    /// The session's leg under auto-fit: chosen from `compile`'s run, which a raised cap carried further.
     Fit,
+    /// The session's leg at a width its caller pinned.
+    Pinned,
     /// A copy or a `.tm` buffer: its header records it.
     Header,
 }
 
 /// The answer for a machine that halted in its overflow guard at `width`: a fault, never the value its cut fields
 /// decode to. Nothing is fitted or run again, so below the widest width the words point at a wider one, and at it
-/// they name the encoding's limit. The session's leg and every copy word an overflow here, so they cannot disagree.
+/// they name the encoding's limit. A pinned width's pointer is the width select's other choices, to try rather than
+/// promised: some programs fit no width. The session's leg and every copy word an overflow here, so they agree.
 fn overflowed_at(width: usize, from: FieldFrom) -> Decoded {
     let what = tm::OVERFLOWING_NUMBER;
     let field = match from {
         FieldFrom::Fit => format!("the {width}-cell tape field this run was fitted to"),
+        FieldFrom::Pinned => format!("the {width}-cell tape field chosen for this run"),
         FieldFrom::Header => format!("the {width}-cell tape field its header records"),
     };
-    let message = if width < tm::MAX_FIELD_WIDTH {
-        format!("{what} outgrew {field}; it needs a field wider than {width} cells")
-    } else {
+    let message = if width >= tm::MAX_FIELD_WIDTH {
         format!("{what} outgrew {field}, the widest there is; this is the encoding's limit")
+    } else if from == FieldFrom::Pinned {
+        format!("{what} outgrew {field}; try a wider width, or auto")
+    } else {
+        format!("{what} outgrew {field}; it needs a field wider than {width} cells")
     };
     Decoded::Fault { message }
 }
@@ -549,9 +579,9 @@ fn run_lambda_cursor(leg: &mut LambdaLeg, budget: u64) -> RunStatus {
 }
 
 impl Session {
-    /// Parse, typecheck, and build whichever legs the backends accept.
+    /// Parse, typecheck, and build whichever legs the backends accept, the TM at a fitted or a pinned `width`.
     ///
-    /// **THE MACHINE RUNS FIRST, AND THE MAP IS BUILT AT THE WIDTH IT FITTED.** The map keys the TM half on
+    /// **THE MACHINE RUNS FIRST, AND THE MAP IS BUILT AT THE WIDTH IT RAN AT.** The map keys the TM half on
     /// state NAMES, and names depend on the field width: the sample, `let x = 40; x + 2`, fits at 64 under
     /// unary, and 47 of its 123 states have names no width-4 machine has. Built at `MIN_FIELD_WIDTH` before the
     /// run, the map would leave `tm_owner` resolving only 74 of the 121 states the run bills to an instruction.
@@ -562,17 +592,23 @@ impl Session {
     /// **THE RXM PROGRAM RUNS TO ITS END TOO**, and it is the map's own lowering, the program the TM ran, so the
     /// map's `rxm_owner` indexes the instructions the rxm cursor steps. See `RxmLeg::run` for what the run costs a
     /// program that never halts.
-    pub fn compile(src: &str, kind: EncodingKind) -> Compiled {
-        Session::compile_with_caps(src, kind, tm::TM_DEFAULT_CAPS, tm::rxm::DEFAULT_CAPS)
+    pub fn compile_at(src: &str, kind: EncodingKind, width: Option<usize>) -> Compiled {
+        Session::compile_with_caps(src, kind, width, tm::TM_DEFAULT_CAPS, tm::rxm::DEFAULT_CAPS)
     }
 
-    /// `compile` with the TM run's and the rxm run's budgets as parameters rather than constants.
+    /// `compile_at` under auto-fit, the case almost every test here is about.
+    #[cfg(test)]
+    pub fn compile(src: &str, kind: EncodingKind) -> Compiled {
+        Session::compile_at(src, kind, None)
+    }
+
+    /// `compile_at` with the TM run's and the rxm run's budgets as parameters rather than constants.
     ///
     /// PRIVATE, AND EVERY PRODUCT CALLER PASSES `TM_DEFAULT_CAPS` AND `tm::rxm::DEFAULT_CAPS` — the
     /// boundary exposes no way to choose. They are parameters because `TM_DEFAULT_CAPS` is 5,000,000
     /// δ-steps, so the `HitCap` arm below is otherwise only reachable by simulating five million steps and
     /// then five million more through the cursor to reach the same wall. A test that cannot afford that is
-    /// a test that never runs, and the arm it cannot reach is the one where `final_tapes` is `None` and
+    /// a test that never runs, and the arm it cannot reach is the one where `run_end` is `NoHalt` and
     /// every question about a continued run is decided. With a budget of ten the same arm is reached in
     /// milliseconds, by the same code, from the same source program.
     ///
@@ -580,7 +616,13 @@ impl Session {
     /// caps — steps, stack, heap and saved-frame memory — ends the run its own way, and at `DEFAULT_CAPS`
     /// reaching the stack cap takes 100,000 frames and the heap and memory caps millions of cells and words.
     /// A small budget reaches each in a few instructions of an ordinary program.
-    fn compile_with_caps(src: &str, kind: EncodingKind, caps: tm::TmCaps, rxm_caps: tm::rxm::Caps) -> Compiled {
+    fn compile_with_caps(
+        src: &str,
+        kind: EncodingKind,
+        width: Option<usize>,
+        caps: tm::TmCaps,
+        rxm_caps: tm::rxm::Caps,
+    ) -> Compiled {
         let (program, mut diagnostics) = parser::parse(src);
         let Some(program) = program else {
             return Compiled { diagnostics, session: None };
@@ -609,38 +651,23 @@ impl Session {
         // A lowering that failed answers as `run_tm_described` does for the same `Core`, so the decline below
         // reads one `Err` whichever step refused.
         let prepared = Prepared::new(&program);
-        let described = match prepared.lowered() {
-            Ok(l) => tm::run_tm_described_program(&l.program, kind, ty.clone(), caps),
-            Err(e) => Err(TmRun::LowerError(e.clone())),
-        };
-        // A run that yields a leg — `Ran` or `HitCap` — fitted a width, and that is the width the map must be built
-        // at. Any other leaves no machine for the map to describe, so the narrowest width, the cheapest to lower, is
-        // as good as any: an `Overflow` decline fitted 64 for a machine nothing will show.
-        let width = match &described {
-            Ok(d) if matches!(d.run, TmRun::Ran { .. } | TmRun::HitCap) => d.header.width,
-            _ => tm::MIN_FIELD_WIDTH,
-        };
-        let map = SourceMap::build_prepared(&prepared, &*kind.at(width));
-        let (core, lowered) = prepared.into_parts();
-        let rxm = lowered.map(|l| RxmLeg::run(Rc::new(l.program), rxm_caps));
-
-        let (lambda, initial_lambda) = match lambda::lower(&core) {
-            Ok(t) => (Ok(LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
-            Err(e) => (Err(e), None),
+        let described = match (prepared.lowered(), width) {
+            (Ok(l), None) => tm::run_tm_described_program(&l.program, kind, ty.clone(), caps),
+            (Ok(l), Some(w)) => tm::run_tm_described_program_at(&l.program, kind, ty.clone(), caps, w),
+            (Err(e), _) => Err(TmRun::LowerError(e.clone())),
         };
 
         // `described` ERRS ONLY FOR A PROGRAM THAT NEVER RAN. The lowering's `Err` is `LowerError`, and
         // `run_tm_described_program` has TWO fallible calls: `sized` (the three pre-checked layout refusals,
         // `Err(TooLarge)`) and `attempt`'s `Option` (the fourth — the state ceiling, only knowable once that
-        // width's gadgets are built — folded into `Err(TooLarge)` the same way). Between them, `Err` carries
-        // `LowerError` or `TooLarge` and nothing else. `Overflow` is NOT an `Err` — reaching `MAX_FIELD_WIDTH`
-        // and still overflowing returns `Ok` with `run: TmRun::Overflow` and a machine attached — so the
-        // decline for it is read off `d.run`, which is why this is two matches and not one.
+        // width's gadgets are built — folded into `Err(TooLarge)` the same way); the pinned twin adds a width out
+        // of range, also `TooLarge`. `Overflow` is NOT an `Err` — overflowing at the last width tried returns `Ok`
+        // with a machine attached — so the decline for it is read off `d.run`: two matches, not one.
         // Read off the `Ok` BEFORE the match consumes it, so every run that STARTED reports its own
-        // count — including `Overflow` and `TooLarge` arriving inside an `Ok`, which decline the leg
+        // count — including `Overflow` and `TooLarge` arriving inside an `Ok`, which may decline the leg
         // and still ran. See the field's doc for where a declined leg's length is withheld.
         let total_steps = described.as_ref().ok().map(|d| d.steps);
-        let tm = match described {
+        let kept = match described {
             Err(TmRun::TooLarge) => Err(TmDecline::TooLarge),
             Err(TmRun::LowerError(e)) => Err(TmDecline::Lower(format!("{e:?}"))),
             // `described`'s `Err` is only ever `LowerError` or `TooLarge` — both matched above — so this
@@ -651,33 +678,58 @@ impl Session {
             // legible decline instead.
             Err(other) => Err(TmDecline::Lower(format!("{other:?}"))),
             Ok(d) => match d.run {
+                // A pinned width's overflow is the run that was asked for, so it is kept, to be stepped to its
+                // halt in the guard. Under auto-fit it means no width up to the ceiling fits, which is a decline.
+                TmRun::Overflow if width.is_some() => Ok((d.header, d.machine, RunEnd::Overflowed)),
                 TmRun::Overflow => Err(TmDecline::Overflow),
                 TmRun::TooLarge => Err(TmDecline::TooLarge),
                 TmRun::LowerError(e) => Err(TmDecline::Lower(format!("{e:?}"))),
                 // `Ran` and `HitCap` BOTH yield a working cursor, and that is the point of the split:
                 // a run that spent its budget is resumable through `raise_tm_cap`, so flattening it
                 // into a decline would throw away a session the user can still drive.
-                TmRun::Ran { tapes } => {
-                    let (p, c, start) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
-                    Ok(((p, c, d.header, start), Some(tapes)))
-                }
-                TmRun::HitCap => {
-                    let (p, c, start) = build_tm_leg(&d.header, Rc::new(d.machine), caps, Some(&map));
-                    Ok(((p, c, d.header, start), None))
-                }
+                TmRun::Ran { tapes } => Ok((d.header, d.machine, RunEnd::Halted(tapes))),
+                TmRun::HitCap => Ok((d.header, d.machine, RunEnd::NoHalt)),
             },
         };
 
-        // The LEG stays paired; only the final tapes are split off, because they are genuinely a
-        // separate fact — `Ran` has them and `HitCap` does not, while both build the same leg.
-        let (tm, final_tapes) = match tm {
-            Ok((leg, t)) => (Ok(leg), t),
-            Err(d) => (Err(d), None),
+        // A kept run ran at a width, and that is the width the map must be built at. A declined one leaves no
+        // machine for the map to describe, so the search's narrowest width, the cheapest it lowers, is as good
+        // as any: an `Overflow` decline fitted 64 for a machine nothing will show.
+        let map_width = kept.as_ref().map_or(tm::MIN_FIELD_WIDTH, |(header, _, _)| header.width);
+        let map = SourceMap::build_prepared(&prepared, &*kind.at(map_width));
+        let (core, lowered) = prepared.into_parts();
+        let rxm = lowered.map(|l| RxmLeg::run(Rc::new(l.program), rxm_caps));
+
+        let (lambda, initial_lambda) = match lambda::lower(&core) {
+            Ok(t) => (Ok(LambdaLeg::new(&t, lambda::MAX_REDUCTION_STEPS)), Some(t)),
+            Err(e) => (Err(e), None),
+        };
+
+        // The LEG stays paired; only how the run ended is split off, because it is genuinely a separate
+        // fact — every kept run builds the same leg.
+        let (tm, run_end) = match kept {
+            Ok((header, machine, end)) => {
+                let (p, c, start) = build_tm_leg(&header, Rc::new(machine), caps, Some(&map));
+                (Ok((p, c, header, start)), end)
+            }
+            Err(d) => (Err(d), RunEnd::NoHalt),
         };
 
         Compiled {
             diagnostics,
-            session: Some(Session { core, ty, lambda, initial_lambda, tm, map, final_tapes, kind, total_steps, rxm }),
+            session: Some(Session {
+                core,
+                ty,
+                lambda,
+                initial_lambda,
+                tm,
+                map,
+                run_end,
+                width_from: if width.is_some() { FieldFrom::Pinned } else { FieldFrom::Fit },
+                kind,
+                total_steps,
+                rxm,
+            }),
         }
     }
 
@@ -813,9 +865,9 @@ impl Session {
                 // When `compile`'s run stopped at a cap, a raised one can carry the cursor past it, to the halt
                 // `tm_value` reads or to a later cap, and the run has then gone as far as the cursor: its count is the
                 // length beside that answer, or the "stopped after" count beside `Unfinished`.
-                total_steps: match &self.final_tapes {
-                    None => self.total_steps.map(|compiled| compiled.max(c.steps_taken())),
-                    Some(_) => self.total_steps,
+                total_steps: match &self.run_end {
+                    RunEnd::NoHalt => self.total_steps.map(|compiled| compiled.max(c.steps_taken())),
+                    RunEnd::Halted(_) | RunEnd::Overflowed => self.total_steps,
                 },
             },
             Err(d) => {
@@ -931,13 +983,13 @@ impl Session {
 
     /// The TM leg's answer, decoded from the run `compile` already performed.
     ///
-    /// **NO SECOND RUN.** `compile` simulates the machine to a halt, and driving the cursor for the same answer
+    /// **NO SECOND RUN.** `compile_at` simulates the machine to a halt, and driving the cursor for the same answer
     /// would simulate the run twice. The cursor exists for WATCHING a run.
     ///
-    /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK.** A `HitCap` compile records no
-    /// `final_tapes`, and `raise_tm_cap` then lets a caller drive the cursor to a halt; read alone, `final_tapes`
-    /// would answer `Unfinished` forever beside a `tm_status().run` of `Ended`. The fallback decodes tapes the
-    /// cursor already holds, so there is still no second run, and `Unfinished` means no final configuration at all.
+    /// **THE CURSOR IS THE FALLBACK, AND ONLY THE FALLBACK.** A `HitCap` compile records `RunEnd::NoHalt`, and
+    /// `raise_tm_cap` then lets a caller drive the cursor to a halt; read alone, `run_end` would answer `Unfinished`
+    /// forever beside a `tm_status().run` of `Ended`. The fallback decodes tapes the cursor already holds, so there
+    /// is still no second run, and `Unfinished` means no final configuration at all.
     ///
     /// **A CURSOR HALTED IN THE OVERFLOW GUARD ANSWERS A `Fault`, NEVER A VALUE**: a capped attempt can stop before
     /// the number that outgrows its width is written, and the guard's tapes hold fields cut to that width. The fault
@@ -946,16 +998,20 @@ impl Session {
     /// `TooLargeToPrint` is a real outcome too: the decode succeeded and only `decoded_value`'s capped print refused.
     pub fn tm_value(&self) -> Result<Decoded, SessionError> {
         let (_, cursor, header, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
-        let tapes: &[Tape] = match &self.final_tapes {
-            Some(t) => t,
-            // Only the cursor can be here: `final_tapes` holds a `TmRun::Ran`, which never ended in the guard.
-            None if cursor.status() == Some(tm::TmStatus::Halted)
-                && tm::is_overflow_guard(cursor.machine(), cursor.state()) =>
+        let tapes: &[Tape] = match &self.run_end {
+            // Answered from the moment `compile` returns, as a halted run's value is: `Unfinished` would read as a
+            // run stopped at a cap.
+            RunEnd::Overflowed => return Ok(overflowed_at(header.width, self.width_from)),
+            RunEnd::Halted(t) => t,
+            // Only the cursor can be here: `Halted` holds a `TmRun::Ran`, which never ended in the guard.
+            RunEnd::NoHalt
+                if cursor.status() == Some(tm::TmStatus::Halted)
+                    && tm::is_overflow_guard(cursor.machine(), cursor.state()) =>
             {
-                return Ok(overflowed_at(header.width, FieldFrom::Fit));
+                return Ok(overflowed_at(header.width, self.width_from));
             }
-            None if cursor.status() == Some(tm::TmStatus::Halted) => cursor.tapes(),
-            None => return Ok(Decoded::Unfinished),
+            RunEnd::NoHalt if cursor.status() == Some(tm::TmStatus::Halted) => cursor.tapes(),
+            RunEnd::NoHalt => return Ok(Decoded::Unfinished),
         };
         let enc = self.kind.at(tm::MIN_FIELD_WIDTH);
         Ok(decoded_or_undecodable(tm::decode_tape_ty(tapes, &self.ty, &*enc)))
@@ -990,7 +1046,7 @@ impl Session {
     }
 
     /// The cursor's machine cut to `window` — `RxmState::window` and nothing else, with the session's map, so
-    /// `source_node` resolves (`compile`'s doc says why this map indexes this cursor's program).
+    /// `source_node` resolves (`compile_at`'s doc says why this map indexes this cursor's program).
     pub fn rxm_state(&self, window: RxmWindow) -> Result<RxmState, SessionError> {
         let leg = self.rxm.as_ref().map_err(|_| SessionError::RxmAbsent)?;
         Ok(leg.state(Some(&self.map), window))
@@ -1528,7 +1584,7 @@ impl LambdaScratch {
 /// A Turing machine typed straight into a pane: the projected program, the cursor walking it, and the
 /// header the text carried — **if it carried one** (design §4.1).
 ///
-/// **NO `ty`, SO NO `tm_value`.** `Session::tm_value` reads `self.ty`, `self.final_tapes` and
+/// **NO `ty`, SO NO `tm_value`.** `Session::tm_value` reads `self.ty`, `self.run_end` and
 /// `self.kind`; decoding is type-directed and TM text carries a `result` type only inside a header,
 /// which may be absent, and there is no compile-time run to have recorded final tapes from. Decision
 /// 2: the method does not exist rather than existing and declining. `tests/browser.rs` pins that at
@@ -2284,7 +2340,7 @@ mod tests {
         let by_cells = tm::TmCaps { steps: tm::TM_DEFAULT_CAPS.steps, cells: 40 };
         for (caps, (extra_steps, extra_cells), frames) in [(by_steps, (5, 0), 11), (by_cells, (0, 1), 224)] {
             let compile = || {
-                Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps, tm::rxm::DEFAULT_CAPS)
+                Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, None, caps, tm::rxm::DEFAULT_CAPS)
                     .session
                     .expect("compiles")
             };
@@ -2336,7 +2392,7 @@ mod tests {
     fn a_rewound_rxm_leg_records_what_a_fresh_one_does() {
         let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
         let compile = || {
-            Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, tm::TM_DEFAULT_CAPS, caps)
+            Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, caps)
                 .session
                 .expect("compiles")
         };
@@ -2377,7 +2433,7 @@ mod tests {
         for src in ["[1, 2, 3]", "head(tail(tail(tail([1, 2, 3]))))"] {
             let whole = Session::compile(src, EncodingKind::Unary).session.expect("compiles");
             let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
-            let mut s = Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, caps)
+            let mut s = Session::compile_with_caps(src, EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, caps)
                 .session
                 .expect("compiles");
             assert_eq!(s.rxm_status().total_steps, Some(3), "the premise: compile's run stopped at the cap: {src}");
@@ -2402,7 +2458,7 @@ mod tests {
         for src in ["[1, 2, 3]", "head(tail(tail(tail([1, 2, 3]))))"] {
             let whole = Session::compile(src, EncodingKind::Unary).session.expect("compiles").rxm_status();
             let caps = tm::rxm::Caps { steps: 3, ..tm::rxm::DEFAULT_CAPS };
-            let mut s = Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, caps)
+            let mut s = Session::compile_with_caps(src, EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, caps)
                 .session
                 .expect("compiles");
             assert!(whole.total_steps > Some(6), "the premise: no raise below reaches the run's end: {src}");
@@ -2981,8 +3037,8 @@ mod tests {
     /// **`tmValue()` AND `tmStatus().run` MUST NOT CONTRADICT EACH OTHER**, and a raised cap is the
     /// one place they could. `RunStatus::Capped` exists specifically so a renderer can offer
     /// "continue"; taking that offer would produce a UI showing a halted machine with no answer,
-    /// permanently, if `final_tapes` alone were read: it is written once in `compile` and a capped
-    /// compile writes `None`.
+    /// permanently, if `run_end` alone were read: it is written once in `compile` and a capped
+    /// compile writes `NoHalt`.
     ///
     /// THE SEQUENCE IS DRIVEN, NOT CONSTRUCTED. Every step here is one a renderer takes: step until the
     /// cursor stops, read `run` to learn the run may continue, raise, step again, read the answer.
@@ -2993,10 +3049,10 @@ mod tests {
     #[test]
     fn a_raised_tm_cap_driven_to_a_halt_answers_what_the_status_claims() {
         let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
-        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, caps, tm::rxm::DEFAULT_CAPS)
+        let mut s = Session::compile_with_caps("[1, 2, 3]", EncodingKind::Unary, None, caps, tm::rxm::DEFAULT_CAPS)
             .session
             .expect("a capped run yields a working session, which is the point of the HitCap arm");
-        assert!(s.final_tapes.is_none(), "a capped compile reached no final configuration to record");
+        assert!(matches!(s.run_end, RunEnd::NoHalt), "a capped compile reached no final configuration to record");
 
         while s.step_tm().expect("TM available") {}
         assert_eq!(s.tm_status().run, Some(RunStatus::Capped), "a spent budget is Capped, not Ended");
@@ -3019,7 +3075,7 @@ mod tests {
     /// auto-fit kept 4, and the continued cursor's tapes hold fields cut to four bits.
     fn continued_into_overflow(src: &str) -> Session {
         let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
-        let mut s = Session::compile_with_caps(src, EncodingKind::Binary, caps, tm::rxm::DEFAULT_CAPS)
+        let mut s = Session::compile_with_caps(src, EncodingKind::Binary, None, caps, tm::rxm::DEFAULT_CAPS)
             .session
             .expect("a capped run yields a working session");
         assert_eq!(s.tm_status().width, Some(4), "the capped attempt at 4 overflowed nothing, so auto-fit kept 4");
@@ -3057,23 +3113,181 @@ mod tests {
     /// the words cannot say only that a value outgrew the field.
     #[test]
     fn a_return_tag_continued_into_overflow_is_named_in_the_fault() {
-        let calls = vec!["f(0)"; 16].join(" + ");
-        let s =
-            continued_into_overflow(&format!("fn f(x) {{ x }} let c = 1; if c == 0 {{ {calls} + 7 }} else {{ f(3) }}"));
+        let s = continued_into_overflow(&many_call_sites());
         assert_eq!(s.tm_value(), Ok(Decoded::Fault { message: FITTED_4_OVERFLOW.to_string() }));
     }
 
-    /// At the widest width there is no wider one to point at, so the words name the encoding's limit.
+    /// At the widest width there is no wider one to point at, so the words name the encoding's limit, whether the
+    /// width was fitted or pinned.
     #[test]
     fn an_overflow_at_the_widest_width_points_at_no_wider_one() {
-        assert_eq!(
-            overflowed_at(tm::MAX_FIELD_WIDTH, FieldFrom::Fit),
-            Decoded::Fault {
-                message: "a number the machine stores (a value, an address or a call's return tag) outgrew the \
-                          64-cell tape field this run was fitted to, the widest there is; this is the encoding's limit"
-                    .to_string()
-            }
-        );
+        for (from, field) in [(FieldFrom::Fit, "this run was fitted to"), (FieldFrom::Pinned, "chosen for this run")] {
+            assert_eq!(
+                overflowed_at(tm::MAX_FIELD_WIDTH, from),
+                Decoded::Fault {
+                    message: format!(
+                        "a number the machine stores (a value, an address or a call's return tag) outgrew the \
+                         64-cell tape field {field}, the widest there is; this is the encoding's limit"
+                    )
+                },
+                "{from:?}"
+            );
+        }
+    }
+
+    /// The fault a pinned width's overflow answers: it names the width the caller chose and the width select's
+    /// other choices, as something to try, since no width may fit (unary `fact(12)` overflows at every one).
+    fn pinned_overflow_at_4() -> Result<Decoded, SessionError> {
+        Ok(Decoded::Fault {
+            message: "a number the machine stores (a value, an address or a call's return tag) outgrew the 4-cell \
+                      tape field chosen for this run; try a wider width, or auto"
+                .to_string(),
+        })
+    }
+
+    /// `1 + 2` fits the narrowest width under binary, so a pinned 16 can only come from the pin.
+    #[test]
+    fn a_pinned_width_builds_the_machine_at_that_width() {
+        let auto = Session::compile("1 + 2", EncodingKind::Binary).session.expect("compiles");
+        assert_eq!(auto.tm_status().width, Some(tm::MIN_FIELD_WIDTH), "the premise: auto fits the narrowest");
+
+        let s = Session::compile_at("1 + 2", EncodingKind::Binary, Some(16)).session.expect("compiles");
+        assert_eq!(s.tm_status().width, Some(16));
+        assert_eq!(s.tm_program().expect("TM available").width, 16);
+        assert_eq!(s.tm_value(), Ok(Decoded::Value { text: "3".to_string() }));
+    }
+
+    /// Pinned at the width auto fitted, a session is auto's: the same status, machine and value. Each fixture
+    /// fits wider than the narrowest width, so a pin that fell back to the first rung of the search would show.
+    #[test]
+    fn pinning_the_width_auto_fitted_changes_nothing() {
+        for (src, kind) in [
+            ("let x = 40; x + 2", EncodingKind::Binary),
+            ("let x = 40; x + 2", EncodingKind::Unary),
+            ("[5, 6, 7]", EncodingKind::Unary),
+        ] {
+            let auto = Session::compile(src, kind).session.expect("compiles");
+            let width = auto.tm_status().width.expect("the TM leg runs this");
+            assert!(width > tm::MIN_FIELD_WIDTH, "{src} {kind:?}: fits at the narrowest width");
+
+            let pinned = Session::compile_at(src, kind, Some(width)).session.expect("compiles");
+            assert_eq!(pinned.tm_status(), auto.tm_status(), "{src} {kind:?}");
+            assert_eq!(pinned.tm_program(), auto.tm_program(), "{src} {kind:?}");
+            assert_eq!(pinned.tm_value(), auto.tm_value(), "{src} {kind:?}");
+        }
+    }
+
+    /// **A PINNED WIDTH THAT A VALUE OUTGROWS KEEPS ITS TM**, where auto would widen: `9 + 9` needs five bits. The
+    /// leg can be stepped to its halt in the guard, and its length is the run `compile` performed.
+    ///
+    /// **THE VALUE IS THE FAULT FROM THE MOMENT `compile` RETURNS**, as a finished run's value is, not `Unfinished`
+    /// until the cursor gets there: a renderer reads `Unfinished` as a run stopped at a cap. A rewound cursor has
+    /// not halted, and the answer is still the run's.
+    #[test]
+    fn a_pinned_width_that_overflows_keeps_its_tm_and_answers_a_fault() {
+        let mut s = Session::compile_at("let a = 9; let b = 9; a + b", EncodingKind::Binary, Some(4))
+            .session
+            .expect("compiles");
+        let st = s.tm_status();
+        assert!(st.available, "a pinned overflow keeps its leg, but: {}", st.reason);
+        assert_eq!(st.width, Some(4));
+        let n = st.total_steps.expect("the run compile performed has a length");
+        assert!(n > 0);
+        assert_eq!(s.tm_value(), pinned_overflow_at_4(), "before a single step");
+
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Ended));
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        assert!(tm::is_overflow_guard(cursor.machine(), cursor.state()), "the premise: it halted in the guard");
+        assert_eq!(s.tm_state(0).expect("TM available").step, n, "the cursor's halt is the run compile performed");
+        assert_eq!(s.tm_value(), pinned_overflow_at_4(), "at the halt");
+
+        s.rewind_tm().expect("TM available");
+        assert_eq!(s.tm_value(), pinned_overflow_at_4(), "rewound");
+    }
+
+    /// What outgrows a pinned width can be a call's return tag while every value fits, and the fault names it: of
+    /// seventeen call sites, the `else` branch takes ordinal 16, which needs five bits, while the values it
+    /// computes are 1, 0 and 3. One bit wider, the same program answers its value.
+    #[test]
+    fn a_return_tag_that_outgrows_a_pinned_width_is_named_in_its_fault() {
+        let src = many_call_sites();
+        let at = |w| Session::compile_at(&src, EncodingKind::Binary, Some(w)).session.expect("compiles");
+        let wider = at(5).tm_value();
+        assert_eq!(wider, Ok(Decoded::Value { text: "3".to_string() }), "the premise: five bits hold every number");
+        assert_eq!(at(4).tm_value(), pinned_overflow_at_4());
+    }
+
+    /// Seventeen call sites whose values all fit four bits: sixteen in the `then` branch, then the one the `else`
+    /// branch takes, whose return tag is ordinal 16 and needs five bits.
+    fn many_call_sites() -> String {
+        let calls = vec!["f(0)"; 16].join(" + ");
+        format!("fn f(x) {{ x }} let c = 1; if c == 0 {{ {calls} + 7 }} else {{ f(3) }}")
+    }
+
+    /// **PINNED AT 4, THE RETURN TAG'S OVERFLOW KEEPS THE TM**, and the leg steps to its halt in the guard rather
+    /// than resuming after the wrong call site; **AUTO WIDENS PAST 4** and answers the `else` branch's `3`. Without
+    /// the return-tag guard the tag written at four bits wraps, auto keeps 4, and the machine halts normally with
+    /// a wrong value.
+    #[test]
+    fn a_program_whose_call_tags_outgrow_a_pinned_width_keeps_its_tm_and_halts_in_overflow() {
+        let src = many_call_sites();
+        let auto = Session::compile(&src, EncodingKind::Binary).session.expect("compiles");
+        assert_eq!(auto.tm_value(), Ok(Decoded::Value { text: "3".to_string() }), "auto");
+        assert_eq!(auto.tm_status().width, Some(8), "auto-fit overflows at 4 and settles on the next rung");
+
+        let mut s = Session::compile_at(&src, EncodingKind::Binary, Some(4)).session.expect("compiles");
+        let st = s.tm_status();
+        assert!(st.available, "a pinned overflow keeps its leg, but: {}", st.reason);
+        assert_eq!(st.width, Some(4));
+        let n = st.total_steps.expect("the run compile performed has a length");
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Ended));
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        assert!(tm::is_overflow_guard(cursor.machine(), cursor.state()), "it halted in the guard");
+        assert_eq!(s.tm_state(0).expect("TM available").step, n, "the cursor's halt is the run compile performed");
+        assert_eq!(s.tm_value(), pinned_overflow_at_4(), "at the halt");
+    }
+
+    /// Auto declines this counter at the widest width (`a_value_that_fits_no_width_declines_the_tm_leg_as_overflow`);
+    /// pinned there, the same overflow is kept, and its fault names the encoding's limit since no wider width exists.
+    #[test]
+    fn a_pinned_widest_width_that_overflows_is_kept() {
+        let s = Session::compile_at(
+            "let mut n = 1; while n > 0 { n = n + 1; } n",
+            EncodingKind::Unary,
+            Some(tm::MAX_FIELD_WIDTH),
+        )
+        .session
+        .expect("compiles");
+        assert!(s.tm_status().available, "kept, but: {}", s.tm_status().reason);
+        assert_eq!(s.tm_value(), Ok(overflowed_at(tm::MAX_FIELD_WIDTH, FieldFrom::Pinned)));
+    }
+
+    /// The cursor fallback words its fault as the width was asked for. A pinned run capped before its overflow,
+    /// then continued into the guard, never had `compile` see the overflow, so only the fallback can answer, and
+    /// a fallback that always used auto-fit's words would ask for a wider field rather than a wider width.
+    #[test]
+    fn a_pinned_run_raised_past_its_cap_into_overflow_answers_the_pinned_fault() {
+        let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
+        let mut s = Session::compile_with_caps(
+            "let a = 9; let b = 9; a + b",
+            EncodingKind::Binary,
+            Some(4),
+            caps,
+            tm::rxm::DEFAULT_CAPS,
+        )
+        .session
+        .expect("a capped run yields a working session");
+        while s.step_tm().expect("TM available") {}
+        assert_eq!(s.tm_status().run, Some(RunStatus::Capped), "the premise: the budget ran out first");
+        assert_eq!(s.tm_value(), Ok(Decoded::Unfinished));
+
+        s.raise_tm_cap(1_000_000, 0).expect("TM available");
+        while s.step_tm().expect("TM available") {}
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        assert!(tm::is_overflow_guard(cursor.machine(), cursor.state()), "the premise: it halted in the guard");
+        assert_eq!(s.tm_value(), pinned_overflow_at_4());
     }
 
     /// Once a raised cap carries the cursor to a halt, `total_steps` is that run's length, not the count `compile`'s
@@ -3085,7 +3299,7 @@ mod tests {
         let src = "let a = 2; let b = 3; a + b";
         let compile = |steps| {
             let caps = tm::TmCaps { steps, cells: tm::TM_DEFAULT_CAPS.cells };
-            Session::compile_with_caps(src, EncodingKind::Binary, caps, tm::rxm::DEFAULT_CAPS)
+            Session::compile_with_caps(src, EncodingKind::Binary, None, caps, tm::rxm::DEFAULT_CAPS)
                 .session
                 .expect("compiles")
         };
@@ -3114,7 +3328,7 @@ mod tests {
         let src = "let a = 2; let b = 3; a + b";
         let whole = Session::compile(src, EncodingKind::Binary).session.expect("compiles").tm_status();
         let caps = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
-        let mut s = Session::compile_with_caps(src, EncodingKind::Binary, caps, tm::rxm::DEFAULT_CAPS)
+        let mut s = Session::compile_with_caps(src, EncodingKind::Binary, None, caps, tm::rxm::DEFAULT_CAPS)
             .session
             .expect("compiles");
         assert!(whole.total_steps > Some(160), "the premise: no raise below reaches the run's end");
@@ -3162,7 +3376,9 @@ mod tests {
 
     /// `compile` with `rxm_caps` for the rxm run and the TM's default for the TM run.
     fn compile_rxm_capped(src: &str, rxm_caps: tm::rxm::Caps) -> Session {
-        Session::compile_with_caps(src, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, rxm_caps).session.expect("compiles")
+        Session::compile_with_caps(src, EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, rxm_caps)
+            .session
+            .expect("compiles")
     }
 
     /// Step the rxm cursor until it stops, and say how many steps it took.
@@ -3360,7 +3576,7 @@ mod tests {
         let src = "fn upto(n) { if n == 0 { nil } else { cons(n, upto(n - 1)) } } \
                    fn tails(xs) { if is_empty(xs) { nil } else { cons(xs, tails(tail(xs))) } } tails(upto(5000))";
         let tm_caps = tm::TmCaps { steps: 10, ..tm::TM_DEFAULT_CAPS };
-        let s = Session::compile_with_caps(src, EncodingKind::Unary, tm_caps, tm::rxm::DEFAULT_CAPS)
+        let s = Session::compile_with_caps(src, EncodingKind::Unary, None, tm_caps, tm::rxm::DEFAULT_CAPS)
             .session
             .expect("compiles");
         assert_eq!(s.rxm_status().run, Some(RunStatus::Running), "the leg is there");
@@ -4369,17 +4585,17 @@ state halt: accept
     }
 
     /// **EVERY STATE THE RUN BILLS TO AN INSTRUCTION RESOLVES — ITS INSTRUCTION, AND FOR A FIRST-ORDER PROGRAM ITS
-    /// OWNER.** State names depend on the field width, so this holds only because `compile` builds its map at the
-    /// width the run fitted (its doc has the numbers for a map built at `MIN_FIELD_WIDTH`).
+    /// OWNER.** State names depend on the field width, so this holds only because `compile_at` builds its map at the
+    /// width the run fitted or was pinned to (its doc has the numbers for a map built at `MIN_FIELD_WIDTH`).
     ///
     /// **THIS COUNTS RATHER THAN STEPPING UNTIL ONE STATE RESOLVES AN OWNER**, which a map built at
     /// `MIN_FIELD_WIDTH` passes with 47 of the sample's 121 billed states unresolved: the authority is
-    /// `lower_tm_mapped` at the fitted width, over a program lowered by `lower_rxm` and `defunc` rather than their
-    /// `_mapped` twins the map uses, and every state must agree with it. Each fixture fits wider than
-    /// `MIN_FIELD_WIDTH`, or it could not tell the two widths apart.
+    /// `lower_tm_mapped` at the run's width, over a program lowered by `lower_rxm` and `defunc` rather than their
+    /// `_mapped` twins the map uses, and every state must agree with it. Each fixture but the capped one runs wider
+    /// than `MIN_FIELD_WIDTH`, or it could not tell the two widths apart.
     ///
-    /// **BOTH ARMS THAT YIELD A LEG, AND THE DEFUNC ROAD.** A budget of 10 steps stops the sample in `HitCap` at the
-    /// narrowest width — the fitting loop retries only an overflow — so that case asks for no widening. A program
+    /// **EVERY ARM THAT YIELDS A LEG, AND THE DEFUNC ROAD.** A budget of 10 steps stops the sample in `HitCap` at the
+    /// narrowest width (the fitting loop retries only an overflow); a pinned overflow is kept at 8. A program
     /// `lower_rxm` refuses reaches the TM half only through `defunc`, whose minted constructs own nothing: there
     /// every owned state is billed, and some billed states are not owned.
     #[test]
@@ -4387,17 +4603,29 @@ state halt: accept
         let list20 = format!("[{}]", (1..=20).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
         let capped = tm::TmCaps { steps: 10, cells: tm::TM_DEFAULT_CAPS.cells };
         let higher = "fn apply2(f, x) { f(x) } fn add1(x) { x + 1 } apply2(add1, 5)";
-        for (src, kind, caps, widens) in [
-            ("let x = 40; x + 2", EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
-            ("let x = 40; x + 2", EncodingKind::Binary, tm::TM_DEFAULT_CAPS, true),
-            (list20.as_str(), EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
-            ("let x = 40; x + 2", EncodingKind::Unary, capped, false),
-            (higher, EncodingKind::Unary, tm::TM_DEFAULT_CAPS, true),
+        let overflows = "let x = 200; x + 100";
+        for (src, kind, pin, caps, widens) in [
+            ("let x = 40; x + 2", EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, true),
+            ("let x = 40; x + 2", EncodingKind::Binary, None, tm::TM_DEFAULT_CAPS, true),
+            (list20.as_str(), EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, true),
+            ("let x = 40; x + 2", EncodingKind::Unary, None, capped, false),
+            (higher, EncodingKind::Unary, None, tm::TM_DEFAULT_CAPS, true),
+            // Pinned wider than auto's 8, on and off the widths auto tries, and a pinned run kept although it
+            // overflows (300 needs nine bits).
+            ("let x = 40; x + 2", EncodingKind::Binary, Some(16), tm::TM_DEFAULT_CAPS, true),
+            ("let x = 40; x + 2", EncodingKind::Binary, Some(13), tm::TM_DEFAULT_CAPS, true),
+            (overflows, EncodingKind::Binary, Some(8), tm::TM_DEFAULT_CAPS, true),
         ] {
-            let s = Session::compile_with_caps(src, kind, caps, tm::rxm::DEFAULT_CAPS).session.expect("compiles");
+            let s = Session::compile_with_caps(src, kind, pin, caps, tm::rxm::DEFAULT_CAPS).session.expect("compiles");
             let program = s.tm_program().expect("the TM leg runs this");
             if widens {
                 assert!(program.width > tm::MIN_FIELD_WIDTH, "{src} {kind:?}: fits at the narrowest width");
+            }
+            if let Some(w) = pin {
+                assert_eq!(program.width, w, "{src} {kind:?}: the pin is the width");
+            }
+            if src == overflows {
+                assert!(matches!(s.run_end, RunEnd::Overflowed), "the premise: kept although it overflowed");
             }
 
             let (rxm, first_order) = match tm::lower_rxm(&s.core) {

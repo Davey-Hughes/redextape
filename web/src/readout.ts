@@ -30,6 +30,8 @@ export type ProgramResult =
        */
       readonly gen: number
       readonly legs: Readonly<ResultLegs>
+      /** The reply's own `pinned`: whether the TM leg's width is the user's choice, which its rows mark. */
+      readonly pinned: boolean
     }
   | { readonly kind: 'no-session'; readonly diagnostics: readonly Diagnostic[] }
   | { readonly kind: 'error'; readonly error: unknown }
@@ -65,6 +67,13 @@ const HISTORY_FULL_ROW: Readonly<Record<Leg, boolean>> = {
 }
 
 /**
+ * What follows a pinned TM width, in the strip and the inspector (the TM width design, decision 23). With no TM view
+ * open there is no width box, so without it a pinned width would read as auto's fit, and a pinned run's overflow
+ * fault would point at a control the page does not show.
+ */
+const PINNED = '(pinned)'
+
+/**
  * `results.ts`'s rows for the program, with a row saying where a machine leg's recording filled its history.
  *
  * **THE RESULT IS THE COMPILE'S RUN AND THE FACT IS THE RECORDING'S, SO THEY ARE TWO INPUTS.** `compile` runs the rxm
@@ -94,7 +103,9 @@ const HISTORY_FULL_ROW: Readonly<Record<Leg, boolean>> = {
  * records nothing, so it gets none.
  */
 function programResultRows(r: Extract<ProgramResult, { kind: 'result' }>, recording: ProgramRecording): Row[] {
-  const rows = resultRows(r.legs)
+  const rows = resultRows(r.legs).map((row) =>
+    r.pinned && row.leg === 'TM' && row.label === 'width' ? { ...row, value: `${row.value} ${PINNED}` } : row,
+  )
   if (r.gen !== recording.gen) return rows
   const full = new Map<string, string>()
   for (const l of LEGS) {
@@ -125,7 +136,8 @@ export function programSegments(r: ProgramResult | null, recording: ProgramRecor
     // THE WIDTH GOES LAST, AS `width N` (spec §9's `TM 42 · 18,574 transitions · width 8`): `results.ts`
     // lists it first, as `N cells`, for a table where each row has its label beside it.
     const rest = own.filter((row) => !['value', 'normal form', 'term so far', 'width'].includes(row.label))
-    const width = name === 'TM' && r.legs.tm.status.width !== null ? [`width ${n(r.legs.tm.status.width)}`] : []
+    const tmWidth = r.legs.tm.status.width
+    const width = name === 'TM' && tmWidth !== null ? [`width ${n(tmWidth)}${r.pinned ? ` ${PINNED}` : ''}`] : []
     return [value === undefined ? name : `${name} ${value}`, ...rest.map((row) => row.value), ...width].join(' · ')
   }
   // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM — named as `LEG_NAME` names them, which is what `results.ts`'s

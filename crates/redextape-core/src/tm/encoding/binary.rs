@@ -980,8 +980,8 @@ impl Encoding for Binary {
         // non-`#` (or nothing) where the delimiter must be, and all yield `None` rather than a
         // plausible number.
         //
-        // An EMPTY field (`##`, digit run of length 0) reads as `Some(0)`. No bank this encoding lays
-        // out contains one — `init_reg` writes `width >= MIN_FIELD_WIDTH` digits per field — so it is a
+        // An EMPTY field (`##`, digit run of length 0) reads as `Some(0)`. No fitted or pinned bank
+        // contains one — `init_reg` writes `width` digits per field, never under one — so it is a
         // degenerate input either way; `Some(0)` is chosen because `Unary::decode_nat` answers the same
         // for the same shape, and the point of this method is that the two agree.
         let mut seps = 0u32;

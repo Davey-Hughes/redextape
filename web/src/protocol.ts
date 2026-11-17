@@ -460,7 +460,12 @@ export type LambdaTreeWire = {
 }
 
 export type RunRequest =
-  | { kind: 'run'; gen: number; src: string; encoding: string }
+  /**
+   * Compile and run the source. **`width` IS PRESENT ONLY WHEN PINNED**: the field width every TM run of this compile
+   * uses, one of wasm's `fieldWidths()`. Absent, wasm fits the width itself (auto), so an auto request is the same
+   * message whether or not its sender knows about widths.
+   */
+  | { kind: 'run'; gen: number; src: string; encoding: string; width?: number }
   /**
    * Build a copy of `leg` from that leg's TEXT and record it: a λ fork (5d-i design §4.3), a TM copy (5d-iv design
    * §4.4) or an rxm copy (Plan 7 part 5 spec §7). A `ScratchBuffers` buffer sends the leg it was minted on.
@@ -801,8 +806,13 @@ export type RunReply =
    * Every leg interrogated once a request's recording stopped — what `results.ts` renders. A leg still recording keeps
    * the part last posted for it, or before the generation's first `result` the part a rewind found, where there is one
    * (`keepInFlight`); one whose decided value a rewind took away keeps its last `result`'s (`keepDecided`).
+   *
+   * `pinned` is whether the `run` request carried a width, so whether the TM leg's `status.width` is the user's choice
+   * or auto's fit: the strip marks a pinned width, since with no TM view open there is no width box to show it
+   * (the TM width design, decision 23). It is carried with the result, not read from the page's width, because a
+   * result on screen can be the previous compile's while a newly chosen width compiles.
    */
-  | { kind: 'result'; gen: number; legs: ResultLegs }
+  | { kind: 'result'; gen: number; legs: ResultLegs; pinned: boolean }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**

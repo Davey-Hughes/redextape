@@ -1,6 +1,7 @@
 import type { Extension } from '@codemirror/state'
 import { canRecordFurther } from './controls'
 import type { KeymapSetting } from './editor-keymap'
+import type { FieldWidth } from './field-width'
 import type { LinkWiring } from './link-wiring'
 import type { LspClient } from './lsp-client'
 import type { LanguageId } from './lsp-protocol'
@@ -49,6 +50,8 @@ export function createTransport(deps: {
   speed: () => Speed
   /** Set the workspace's one speed — `main.ts` writes the workspace and draws. */
   setSpeed: (s: Speed) => void
+  /** The program's one field width, handed to every view as `speed` is; a caller without it builds no width box. */
+  fieldWidth?: FieldWidth
   /** Say a refusal — `notice.ts`'s `notify`. */
   notify: (text: string) => void
   linkWiring: () => LinkWiring
@@ -261,6 +264,7 @@ export function createTransport(deps: {
     // ONE SPEED FOR THE WORKSPACE, NOT PER VIEW — every view's step controls read and set the same value.
     speed: deps.speed,
     setSpeed: deps.setSpeed,
+    ...(deps.fieldWidth !== undefined ? { fieldWidth: deps.fieldWidth } : {}),
     back: () => {
       taken(slot).hist.back()
       draw()

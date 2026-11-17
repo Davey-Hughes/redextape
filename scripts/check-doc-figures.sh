@@ -91,8 +91,8 @@
 #      is checked. Deleting a claimed figure, by contrast, fails loudly.
 #
 # **ONE ROW'S DOCUMENT IS A SOURCE FILE, NOT A README, AND THAT IS A DELIBERATE WIDENING.**
-# `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The TENTH export" in a doc comment, and
-# `docs/architecture.md` states the same fact twice more — "ten exported functions" and "the tenth, `tapeNames()`". An ORDINAL
+# `crates/redextape-wasm/src/lib.rs` calls `tapeNames()` "The ELEVENTH export" in a doc comment, and
+# `docs/architecture.md` states the same fact twice more — "eleven exported functions" and "the eleventh, `tapeNames()`". An ORDINAL
 # that moves whenever any export is added, with no gate behind it, goes stale with nothing to say so.
 # The scan reads any path it is given — `normalize` just flattens a file — so the widening costs one row
 # and no machinery.
@@ -261,7 +261,7 @@ derive_cmd() {
 # rather than silently reading as zero.
 #
 # **ORDINALS ARE HERE FOR THE `tapeNames()` ROWS, AND THEY READ AS THE POSITION THEY NAME.** Two
-# documents call that export "the tenth" and one of them capitalises it; there is no sentence in this
+# documents call that export "the eleventh" and one of them capitalises it; there is no sentence in this
 # tree where an ordinal word means anything but its own number, so they share the table rather than
 # getting a second one. The row that uses them derives a POSITION — see this file's header.
 to_number() {

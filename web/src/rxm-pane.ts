@@ -222,8 +222,9 @@ export class RxmPane implements EditablePane {
     machine.className = 'rxm-machine'
     machine.append(this.#registersPanel.el, this.#stackPanel.el)
 
-    // THE TEXT PANEL FIRST, THE OUTLINE LAST — the TM view's order (spec amendment 28). On a view of the program both
-    // start hidden and take no room, so this order is invisible until a copy's editor mounts.
+    // THE TEXT PANEL FIRST, THE OUTLINE LAST — the TM view's order under its status line (spec amendment 28), a line
+    // this view does not have. On a view of the program both start hidden and take no room, so this order is
+    // invisible until a copy's editor mounts.
     this.#body = document.createElement('div')
     this.#body.className = 'rxm-pane'
     this.#body.append(

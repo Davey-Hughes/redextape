@@ -1,4 +1,5 @@
 import type { EditorView } from '@codemirror/view'
+import { fieldWidths } from '../../../pkg/redextape_wasm.js'
 import { PROGRAM_STORAGE_KEY, parseProgram, serializeProgram } from '../../src/program-store'
 import type { SharePayload } from '../../src/share-link'
 import { defaultWorkspace, PRESETS, serializeWorkspace } from '../../src/workspace'
@@ -31,7 +32,8 @@ export const LEFT_OUT = "opened a shared link's program — its encoding, worksp
 
 export const workspaceName = () => document.querySelector('#workspace')?.textContent
 /** The program storage holds: the last write that went through. */
-export const stored = () => parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['unary', 'binary'])
+export const stored = () =>
+  parseProgram(localStorage.getItem(PROGRAM_STORAGE_KEY), ['unary', 'binary'], fieldWidths() as number[])
 
 /** Every compile the page has posted, in order: the text and the encoding of each `run` request. */
 export const runs: { src: string; encoding: string }[] = []

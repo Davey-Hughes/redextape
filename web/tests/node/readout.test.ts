@@ -18,7 +18,8 @@ const TM = {
 const GEN = 3
 const leg = (newestStep: number, done: RecordEnd | null) => ({ hist: { newestStep }, done })
 /** The program's compile `gen`, as `replies.ts` stores its `result` reply. */
-const result = (gen = GEN) => ({ kind: 'result', gen, legs: { lambda: LAMBDA, rxm: RXM, tm: TM } }) as never
+const result = (gen = GEN, pinned = false) =>
+  ({ kind: 'result', gen, legs: { lambda: LAMBDA, rxm: RXM, tm: TM }, pinned }) as never
 /** The program's recording for `GEN` with every leg ended: what a result with no full history is drawn beside. */
 const ENDED = { gen: GEN, lambda: leg(7, 'ended'), rxm: leg(55, 'ended'), tm: leg(2_870, 'ended') }
 /** The strip for `result()` with no full history in it. */
@@ -27,6 +28,20 @@ const PLAIN = ['λ 42 · 7 reductions', 'rxm 42 · 55 instructions', 'TM 42 · 2
 describe('programSegments', () => {
   it('reads value and counts per leg, with no normal-form text', () => {
     expect(programSegments(result(), ENDED)).toEqual(PLAIN)
+  })
+
+  /**
+   * **A PINNED WIDTH IS MARKED, IN THE STRIP AND IN THE INSPECTOR** (the TM width design, decision 23): with no TM
+   * view open, nothing else on the page says the width was chosen rather than fitted. The mark is the result's own, so
+   * it holds beside a recording of a later generation too.
+   */
+  it('marks a pinned TM width, and not auto’s', () => {
+    const widthRow = (r: never) => programRows(r, ENDED).find((row) => row.label === 'TM width')
+    expect(programSegments(result(GEN, true), ENDED)[2]).toBe('TM 42 · 2,870 transitions · width 8 (pinned)')
+    expect(widthRow(result(GEN, true))?.value).toBe('8 cells (pinned)')
+    expect(widthRow(result(GEN - 1, true))?.value).toBe('8 cells (pinned)')
+    expect(programSegments(result(GEN, false), ENDED)[2]).toBe('TM 42 · 2,870 transitions · width 8')
+    expect(widthRow(result(GEN, false))?.value).toBe('8 cells')
   })
 
   it('says a program that does not compile, and how many errors', () => {
