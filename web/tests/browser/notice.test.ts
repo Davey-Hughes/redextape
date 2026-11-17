@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { userEvent } from 'vitest/browser'
 import { createNotices, NOTICE_MS } from '../../src/notice'
 import { hear } from './harness'
 
@@ -105,7 +106,8 @@ describe('notices', () => {
     })
 
     // THE OTHER TWO WAYS A NOTICE ENDS UNDER THE FOCUS: drawn over by a notice with no action of its own, and expired
-    // onto a resting sentence, which has none either. Each hands the focus to the ending notice's own fallback.
+    // onto a resting sentence, whose `hide` is not what the user was on. Each hands the focus to the ending notice's own
+    // fallback.
     it('goes to the action’s own fallback when a notice with no action is drawn over it', () => {
       const own = document.createElement('button')
       document.body.append(own)
@@ -127,6 +129,51 @@ describe('notices', () => {
       vi.advanceTimersByTime(NOTICE_MS)
       expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
       expect(document.activeElement).toBe(own)
+    })
+
+    /**
+     * **WITH THE RESTING SENTENCE UNDER IT, A PRESS ON THE ACTION STILL ENDS ON ITS FALLBACK, AND A SECOND PRESS HITS
+     * NOTHING.** The sentence comes back with its `hide` on the same button's place, in the app's own styles: the focus
+     * left there, or a double-click's second click landing there, would take the one sign that nothing is being saved
+     * off the line. Real presses, on real timers.
+     */
+    describe('with the resting sentence under it, pressed', () => {
+      const setUp = () => {
+        vi.useRealTimers()
+        line.className = 'notice'
+        line.style.setProperty('--notice-row', '100px')
+        const own = document.createElement('button')
+        own.textContent = 'examples'
+        document.body.append(own)
+        const n = createNotices(line, live, fallbackEl)
+        n.rest('copies are not being saved')
+        const run = vi.fn()
+        n.notify('opened the example fact(4)', { action: { label: 'undo', run, fallback: () => own } })
+        return { own, run, undo: line.querySelector('button.notice-action') as HTMLButtonElement }
+      }
+
+      it('goes to the action’s own fallback, not to hide', async () => {
+        const { own, run, undo } = setUp()
+        await userEvent.click(undo)
+        expect(run).toHaveBeenCalledTimes(1)
+        expect(line.querySelector('button.notice-action')?.textContent, 'the resting sentence’s hide').toBe('hide')
+        expect(document.activeElement).toBe(own)
+      })
+
+      it('runs the action once on a double-click and leaves the resting sentence up', async () => {
+        const { run, undo } = setUp()
+        const at = undo.getBoundingClientRect()
+        await userEvent.dblClick(undo)
+        expect(line.hidden, 'the resting sentence after the double-click').toBe(false)
+        expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+        expect(run).toHaveBeenCalledTimes(1)
+        const hide = line.querySelector('button.notice-action') as HTMLElement
+        expect(hide.textContent, 'precondition: hide is drawn where undo was').toBe('hide')
+        expect(
+          document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2),
+          'precondition: hide lies where the double-click landed',
+        ).toBe(hide)
+      })
     })
 
     it('leaves the focus alone when it is somewhere else entirely', () => {
@@ -176,7 +223,8 @@ describe('notices', () => {
 
     /**
      * **IN THE APP'S OWN STYLES, AT A PHONE'S WIDTH, WHERE THE LONGER WORDS WRAP.** The button sits at the line's end
-     * and on its first line, so neither the words' length nor how many lines they take moves it.
+     * and on its first line, so neither the words' length nor how many lines they take moves it: the notice floats
+     * anchored at its top corner, and grows away from it.
      */
     it('stays where it was however long the words are, and however many lines they take', () => {
       line.className = 'notice'
@@ -231,7 +279,7 @@ describe('notices', () => {
     n.rest('copies are not being saved')
     const pick = n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
     pick.dismiss()
-    expect(line.querySelector('button.notice-action')).toBeNull()
+    expect(line.querySelector('button.notice-action')?.textContent).toBe('hide')
     expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
   })
 

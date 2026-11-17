@@ -301,6 +301,10 @@ Row wording takes §12's vocabulary: *reductions* and *transitions* for β-steps
 
 ## §11 Notices, the live region, and focus
 
+> The notice no longer sits in the page's flow under the header: it floats over the header, in its empty run just
+> before `share` where it fits there and over `share` and the controls after it where it does not, per
+> `2026-11-17-notice-float-design.md`.
+
 - **`notice.ts`** shows the latest notice as one visible line under the header, with at most one action
   (*undo*), for 8 s or until the next notice replaces it. It writes the same text to **one** visually
   hidden element with `role="status"` — the app's single polite live region. Every notice expires;

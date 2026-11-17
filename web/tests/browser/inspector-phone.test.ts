@@ -64,9 +64,9 @@ async function pick(selector: string): Promise<void> {
 }
 
 /**
- * Put the page in workspace `w`, **CHOSEN AFRESH, SO THE NOTICE LINE IS UP**: the last pick says so on the notice line
- * for 8 s, and the line is a box above `main`. Picking what is already in force says nothing, so another preset is
- * picked first.
+ * Put the page in workspace `w`, **CHOSEN AFRESH, SO THE NOTICE IS UP**: the last pick says so for 8 s, in a notice
+ * floating over the page, where it must move no box. Picking what is already in force says nothing, so another preset
+ * is picked first.
  */
 async function choose(w: Workspace): Promise<void> {
   const { preset, readout } = WORKSPACES[w]
@@ -291,104 +291,102 @@ describe('at a phone’s width the inspector stacks under the views', () => {
 })
 
 /**
- * Every box `53ecbfa` drew, as `[left, top, width, height]`, measured there with the preset's notice up: `main`,
- * `#views`, the inspector, its header and (open) its body, the Stage's tab strip, and each view on the page.
- *
- * **BUT THE INSPECTOR'S HEADER IS TALLER BY `.panel-header`'S BLOCK PADDING**, and its open body starts lower and is
- * shorter by as much.
+ * Every box the page draws, as `[left, top, width, height]`, with the preset's notice up: `main`, `#views`, the
+ * inspector, its header and (open) its body, the Stage's tab strip, and each view on the page. **THE NOTICE TAKES NO
+ * ROOM**: it floats over the page, so these are the boxes with it gone as well.
  */
 const HELD_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
   'debugger@1280x800 open': {
-    main: [0, 74.5, 1280, 678.5],
-    views: [0, 74.5, 992, 678.5],
-    inspector: [992, 74.5, 288, 678.5],
-    header: [993, 74.5, 287, 33],
-    body: [993, 107.5, 287, 645.5],
-    source: [0, 74.5, 490, 333.25],
-    'lambda-0': [502, 74.5, 490, 333.25],
-    'rxm-0': [0, 419.75, 490, 333.25],
-    'tm-0': [502, 419.75, 490, 333.25],
+    main: [0, 46, 1280, 707],
+    views: [0, 46, 992, 707],
+    inspector: [992, 46, 288, 707],
+    header: [993, 46, 287, 33],
+    body: [993, 79, 287, 674],
+    source: [0, 46, 490, 347.5],
+    'lambda-0': [502, 46, 490, 347.5],
+    'rxm-0': [0, 405.5, 490, 347.5],
+    'tm-0': [502, 405.5, 490, 347.5],
   },
   'debugger@1280x800 closed': {
-    main: [0, 74.5, 1280, 678.5],
-    views: [0, 74.5, 992, 678.5],
-    inspector: [992, 74.5, 288, 678.5],
-    header: [993, 74.5, 287, 33],
-    source: [0, 74.5, 490, 333.25],
-    'lambda-0': [502, 74.5, 490, 333.25],
-    'rxm-0': [0, 419.75, 490, 333.25],
-    'tm-0': [502, 419.75, 490, 333.25],
+    main: [0, 46, 1280, 707],
+    views: [0, 46, 992, 707],
+    inspector: [992, 46, 288, 707],
+    header: [993, 46, 287, 33],
+    source: [0, 46, 490, 347.5],
+    'lambda-0': [502, 46, 490, 347.5],
+    'rxm-0': [0, 405.5, 490, 347.5],
+    'tm-0': [502, 405.5, 490, 347.5],
   },
   'debugger@481x800 open': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
-    header: [194, 164.5, 287, 33],
-    body: [194, 197.5, 287, 555.5],
-    source: [0, 164.5, 90.5, 288.25],
-    'lambda-0': [102.5, 164.5, 90.5, 288.25],
-    'rxm-0': [0, 464.75, 90.5, 288.25],
-    'tm-0': [102.5, 464.75, 90.5, 288.25],
+    main: [0, 136, 481, 617],
+    views: [0, 136, 193, 617],
+    inspector: [193, 136, 288, 617],
+    header: [194, 136, 287, 33],
+    body: [194, 169, 287, 584],
+    source: [0, 136, 90.5, 302.5],
+    'lambda-0': [102.5, 136, 90.5, 302.5],
+    'rxm-0': [0, 450.5, 90.5, 302.5],
+    'tm-0': [102.5, 450.5, 90.5, 302.5],
   },
   'debugger@481x800 closed': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
-    header: [194, 164.5, 287, 33],
-    source: [0, 164.5, 90.5, 288.25],
-    'lambda-0': [102.5, 164.5, 90.5, 288.25],
-    'rxm-0': [0, 464.75, 90.5, 288.25],
-    'tm-0': [102.5, 464.75, 90.5, 288.25],
+    main: [0, 136, 481, 617],
+    views: [0, 136, 193, 617],
+    inspector: [193, 136, 288, 617],
+    header: [194, 136, 287, 33],
+    source: [0, 136, 90.5, 302.5],
+    'lambda-0': [102.5, 136, 90.5, 302.5],
+    'rxm-0': [0, 450.5, 90.5, 302.5],
+    'tm-0': [102.5, 450.5, 90.5, 302.5],
   },
   'stage@1280x800 open': {
-    main: [0, 74.5, 1280, 678.5],
-    views: [0, 74.5, 992, 678.5],
-    inspector: [992, 74.5, 288, 678.5],
-    header: [993, 74.5, 287, 33],
-    body: [993, 107.5, 287, 645.5],
-    tabs: [0, 74.5, 992, 30.5],
-    'lambda-0': [0, 105, 992, 648],
+    main: [0, 46, 1280, 707],
+    views: [0, 46, 992, 707],
+    inspector: [992, 46, 288, 707],
+    header: [993, 46, 287, 33],
+    body: [993, 79, 287, 674],
+    tabs: [0, 46, 992, 30.5],
+    'lambda-0': [0, 76.5, 992, 676.5],
   },
   'stage@1280x800 closed': {
-    main: [0, 74.5, 1280, 678.5],
-    views: [0, 74.5, 992, 678.5],
-    inspector: [992, 74.5, 288, 678.5],
-    header: [993, 74.5, 287, 33],
-    tabs: [0, 74.5, 992, 30.5],
-    'lambda-0': [0, 105, 992, 648],
+    main: [0, 46, 1280, 707],
+    views: [0, 46, 992, 707],
+    inspector: [992, 46, 288, 707],
+    header: [993, 46, 287, 33],
+    tabs: [0, 46, 992, 30.5],
+    'lambda-0': [0, 76.5, 992, 676.5],
   },
   'stage@481x800 open': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
-    header: [194, 164.5, 287, 33],
-    body: [194, 197.5, 287, 555.5],
-    tabs: [0, 164.5, 193, 50],
-    'lambda-0': [0, 214.5, 193, 538.5],
+    main: [0, 136, 481, 617],
+    views: [0, 136, 193, 617],
+    inspector: [193, 136, 288, 617],
+    header: [194, 136, 287, 33],
+    body: [194, 169, 287, 584],
+    tabs: [0, 136, 193, 50],
+    'lambda-0': [0, 186, 193, 567],
   },
   'stage@481x800 closed': {
-    main: [0, 164.5, 481, 588.5],
-    views: [0, 164.5, 193, 588.5],
-    inspector: [193, 164.5, 288, 588.5],
-    header: [194, 164.5, 287, 33],
-    tabs: [0, 164.5, 193, 50],
-    'lambda-0': [0, 214.5, 193, 538.5],
+    main: [0, 136, 481, 617],
+    views: [0, 136, 193, 617],
+    inspector: [193, 136, 288, 617],
+    header: [194, 136, 287, 33],
+    tabs: [0, 136, 193, 50],
+    'lambda-0': [0, 186, 193, 567],
   },
   'explorer@390x844': {
-    main: [0, 164.5, 390, 610.25],
-    views: [0, 164.5, 390, 610.25],
-    source: [0, 164.5, 189, 299.125],
-    'lambda-0': [201, 164.5, 189, 299.125],
-    'rxm-0': [0, 475.625, 189, 299.125],
-    'tm-0': [201, 475.625, 189, 299.125],
+    main: [0, 136, 390, 638.75],
+    views: [0, 136, 390, 638.75],
+    source: [0, 136, 189, 313.375],
+    'lambda-0': [201, 136, 189, 313.375],
+    'rxm-0': [0, 461.375, 189, 313.375],
+    'tm-0': [201, 461.375, 189, 313.375],
   },
   'explorer@320x568': {
-    main: [0, 229, 320, 246.25],
-    views: [0, 229, 320, 246.25],
-    source: [0, 229, 154, 117.125],
-    'lambda-0': [166, 229, 154, 117.125],
-    'rxm-0': [0, 358.125, 154, 117.125],
-    'tm-0': [166, 358.125, 154, 117.125],
+    main: [0, 181, 320, 294.25],
+    views: [0, 181, 320, 294.25],
+    source: [0, 181, 154, 141.125],
+    'lambda-0': [166, 181, 154, 141.125],
+    'rxm-0': [0, 334.125, 154, 141.125],
+    'tm-0': [166, 334.125, 154, 141.125],
   },
 }
 
@@ -441,11 +439,10 @@ describe('nothing moves where the inspector does not stack: at 481 px and wider,
 
 /**
  * The short pages the stacked cases run at, each with whether `main` is at its minimum there in Debugger and on the
- * Stage, by the notice: measured, `main` would be 199.63 px at 320×500 with the notice up and 247.63 with it gone, so
- * 320×500 is the one short page above 15rem.
+ * Stage: 320×500 is the one short page above 15rem, with the notice up or gone, since the notice floats over the page.
  */
 const SHORT_STACKED = [
-  [320, 500, 'up', true],
+  [320, 500, 'up', false],
   [320, 400, 'up', true],
   [320, 320, 'up', true],
   [320, 500, 'gone', false],
@@ -536,27 +533,27 @@ function pageBoxes(): Record<string, Box> {
 }
 
 /**
- * Every box `53ecbfa` drew on a short page with no inspector, measured there by a probe with `pageBoxes`, the
- * notice up or gone.
+ * Every box a short page with no inspector draws, measured by a probe with `pageBoxes`, the notice up or gone: the
+ * same boxes either way, since the notice floats over the page.
  */
 const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> = {
   'stage-strip@320x400 up': {
-    main: [0, 229, 320, 50],
-    views: [0, 229, 320, 50],
-    tabs: [0, 229, 320, 50],
-    'lambda-0': [0, 279, 320, 0],
-    step: [0, 279, 320, 62.375],
-    strip: [0, 341.375, 320, 92.75],
-    page: [0, 0, 320, 434],
+    main: [0, 181, 320, 63.875],
+    views: [0, 181, 320, 63.875],
+    tabs: [0, 181, 320, 50],
+    'lambda-0': [0, 231, 320, 13.875],
+    step: [0, 244.875, 320, 62.375],
+    strip: [0, 307.25, 320, 92.75],
+    page: [0, 0, 320, 400],
   },
   'stage-strip@320x320 up': {
-    main: [0, 229, 320, 50],
-    views: [0, 229, 320, 50],
-    tabs: [0, 229, 320, 50],
-    'lambda-0': [0, 279, 320, 0],
-    step: [0, 279, 320, 62.375],
-    strip: [0, 341.375, 320, 92.75],
-    page: [0, 0, 320, 434],
+    main: [0, 181, 320, 50],
+    views: [0, 181, 320, 50],
+    tabs: [0, 181, 320, 50],
+    'lambda-0': [0, 231, 320, 0],
+    step: [0, 231, 320, 62.375],
+    strip: [0, 293.375, 320, 92.75],
+    page: [0, 0, 320, 386],
   },
   'stage-strip@320x400 gone': {
     main: [0, 181, 320, 63.875],
@@ -577,24 +574,24 @@ const SHORT_PAGE_BOXES: Readonly<Record<string, Readonly<Record<string, Box>>>> 
     page: [0, 0, 320, 386],
   },
   'explorer@320x400 up': {
-    main: [0, 229, 320, 78.25],
-    views: [0, 229, 320, 78.25],
-    source: [0, 229, 154, 33.125],
-    'lambda-0': [166, 229, 154, 33.125],
-    'rxm-0': [0, 274.125, 154, 33.125],
-    'tm-0': [166, 274.125, 154, 33.125],
+    main: [0, 181, 320, 126.25],
+    views: [0, 181, 320, 126.25],
+    source: [0, 181, 154, 57.125],
+    'lambda-0': [166, 181, 154, 57.125],
+    'rxm-0': [0, 250.125, 154, 57.125],
+    'tm-0': [166, 250.125, 154, 57.125],
     strip: [0, 307.25, 320, 92.75],
     page: [0, 0, 320, 400],
   },
   'explorer@320x320 up': {
-    main: [0, 229, 320, 0],
-    views: [0, 229, 320, 0],
-    source: [0, 229, 154, 0],
-    'lambda-0': [166, 229, 154, 0],
-    'rxm-0': [0, 241, 154, 0],
-    'tm-0': [166, 241, 154, 0],
-    strip: [0, 229, 320, 92.75],
-    page: [0, 0, 320, 322],
+    main: [0, 181, 320, 46.25],
+    views: [0, 181, 320, 46.25],
+    source: [0, 181, 154, 17.125],
+    'lambda-0': [166, 181, 154, 17.125],
+    'rxm-0': [0, 210.125, 154, 17.125],
+    'tm-0': [166, 210.125, 154, 17.125],
+    strip: [0, 227.25, 320, 92.75],
+    page: [0, 0, 320, 320],
   },
   'explorer@320x400 gone': {
     main: [0, 181, 320, 126.25],

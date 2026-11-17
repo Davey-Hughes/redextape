@@ -348,8 +348,7 @@ select option {
   cursor: pointer;
 }
 /* THE ABOUT MENU (about pages design §5): links, drawn as the other menus' items, and the build beneath a rule. It
-   sits just before settings, which stays the header's last control so a Tab from it still reaches the notice line's
-   action, and opens leftward as settings does. */
+   sits just before settings and opens leftward as settings does. */
 .header-menu > a {
   text-decoration: none;
 }
@@ -1829,10 +1828,13 @@ button.view-title[aria-expanded="true"] {
   font-size: 0.85em;
   color: var(--fg-dim);
 }
-/* In the strip (spec §9), at its right end — after the base rule, which it narrows. */
+/* In the strip (spec §9), at its right end — after the base rule, which it narrows. **ITS LINE IS THE `min-height`,
+   1.2em**, so a sentence coming or going leaves the strip's height as it was: a run writes one and takes it away, and
+   the strip is the page's foot, whose growth the workspace above it would give up. */
 .strip .link-status {
   margin-inline-start: auto;
   padding: 0;
+  line-height: 1.2;
 }
 
 /* A linked node in the λ view, when it fits one row: one span round its run of tokens. A ground and
@@ -2023,22 +2025,46 @@ main {
   outline-offset: -2px;
 }
 
-/* THE NOTICE LINE (spec §11): one line under the header, the latest notice and at most one action. THE ACTION SITS AT
-   THE LINE'S END, ON ITS FIRST LINE, so no length of the words beside it moves it: a notice offering the same action
-   again keeps its button (`notice.ts`'s `paint`), and a press on it must still be on it at the release. */
+/* THE NOTICE (spec §11, as the notice float design amends it): the latest notice and at most one action. **FIXED,
+   OVER THE HEADER**, so it takes no room: `notice.ts`'s `floatInRun` sets `--notice-end` and `--notice-row`, the run's
+   end and row where it fits and the header's end on its last control's row where it does not. It grows towards the
+   inline start, to the window's gutter, and wraps down. In the header, so Tab reaches its action as drawn. Under the
+   top layer's menus and dialogs; drawn as the menus are. **ITS WORDS TAKE NO POINTER**, so a click on them reaches the
+   control under them. THE ACTION ENDS THE FIRST LINE: anchored at its top and inline end, the box grows away from that
+   corner, so the words' length never moves a kept button (`notice.ts`'s `paint`). The first line is the action's
+   height (its line and border), centred on its row. */
 .notice {
+  position: fixed;
+  inset-block-start: calc(var(--notice-row, 0px) - (1lh + 2px) / 2 - var(--space-1) - 1px);
+  inset-inline-end: var(--notice-end, var(--space-3));
+  max-width: calc(100% - var(--notice-end, var(--space-3)) - var(--space-3));
+  pointer-events: none;
+  z-index: 10;
+  box-sizing: border-box;
   display: flex;
   align-items: baseline;
   gap: var(--space-3);
   padding: var(--space-1) var(--space-3);
-  border-bottom: 1px solid var(--rule);
-  background: var(--bg-raised);
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--fg);
   font-size: var(--step--1);
 }
 .notice[hidden] {
   display: none;
 }
+/* A NOTICE DRAWN IN PLACE OF ONE WHOSE ACTION WAS JUST PRESSED TAKES CLICKS ON ITS WORDS, for `notice.ts`'s
+   `SECOND_CLICK_MS`: a double-click's second click would otherwise pass through them to the control under the action. */
+.notice.notice-catching {
+  pointer-events: auto;
+}
+/* THE WORDS' FIRST LINE IS THE ACTION'S HEIGHT, so a notice with no action is centred on its row as one with an action
+   is: the padding stands where the action's border does. */
+.notice-text {
+  padding-block: 1px;
+}
 .notice-action {
+  pointer-events: auto;
   margin-inline-start: auto;
   font: inherit;
   padding: 0 0.5em;

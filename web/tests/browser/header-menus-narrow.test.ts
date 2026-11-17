@@ -207,6 +207,8 @@ describe('the header at 390px', () => {
     for (const control of document.querySelector('header.bar')?.children ?? []) {
       const box = control.getBoundingClientRect()
       if (box.width === 0 && box.height === 0) continue
+      // THE NOTICE FLOATS OVER THE HEADER, OUT OF ITS FLOW: it takes no row.
+      if (getComputedStyle(control).position === 'fixed') continue
       const centre = (box.top + box.bottom) / 2
       if (!centres.some((c) => Math.abs(c - centre) < 2)) centres.push(centre)
     }

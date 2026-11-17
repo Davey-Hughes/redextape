@@ -241,8 +241,8 @@ function detachedText(d: DetachedPanes): string {
 export function linkStatus(s: LinkStatus): string {
   const detached = s.detached ?? ATTACHED
   const parts: string[] = []
-  // REFUSALS ARE NOT SAID HERE (Plan 7 part 2 spec §11): they are notices (`notice.ts`), shown under the
-  // header and said in the one live region, and this line carries the link sentence only.
+  // REFUSALS ARE NOT SAID HERE (Plan 7 part 2 spec §11): they are notices (`notice.ts`), shown and said in
+  // the one live region, and this line carries the link sentence only.
   const detachment = detachedText(detached)
   if (detachment !== '') parts.push(detachment)
   if (s.state === 'stale') {

@@ -35763,3 +35763,164 @@ which are from `$R`; `r4-figures.log` and `r5-figures.log` name each command's d
 | the counts in the block of runs | each run's `Test Files` and `Tests` lines | `rg '^\s+Tests? ' <log>` for each log the block names (r5-figures.log) |
 | seven | test files that name the value line, the affordability probe aside | `rg -l 'tm-value\|setScratchValue' web/tests/browser`: nine, less `buffer-affordability.test.ts` and its worker, `affordability-tm-worker.ts` (r3-figures.log) |
 | 73, 1497; 219, 1760 | node test files and tests passed; browser test files and tests passed, at `9d9796f` | the two runs above, their summary lines (r3-node.log, r3-browser-full.log) |
+
+#### NOTICES FLOAT OVER THE HEADER AND MOVE NOTHING: A NOTICE AND THE RESTING SENTENCE SIT IN THE HEADER'S EMPTY RUN BEFORE `share` WHERE THEY FIT, AND AT THE HEADER'S INLINE END ON `settings`'S ROW WHERE THEY DO NOT, THEIR WORDS PASSING A CLICK THROUGH TO THE CONTROL UNDER THEM; THE RESTING SENTENCE OFFERS `hide`, AND THE STRIP KEEPS ONE HEIGHT ACROSS A RUN (2026-11-17, branch `notice-float`, 16 commits: `846bb78..cf2bd2b`'s 12, then this entry, `1d4dffd`, two that correct it and the design doc, `14e2b34` and `debd976`, and the last, which updates its SHAs and figures for the rebase onto `846bb78`)
+
+The user, 2026-11-17: "also the message that shows up for 'opened the example...' all these sort of
+banner messages which shift the page should be removed. I don't want anything like this that shifts
+the page unexpectedly". The notice line (Plan 7 part 2 spec §11) sat in the page's flow under the
+header, so a notice pushed everything below it down a line and its end pulled it back; the resting
+sentence (*… not being saved*) did the same. The decisions, round by round, and every call with who
+made it are in `docs/superpowers/specs/2026-11-17-notice-float-design.md`; spec §11 points there. The
+lane's record is `~/temp/redextape-notice-float-record/`, `$R` below: `brief.md` with its five
+addenda, (2) to (6), `progress.md`, `review-1.md`, `review-2.md` and the logs this entry names.
+
+##### DECISIONS
+
+The user's, 2026-11-17, in four rounds:
+
+- **Float them**, over removing the notices (and the four undos) or keeping an empty line under the
+  header: first drawn at the window's bottom inline-end corner.
+- **Above the bottom bars, with words a click passes through**, after the first build covered the
+  step bar's controls at phone widths. The placement went in the next round; the click-through
+  words stayed. The sweep of everything else that moves the page waits for a separate, measured PR.
+- **At the top, as an overlay, in an empty spot to the left of `share`**: "if it needs to draw over
+  on small screens it can".
+- **"Over the right buttons"** where it does not fit that spot: review 2 found that at 1280 px the
+  example's notice covered `examples ▾` and the encoding select, and a press on the select's arrow
+  ran its undo. A notice wider than the run now ends at the header's inline end and covers `share`,
+  the appearance button, `about` and `settings`, its undo over `settings`.
+
+The user's verdict on the top placement, after trying its build at `6d43f88` and before the fourth
+round (the controller's record of when): "banners looks good".
+
+The controller's:
+
+- **Drawn as the app's menus and popovers are**, by their tokens, above the panes and below modal
+  dialogs (the brief).
+- **The resting sentence floats where a notice does, and gets a `hide`** (review 1) that keeps it off
+  until the condition says something else, since it can last a whole session.
+- **The notice stays at the top when it does not fit** rather than dropping over the views, no wider
+  than the window less a 16 px gutter, wrapping down; where `share` begins a row of its own (bands of
+  widths within 850-964 px, and 354-402 px on the Stage), it follows the run.
+- **Review 2's I1 and M1**: an undo pressed over the resting sentence leaves the focus on its own
+  fallback, not on `hide`, which ignores a double-click's second click; Tab reaches the action where
+  it is drawn.
+- **The strip's link-sentence line is fixed here**: it grew the strip 3.3 px mid-run and moved the
+  workspace above it.
+- **After the fourth round's build**: a notice too wide for the run ends on the row of the header's
+  last control, `settings`, wherever that row is, since at 414 px `share` ends its row and `settings`
+  sits below it, and the undo lay over `share`; and a notice drawn in place of one whose action was
+  just pressed takes clicks on its words for 500 ms, since a double-click on the example's undo ran
+  it and its second click opened `settings` through the next notice's words.
+
+The implementer's, each with its reason in the design doc: `floatInRun` places the notice from the
+header's measured boxes, observing the header and every control in it for size and the notice only
+for its words; "fits" is the notice's width against the run's, decided for new words and kept while
+the same words' element is redrawn (Plan 7 part 6a spec §5.5's kept button); it is `position: fixed`
+at `z-index: 10`, the view keys' hint's, which the top layer's menus and dialogs paint over, with the
+menus' `1px solid var(--rule)` and `var(--bg)`, no radius and no shadow; its first line is
+centred on its row with the action at that line's end; the notice element moves after `settings`
+when it ends there so Tab reaches its action as drawn; and a caught press on the words moves no
+focus.
+
+##### WHAT CHANGED
+
+- **`web/src/notice.ts`**: `floatInRun(line, run)`, called from `main.ts`, sets `--notice-end` and
+  `--notice-row`; `createNotices` gains the resting sentence's `hide`, the press's catching
+  (`SECOND_CLICK_MS`) and the focus rules above.
+- **`web/index.html`** (and the test harness's `SHELL`): `#notice` moves into the header, after its
+  `.bar-spacer`.
+- **`web/src/style.css`**: `.notice` is fixed over the header, its words `pointer-events: none` and
+  its action `auto`, `.notice-catching` while it catches; `.strip .link-status` sets
+  `line-height: 1.2`.
+- **Tests**: `notice-float.test.ts` is new (nothing moves when a notice or the resting sentence comes,
+  changes or goes; the place at 1280, 414, 1600, 1920, 375, and in the bands; the header followed on
+  resize and preset; `hide`; a notice with no action; the select's arrow at 1280; Tab order; real
+  clicks on the undo and through the words; a double-click's second click; the strip's height across
+  a run). `notice.test.ts` gains the focus and double-click cases; `inspector-phone`, `follow-kept`
+  and `header-menus-narrow` were updated for the line leaving the page's flow, each with its reason
+  in its commit message.
+
+##### WHAT THE REVIEWS CAUGHT
+
+- **Review 1** (`review-1.md`, at `1010ab1`): 0 Critical, 2 Important, 5 Minor. I1, the undo moving
+  under a held press as the bars changed height, was made moot by the move to the top; I2 became the
+  resting sentence's `hide`; the five minor findings were fixed.
+- **Review 2** (`review-2.md`, at `6d43f88`): 0 Critical, 2 Important, 4 Minor, all fixed: I1 in
+  `08aeeb6`, I2 by the user's fourth-round decision, M1 in `08aeeb6` and `e2e1fc8`, M2-M4 in
+  `01be15b` and `08aeeb6`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The sweep**, everything else the app shows or hides in the page's flow on its own (the readout's
+  worker-error banner, the readout's segments mid-run, the step bar's `extend`, the TM status and value
+  lines, the reattach buttons), is listed in the design doc's *Not closed here*, read from the code and
+  not measured, for the follow-up PR the user chose.
+- **`footer.strip` is drawn while `hidden`** (`display: flex`, no `[hidden]` rule), empty, in the
+  debugger and stage presets; and **an open inspector can lengthen the page at a desktop
+  width**: both measured by the lane, neither changed.
+- **A notice redrawn with longer words keeps its place**, so a kept undo does not move under a press:
+  such a redraw that no longer fits the run grows over the controls before it until the next notice or
+  a change of the header.
+- **Firefox's open list**: Firefox under the test driver reports no `:open` on the encoding select
+  after a press at its arrow, so that check is Chromium's alone.
+- **Firefox failures that are not this branch's**: 10 `inspector-phone.test.ts` cases (Chromium's
+  boxes pinned against Firefox's font metrics), `controls-gate.test.ts`'s toggle walk, two
+  `focus-scroll.test.ts` cases and `header-menus-narrow.test.ts`'s workspace-menu case fail in
+  Firefox here and at `846bb78` alike, with one more `inspector-phone` case failing there.
+
+##### VERIFICATION
+
+Run on 2026-11-17 in the lane's worktree, `~/temp/redextape-notice-float`, at `cf2bd2b`, the last
+code commit, each into its log in `$R`; the browser runs under `flock ~/temp/redextape-browser.lock`,
+from `web/`:
+
+```
+VITEST_MAX_WORKERS=6 pnpm exec vitest run --project browser             → "Test Files  220 passed (220)",
+                                                                           "Tests  1785 passed (1785)" (rb-browser-all-2.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run
+  --project browser --project firefox <the five files below>            → "Tests  1 failed | 193 passed (194)",
+                                                                           Firefox's workspace-menu case (rb-touched-both.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run
+  --project firefox <the four files below>, here and at 846bb78         → "Tests  14 failed | 96 passed (110)" here,
+                                                                           "Tests  15 failed | 95 passed (110)" at 846bb78
+                                                                           (rb-ff-four-head.log, rb-ff-four-base.log)
+```
+
+The five files are `notice-float`, `notice`, `share-through-open`, `base16-remove` and
+`header-menus-narrow`; the four are `inspector-phone`, `controls-gate`, `focus-scroll` and
+`header-menus-narrow`, each `tests/browser/<name>.test.ts`. The run at `846bb78` was in a temporary
+worktree of that commit with this one's `pkg/`, `pkg-lsp/` and `web/bindings/` copied in (the branch
+changes no Rust), removed afterwards. Each new test was seen to fail first and was sabotaged once,
+in both engines but for the first round's two no-movement tests (`red-1.log`, `sab-static.log`) and
+the strip test (`red-strip.log`, `sab-5-no-min-height.log`), seen in Chromium alone. The undo's
+real-click test failed first in its 1280 px case; its 375×800 case failed only under a sabotage
+(`red-top-1.log`, `red-top-ff-1.log`, `sab-top-5-undo-no-pointer.log`). The earlier rounds' runs
+are in `progress.md`. The sabotaged source was saved, broken, restored and compared with `cmp` in
+the third round (`sab.sh`), the fourth round's three (`r5-sab-A.log`, `r5-sab-B.log`,
+`r5-sab-C.log`) and this round's two below. This round's: the new tests against the old `notice.ts`
+and `style.css` (`r6-old-both.log`); the notice's row put back to the run's (`r6-sab-F1.log`); the
+catching class never added (`r6-sab-F2.log`). The full gate ran on the final tree, after the
+rebase onto `846bb78` and the commit that updates this entry's SHAs and figures for it; its
+results are in the PR's description.
+
+**Every count this entry quotes, with what produces it.** A command ran in the worktree, and its
+output is in the log the row names, in `$R`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 12; `cf2bd2b` | commits in the range; its last | `git rev-list --count 846bb78..HEAD`; `git rev-parse --short HEAD` (rb-entry-figures.log) |
+| 16 | the branch's commits, the two correcting ones and the rebase's update included | `git rev-list --count 846bb78..HEAD` after the last (rb-count.log) |
+| 0, 2, 5; 0, 2, 4 | review 1's and review 2's Critical, Important and Minor findings | `sed -n 8p review-1.md`; `sed -n 3p review-2.md` (rb-entry-figures.log) |
+| 8 s; 500 ms | `NOTICE_MS`; `SECOND_CLICK_MS` | `rg -n 'SECOND_CLICK_MS = \|NOTICE_MS = ' web/src/notice.ts` (rb-entry-figures.log) |
+| 16 px; `z-index: 10`; `line-height: 1.2` | the gutter, `--space-3` at a 16 px root; the notice's stacking; the strip's link sentence | `rg -n -- '--space-3:\|z-index: 10;\|line-height: 1.2;' web/src/style.css` (rb-entry-figures.log) |
+| 850-964; 354-402 | the widths, in px, where `share` begins its header row, over every style and preset; on the Stage | `$R/probe-share-rows.cjs` against the lane's dev server at `1010ab1` (probe-share-rows.log, lines 1-9) |
+| 3.3 px | the strip's growth mid-run before `1010ab1`: 69.25 to 72.5625 | the lane's strip probe (probe-strip-1.log, lines 5-6) |
+| four | the notices that offer an undo | `rg -c "label: 'undo'" web/src/main.ts` (rb-entry-figures.log) |
+| 1280 px | where review 2 found the example's undo over the encoding select's arrow | `review-2.md`, line 46, its I2 heading |
+| 414×896 | vitest's default window, where `share` ends its row and `settings` sits below it | a probe run during `share-through-open.test.ts` at 414×896: `share` spans y 53-82, `settings` y 98-127 (r5-probe-share.log, line 4) |
+| 220, 1785, 0 | files passed, tests passed and failed in the full Chromium project at `cf2bd2b` | the first command above (rb-browser-all-2.log) |
+| 193; 1 | tests passed and failed in the five files in both engines at `cf2bd2b`, the failure Firefox's workspace-menu case | the second command above (rb-touched-both.log) |
+| 14 (10, 2, 1, 1); 15 | the four files' failures in Firefox here (`inspector-phone`, `focus-scroll`, `controls-gate`, `header-menus-narrow`) and at `846bb78`, where the same 14 fail and one more `inspector-phone` case, which passes here | the third command above (rb-ff-four-head.log, rb-ff-four-base.log) |
+| 18; 16; 2 | tests failed: the new tests against the old sources; with the row put back; with no catching, in both engines together | `REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project browser --project firefox tests/browser/notice-float.test.ts tests/browser/share-through-open.test.ts` on each tree (r6-old-both.log, r6-sab-F1.log, r6-sab-F2.log), their `Tests` lines |

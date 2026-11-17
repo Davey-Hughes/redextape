@@ -238,7 +238,12 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
 
   describe('on the Stage', () => {
     // AFTER THE HOOK ABOVE, which has put the four views back: the Stage, where a case before did not leave it.
-    beforeEach(() => startOn('stage'))
+    // SHORTER THAN THE FILE'S PAGE: at 896 px the Stage's λ body holds the run's last step on its first row, and a box
+    // that follows must be scrolled past that row for a return to the same place to show anything.
+    beforeEach(async () => {
+      await page.viewport(1280, 840)
+      startOn('stage')
+    })
 
     it.for(BOXES)('is still following when its Stage tab is left and selected again: $name', async (b) => {
       expect(stageTab(b.leaf), 'precondition: the Stage is drawn').not.toBeNull()

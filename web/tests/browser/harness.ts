@@ -58,6 +58,7 @@ export const SHELL = `
       <select id="encoding"></select>
     </label>
     <span class="bar-spacer"></span>
+    <div id="notice" class="notice" hidden></div>
     <button type="button" id="share" aria-controls="share-menu" aria-expanded="false">share</button>
     <div id="share-menu" class="header-menu share" popover></div>
     <button type="button" id="appearance"></button>
@@ -81,7 +82,6 @@ export const SHELL = `
         <button type="button" id="import-base16">import base16…</button>
     </div>
   </header>
-  <div id="notice" class="notice" hidden></div>
   <div id="live" class="visually-hidden" role="status"></div>
   <div id="view-keys" class="view-keys" hidden></div>
   <main>

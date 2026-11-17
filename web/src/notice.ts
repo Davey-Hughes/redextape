@@ -1,9 +1,9 @@
 /**
- * THE NOTICE LINE AND THE LIVE REGION — Plan 7 part 2 spec §11.
+ * THE NOTICE LINE AND THE LIVE REGION — Plan 7 part 2 spec §11, and the notice float design for where it is drawn.
  *
  * **ONE VISIBLE NOTICE AT A TIME, AND ONE POLITE LIVE REGION FOR THE WHOLE APP.** Every refusal, every copy
- * change and every layout change is said here, once, in words: shown on a line under the header, and written
- * to a visually hidden `role="status"` element so a screen reader hears it.
+ * change and every layout change is said here, once, in words: shown floating over the header (`floatInRun`), where
+ * it moves nothing on the page, and written to a visually hidden `role="status"` element so a screen reader hears it.
  *
  * **A NEW NOTICE REPLACES THE OLD ONE, ACTION AND ALL.** A notice lasts `NOTICE_MS`, or until the next one;
  * an undo offered by a notice that has been replaced is gone with it (spec §10), unless the new one offers the
@@ -16,6 +16,14 @@
 
 /** How long a notice stays, in milliseconds (spec §10's "8 s"). */
 export const NOTICE_MS = 8000
+
+/**
+ * How long a notice drawn in place of one whose action was just pressed takes clicks on its words, in milliseconds.
+ * **A DOUBLE-CLICK'S SECOND CLICK LANDS WHERE THE ACTION WAS**, on the next notice's words, which otherwise pass it
+ * through to the control under them (`settings`, under an undo at the header's end); 500 ms is the double-click
+ * interval most systems default to.
+ */
+export const SECOND_CLICK_MS = 500
 
 export type NoticeAction = {
   readonly label: string
@@ -69,9 +77,61 @@ export type Notices = {
    * persistent notice still goes the moment anything else is said, and nearly every gesture says
    * something — a copy created, a view closed. The condition it describes lasts, so the line returns to
    * it: every other notice shows over it for its `NOTICE_MS`, and when that one goes, this comes back.
-   * `null` clears it, which is what a write that succeeds does.
+   * `null` clears it, which is what a write that succeeds does. It offers `hide`, which takes it off the line until
+   * the condition says something else.
    */
   rest(text: string | null): void
+}
+
+/**
+ * **THE NOTICE FLOATS IN THE HEADER'S EMPTY RUN WHERE IT FITS, AND AT THE HEADER'S INLINE END WHERE IT DOES NOT** — the
+ * notice float design. `run` is the header's spacer. A wider notice ends on the row of the header's last control,
+ * `settings`, wherever the header wraps it, and grows over the controls after the run, so its action lies over
+ * `settings` and not over `share` or a control before the run that a user may be on.
+ * **THE PLACE IS KEPT WHILE THE SAME WORDS' ELEMENT IS REWRITTEN**: `paint` keeps the button for the same action, so a
+ * press held across the redraw must still be on it at the release. The header and its controls are observed for size,
+ * every way the run moves; the line only for its words, as a size observer that changes what it observes loops.
+ * Fixed to the window: on a page scrolled down, it stays in sight.
+ */
+export function floatInRun(line: HTMLElement, run: HTMLElement): void {
+  const header = run.parentElement as HTMLElement
+  /** The header's last control in its flow, `settings`: its menus are popovers, out of the flow. */
+  const last = [...header.children].findLast((c) => c !== line && !c.hasAttribute('popover')) as HTMLElement
+  /** The words the place was last decided for, and whether it was the header's end. */
+  let decidedFor: Element | null = null
+  let atEnd = false
+  const place = (decide: boolean): void => {
+    const r = run.getBoundingClientRect()
+    const words = line.querySelector('.notice-text')
+    if (decide || words !== decidedFor) {
+      decidedFor = words
+      // EITHER PLACE LEAVES THE NOTICE AT LEAST THE RUN'S WIDTH, so its width as drawn now answers whether it fits.
+      atEnd = line.getBoundingClientRect().width > r.width
+    }
+    const headerEnd =
+      header.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(header).paddingInlineEnd)
+    const end = atEnd ? headerEnd : r.right
+    const row = atEnd ? last.getBoundingClientRect() : r
+    line.style.setProperty('--notice-end', `${document.documentElement.clientWidth - (end + scrollX)}px`)
+    line.style.setProperty('--notice-row', `${row.top + row.height / 2 + scrollY}px`)
+    // TAB REACHES THE ACTION WHERE IT IS DRAWN: after the run, before `share`, when it ends where the run does; after
+    // `settings` when it ends that control's row. A move drops the focus, so a focused action takes it back.
+    if (atEnd ? line.nextElementSibling !== null : line.previousElementSibling !== run) {
+      const focused = line.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null
+      if (atEnd) header.append(line)
+      else run.after(line)
+      focused?.focus()
+    }
+  }
+  const resized = new ResizeObserver(() => place(true))
+  resized.observe(header)
+  for (const control of header.children) if (control !== line) resized.observe(control)
+  new MutationObserver(() => place(false)).observe(line, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributeFilter: ['hidden'],
+  })
 }
 
 export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: () => HTMLElement | null): Notices {
@@ -96,6 +156,31 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
   /** The action on the line now, if any: its own `fallback` is where the focus goes when it goes. */
   let shown: NoticeAction | undefined
 
+  /** Whether an action's press is being handled: what the line draws meanwhile catches the press's second click. */
+  let pressing = false
+  /** Ends the line's catching, `SECOND_CLICK_MS` after the last notice drawn while a press was handled. */
+  let catching: ReturnType<typeof setTimeout> | null = null
+  // A CAUGHT PRESS ON THE WORDS MOVES NO FOCUS AND SELECTS NOTHING: the action just put the focus where it belongs.
+  line.addEventListener('mousedown', (e) => {
+    if (!(e.target instanceof Element && e.target.closest('.notice-action'))) e.preventDefault()
+  })
+
+  /**
+   * The resting sentence its `hide` took off the line. **IT STAYS OFF UNTIL THE CONDITION SAYS SOMETHING ELSE**: a
+   * condition can last the whole session, and the line floats over the header, so the user may put it away; the same
+   * sentence reported again, after a write that went through, is the condition they put away, and a different one is
+   * news.
+   */
+  let hidden: string | null = null
+  /** **NO FALLBACK OF ITS OWN**: hidden, the line is empty, and the focus goes to the line's. */
+  const hide: NoticeAction = {
+    label: 'hide',
+    run: () => {
+      hidden = resting
+      paint(null)
+    },
+  }
+
   /**
    * Draw `text` as the line's whole contents, with an optional action, or empty it for `null`.
    *
@@ -113,10 +198,10 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
    * redraw the open's notice with the open's `undo`, hundreds of milliseconds after the open, while a user may be
    * pressing it. Chrome dispatches a `click` only where the press and the release land on the same element: a
    * button replaced while pressed clicks nothing even drawn in the same place, and one kept but moved from under the
-   * pointer clicks the line. So the button stays the same element, the focus stays on it, and the stylesheet keeps
-   * it in place: at the line's end, on its first line, whatever the words' length.
+   * pointer clicks no undo. So the button stays the same element, the focus stays on it, and the stylesheet keeps
+   * it in place: at the notice's end, on its first line, whatever the words' length.
    */
-  const paint = (text: string | null, action?: NoticeAction): void => {
+  const paint = (text: string | null, action?: NoticeAction, toAction = true): void => {
     const words = line.querySelector<HTMLElement>('.notice-text')
     if (text !== null && action !== undefined && action === shown && words !== null) {
       words.textContent = text
@@ -140,15 +225,44 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
       b.type = 'button'
       b.className = 'notice-action'
       b.textContent = action.label
-      b.addEventListener('click', () => {
-        dismiss()
-        action.run()
+      b.addEventListener('click', (e) => {
+        // A DOUBLE-CLICK'S SECOND CLICK IS NOT A PRESS ON `hide`: the resting sentence comes back with its `hide` in
+        // the place of the action the first click ran, and would go with the one sign that nothing is being saved.
+        if (action === hide && e.detail > 1) return
+        pressing = true
+        try {
+          dismiss()
+          action.run()
+        } finally {
+          pressing = false
+        }
       })
       line.append(b)
     }
     line.hidden = false
-    // THE NEW LINE'S OWN ACTION IF IT HAS ONE, SO A KEYBOARD USER STAYS ON THE LINE THEY WERE ON.
-    if (held) (line.querySelector<HTMLElement>('button.notice-action') ?? leaving?.() ?? null)?.focus()
+    if (pressing) {
+      line.classList.add('notice-catching')
+      if (catching !== null) clearTimeout(catching)
+      catching = setTimeout(() => {
+        catching = null
+        line.classList.remove('notice-catching')
+      }, SECOND_CLICK_MS)
+    }
+    // THE NEW LINE'S OWN ACTION IF IT HAS ONE, SO A KEYBOARD USER STAYS ON THE LINE THEY WERE ON — unless `toAction`
+    // is false: the resting sentence's `hide` is not where a user who was on an undo meant to be.
+    const own = toAction ? line.querySelector<HTMLElement>('button.notice-action') : null
+    if (held) (own ?? leaving?.() ?? null)?.focus()
+  }
+
+  /**
+   * The resting sentence with its `hide`, or an empty line while there is none or it is hidden. **A FOCUS THE LINE
+   * HOLDS GOES TO THE ENDING ACTION'S FALLBACK, NOT TO `hide`**: an undo pressed, or left to expire, under the focus
+   * hands it where that undo names (`main.ts`'s palette removal promises the settings button), and a second press of
+   * Enter must not land on `hide`.
+   */
+  const paintResting = (): void => {
+    if (resting === null || resting === hidden) paint(null)
+    else paint(resting, hide, false)
   }
 
   /** The notice on the line now, until it ends: the one whose own `dismiss` still acts. */
@@ -161,7 +275,7 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
     if (timer !== null) clearTimeout(timer)
     timer = null
     current = null
-    paint(resting)
+    paintResting()
   }
 
   return {
@@ -184,6 +298,7 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
     rest(text: string | null): void {
       if (text === resting) return
       resting = text
+      if (text !== null && text !== hidden) hidden = null
       // **SAID ONCE A PAGE LOAD, NOT ONCE A CYCLE.** `resting` alone suppresses only a repeat while the
       // condition still holds — and it does not hold continuously: `localStorage` refuses a write by
       // SIZE, so a user typing into a copy near the quota gets a write every 300 ms, some succeeding and
@@ -200,7 +315,7 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
         said.add(text)
         say(text)
       }
-      if (timer === null) paint(resting)
+      if (timer === null) paintResting()
     },
   }
 }

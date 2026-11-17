@@ -80,7 +80,7 @@ import { navKeymap } from './lsp-nav'
 import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_LABEL } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
-import { createNotices, type Notice, type NoticeAction } from './notice'
+import { createNotices, floatInRun, type Notice, type NoticeAction } from './notice'
 import { createOutlinePanel } from './outline'
 import { paletteDeclarations } from './palettes'
 import type { PaneChoice } from './pane-chrome'
@@ -268,6 +268,7 @@ async function main(): Promise<EditorView> {
   const aboutSource = document.querySelector<HTMLAnchorElement>('#about-source')
   const aboutBuild = document.querySelector<HTMLElement>('#about-build')
   const noticeHost = document.querySelector<HTMLElement>('#notice')
+  const headerRun = document.querySelector<HTMLElement>('header.bar .bar-spacer')
   const liveHost = document.querySelector<HTMLElement>('#live')
   const viewsShown = document.querySelector<HTMLElement>('#views-shown')
   const viewKeysHint = document.querySelector<HTMLElement>('#view-keys')
@@ -305,6 +306,7 @@ async function main(): Promise<EditorView> {
     !aboutSource ||
     !aboutBuild ||
     !noticeHost ||
+    !headerRun ||
     !stepBarHost ||
     !inspectorHost ||
     !strip ||
@@ -323,6 +325,7 @@ async function main(): Promise<EditorView> {
   // An imported palette's *undo* names its own, the settings button, and a picked example's names `examples ▾`
   // (`NoticeAction`'s `fallback`).
   const notices = createNotices(noticeHost, liveHost, () => buffersButton)
+  floatInRun(noticeHost, headerRun)
 
   // Wired BEFORE `init()`. The toggle has nothing to do with wasm — it reads and writes `localStorage`
   // and flips an attribute on `<html>` — so it stays live even on the failure paths (`showBanner`
