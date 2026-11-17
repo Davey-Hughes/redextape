@@ -24,7 +24,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
 assert_cmd = "2"
-trycmd = "1"
+# `cmd` runs the binary, `dir` gives each case its sandbox and checks its `.out` files, and `diff` makes a
+# failure print a unified diff; `diff` uses `similar` 3, which this crate already depends on.
+snapbox = { version = "1.2.2", default-features = false, features = ["cmd", "dir", "diff"] }
 # `default-features = false`: this crate wants only `ScratchDir`, not `arb_expr_over`'s `proptest`
 # dependency — see `redextape-test-support`'s own `Cargo.toml` and `lib.rs` doc for the feature gate
 # that makes that possible. (A `--workspace` build still unifies features across every crate that

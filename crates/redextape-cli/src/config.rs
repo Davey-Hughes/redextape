@@ -143,7 +143,7 @@ pub fn parse(text: &str, path: &Path) -> Result<Config, Error> {
         path: path.to_path_buf(),
         // `toml`'s own message names the offending key and what was expected instead, which is the
         // "did you mean" the design asked for without a second suggestion mechanism to maintain.
-        // Its multi-line span rendering is collapsed to one line so a `trycmd` golden stays legible.
+        // Its multi-line span rendering is collapsed to one line so a CLI transcript golden stays legible.
         message: e.message().replace('\n', "; "),
     })?;
     validate(&config, path)?;

@@ -117,7 +117,7 @@ readonly SCOPE_RE='^docs/'
 # the discrimination had to move into the pattern.
 #
 # What this gives up, stated rather than discovered later: a genuine authored pointer inside a golden
-# is invisible here. Nobody hand-writes prose into a file `TRYCMD=dump` regenerates, and a golden
+# is invisible here. Nobody hand-writes prose into a file `SNAPSHOTS=overwrite` regenerates, and a golden
 # is reviewed as a diff against real output, so the exposure is small — but it is not zero.
 readonly RECORDING_RE='\.(stdout|stderr)$'
 

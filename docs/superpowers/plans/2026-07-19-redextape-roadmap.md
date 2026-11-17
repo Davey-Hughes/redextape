@@ -36587,3 +36587,243 @@ before the rebase, on `486df8d`.
 | 38 | commits in `7085aa2..e0ee65a`, `e0ee65a` being the docs commit that brings this entry to `d02504c` | `git rev-list --count 7085aa2..e0ee65a` (`$R/rebase2/entry-figures.log`) |
 | 39 | commits in `7085aa2..d8db404`, `d8db404` being the second, naming the new browser file | `git rev-list --count 7085aa2..d8db404` (`$R/rebase2/entry-figures.log`) |
 | 43 | commits in `7085aa2..HEAD` once the commit that updates this entry for the rebase onto `7085aa2` was committed | `git rev-list --count 7085aa2..HEAD`, run before (42) and after that commit (`$R/rebase2/count.log`) |
+
+#### THE CLI'S GOLDEN TESTS RUN ON SNAPBOX, NOT TRYCMD: `tests/cli.rs` IS A SMALL HARNESS THAT READS THE SAME 41 `tests/cmd/*.toml` CASES AND CHECKS THEM AGAINST THE SAME GOLDENS, UNCHANGED, AND `Cargo.lock` LOSES `trycmd` AND, WITH IT, THE UNMAINTAINED `humantime` (RUSTSEC-2026-0542) THAT FAILED `main`'S ADVISORIES JOB (2026-11-17, branch `drop-trycmd`, `0230e6b..fe907ca`, 6 commits, the second this entry's first version and the fourth and fifth its updates for review 1 and for the rebase onto `0230e6b`, plus a third update, after fact-check 1, and a fourth, after fact-check 2)
+
+After #180 merged, `main`'s `advisories.yml` run (Forgejo run 720, job `cargo-deny`) failed:
+`error[unmaintained]: humantime is unmaintained`, RUSTSEC-2026-0542, "No safe upgrade is available!",
+reached as `humantime v2.4.0 ← humantime-serde v1.1.1 ← trycmd v1.2.1 ← (dev) redextape-cli` and
+through `trycmd` directly. redextape uses no time crate itself, and trycmd 1.2.1, the latest release
+(2026-07-21), still requires `humantime ^2` and `humantime-serde ^1`. The lane's record is
+`~/temp/redextape-drop-trycmd-record/`, `$R` below: `brief.md` (the user's decision), `progress.md`,
+the sabotage scripts in `sabotage/` and the logs this entry names.
+
+A SHA this entry gives for a run, a measurement, a sabotage or a review from before the rebase is
+that commit's SHA before the rebase onto `0230e6b`, measured before the rebase, on `846bb78`;
+`$R/rebase1/sha-map.txt` maps each to its SHA after it, and the local branch
+`drop-trycmd-pre-rebase-1` keeps them. The runs after fact-check 1, whose logs are in `$R/fc1fix/`,
+are on `423fa4e` with `tests/cli.rs` changed but not committed, on `fe907ca`, or on `3d46a5f`, the
+commit that adds the update after fact-check 1. A SHA that names what a commit changes, a range or
+a count of commits is its SHA after the rebase.
+
+##### WHAT CHANGED AND WHY
+
+- **`snapbox` replaces `trycmd`** in `redextape-cli`'s dev-dependencies: 1.2.2, the latest release on
+  crates.io when checked on 2026-11-17, with its default features off and `cmd`, `dir` and `diff` on.
+  snapbox is the engine trycmd runs on, and none of its normal dependencies is a time crate. `cmd`
+  runs the binary, `dir` makes the sandboxes and compares `.out` files, and `diff` prints a failure
+  as a unified diff through `similar` 3, which `redextape-cli` already depends on.
+- **`Cargo.lock` loses ten packages and gains none**: trycmd 1.2.1, humantime 2.4.0, humantime-serde
+  1.1.1, rayon 1.12.0, rayon-core 1.13.0, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, either
+  1.19.0, glob 0.3.4 and shlex 1.3.0 (shlex 2.0.1 stays). snapbox 1.2.2 was already locked, under
+  trycmd.
+- **`tests/cli.rs` is a harness that reads `tests/cmd/*.toml`** and does for each case what trycmd
+  did: the same argv and stdin (the `stdin` key, or else a `<name>.stdin` file, which trycmd also
+  read); the same working directory, a fresh temp sandbox holding a copy of
+  `<name>.in/` for the 30 cases with `fs.sandbox = true` and the crate's directory for the other 11;
+  the exit code (`status.code`, or 0); stdout and stderr against `<name>.stdout` and `<name>.stderr`
+  through the same snapbox filters (line endings, and `\` to `/` on both sides) and redactions
+  (`[CWD]`, `[ROOT]`, `[EXE]`); and every file under the four `<name>.out/` directories against the
+  sandbox's file at the same path. It runs every case and then fails once, naming each case that
+  differed and how. No file under `tests/cmd/` changed but `.gitignore`, which is gone (below).
+- **An entry in `tests/cmd/` that is not part of a `.toml` case fails the run, naming it** (`fe907ca`),
+  before any case runs: anything but `<name>.toml` and the `.stdin`, `.stdout`, `.stderr`, `.in` or
+  `.out` beside it. That covers a `.trycmd` or `.md` case, which the harness does not read, and a
+  golden or `.in/` whose `.toml` is missing. trycmd's `tests/cmd/*.toml` glob never ran such a file
+  and said nothing.
+- **`SNAPSHOTS=overwrite`** rewrites each `.stdout`, `.stderr` and `.out/` golden whose content
+  differs. It never writes a `.toml`, so a changed exit code stays a failure until `status.code` is
+  edited by hand, and an `.out/` file the binary did not make also stays a failure. `SNAPSHOTS` takes
+  no other value: any other fails the run before a case runs.
+- **The `.git` marker that stops `config::discover` at the sandbox root is written into each sandbox
+  after the copy**, no longer into the working tree's 30 `.in/` directories for the copy to carry. The
+  sandbox the binary runs in is the same; a test run no longer writes into the working tree, and
+  `tests/cmd/.gitignore`, whose one pattern named those markers, is deleted.
+- Two comments that named trycmd now say what they mean: `config.rs`'s "so a CLI transcript golden
+  stays legible", and `scripts/check-citations.sh`'s "a file `SNAPSHOTS=overwrite` regenerates". The
+  plans and specs that name trycmd are history and stay.
+
+##### DECISIONS
+
+The user's, 2026-11-17: a PR of its own for the advisory. He said "we should move to jiff"; told that
+only a trycmd release could change the time crate trycmd uses, and offered three fixes, he chose
+**"Drop trycmd for snapbox"**: port the CLI's golden tests to snapbox, keeping the golden files.
+
+The controller's, after fact-check 1 found a `.trycmd` or `.md` file in `tests/cmd/` skipped where
+this entry said it failed: change the code, so that any entry there that is not part of a `.toml`
+case fails the run, naming it.
+
+The implementer's calls:
+
+- **A harness that reads the `.toml` cases, not 41 Rust tests.** The case files stay byte-identical,
+  so each case's command line and exit code are the same by construction rather than by checking 41
+  transcriptions, and adding a case is still adding its files. What it costs: nextest shows one test,
+  `cli_transcripts`, for 41 cases, and its failure message is what lists the failing cases.
+- **Strict reading.** Every table in a case refuses a key it does not declare
+  (`serde(deny_unknown_fields)`), so a trycmd key the harness does not act on fails its case instead
+  of being ignored; a case with a `.in/` or `.out/` and no `fs.sandbox = true` fails; a case missing
+  either golden fails, where trycmd skipped a stream that had none; and `bin.name` must be `redextape`.
+- **The path filter stays on both sides.** snapbox's `Assert` filters only the captured stream; the
+  harness filters each golden too, as trycmd did, so no golden changes. The module doc's note on
+  `fmt_check_dirty.stdout`'s `/` trailer is kept and reworded: the filter can now be turned off
+  (`Assert::normalize_paths(false)`), and doing so would need that golden to hold the binary's `\`.
+- **The `.git` marker is kept and moved into the sandbox.** snapbox still sandboxes under the system
+  temp directory, so the upward walk the marker bounds is still there to bound.
+
+##### WHAT THE REVIEW CAUGHT
+
+Review 1 (`$R/review-1.md`), on `6f26d9c`: 0 Critical, 0 Important and 4 Minor findings, all fixed
+in `add0ae9` as the controller called them.
+
+- **M1, `SNAPSHOTS=skip` or `ignore` passed every stream.** snapbox reads both as "pass whatever the
+  stream holds". The harness now takes only `overwrite`, or `SNAPSHOTS` unset; any other value,
+  `verify` and the empty string included, fails the run (`snapshots_takes_only_overwrite_or_unset`, and
+  `snapshots_ignore_fails_the_run`, which runs the test binary's own `cli_transcripts` under
+  `SNAPSHOTS=ignore`).
+- **M2, a `<name>.stdin` file was ignored**, where trycmd read it as the input of a case with no
+  `stdin` key. The harness now reads its bytes; a case with both fails, naming its two inputs
+  (`a_stdin_file_is_the_input_of_a_case_without_a_stdin_key`,
+  `a_case_with_a_stdin_key_and_a_stdin_file_fails`). No case in `tests/cmd/` has one.
+- **M3, "a case without either fails"** (the module doc) and "a case without both goldens fails"
+  (this entry) read as "a case with neither"; the harness fails a case missing either one, and both
+  now say so (`a_case_missing_either_golden_fails`, which holds it for each golden in turn).
+- **M4, under `SNAPSHOTS=overwrite` an `.out/` file the binary did not make counted as fixed.**
+  snapbox's overwrite of that difference copies the golden into the sandbox and returns `Ok`, so the
+  run passed and the stale golden stayed. Only a content mismatch now counts as fixed
+  (`overwrite_rewrites_a_differing_out_file_and_fails_on_one_the_binary_did_not_make`, which also
+  checks that a differing `.out/` file is still rewritten). trycmd counted it fixed the same way.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`fmt_check_dirty.stdout` still holds `/` where the binary prints `\`.** Turning snapbox's path
+  filter off on both sides and putting the real `\` in that golden would make it what a terminal
+  shows; it is left so that this change touches no golden.
+- **One test for 41 cases.** nextest names `cli_transcripts`, not the case that failed.
+- **A checkout that ran the trycmd test keeps its `.git` markers in `tests/cmd/*.in/`.** Git skips any
+  entry named `.git`, so `git status` does not show them; the copy into a sandbox brings one along,
+  and the harness writes the same marker over it. Deleting them is safe.
+- **trycmd's other case keys** (such as `env`, `fs.cwd`, `fs.base`, `timeout`, `stderr-to-stdout` and
+  `binary`)
+  **and its multi-step `.trycmd` and `.md` files are not modelled.** No case uses one. A case with
+  such a key fails on it as unknown; a `.trycmd` or `.md` file in `tests/cmd/` fails the run, naming
+  it (`a_file_that_is_not_part_of_a_toml_case_is_named_and_refused`,
+  `a_stray_file_in_tests_cmd_fails_the_run`).
+- **26 of the 30 sandboxed cases have no `.out/`, so nothing checks the files they leave**:
+  `fmt --check dirty.rxt` rewriting `dirty.rxt` would still pass `fmt_check_dirty`. trycmd checked no
+  more; a sandbox file no `.out/` names is not checked in the other four either.
+
+##### VERIFICATION
+
+Run on 2026-11-17 in the lane's worktree, `~/temp/redextape-drop-trycmd`, each into its log in `$R`,
+measured before the rebase, on `846bb78`:
+
+```
+cargo test -p redextape-cli --test cli -- --nocapture
+  at 846bb78, trycmd (before-cli.log)                → 41 cases "... ok", 30 sandbox teardowns "... ok"
+  at f10d1a9, the harness (after-cli.log)            → 41 cases "... ok"
+  at a4fc8a1, after review 1 (after-cli-a4fc8a1.log) → 41 cases "... ok"; "7 passed; 0 failed"
+```
+
+The sabotages, measured before the rebase, on `846bb78`, each restored from a saved copy and checked
+with `cmp`:
+
+- `sabotage/per-case.sh` breaks, one at a time, each case's `.stdout` (its first byte changed, or a
+  `Z` written into an empty one), its `.stderr` the same way, its exit code (`status.code` plus one,
+  or 1 where none is given), and the first byte of each of the four `.out/` files, and runs the test
+  binary each time; each must fail with exactly that case failing. All 127 did, at `f10d1a9`
+  (`sabotage/per-case.log`) and again at `a4fc8a1` (`sabotage/per-case-a4fc8a1.log`).
+- `fix1/sabotage.sh` (`fix1/sabotage.log`) breaks `a4fc8a1`'s `tests/cli.rs` seven ways, one at a
+  time, and runs `cargo nextest run -p redextape-cli --test cli --no-fail-fast` each time; each
+  exited 100 with the review fix's tests failing. The guard accepting every value fails
+  `snapshots_takes_only_overwrite_or_unset` and `snapshots_ignore_fails_the_run`; the guard handed
+  `None` in place of the variable fails `snapshots_ignore_fails_the_run`. Ignoring the `.stdin` file
+  fails both `.stdin` tests. Skipping a missing golden, and skipping only a missing `.stderr`, each
+  fail `a_case_missing_either_golden_fails`. Counting every `.out/` difference fixed, and counting
+  a link mismatch fixed in place of a content mismatch, each fail the overwrite test.
+- With a `redextape.toml` holding `width = 4` in `$R/sabotage/tmproot/` and `TMPDIR` pointed there,
+  the harness passes all 41 cases (`sabotage/marker-baseline.log`). With the marker's write removed,
+  28 of 41 fail, on "`fmt.width` must be in 20..=1000, got 4", and they are exactly the 28 sandboxed
+  cases with no `redextape.toml` of their own (`sabotage/marker-sabotaged.log`).
+- With the case filter looking for `.tomlx`, the harness finds no case and fails on "no `.toml` case
+  in tests/cmd" rather than passing on nothing (`sabotage/empty-sabotaged.log`).
+- `sabotage/mechanisms.sh` (`sabotage/mechanisms.log`): an `env.add.FOO` key in `run_value.toml`
+  fails that case on "unknown field `env`"; `SNAPSHOTS=overwrite` writes a broken `run_value.stdout`
+  and a broken `fmt_rewrite.out/dirty.rxt` back byte-identical to the originals.
+
+After fact-check 1, the stray check, each log in `$R/fc1fix/` recording its command and
+`echo "exit $?"`. The first three ran on `423fa4e` with `tests/cli.rs` changed but not committed; that
+file differs from `fe907ca`'s only in comments and one line's wrapping (`fc1fix/green-vs-fe907ca.diff`).
+The sabotage was restored from a saved copy and checked with `cmp`.
+
+```
+cargo nextest run -p redextape-cli --test cli --no-fail-fast
+  read_cases keeping every .toml, no stray check (red.log)  → exit 100; the two new tests fail
+  with the stray check (green.log)                           → exit 0; 9 passed
+  its ".toml beside it" test made always true
+    (sabotage-sibling.log)                                   → exit 100; the unit test of read_cases
+                                                               fails on "orphan.stdout is not named"
+cargo test -p redextape-cli --test cli -- --nocapture
+  at fe907ca (after-cli-fe907ca.log)                         → exit 0; 41 cases "... ok"; "9 passed"
+```
+
+cargo-deny 0.20.2, the workflow's pinned release with its checksum checked, in `$R/tools/`, at
+`fe907ca`, each log in `$R/fc1fix/` recording its command, `HEAD` and `echo "exit $?"`. A file put
+back came from `0230e6b`, whose `Cargo.lock` is its parent `7085aa2`'s and holds trycmd, and was
+restored from a saved copy and checked with `cmp`.
+
+```
+cargo deny --locked check advisories
+  on the branch (deny-branch.log)                            → exit 0, "advisories ok"
+  with Cargo.lock put back (deny-main-lock.log)              → exit 1 on cargo metadata's error,
+                                                               "cannot update the lock file ...
+                                                               because --locked was passed"
+  with Cargo.lock and crates/redextape-cli/Cargo.toml put
+    back (deny-main-lock-and-manifest.log)                   → exit 1, RUSTSEC-2026-0542,
+                                                               "advisories FAILED"
+scripts/check-licences.sh, at fe907ca (licences.log)         → exit 0
+```
+
+The full gate ran on `423fa4e`, before fact-check 1; the PR's description gives it. These ran again on
+the final tree, and the PR's description gives their results:
+`cargo nextest run -p redextape-cli --no-fail-fast`;
+`cargo clippy -p redextape-cli --all-targets -- -D warnings`; `sabotage/per-case.sh` on the test
+binary; `scripts/check-text-bytes.sh`, `check-citations.sh`, `check-attributions.sh`,
+`check-doc-figures.sh`, `check-shared-docs.sh`, `check-colours.sh`, `check-grammar-wasm.sh` and
+`check-lua.sh`, each with `--self-test` and then alone; `node scripts/check-comments.mjs` with
+`--self-test` and with `--base 0230e6b`; and `pnpm exec biome ci --error-on-warnings` and
+`pnpm run typecheck`.
+
+**Every count this entry quotes, with what produces it.** A log named in a row is in `$R`; every
+command in `figures.log` runs from the worktree. A row that counts commits, or a range's changes,
+names the commits by their SHAs after the rebase and was counted again on them
+(`rebase1/entry-figures.log`). A row citing `fc1fix/entry-figures.log` was counted after fact-check
+1, at `fe907ca` (`bash $R/fc1fix/entry-figures.sh`). The row citing `fc1fix/entry-figures-after.log`
+counted its first part at `3d46a5f`, and its second, citing `fc2fix/entry-figures-after.log`, once
+this update was committed. Every other row was measured before the rebase, on `846bb78`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 6; `7d7c66b`, `fa68caa`, `add0ae9`, `9d69cee`, `423fa4e`, `fe907ca` | commits in the range; them, oldest first | `git rev-list --count 0230e6b..fe907ca`; `git log --reverse --format=%h 0230e6b..fe907ca` (fc1fix/entry-figures.log) |
+| one; one | docs commits after the range: the update after fact-check 1; this update, after fact-check 2 | `git rev-list --count fe907ca..HEAD` at `3d46a5f` (fc1fix/entry-figures-after.log); `git rev-list --count 3d46a5f..HEAD`, run once this update was committed (fc2fix/entry-figures-after.log) |
+| 41 | case files | `ls crates/redextape-cli/tests/cmd/*.toml \| wc -l` (figures.log) |
+| 30, 11 | cases with `fs.sandbox = true`; the rest | `rg -l 'fs.sandbox = true' crates/redextape-cli/tests/cmd \| wc -l`, and 41 less it (figures.log) |
+| four | `.out/` directories | `ls -d crates/redextape-cli/tests/cmd/*.out \| wc -l` (figures.log) |
+| 28 | sandboxed cases with no `redextape.toml` of their own | 30 less the two `ls crates/redextape-cli/tests/cmd/*.in/redextape.toml` lists (figures.log) |
+| 41, 30 | trycmd's case lines and sandbox teardowns, ok | `rg -c '^Testing tests/cmd/[a-z_]+\.toml \.\.\. ok' before-cli.log`; `rg -c ':teardown \.\.\. ok' before-cli.log` (figures.log) |
+| 41 | the harness's case lines, ok | `rg -c '^tests/cmd/[a-z_]+\.toml \.\.\. ok$' after-cli.log` (figures.log) |
+| ten; none | packages `Cargo.lock` loses; gains | `git diff 0230e6b 7d7c66b -- Cargo.lock \| rg -A1 '^-name = '`; the same with `rg -c '^\+name = '`, which finds none (rebase1/entry-figures.log) |
+| none but `.gitignore` | files changed under `tests/cmd/` | `git diff --stat 0230e6b..7d7c66b -- crates/redextape-cli/tests/cmd` (rebase1/entry-figures.log) |
+| 127 | sabotages that failed exactly their case | `rg 'fired=' sabotage/per-case.log`: `fired=127 missed=0` (figures.log) |
+| 41; 28 of 41 | cases passing under the bad `TMPDIR` with the marker; failing without it | `rg -c '^tests/cmd/.* ok$' sabotage/marker-baseline.log`; `rg 'cases failed' sabotage/marker-sabotaged.log` (figures.log) |
+| 0; 1; 1 | `cargo deny --locked check advisories`'s exit on the branch; with `0230e6b`'s lock; with its lock and manifest | `rg '^exit' fc1fix/deny-branch.log fc1fix/deny-main-lock.log fc1fix/deny-main-lock-and-manifest.log` (fc1fix/entry-figures.log) |
+| 0 | `scripts/check-licences.sh`'s exit at `fe907ca` | `rg '^exit' fc1fix/licences.log` (fc1fix/entry-figures.log) |
+| none; 1 | `Cargo.lock` changes from `7085aa2` to `0230e6b`; trycmd packages in `0230e6b`'s lock | `git diff --stat 7085aa2 0230e6b -- Cargo.lock \| wc -l`; `git show 0230e6b:Cargo.lock \| rg -c '^name = "trycmd"$'` (fc1fix/entry-figures.log) |
+| none | lock or manifest changes from `7d7c66b` to `add0ae9` | `git diff --stat 7d7c66b add0ae9 -- Cargo.lock crates/redextape-cli/Cargo.toml` (rebase1/entry-figures.log) |
+| 26 | sandboxed cases with no `.out/` | 30 less the four `.out/` directories, each beside a `fs.sandbox = true` case (figures-a4fc8a1.log) |
+| 4; 0, 0 | review 1's Minor findings; its Critical and Important ones | `rg -c '^### Minor' review-1.md`; `rg -c '^### (Critical\|Important)' review-1.md`, which finds none (figures-a4fc8a1.log) |
+| none | `.stdin` files in `tests/cmd/` | `ls crates/redextape-cli/tests/cmd/*.stdin \| wc -l` (figures-a4fc8a1.log) |
+| 41; 7 | the harness's case lines, ok, at `a4fc8a1`; its tests passed | `rg -c '^tests/cmd/[a-z_]+\.toml \.\.\. ok$' after-cli-a4fc8a1.log`; `rg '^test result' after-cli-a4fc8a1.log` (figures-a4fc8a1.log) |
+| 127 | sabotages that failed exactly their case, at `a4fc8a1` | `rg 'fired=' sabotage/per-case-a4fc8a1.log`: `fired=127 missed=0` (figures-a4fc8a1.log) |
+| seven | review-fix sabotages, each exiting 100 | `rg -c '^== .* rc=100$' fix1/sabotage.log` (figures-a4fc8a1.log) |
+| 100, 2; 0, 9; 100, 1 | the stray check's runs: without it, exit and failing tests; with it, exit and passing tests; sabotaged, exit and failing tests | `rg '^exit\|Summary' fc1fix/red.log fc1fix/green.log fc1fix/sabotage-sibling.log` (fc1fix/entry-figures.log) |
+| 41; 9 | the harness's case lines, ok, at `fe907ca`; its tests passed | `rg -c '^tests/cmd/[a-z_]+\.toml \.\.\. ok$' fc1fix/after-cli-fe907ca.log`; `rg '^test result' fc1fix/after-cli-fe907ca.log` (fc1fix/entry-figures.log) |
