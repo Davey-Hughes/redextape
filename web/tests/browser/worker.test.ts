@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import { LEGS } from '../../src/legs'
-import type { FramesReply, Leg, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
+import type { FramesReply, Leg, LegFrame, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
 import type { LambdaState } from '../../src/types'
 import { until } from './until'
+
+/** The copy build reply of each leg. */
+const COPY_BUILT: { readonly [K in Leg]: RunReply['kind'] } = {
+  lambda: 'scratch-compiled',
+  rxm: 'rxm-scratch-compiled',
+  tm: 'tm-scratch-compiled',
+}
+
+/**
+ * The step-0 frame of `leg` that the build reply among `replies` carried, as a list of none or one: a session's
+ * `compiled`, or `leg`'s copy's `*-scratch-compiled`.
+ */
+function builtFirst<K extends Leg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
+  const built = replies.find((r) => r.kind === 'compiled' || r.kind === COPY_BUILT[leg])
+  if (built === undefined) return []
+  const first =
+    built.kind === 'compiled' ? built.first[leg] : 'first' in built ? (built.first as LegFrame[K] | null) : null
+  return first === null ? [] : [first]
+}
+
+/** Every frame of `leg` a build's replies carried: its step 0 on its build reply, then its chunks'. */
+function builtFrames<K extends Leg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
+  const chunked = replies.flatMap((r) => (r.kind === 'frames' && r.leg === leg ? (r.frames as LegFrame[K][]) : []))
+  return [...builtFirst(replies, leg), ...chunked]
+}
 
 /**
  * Post `req` to a fresh worker and collect every reply until `last` says the answer is complete, or the worker reports
@@ -147,7 +172,7 @@ describe('session-worker recording', () => {
   it('records a frame per β-step plus the initial term', async () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
-    const frames = replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' ? r.frames : []))
+    const frames = builtFrames(replies, 'lambda')
     // The run is 7 β-steps, so 8 frames: step 0 through step 7.
     expect(frames.length).toBe(8)
     expect(frames[0]?.step).toBe(0)
@@ -174,7 +199,7 @@ describe('session-worker recording', () => {
   it('records TM frames from step 0 even though compile already ran the TM leg', async () => {
     const { replies, worker } = await askAll(run('[1, 2]'))
     worker.terminate()
-    const frames = replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'tm' ? r.frames : []))
+    const frames = builtFrames(replies, 'tm')
     expect(frames[0]?.step).toBe(0)
     expect(frames[1]?.step).toBe(1)
     expect(frames.at(-1)?.step).toBeGreaterThan(100)
@@ -219,7 +244,7 @@ describe('session-worker recording', () => {
     // in the record loop would leave frames longer than 512 and this test would catch it.
     const { replies, worker } = await askAll(run('let x = 200; x + 1'))
     worker.terminate()
-    const frames = replies.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' ? r.frames : []))
+    const frames = builtFrames(replies, 'lambda')
     expect(frames.length).toBeGreaterThan(0)
     for (const f of frames) expect(f.text.length).toBeLessThanOrEqual(512)
   })
@@ -329,7 +354,8 @@ describe('session-worker rxm copies', () => {
     expect(built.rxm).toEqual({ available: true, reason: '', run: 'Running', cap: null, total_steps: 2 })
     expect(built.rxmProgram).toEqual({ listing: ['li\trr, #42', 'halt'], labels: [] })
     expect(built.value).toEqual({ Value: { text: '42' } })
-    const frames = rest.flatMap((r) => (r.kind === 'frames' && r.leg === 'rxm' ? r.frames : []))
+    // STEP 0 ON THE BUILD REPLY, THE CHUNKS FROM STEP 1 (`buildCopy`'s doc).
+    const frames = builtFrames(replies, 'rxm')
     expect(frames.map((f) => [f.step, f.source_node])).toEqual([
       [0, null],
       [1, null],
@@ -431,12 +457,17 @@ const chunks = (replies: readonly RunReply[], leg: Leg, epoch: number): FramesRe
 const stopped = (replies: readonly RunReply[], leg: Leg, epoch: number): boolean =>
   (chunks(replies, leg, epoch).at(-1)?.done ?? null) !== null
 
-/** `leg`'s frames under `epoch` up to its first stop, and how that stop ended: a fill. */
+/**
+ * `leg`'s frames under `epoch` up to its first stop, and how that stop ended: a fill. **A BUILD'S FILL STARTS WITH THE
+ * STEP-0 FRAME ITS BUILD REPLY CARRIED**, a session's `compiled` or a copy's `*-scratch-compiled`, its chunks recording
+ * on from step 1; a rewind's chunks carry their step 0 themselves.
+ */
 const fill = (replies: readonly RunReply[], leg: Leg, epoch: number): { frames: unknown[]; done: RecordEnd | null } => {
   const all = chunks(replies, leg, epoch)
   const end = all.findIndex((c) => c.done !== null)
   const taken = end === -1 ? all : all.slice(0, end + 1)
-  return { frames: taken.flatMap((c): unknown[] => c.frames), done: taken.at(-1)?.done ?? null }
+  const first = epoch === 0 ? builtFirst(replies, leg) : []
+  return { frames: [...first, ...taken.flatMap((c): unknown[] => c.frames)], done: taken.at(-1)?.done ?? null }
 }
 
 /**

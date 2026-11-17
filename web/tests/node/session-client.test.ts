@@ -200,6 +200,8 @@ describe('SessionClient streaming', () => {
       programs: { rxm: null, tm: null },
       declinedSpan: null,
       linkIndex: null,
+      first: { lambda: null, rxm: null, tm: null },
+      lambdaTree: null,
     })
     deliver({ kind: 'frames', leg: 'lambda', gen: 1, epoch: 0, frames: [], done: null })
     deliver({ kind: 'frames', leg: 'lambda', gen: 1, epoch: 0, frames: [], done: 'ended' })
@@ -274,6 +276,8 @@ const compiled = (gen: number): RunReply => ({
   programs: { rxm: null, tm: null },
   declinedSpan: null,
   linkIndex: null,
+  first: { lambda: null, rxm: null, tm: null },
+  lambdaTree: null,
 })
 
 describe('scratch on the tm leg', () => {

@@ -142,10 +142,12 @@ export class LinkPositions {
     }
     switch (reply.kind) {
       case 'compiled':
-        // A POSITION FOR A DECLINED LEG IS DROPPED SILENTLY: the leg's view already says why it is absent.
+        // A POSITION FOR A DECLINED LEG IS DROPPED SILENTLY: the leg's view already says why it is absent. **SO IS STEP
+        // 0**, which the reply has already put in the leg's ring, where the run opens: held, the step line would say the
+        // leg is going to the step it shows until its first chunk came.
         for (const leg of LEGS) {
           const step = this.#held[leg]
-          if (step !== undefined && reply.statuses[leg].available) this.#deps.legOf(leg).pending = step
+          if (step !== undefined && step > 0 && reply.statuses[leg].available) this.#deps.legOf(leg).pending = step
         }
         this.#held = {}
         return

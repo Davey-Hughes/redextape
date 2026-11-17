@@ -561,6 +561,12 @@ export type FramesReply<L extends Leg = Leg> = {
   [K in L]: { kind: 'frames'; leg: K; gen: number; epoch: number; frames: LegFrame[K][]; done: RecordEnd | null }
 }[L]
 
+/**
+ * Each leg's step-0 frame, as `compiled` carries it: `null` for a leg that did not compile, which has no cursor to read.
+ * **THE LEG'S FIRST `frames` CHUNK STARTS AT STEP 1**, so no step reaches the page twice.
+ */
+export type FirstFrames = { [K in Leg]: LegFrame[K] | null }
+
 /** Each leg's status at compile time, keyed as `LegFrame` is: what `compiled` carries as `statuses`. */
 export type LegStatus = {
   lambda: LambdaStatus
@@ -672,7 +678,19 @@ export type RunReply =
    * take `no-session`, which carries the diagnostics and has no `text` field. A reader hunting for a
    * live null case on this variant will not find one.
    */
-  | { kind: 'scratch-compiled'; gen: number; lambda: LambdaStatus; text: string | null }
+  | {
+      kind: 'scratch-compiled'
+      gen: number
+      lambda: LambdaStatus
+      text: string | null
+      /**
+       * The copy's step-0 frame, as `compiled`'s `first` carries the program's and for its reason; `null` where the λ
+       * leg is not available. **THE COPY'S FIRST `frames` CHUNK STARTS AT STEP 1.**
+       */
+      first: LambdaState | null
+      /** The step-0 tree at `LAMBDA_TREE_NODES`, `null` beside a `null` frame; transferred, as `lambda-tree`'s is. */
+      lambdaTree: LambdaTreeWire | null
+    }
   /**
    * A TM scratch was built — 5d-iv design §4.4, and `scratch-compiled`'s counterpart rather than a
    * widening of it.
@@ -690,7 +708,15 @@ export type RunReply =
    * the main thread has never seen it. Here the main thread SENT the text, so echoing it would return
    * up to `MAX_FORK_RULES` rules of string to the sender that already holds it.
    */
-  | { kind: 'tm-scratch-compiled'; gen: number; tm: TmScratchStatus; tmProgram: TmProgram; tapeNames: string[] }
+  | {
+      kind: 'tm-scratch-compiled'
+      gen: number
+      tm: TmScratchStatus
+      tmProgram: TmProgram
+      tapeNames: string[]
+      /** The copy's step-0 frame, as on `scratch-compiled`. */
+      first: TmState | null
+    }
   /**
    * How far a TM buffer's value run has got, and its value once it has finished — posted after every chunk.
    *
@@ -708,7 +734,15 @@ export type RunReply =
    * carries, since every field of it is true of a copy. No `text` echo, for `tm-scratch-compiled`'s reason: the main
    * thread sent the text.
    */
-  | { kind: 'rxm-scratch-compiled'; gen: number; rxm: RxmStatus; rxmProgram: RxmProgram; value: Decoded }
+  | {
+      kind: 'rxm-scratch-compiled'
+      gen: number
+      rxm: RxmStatus
+      rxmProgram: RxmProgram
+      value: Decoded
+      /** The copy's step-0 frame, as on `scratch-compiled`. */
+      first: RxmState | null
+    }
   /**
    * An rxm copy's value after a `[continue]` — where a compiled session's arrives in `result`, which a copy never
    * gets. Only a step cap can be continued, so this changes a value only for a copy whose build that cap stopped: a
@@ -719,6 +753,11 @@ export type RunReply =
   /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
+   *
+   * **IT CARRIES EVERY VIEW'S STEP-0 PICTURE** (recompile-flash design): `first`, each leg's step-0 frame, and
+   * `lambdaTree`, the λ term's step-0 tree at `LAMBDA_TREE_NODES`, `null` where the λ leg did not compile. The page
+   * replaces the old program's picture with these in the one draw this reply makes; told in later messages, it could
+   * paint emptied views between this one and theirs, since a browser may paint between any two.
    *
    * `programs` IS SENT ONCE, HERE. A program does not change as the cursor moves, so putting it on every
    * frame would send the same machine again with each one.
@@ -752,6 +791,9 @@ export type RunReply =
        * The eleven typed arrays inside are TRANSFERRED, not cloned; see the worker's `postMessage`.
        */
       linkIndex: LinkIndexWire | null
+      first: FirstFrames
+      /** Its columns are transferred, as `lambda-tree`'s are. */
+      lambdaTree: LambdaTreeWire | null
     }
   /** One chunk of a leg's recording, under the leg's epoch when it was recorded (`rewind`'s doc). */
   | FramesReply

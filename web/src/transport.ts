@@ -305,7 +305,7 @@ export function createTransport(deps: {
       if (leg.hist.evicted && leg.gen === client.gen) {
         rewindLeg(leg)
         client.rewind(slot.binding.leg, leg.epoch)
-      } else leg.hist.seek(0)
+      } else leg.hist.toStart()
       draw()
     },
     extend: () => {

@@ -4,8 +4,8 @@
  * module doc gives: the coverage gate cannot see the worker. What touches the worker's state or a wasm handle stays
  * there and is passed in. `tests/node/copy-build.test.ts` holds the order.
  */
-import type { Leg, RunReply } from './protocol'
-import { type RecordLeg, type RecordWorker, recordLeg, resetRecording } from './record-loop'
+import type { Leg, LegFrame, RunReply } from './protocol'
+import { firstFrame, type RecordLeg, type RecordWorker, recordLeg, resetRecording } from './record-loop'
 import type { Diagnostic } from './types'
 
 /** What claiming the thread touches in the worker. */
@@ -73,7 +73,10 @@ export type CopyBuild<K extends Leg, M> = {
   /** Free a build a newer generation superseded. */
   free(made: M): void
   occupy(gen: number, made: M): void
-  compiled(gen: number, made: M): CopyCompiled[K]
+  /** `first` is the copy's step-0 frame, which the reply carries (`null` where its leg is not available). */
+  compiled(gen: number, made: M, first: LegFrame[K] | null): CopyCompiled[K]
+  /** The buffers `reply` hands over rather than copies, where it has any. */
+  transfer?(reply: CopyCompiled[K]): Transferable[]
   /** What runs once the first recording has. */
   after?(gen: number): Promise<void>
 }
@@ -105,7 +108,10 @@ export async function buildCopy<K extends Leg, M, H>(
     return
   }
   build.occupy(req.gen, made)
-  worker.post(build.compiled(req.gen, made))
-  await recordLeg(record, worker, req.gen, true)
+  // STEP 0 RIDES THE COMPILED REPLY, AS ON A SESSION'S `compiled` (recompile-flash design): the page puts it in the
+  // copy's emptied ring in that reply's one draw, so an edit in a copy's editor never draws the copy's view empty first.
+  const reply = build.compiled(req.gen, made, firstFrame(record, worker, req.gen))
+  worker.post(reply, build.transfer?.(reply))
+  await recordLeg(record, worker, req.gen, false)
   await build.after?.(req.gen)
 }

@@ -125,6 +125,18 @@ describe('History', () => {
     expect(h.current).toBe('c')
   })
 
+  it('stays on step 0 after toStart, even on a ring of one frame, as frames arrive', () => {
+    h.push('a', 10)
+    h.toStart()
+    h.push('b', 10)
+    expect(h.current).toBe('a')
+    h.seek(1)
+    h.toStart()
+    h.push('c', 10)
+    expect(h.current).toBe('a')
+    expect(h.head).toBe(0)
+  })
+
   it('does not move the head off a scrubbed-back position when new frames arrive', () => {
     h.push('a', 10)
     h.push('b', 10)

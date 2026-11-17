@@ -82,6 +82,14 @@ export class LambdaTrees {
     return latest.refused === null ? { kind: 'stale', tree: latest } : { kind: 'none' }
   }
 
+  /**
+   * Start build `gen`'s entry with `tree`, the step-0 tree its `compiled` reply carried, as if asked and answered: the
+   * views draw the new build's step 0 as a tree in the draw that shows it, and ask nothing for it.
+   */
+  seed(session: SessionId, gen: number, tree: LambdaTreeWire): void {
+    this.#entries.set(session, { gen, latest: tree, answered: tree.step, asked: null })
+  }
+
   store(session: SessionId, gen: number, tree: LambdaTreeWire): void {
     const e = this.#entries.get(session)
     if (e === undefined || e.gen !== gen) return

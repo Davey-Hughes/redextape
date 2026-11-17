@@ -53,13 +53,14 @@ import {
   keepDecided,
   keepInFlight,
   LAMBDA_BYTE_BUDGET,
+  LAMBDA_TREE_NODES,
   LEG_FRAME_BYTES,
   RXM_WINDOW,
   rxmRecordEnd,
   TM_RADIUS,
   VALUE_CHUNK,
 } from './protocol'
-import { extendLeg, type RecordLeg, type RecordWorker, recordLeg, rewindAndRecord } from './record-loop'
+import { extendLeg, type RecordLeg, type RecordWorker, recordBuild, rewindAndRecord } from './record-loop'
 import type {
   Decoded,
   Diagnostic,
@@ -396,7 +397,7 @@ const worker: RecordWorker = {
   allowance,
   epoch,
   owns: (gen) => live?.gen === gen,
-  post: (reply) => ctx.postMessage(reply),
+  post: (reply, transfer = []) => ctx.postMessage(reply, transfer),
   yieldToEventLoop,
 }
 
@@ -417,8 +418,8 @@ function handleOf<K extends Leg>(leg: K, gen: number): Session | ScratchOf[K] | 
 
 /**
  * Each leg's pieces for `record-loop.ts`: a `Session`'s leg, or a copy's (`ScratchOf`), which carries that leg's
- * methods under `Session`'s names. Reached only through `record`, `extend`, `rewind` and `onScratch` below (`record`'s
- * doc).
+ * methods under `Session`'s names. Reached only through `onRun`'s `recordBuild`, `extend`, `rewind` and `onScratch`
+ * below (`extend`'s doc).
  */
 const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, Session | ScratchOf[K]> } = {
   // The λ leg's recording is what decides its value, where TM's and rxm's replay a run `compile` already finished,
@@ -459,15 +460,10 @@ const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, Session | ScratchOf[K]> } 
 }
 
 /**
- * Record `leg` through its entry in `RECORDINGS`; `recordLeg`'s doc has the contract, and its answer is this one's.
- * **GENERIC IN THE LEG, AS `extend` AND `rewind` ARE**, so the entry is typed by the one leg `K` and handed on as such:
- * no call passes a `RecordLeg` of the whole union, whose `leg` and frames `tsc` would not tie together.
+ * `extendLeg` for `leg`, through its entry in `RECORDINGS`. **GENERIC IN THE LEG, AS `rewind` IS**, so the entry is
+ * typed by the one leg `K` and handed on as such: no call passes a `RecordLeg` of the whole union, whose `leg` and
+ * frames `tsc` would not tie together.
  */
-function record<K extends Leg>(leg: K, gen: number, emitInitial: boolean): Promise<boolean> {
-  return recordLeg(RECORDINGS[leg], worker, gen, emitInitial)
-}
-
-/** `extendLeg` for `leg`, reached as `record` reaches `recordLeg`. */
 function extend<K extends Leg>(leg: K, gen: number): Promise<boolean> {
   return extendLeg(RECORDINGS[leg], worker, gen)
 }
@@ -564,44 +560,49 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   // UNGUARDED, WHERE `rxmProgram` ABOVE IS GUARDED: `rxmText` answers `null` itself for a declined leg and for text
   // over the copy ceiling, and cannot throw. Passed through unchanged, never through `??`, for `tmText`'s reason.
   const rxmText = session.rxmText()
-  ctx.postMessage(
-    {
-      kind: 'compiled',
-      gen: req.gen,
-      statuses: { lambda, rxm, tm },
-      programs: {
-        rxm: rxmProgram === null ? null : { program: rxmProgram, text: rxmText },
-        tm:
-          tmProgram === null
-            ? null
-            : { program: tmProgram, tapeNames: tapeNames() as string[], text: tmText, tmResultDecodable },
-      },
-      declinedSpan: declinedSourceSpan(session, lambda),
-      linkIndex: index,
-    },
-    // TRANSFERRED, NOT CLONED. `prog200`'s index is ~689 KB and the app rebuilds one on every 300 ms
-    // typing pause; a structured clone would copy all of it. The buffers are dead on this side the
-    // moment they are posted, which is correct — `index` is built fresh per compile and never re-read
-    // here. `lambdaText` is a string and is cloned as usual; strings are not transferable.
-    [
-      index.lambdaSpanStart.buffer,
-      index.lambdaSpanEnd.buffer,
-      index.lambdaSpanClass.buffer,
-      index.lambdaNodeStart.buffer,
-      index.lambdaNodeEnd.buffer,
-      index.lambdaNodeId.buffer,
-      index.sourceNodeStart.buffer,
-      index.sourceNodeEnd.buffer,
-      index.sourceNodeId.buffer,
-      index.tmOwner.buffer,
-      index.rxmOwner.buffer,
-    ],
-  )
-
+  // GUARDED FOR `tmProgram`'s REASON: `lambdaTree` throws for a declined λ leg.
+  const lambdaTree = lambda.available ? session.lambdaTree(0, LAMBDA_TREE_NODES) : null
   // λ, THEN RXM, THEN TM (Plan 7 part 5 spec §5.4), `LEGS`' order, which is `LEG_NAME`'s. rxm is the cheapest leg per
   // step, and TM's recording can run to its whole `HISTORY_BYTES` before a leg after it starts; the λ leg stays first,
-  // since its recording is what decides its value.
-  for (const leg of LEGS) await record(leg, req.gen, true)
+  // since its recording is what decides its value. `compiled` goes out with every leg's step 0 before any of them.
+  await recordBuild(RECORDINGS, worker, req.gen, (first) =>
+    ctx.postMessage(
+      {
+        kind: 'compiled',
+        gen: req.gen,
+        statuses: { lambda, rxm, tm },
+        programs: {
+          rxm: rxmProgram === null ? null : { program: rxmProgram, text: rxmText },
+          tm:
+            tmProgram === null
+              ? null
+              : { program: tmProgram, tapeNames: tapeNames() as string[], text: tmText, tmResultDecodable },
+        },
+        declinedSpan: declinedSourceSpan(session, lambda),
+        linkIndex: index,
+        first,
+        lambdaTree,
+      },
+      // TRANSFERRED, NOT CLONED. `prog200`'s index is ~689 KB and the app rebuilds one on every 300 ms
+      // typing pause; a structured clone would copy all of it. The buffers are dead on this side the
+      // moment they are posted, which is correct — `index` is built fresh per compile and never re-read
+      // here. `lambdaText` is a string and is cloned as usual; strings are not transferable.
+      [
+        index.lambdaSpanStart.buffer,
+        index.lambdaSpanEnd.buffer,
+        index.lambdaSpanClass.buffer,
+        index.lambdaNodeStart.buffer,
+        index.lambdaNodeEnd.buffer,
+        index.lambdaNodeId.buffer,
+        index.sourceNodeStart.buffer,
+        index.sourceNodeEnd.buffer,
+        index.sourceNodeId.buffer,
+        index.tmOwner.buffer,
+        index.rxmOwner.buffer,
+        ...(lambdaTree === null ? [] : treeBuffers(lambdaTree)),
+      ],
+    ),
+  )
 
   // Deliberate silence: superseded while recording ran. The generation that wanted this result is gone.
   // The `kind` half is the type restating the `gen` half — see `liveHandle`'s doc for the argument.
@@ -638,7 +639,17 @@ const BUILD: { readonly [K in Leg]: CopyBuild<K, Made[K]> } = {
     occupy: (gen, { scratch }) => {
       live = { gen, kind: 'scratch', leg: 'lambda', session: scratch }
     },
-    compiled: (gen, { scratch, text }) => ({ kind: 'scratch-compiled', gen, lambda: scratch.lambdaStatus(), text }),
+    // THE TREE BESIDE THE FRAME, `null` BESIDE A `null` ONE, for `onRun`'s reason: `lambdaTree` is not asked of a leg
+    // that is not available.
+    compiled: (gen, { scratch, text }, first) => ({
+      kind: 'scratch-compiled',
+      gen,
+      lambda: scratch.lambdaStatus(),
+      text,
+      first,
+      lambdaTree: first === null ? null : scratch.lambdaTree(0, LAMBDA_TREE_NODES),
+    }),
+    transfer: ({ lambdaTree }) => (lambdaTree === null ? [] : treeBuffers(lambdaTree)),
   },
   rxm: {
     build: (src) => {
@@ -651,12 +662,13 @@ const BUILD: { readonly [K in Leg]: CopyBuild<K, Made[K]> } = {
     },
     // ITS VALUE RIDES THE BUILD REPLY: `rxmScratch` has run the program to its end (Plan 7 part 5 spec, amendment 26),
     // so no value loop follows the recording as a TM copy's does.
-    compiled: (gen, scratch) => ({
+    compiled: (gen, scratch, first) => ({
       kind: 'rxm-scratch-compiled',
       gen,
       rxm: scratch.rxmStatus(),
       rxmProgram: scratch.rxmProgram(),
       value: scratch.rxmValue(),
+      first,
     }),
   },
   tm: {
@@ -673,12 +685,13 @@ const BUILD: { readonly [K in Leg]: CopyBuild<K, Made[K]> } = {
     },
     // Its own `tapeNames`, not the fixed export `onRun` posts: a reduced file's single-tape stage changes what its one
     // tape is.
-    compiled: (gen, { scratch }) => ({
+    compiled: (gen, { scratch }, first) => ({
       kind: 'tm-scratch-compiled',
       gen,
       tm: scratch.tmStatus(),
       tmProgram: scratch.tmProgram(),
       tapeNames: scratch.tapeNames(),
+      first,
     }),
     // A headered file's value, as `tm-value` after every chunk, in place of a session's `result`.
     after: runValueLoop,
@@ -686,7 +699,7 @@ const BUILD: { readonly [K in Leg]: CopyBuild<K, Made[K]> } = {
 }
 
 /**
- * Build `leg`'s copy. **GENERIC IN THE LEG, AS `record` IS**: `tsc` checks this body with `K` abstract, so a build of
+ * Build `leg`'s copy. **GENERIC IN THE LEG, AS `extend` IS**: `tsc` checks this body with `K` abstract, so a build of
  * one leg paired with another leg's recording is refused, `buildCopy` taking both of one `K`.
  */
 function onScratch<K extends Leg>(leg: K, req: Extract<RunRequest, { kind: 'scratch' }>): Promise<void> {
@@ -806,14 +819,12 @@ function onLambdaTree(req: Extract<RunRequest, { kind: 'lambda-tree' }>): void {
   const held = handleOf('lambda', req.gen)
   if (held === null || (live?.kind === 'session' && !live.session.lambdaStatus().available)) return
   const tree = held.lambdaTree(req.step, req.budget)
-  ctx.postMessage({ kind: 'lambda-tree', gen: req.gen, tree }, [
-    tree.kind.buffer,
-    tree.left.buffer,
-    tree.right.buffer,
-    tree.name.buffer,
-    tree.hint.buffer,
-    tree.link.buffer,
-  ])
+  ctx.postMessage({ kind: 'lambda-tree', gen: req.gen, tree }, treeBuffers(tree))
+}
+
+/** A tree's columns, which a post transfers: `tree_to_js` copies each into its own buffer, which nothing here reads. */
+function treeBuffers(tree: LambdaTreeWire): Transferable[] {
+  return [tree.kind.buffer, tree.left.buffer, tree.right.buffer, tree.name.buffer, tree.hint.buffer, tree.link.buffer]
 }
 
 ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {

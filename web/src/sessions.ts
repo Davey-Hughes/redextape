@@ -36,8 +36,9 @@ export type LegState<T> = {
    */
   epoch: number
   /**
-   * The generation of the frames the ring holds, which `replies.ts`'s `pushFrames` sets from each reply it takes and
-   * nothing else writes; 0 on a leg no frames have reached. While it is the client's generation the worker holds
+   * The generation of the frames the ring holds, which `replies.ts` sets from each reply that puts frames in it (a
+   * chunk's, in `pushFrames`, and a build reply's step 0, in `seedFirst`) and nothing else writes; 0 on a leg no frames
+   * have reached. While it is the client's generation the worker holds
    * their recording, which `transport.ts`'s `restart` needs before it asks for a rewind (hidden-recording spec §6).
    */
   gen: number

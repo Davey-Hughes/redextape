@@ -57,6 +57,7 @@ function booksState(worker: RecordWorker): string {
 /** The fake's compiled reply for the copy named `name`: its value is that name, so another copy's reply differs. */
 const compiledOf = (gen: number, name: string): Extract<RunReply, { kind: 'rxm-scratch-compiled' }> => ({
   kind: 'rxm-scratch-compiled',
+  first: null,
   gen,
   rxm: rxmSnapshot('Ended').status,
   rxmProgram: FACT3,
@@ -101,7 +102,7 @@ function harness(made: Copy | null = copyOf('copy', 2), diagnostics: Diagnostic[
       log.push(`occupy ${copy?.name ?? 'nothing'}`)
       occupant.current = { gen, copy }
     },
-    compiled: (gen, copy) => compiledOf(gen, copy?.name ?? 'nothing'),
+    compiled: (gen, copy, first) => ({ ...compiledOf(gen, copy?.name ?? 'nothing'), first }),
     after: async (gen) => {
       log.push(`after ${gen}`)
     },
@@ -194,7 +195,7 @@ describe('buildCopy', () => {
     expect(copy.cursor.at).toBe(0)
   })
 
-  it('occupies, posts the compiled reply, records the first frames from step 0, then runs after', async () => {
+  it('occupies, posts the compiled reply with step 0, records on from step 1, then runs after', async () => {
     const copy = copyOf('copy', 2)
     const h = harness(copy)
 
@@ -206,10 +207,11 @@ describe('buildCopy', () => {
       'build text at 3 over nothing',
       'occupy copy',
       'rxm-scratch-compiled',
-      'frames 0,1,2 ended',
+      'frames 1,2 ended',
       'after 1',
     ])
-    expect(h.posts[0]).toEqual(compiledOf(1, 'copy'))
+    expect(h.posts[0]).toEqual({ ...compiledOf(1, 'copy'), first: frameOf({ step: 0 }) })
+    // Step 0 is counted against the allowance as a chunk's frames are.
     expect(h.occupant.current).toEqual({ gen: 1, copy })
     expect(h.worker.recorded.rxm).toBe(30)
     expect(h.worker.recording.rxm).toBe(false)

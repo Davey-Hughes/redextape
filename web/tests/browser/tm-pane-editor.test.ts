@@ -189,10 +189,11 @@ describe('the TM pane editor region', () => {
    * `display: none`, which is what the line may not use (`TmPane`'s `#value` doc) and is exactly "no space".
    * `style.css` is loaded for this tier by `tests/browser/setup.ts`, so the margins measured are the app's.
    */
-  it('takes no vertical space with an empty value line', () => {
+  it('takes no vertical space with an empty value line for a file with no header', () => {
     const { pane, host } = mountPane()
     pane.setProgram(ONE_RULE_PROGRAM, ['TAPE'])
-    pane.setScratchStatus({ available: true, reason: '', width: 8, run: 'Running', header: true, reduction: null })
+    pane.setScratchStatus({ available: true, reason: '', width: 8, run: 'Running', header: false, reduction: null })
+    pane.setScratchValue(null)
     pane.render(FRAME, CONTROLS)
     const at = (selector: string) => host.querySelector<HTMLElement>(selector)?.getBoundingClientRect()
     const gap = () => (at('.tapes')?.top ?? Number.NaN) - (at('.tm-status')?.bottom ?? Number.NaN)
@@ -207,6 +208,24 @@ describe('the TM pane editor region', () => {
 
     pane.setScratchValue({ run: { run: 'Ended', steps: 1, cap: 1 }, value: { Value: { text: '2' } } })
     expect(gap()).toBeGreaterThan(absent)
+  })
+
+  /**
+   * **A HEADERED COPY'S EMPTY LINE KEEPS THE ROOM ITS VALUE TAKES**, so the tapes below stay put when the value run's
+   * first reading comes after the copy's first recording (`TmPane`'s `#value` doc).
+   */
+  it('keeps one line’s room while a headered copy’s value is not in', () => {
+    const { pane, host } = mountPane()
+    pane.setProgram(ONE_RULE_PROGRAM, ['TAPE'])
+    pane.setScratchStatus({ available: true, reason: '', width: 8, run: 'Running', header: true, reduction: null })
+    pane.setScratchValue(null)
+    pane.render(FRAME, CONTROLS)
+    const top = () => host.querySelector<HTMLElement>('.tapes')?.getBoundingClientRect().top ?? Number.NaN
+    expect(host.querySelector('.tm-value')?.textContent).toBe('')
+
+    const waiting = top()
+    pane.setScratchValue({ run: { run: 'Ended', steps: 1, cap: 1 }, value: { Value: { text: '2' } } })
+    expect(top()).toBe(waiting)
   })
 
   /**

@@ -149,10 +149,13 @@ export function controlState(v: LegView): ControlState {
   // THE READOUT SAYS WHAT THE USER DID; THE FIELD NAMES WHAT IS TRUE OF THE SESSION. They are the
   // same state from the two ends, and this is the existing narration rather than a second channel.
   // **A LINK'S PENDING POSITION SAYS WHERE THE LEG IS GOING IN PLACE OF HOW ITS RECORDING STOPPED** (Plan 7 part 6a
-  // spec §5.4): a stop the link will continue past is not where the leg rests.
+  // spec §5.4): a stop the link will continue past is not where the leg rests. **NOT WHILE THE LEG HOLDS ONLY THE STEP 0
+  // ITS BUILD REPLY CARRIED AND ITS RECORDING HAS SAID NOTHING** (recompile-flash design): the line then reads no longer
+  // than the one it turns into, where the tail could wrap the view's header and move its panels until the first chunk.
+  const started = v.length > 1 || v.done !== null
   const tail = v.awaitingRun
     ? ' — recompiling'
-    : v.pending !== null
+    : v.pending !== null && started
       ? ` — going to step ${n(v.pending)} from the link`
       : v.done === null
         ? ''

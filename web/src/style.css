@@ -1079,9 +1079,15 @@ button.view-title[aria-expanded="true"] {
 /* AN EMPTY VALUE LINE TAKES NO SPACE AND STAYS IN THE ACCESSIBILITY TREE. `TmPane` empties the line rather than
    hiding it (its `#value` doc has why: a live region is announced from that tree), so `display: none` is not an
    option here. `tm-pane-editor.test.ts` holds the gap. */
-.tm-value:empty,
+.tm-value:empty:not(.has-value-run),
 .rxm-value:empty {
   margin-bottom: 0;
+}
+
+/* BUT A HEADERED COPY'S LINE KEEPS ONE LINE'S ROOM WHILE IT WAITS for its value run's first reading, so the panels
+   below do not move when the reading comes (`TmPane`'s `#drawValue` doc). `recompile-swap.test.ts` holds it. */
+.tm-value.has-value-run {
+  min-height: 1lh;
 }
 
 /* Tape rows scroll horizontally INSIDE the pane. A wide tape must never make the page scroll. */

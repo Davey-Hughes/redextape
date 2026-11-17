@@ -35592,3 +35592,174 @@ naming a test gives the figure as that test's failure printed it before its fix.
 | 42 | `check-all`'s commands: its 47 `==>` lines less the five that report a tool it found (`using …` and `chromedriver … already matches`) | `grep '^==> ' $R/gate4/check-all.log \| grep -vc -e '^==> using ' -e '^==> chromedriver .* already matches'`; `grep -c '^==> '` for the 47 |
 | 1331, 32 | `redextape-core` tests run and skipped at `b01ba64` | `cargo nextest run -p redextape-core --no-fail-fast`, its summary line (`$R/gate4/nextest-core.log`) |
 | 45; 12, 4, 3 | figures `check-doc-figures.sh` pins; shared regions, files and sources | `scripts/check-doc-figures.sh`; `scripts/check-shared-docs.sh` (`$R/gate4/scan-doc-figures.log`, `scan-shared-docs.log`, and the same in `$R/gate5/`) |
+
+#### A RECOMPILE SWAPS EVERY VIEW TO THE NEW PROGRAM'S STEP 0 IN ONE FRAME: THE BUILD REPLY CARRIES EACH VIEW'S STEP-0 PICTURE AND THE λ TERM'S STEP-0 TREE, FOR THE PROGRAM AND FOR A COPY, SO NO FRAME BETWEEN THE OLD PROGRAM AND THE NEW ONE SHOWS AN EMPTIED PANEL, THE λ TERM AS FLAT TEXT OR `not run`, AND A HEADERED TM COPY'S VALUE LINE KEEPS ITS ROOM UNTIL ITS VALUE RUN REPORTS (2026-11-17, branch `recompile-flash`, `486df8d..9d9796f`, 15 commits, then this entry, `fd41186`, then `808c11e`, which corrects two code comments, then `1e6c0c4`, `33a4f97` and the commit after them, which correct this entry and the design: 20 commits in all)
+
+The user, 2026-11-17: "after the program recompiles, there's a bit of a flash as the panels are
+rebuilt, can we eliminate that?" He saw it on the `notice-float` branch; the lane reproduced it on
+`main` at `486df8d`. The design he chose, and the controller's and the implementer's calls, are in
+`docs/superpowers/specs/2026-11-17-recompile-flash-design.md`. The lane's record is
+`~/temp/redextape-recompile-flash-record/`, `$R` below: `brief.md` (his words, his decision and the
+controller's calls, in three addenda), `progress.md`, `review-1.md`, the frame captures in `frames/`
+and `shots/`, and the logs this entry names.
+
+##### WHAT CHANGED AND WHY
+
+- **The cause.** At each recompile the lane captured on `main` (a typed edit, an example, the
+  encoding, an example's undo and a shared link's open in the Explorer preset; a typed edit and an
+  example in Debugger) the page painted at least one frame of emptied views. `replies.ts`'s
+  `compiled` arm emptied every leg's ring (`sessions.ts`'s `resetLegs`) and drew at once: the TM
+  view lost its status line and tape rows, so its rules panel and state diagram moved up; the rxm
+  registers, call stack and heap emptied; in Explorer the rxm and TM step lines read `not run` (at
+  the encoding change the λ one too, and at a shared link's open TM's, the only one shown), and
+  Debugger's one step line never did. Each leg waited for its first `frames` chunk, TM's behind the
+  λ and rxm legs' whole first recordings, and the λ view drew the term as flat text until its
+  `lambda-tree` reply.
+- **`compiled` carries every leg's step-0 frame and the λ term's step-0 tree** (`first`,
+  `lambdaTree`), and the worker records each leg from step 1 (`record-loop.ts`'s `recordBuild`). The
+  page resets the legs, puts each step 0 in its ring and the tree in `LambdaTrees` under the new
+  generation, and draws once.
+- **A copy's build reply does the same for its leg**: `scratch-compiled`, `tm-scratch-compiled` and
+  `rxm-scratch-compiled` carry `first`, the λ one `lambdaTree` too, and `copy-build.ts` records from
+  step 1, so an edit in a copy's editor swaps the copy's view in one frame.
+- **A leg whose recording waits behind another's** reads `step 0 of 0…` from `compiled`, where it
+  read `not run`, and ⏭ is off until its first chunk.
+- **↺ on a view still waiting for its first chunk leaves it on step 0** (`History.toStart`), where
+  `seek(0)` on a ring of one frame followed the recording to its newest step.
+- **A shared link's step line leaves the link's tail off while its leg holds only the build's step
+  0**, so the waiting line is no longer than the line it turns into and wraps no header; a link's
+  position of step 0 is spent at `compiled`.
+- **A headered TM copy's value line keeps one line's room while its value run has not reported**
+  (`TmPane`'s `has-value-run`, `min-height: 1lh`). The run's first `tm-value` comes after the copy's
+  whole first recording, and until then the empty line took no room, so the rules panel stood one
+  line higher.
+- No Rust changed.
+
+##### DECISIONS
+
+The user's, 2026-11-17: of three options the controller put to him (swap in one frame; the same,
+with the old content dimmed while an edit waits; hold every view until all are ready), the first,
+"Swap in one frame". The option's description is the controller's text: "The worker sends each
+view's step-0 picture together with 'compiled', and the page switches every view to the new program
+in a single frame. No blank frame and no jump."
+
+The controller's, in `brief.md`'s second and third addenda:
+
+- **Copies are in scope** (review 1's I3): "The user asked for the flash after a recompile to go,
+  and a copy's edit is a recompile."
+- **↺ on a waiting view leaves it on step 0, not following** (I1), as a press of ↺ does anywhere
+  else.
+- **A TM copy's value line keeps its room while it waits, its settled height, empty**, with no new
+  wording: the smallest visible change. The controller applied here what the user said of the page's
+  banners on 2026-11-17: "I don't want anything like this that shifts the page unexpectedly".
+
+The implementer's, in the design doc's "Calls made in the build" and the two sections after it:
+
+- **The pictures ride `compiled` itself**, not replies after it: each message from a worker is its
+  own task, and a browser may paint between two tasks.
+- **λ's tree is sent whether or not a λ view is open**: an open λ view asks for it at once, and it is
+  bounded by `LAMBDA_TREE_NODES`.
+- **The link's tail goes while the leg waits** (I2), rather than the header reserving the room,
+  which would change every view's header at every step.
+- **The value line's room follows the build, not the reading**: a pane showing a copy whose status
+  says `header` (which is when the build makes a value run) keeps one line's room, reading or not.
+  Keeping the previous reading's exact height would need a layout read in the reply's draw and would
+  still move the panel whenever the new value's line count differs.
+
+##### WHAT THE REVIEW CAUGHT
+
+Review 1 (`$R/review-1.md`), on `d4d0615`: 3 Important and 3 Minor findings, all fixed. I1, ↺ on a
+waiting view jumped to the newest step. I2, in Firefox a shared link with every view past step 0
+wrapped the TM header while λ and rxm recorded, moving the rules panel from 230 to 261 px and back.
+I3, an edit in a copy's editor still flashed. M1, `test:probe:record`'s pins: its tally now counts
+the step 0 a build reply carries, and the pins are unchanged. M2, three stale docs; M3, an orphaned
+doc comment. The fix round left a TM copy's value line moving its rules panel from 487 to 459 px and
+back, which the controller ruled on (above).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **↺ on a view whose step 0 was dropped (`rewindLeg`) still empties the leg's ring** until the
+  rewound recording's first chunk: a designed wait (hidden-recording spec §6), held by
+  `restart-rewind.test.ts`, left for the user to decide.
+- **A view's header that wraps as its step line grows can still move the view's body once**, the
+  open TM header-wrap item; a link position past the first chunk shows the link's tail from that
+  chunk on, as on `main`.
+- **A TM copy's value that wraps onto more than one line** still grows the line by the extra lines
+  when it arrives; the room kept is one line's.
+- **From the keystroke to the new build, every view shows the old run at its old step, undimmed**,
+  and the strip and readout keep the old run's values, dimmed, until the new `result`, both as on
+  `main`: the option that dims the old content was not the one chosen.
+
+##### VERIFICATION
+
+Run on 2026-11-17 in the lane's worktree, `~/temp/redextape-recompile-flash`, each into its log in
+`$R`. The new test cases and `copy-build.test.ts`'s rewritten one, with the logs in which each
+failed:
+
+| Case | Before its change | Under a sabotage that put the old logic back |
+|---|---|---|
+| `record-loop.test.ts`'s two `recordBuild` cases; `replies.test.ts`'s case for a `compiled` reply's step-0 pictures | `node-fail-before.log` | `node-sabotage.log` |
+| `recompile-swap.test.ts`'s typed edit, encoding, example and undo cases | `swap-fail-before-chromium.log`, Chromium | `swap-sabotage-rings.log`, `swap-sabotage-tree.log`, Chromium |
+| `recompile-swap.test.ts`'s shared link case, before `d25fb79` | `swap-fail-before-chromium.log`, Chromium | `swap-sabotage-rings.log`, `swap-sabotage-tree.log`, Chromium |
+| the same case from `d25fb79` on, with every view at step 3 | none: it passed in `r2-swap-fail-before-chromium.log` | `r2-sab-firefox.log`, Firefox |
+| `share-positions.test.ts`'s step-0 case | none | `sp-sabotage.log` |
+| `history.test.ts`'s `toStart` case; `replies.test.ts`'s case for a copy's build reply | `r2-node-fail-before.log` | `r2-sab-node.log` |
+| `copy-build.test.ts`'s build case, rewritten for step 0 on the reply | `r2-node-fail-before.log` | `r2-sab-node-copybuild.log` |
+| `controls.test.ts`'s link-tail case | none | `r2-sab-node.log` |
+| `recompile-swap.test.ts`'s ↺ case and its λ, rxm and TM copy cases | `r2-swap-fail-before-chromium.log`, Chromium | `r2-sab-chromium.log`, Chromium; `r2-sab-firefox.log`, Firefox |
+| the TM copy case with its value-line filter removed | `r3-fail-before-chromium.log`, `r3-fail-before-firefox.log` | `r3-sab-chromium.log`, `r3-sab-firefox.log` |
+| `tm-pane-editor.test.ts`'s headered-copy case | none | `r3-sab-chromium.log`, `r3-sab-firefox.log` |
+
+The rounds' runs, in order:
+
+```
+the fix, before it: node tests (node-fail-before.log)          → 3 failed | 77 passed
+  recompile-swap, Chromium (swap-fail-before-chromium.log)     → 5 failed
+review 1's fixes, before them: node (r2-node-fail-before.log)  → 3 failed | 88 passed
+  recompile-swap, Chromium (r2-swap-fail-before-chromium.log)  → 4 failed | 5 passed
+  sabotaged, Firefox (r2-sab-firefox.log)                      → 5 failed | 4 passed
+the value line, before it: recompile-swap, Chromium and
+  Firefox (r3-fail-before-chromium.log, -firefox.log)          → 1 failed | 8 passed, each
+  its fix sabotaged, recompile-swap and tm-pane-editor,
+  Chromium and Firefox (r3-sab-chromium.log, -firefox.log)     → 2 failed | 20 passed, each
+  after it, recompile-swap and the seven test files that
+  name the value line, Chromium and Firefox
+  (r3-after-chromium.log, -firefox.log)                        → 8 files, 166 tests passed, each
+```
+
+The seven are the `tests/browser` test files that name `tm-value` or `setScratchValue`, the
+affordability probe aside: `copy-edit-leaving`, `copy-editor-mount`, `edge-spacing`,
+`tm-copy-value-readout`, `tm-pane-editor`, `tm-pane-follows-session` and `tm-reduced-buffer`.
+
+The browser runs are `pnpm exec vitest run --project browser <files>` and, for Firefox,
+`REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project firefox <files>`, under
+`flock ~/temp/redextape-browser.lock`. At `9d9796f`, the last commit before this entry:
+
+```
+pnpm run test:node                                             → "Test Files 73 passed (73)",
+                                                                 "Tests 1497 passed (1497)" (r3-node.log)
+the browser project, in full                                   → "Test Files 219 passed (219)",
+                                                                 "Tests 1760 passed (1760)" (r3-browser-full.log)
+```
+
+The full gate ran on `fd41186`, this entry's first version, and the scans and the comment guard ran
+again on the tree with this correction; the PR's description gives both.
+
+**Every count this entry quotes, with what produces it.** A log named in a row is in `$R`. The
+relative paths in `r3-figures.log` are from the worktree, but for its `rules panel at` search's,
+which are from `$R`; `r4-figures.log` and `r5-figures.log` name each command's directory.
+
+| Value | What | Produced by |
+|---|---|---|
+| 15; `50690b0`, `9d9796f` | commits in the range; its first and last | `git rev-list --count 486df8d..9d9796f`; `git rev-list --reverse 486df8d..9d9796f \| head -1` (r3-figures.log) |
+| 20 | commits on the branch, the three that correct this entry included | `git rev-list --count 486df8d..HEAD`, run once the third was committed (r6-figures.log) |
+| two | code comments `808c11e` corrects: the `has-value-run` rule's in `style.css`, and `TmPane`'s `#value` doc | `git show --format= 808c11e` (r4-figures.log) |
+| 30, 1087, 115 | files changed, insertions and deletions in the range | `git diff --stat 486df8d..9d9796f`, its last line (r3-figures.log) |
+| none | Rust files changed | `git diff --stat 486df8d..9d9796f -- crates`, empty (r3-figures.log) |
+| 3, 3 | review 1's Important and Minor findings | `rg -c '^### I' $R/review-1.md`; `rg -c '^### M' $R/review-1.md` (r3-figures.log) |
+| 230, 261, 230 | the TM rules panel's top in px, Firefox, a shared link past step 0, I2's fix sabotaged | `rg -n 'rules panel at' r2-sab-firefox.log` (r3-figures.log) |
+| 487, 459, 487 | the TM rules panel's top in px across a TM copy's rebuild, before the value-line fix, Chromium and Firefox | `rg -n 'rules panel at' r3-fail-before-chromium.log r3-fail-before-firefox.log` (r3-figures.log) |
+| 1600 px | the width `recompile-swap.test.ts` runs at | `rg -n 'viewport\(1600' web/tests/browser/recompile-swap.test.ts` (r3-figures.log) |
+| the counts in the block of runs | each run's `Test Files` and `Tests` lines | `rg '^\s+Tests? ' <log>` for each log the block names (r5-figures.log) |
+| seven | test files that name the value line, the affordability probe aside | `rg -l 'tm-value\|setScratchValue' web/tests/browser`: nine, less `buffer-affordability.test.ts` and its worker, `affordability-tm-worker.ts` (r3-figures.log) |
+| 73, 1497; 219, 1760 | node test files and tests passed; browser test files and tests passed, at `9d9796f` | the two runs above, their summary lines (r3-node.log, r3-browser-full.log) |

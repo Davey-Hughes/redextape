@@ -13,8 +13,8 @@
  * handle are type parameters, so each leg's pieces are checked against its own wasm type and its own `LegFrame`, and
  * nothing is cast back out of a union of frames. The legs are built in the worker, beside the wasm types they call.
  */
-import { LEGS, perLeg } from './legs'
-import type { FramesReply, Leg, LegFrame, RecordEnd, RunReply } from './protocol'
+import { LEGS, mapLegs, perLeg } from './legs'
+import type { FirstFrames, FramesReply, Leg, LegFrame, RecordEnd, RunReply } from './protocol'
 import { HISTORY_BYTES, RECORD_CHUNK } from './protocol'
 
 /**
@@ -75,7 +75,8 @@ export type RecordWorker = {
   readonly epoch: Record<Leg, number>
   /** Whether generation `gen` still owns what is live, whatever kind it is. */
   owns(gen: number): boolean
-  post(reply: RunReply): void
+  /** `transfer` names buffers the reply hands over rather than copies: dead on the worker's side once posted. */
+  post(reply: RunReply, transfer?: Transferable[]): void
   /** One macrotask, so a newer request can be dispatched between chunks. */
   yieldToEventLoop(): Promise<void>
 }
@@ -169,6 +170,39 @@ export async function recordLeg<K extends Leg, H>(
   } finally {
     if (worker.owns(gen) && worker.epoch[leg.leg] === epoch) worker.recording[leg.leg] = false
   }
+}
+
+/**
+ * A build's recording: every leg's step-0 frame handed to `announce`, which posts them with `compiled`, then each leg
+ * recorded on from step 1, in `LEGS`' order. **`announce` RUNS BEFORE ANY LEG STEPS**, so that the page has every
+ * view's step 0 in the reply that tells it of the new program, and a leg whose recording waits behind another's is not
+ * left empty meanwhile. Each step-0 frame is counted against its leg's allowance as a chunk's frames are.
+ */
+export async function recordBuild<H extends { [K in Leg]: unknown }>(
+  legs: { readonly [K in Leg]: RecordLeg<K, H[K]> },
+  worker: RecordWorker,
+  gen: number,
+  announce: (first: FirstFrames) => void,
+): Promise<void> {
+  announce(mapLegs<FirstFrames>((leg) => firstFrame(legs[leg], worker, gen)))
+  const record = <K extends Leg>(leg: K) => recordLeg(legs[leg], worker, gen, false)
+  for (const leg of LEGS) await record(leg)
+}
+
+/**
+ * The frame `leg`'s cursor stands on, counted against its allowance as a chunk's frames are; `null` where `gen` holds no
+ * cursor for it, or one whose leg is not available. A build's reply carries it, and its recording starts at step 1.
+ */
+export function firstFrame<K extends Leg, H>(
+  leg: RecordLeg<K, H>,
+  worker: RecordWorker,
+  gen: number,
+): LegFrame[K] | null {
+  const held = leg.handle(gen)
+  if (held === null || !leg.available(held)) return null
+  const first = leg.frame(held)
+  worker.recorded[leg.leg] += leg.bytes(first)
+  return first
 }
 
 /**

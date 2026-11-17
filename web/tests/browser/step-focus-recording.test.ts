@@ -56,6 +56,12 @@ const release = (then: 'hold' | 'let through') => {
 const strip = () => document.querySelector('[data-leaf="tm-0"] .controls') as HTMLElement
 const button = (name: string) => strip().querySelector(`button[aria-label="${name}"]`) as HTMLButtonElement
 
+/**
+ * The TM line once its leg's first chunk is in and it records on. **NOT `…` ALONE**: the line reads `step 0 of 0…` from
+ * the build's `compiled` reply, which carries step 0, and ⏭ is off until a chunk gives it a newer step to go to.
+ */
+const FIRST_CHUNK_IN = /^step [\d,]+ of [1-9][\d,]*…/
+
 /** The readout's step and its newest step. */
 const at = (): { step: number; of: number } => {
   const m = /^step ([\d,]+) of ([\d,]+)/.exec(tmStepText())
@@ -166,7 +172,7 @@ describe('a step button a recording turns off under the focus, in the app', () =
 
   it('⏭ clicked while it records waits, and hands the focus to ▶ at its `budget` stop, where Enter records further', async () => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${LONG_SRC} ` } })
-    await until(() => tmStepText().includes('…'), 'the first recording to start')
+    await until(() => FIRST_CHUNK_IN.test(tmStepText()), 'the first recording’s first chunk')
     held = []
     await userEvent.click(button(NEWEST))
     expect(tmStepText(), 'precondition: the click landed while the page knew it to be recording').toContain('…')
@@ -226,7 +232,7 @@ describe('a step button a recording turns off under the focus, in the app', () =
     await page.viewport(1280, 896)
     await resetToFirstLoad()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } })
-    await until(() => tmStepText().includes('…'), 'the first recording to start')
+    await until(() => FIRST_CHUNK_IN.test(tmStepText()), 'the first recording’s first chunk')
     held = []
     await userEvent.click(button(NEWEST))
     expect(tmStepText(), 'precondition: the click landed while the page knew it to be recording').toContain('…')

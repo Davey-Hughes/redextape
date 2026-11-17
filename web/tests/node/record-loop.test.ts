@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { LEGS } from '../../src/legs'
-import { endOf, type FramesReply, HISTORY_BYTES, RECORD_CHUNK, type RecordEnd, rxmRecordEnd } from '../../src/protocol'
+import {
+  endOf,
+  type FirstFrames,
+  type FramesReply,
+  HISTORY_BYTES,
+  type Leg,
+  type LegFrame,
+  RECORD_CHUNK,
+  type RecordEnd,
+  type RunReply,
+  rxmRecordEnd,
+} from '../../src/protocol'
 import {
   extendLeg,
   type RecordLeg,
   type RecordWorker,
+  recordBuild,
   recordLeg,
   resetRecording,
   rewindAndRecord,
@@ -391,5 +403,80 @@ describe('extendLeg', () => {
     expect(await extendLeg(raisingLeg(h, 'capped', raises), h.worker, 1)).toBe(false)
     expect(raises).toEqual([])
     expect(h.events).toEqual([])
+  })
+})
+
+/**
+ * `recordBuild`'s contract, against three fake legs, each a cursor as `fakeLeg`'s is whose frames are the step it
+ * stands on, and a worker that notes the announcement and every chunk in the order they go out: a chunk as its leg, the
+ * first and last step it carries (`-` for none) and its end.
+ */
+describe('recordBuild', () => {
+  const legOf = <K extends Leg>(leg: K, c: Cursor, available = true): RecordLeg<K, Cursor> => ({
+    leg,
+    handle: (gen) => (gen === 1 ? c : null),
+    available: () => available,
+    frame: (x) => ({ step: x.at }) as unknown as LegFrame[K],
+    bytes: () => FRAME_BYTES,
+    step: (x) => {
+      if (x.at >= x.length) return false
+      x.at += 1
+      return true
+    },
+    end: () => 'ended',
+    raise: () => {
+      throw new Error('recordBuild raised a cap')
+    },
+    rewind: () => {
+      throw new Error('recordBuild rewound a cursor')
+    },
+  })
+
+  const build = async (legs: { [K in Leg]: RecordLeg<K, Cursor> }) => {
+    const events: string[] = []
+    const worker: RecordWorker = {
+      recording: { lambda: false, rxm: false, tm: false },
+      recorded: { lambda: 0, rxm: 0, tm: 0 },
+      allowance: { lambda: HISTORY_BYTES, rxm: HISTORY_BYTES, tm: HISTORY_BYTES },
+      epoch: { lambda: 0, rxm: 0, tm: 0 },
+      owns: (gen) => gen === 1,
+      post: (reply: RunReply) => {
+        if (reply.kind !== 'frames') throw new Error(`the build posted a ${reply.kind}`)
+        const steps = (reply.frames as readonly { step: number }[]).map((f) => f.step)
+        events.push(`${reply.leg} ${steps.length === 0 ? '-' : `${steps[0]}..${steps.at(-1)}`} ${reply.done}`)
+      },
+      yieldToEventLoop: () => Promise.resolve(),
+    }
+    await recordBuild(legs, worker, 1, (first: FirstFrames) => {
+      const at = (leg: Leg) => (first[leg] === null ? '-' : String((first[leg] as { step: number }).step))
+      events.push(`compiled ${LEGS.map((leg) => `${leg} ${at(leg)}`).join(', ')}`)
+    })
+    return { events, recorded: worker.recorded }
+  }
+
+  it("announces every leg's step-0 frame before any chunk, and records each leg on from step 1", async () => {
+    const { events, recorded } = await build({
+      lambda: legOf('lambda', cursor(3)),
+      rxm: legOf('rxm', cursor(2)),
+      tm: legOf('tm', cursor(RECORD_CHUNK + 1)),
+    })
+    expect(events).toEqual([
+      'compiled lambda 0, rxm 0, tm 0',
+      'lambda 1..3 ended',
+      'rxm 1..2 ended',
+      `tm 1..${RECORD_CHUNK} null`,
+      `tm ${RECORD_CHUNK + 1}..${RECORD_CHUNK + 1} ended`,
+    ])
+    // Step 0 is counted against each leg's allowance as a chunk's frames are.
+    expect(recorded).toEqual({ lambda: 40, rxm: 30, tm: (RECORD_CHUNK + 2) * FRAME_BYTES })
+  })
+
+  it('announces none for a leg that did not compile and records none of it, and a leg over at step 0 posts its end alone', async () => {
+    const { events } = await build({
+      lambda: legOf('lambda', cursor(0)),
+      rxm: legOf('rxm', cursor(5), false),
+      tm: legOf('tm', cursor(1)),
+    })
+    expect(events).toEqual(['compiled lambda 0, rxm -, tm 0', 'lambda - ended', 'tm 1..1 ended'])
   })
 })

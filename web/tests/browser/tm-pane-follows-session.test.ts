@@ -102,6 +102,7 @@ describe('a TM buffer whose worker died', () => {
 
     replies.onScratchReply(id, {
       kind: 'tm-scratch-compiled',
+      first: null,
       gen: 1,
       tm: REDUCED,
       tmProgram: ONE_RULE_PROGRAM,

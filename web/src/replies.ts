@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
 import type { LambdaTrees } from './lambda-trees'
-import { unhandled } from './legs'
+import { LEGS, unhandled } from './legs'
 import { LinkIndex } from './link'
 import type { LinkWiring } from './link-wiring'
 import type { Notice } from './notice'
@@ -313,6 +313,14 @@ export function createReplies(deps: {
     else flushDraw()
   }
 
+  /** `leg`'s step-0 frame from a build reply into its emptied ring, sized as `pushFrames` sizes a chunk's. */
+  const seedFirst = <K extends Leg>(session: SessionId, leg: K, first: LegFrame[K] | null, gen: number): void => {
+    if (first === null) return
+    const state = sessions.legOf({ session, leg })
+    state.gen = gen
+    state.hist.push(first, LEG_FRAME_BYTES[leg](first))
+  }
+
   /**
    * One session's replies, applied to that session's legs.
    *
@@ -349,6 +357,10 @@ export function createReplies(deps: {
         return
       case 'compiled':
         resetLegs(legs, reply.statuses)
+        // THE NEW PROGRAM'S STEP 0 GOES IN WITH THE RESET, before the one `draw()` below, so every view goes from the
+        // old program's picture to the new one's in one frame: drawn from the emptied rings, it would be blank first.
+        for (const leg of LEGS) seedFirst(session, leg, reply.first[leg], reply.gen)
+        if (reply.lambdaTree !== null) trees.seed(session, reply.gen, reply.lambdaTree)
         // THE ONE REPLY THAT CARRIES A MACHINE, RETAINED AS IT IS FANNED OUT.
         setLegPrograms(session, reply.programs)
         linkWiring.setIndex(reply.linkIndex === null ? null : new LinkIndex(reply.linkIndex))
@@ -465,6 +477,10 @@ export function createReplies(deps: {
         // `ScratchBuffers.noSessionReply` carries the full argument, including why its own `warm` check
         // is belt-and-braces — it is stated once, there, rather than three times across this switch.
         resetLegs(sessions.entryOf(session).legs, { lambda: reply.lambda })
+        // THE COPY'S STEP 0 GOES IN WITH THE RESET, before this arm's one `draw()`, as the `compiled` arm's does and for
+        // its reason; the other two copy arms below do the same.
+        seedFirst(session, 'lambda', reply.first, reply.gen)
+        if (reply.lambdaTree !== null) trees.seed(session, reply.gen, reply.lambdaTree)
         built(session)
         // THE EDITOR IS SEEDED FROM THE REPLY'S OWN TEXT, NOT FROM THE FRAME THAT ARRIVES NEXT
         // (5d-iii design §4.1: `text` "travels back so `main.ts` can seed the editor from the same
@@ -524,6 +540,7 @@ export function createReplies(deps: {
         // it is the reverse. `reply.tm` is a `TmScratchStatus`, not a `TmStatus` — `resetLegs`'s own
         // doc has the argument for why its `statuses` record accepts it.
         resetLegs(sessions.entryOf(session).legs, { tm: reply.tm })
+        seedFirst(session, 'tm', reply.first, reply.gen)
         built(session)
         // THE MACHINE IS STORED ON THE ENTRY AND FANNED OUT TO `setProgram`, THE SAME PAIRING
         // `setLegProgram` MAKES FOR THE `compiled` ARM — so a pane bound to this session later
@@ -606,6 +623,7 @@ export function createReplies(deps: {
         // status and value retained on the entry for a view built after this reply. The value comes with the build
         // (`protocol.ts`'s own doc on this reply). No text: a copy offers no copy of itself.
         resetLegs(sessions.entryOf(session).legs, { rxm: reply.rxm })
+        seedFirst(session, 'rxm', reply.first, reply.gen)
         built(session)
         sessions.entryOf(session).readings.rxm = { status: reply.rxm, value: reply.value }
         setLegProgram(session, 'rxm', { program: reply.rxmProgram, text: null })

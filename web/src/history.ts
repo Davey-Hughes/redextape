@@ -122,6 +122,15 @@ export class History<T> {
     this.#following = this.#head === this.length - 1
   }
 
+  /**
+   * The head onto the oldest kept frame, **NOT FOLLOWING**: `↺`'s seek. `seek(0)` follows on a ring of one frame, whose
+   * oldest frame is also its newest, and the frames still arriving would carry a view the user sent to step 0 away.
+   */
+  toStart(): void {
+    this.#head = 0
+    this.#following = false
+  }
+
   back(): boolean {
     if (this.length === 0) return false
     // Set even on a clamped no-op: pressing ◀ at all — even from the oldest frame, where it can't

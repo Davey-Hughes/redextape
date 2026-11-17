@@ -133,6 +133,20 @@ const COMPILED_KINDS: ReadonlySet<string> = new Set([
   'rxm-scratch-compiled',
 ])
 
+/** The legs whose step-0 frame `c` carries: every compiled leg of a build, a copy's own leg. */
+const firstLegs = (c: Compiled): Leg[] => {
+  switch (c.kind) {
+    case 'compiled':
+      return LEGS.filter((leg) => c.first[leg] !== null)
+    case 'scratch-compiled':
+      return c.first === null ? [] : ['lambda']
+    case 'tm-scratch-compiled':
+      return c.first === null ? [] : ['tm']
+    case 'rxm-scratch-compiled':
+      return c.first === null ? [] : ['rxm']
+  }
+}
+
 /**
  * One run of `request` in a fresh worker, timed from its posting to `last`: the `result`, or that leg's frames reply
  * with a `done`. **A SMALL RUN GOES FIRST, UNTIMED**, so that the worker's load of the wasm is not in any figure.
@@ -175,6 +189,13 @@ function record(name: string, request: RunRequest, last: Leg | 'result', kept?: 
       } else if (COMPILED_KINDS.has(r.kind)) {
         compiledMs = now - t0
         compiled = r as Compiled
+        // COUNTED WITH THE LEG'S CHUNKS, which record on from step 1, so that a leg's frames are its whole recording
+        // for a build and a copy alike, and are what (h)'s rings hold.
+        for (const leg of firstLegs(compiled)) {
+          const l = legs[leg] ?? { ms: Number.NaN, frames: 0, replies: 0, done: null }
+          legs[leg] = l
+          l.frames += 1
+        }
       } else if (r.kind === 'frames') {
         const leg = r.leg
         const l = legs[leg] ?? { ms: Number.NaN, frames: 0, replies: 0, done: null }

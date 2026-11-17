@@ -26,6 +26,7 @@ import { legState } from './leg-fixture'
 import { frameOf } from './rxm-fixtures'
 import { fakeClient, lambdaFrame } from './session-fixtures'
 import { ONE_RULE_PROGRAM, tmFrame } from './tm-machines'
+import { wireOf } from './tree-fixture'
 
 /**
  * **WHAT A SESSION KEEPS FROM ITS OWN `compiled` REPLY** — the retention a TM pane created later is
@@ -100,6 +101,8 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<Run
   },
   declinedSpan: null,
   linkIndex: null,
+  first: { lambda: null, rxm: null, tm: null },
+  lambdaTree: null,
 })
 
 /**
@@ -109,7 +112,10 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<Run
  * recording chunk that does not end the recording schedules its redraw on `frame`, and `createReplies`' own default,
  * `requestAnimationFrame`, is not defined in this tier: a `frames` reply sent here without a stand-in would throw.
  */
-function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } = {}) {
+function driver(
+  entry: SessionEntry,
+  opts: { frame?: (cb: () => void) => void; trees?: LambdaTrees; onDraw?: () => void } = {},
+) {
   const reg = new SessionRegistry()
   reg.add(entry)
   const dispatched: unknown[] = []
@@ -119,7 +125,7 @@ function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } 
   const links = { setIndex: (i: unknown) => indexed.push(i) } as unknown as LinkWiring
   const replies = createReplies({
     setProgram: () => undefined,
-    trees: new LambdaTrees(() => undefined),
+    trees: opts.trees ?? new LambdaTrees(() => undefined),
     sessions: reg,
     scratchpad: undefined as unknown as ScratchBuffers,
     results: undefined as unknown as HTMLElement,
@@ -129,6 +135,7 @@ function driver(entry: SessionEntry, opts: { frame?: (cb: () => void) => void } 
     notify: () => ({ dismiss: () => undefined }),
     draw: () => {
       drawn += 1
+      opts.onDraw?.()
     },
     frame: opts.frame ?? ((cb: () => void) => cb()),
     editorHome: () => undefined,
@@ -200,6 +207,43 @@ describe('a session retains its last compiled machine', () => {
 })
 
 /**
+ * **THE NEW PROGRAM'S STEP 0 IS ON THE PAGE IN THE ONE DRAW ITS `compiled` REPLY MAKES** (recompile-flash design): each
+ * leg's step-0 frame in its ring and λ's step-0 tree in the cache, so no view draws an empty ring or flat text first.
+ */
+describe("a `compiled` reply's step-0 pictures", () => {
+  it('are in the rings and the tree cache when the arm draws, and no tree is asked for', () => {
+    const entry = sourceEntry()
+    const asked: number[] = []
+    const trees = new LambdaTrees(() => ({ gen: 1, awaitingRun: false, tree: (step: number) => asked.push(step) }))
+    const seen: unknown[] = []
+    const { replies, drawn } = driver(entry, {
+      trees,
+      onDraw: () =>
+        seen.push({
+          lambda: entry.legs.lambda?.hist.current,
+          rxm: entry.legs.rxm?.hist.length,
+          tm: entry.legs.tm?.hist.current,
+          gens: [entry.legs.lambda?.gen, entry.legs.tm?.gen],
+          tree: trees.want(SOURCE, 0),
+          build: trees.buildOf(SOURCE),
+        }),
+    })
+    const tree = wireOf('(λx. x) (λy. y)')
+    const [lambda, tm] = [lambdaFrame('(λx. x) (λy. y)'), tmFrame(0, 0, '#')]
+
+    replies.onReply(SOURCE, {
+      ...compiled(ONE_RULE_PROGRAM, ['TAPE']),
+      first: { lambda, rxm: null, tm },
+      lambdaTree: tree,
+    })
+
+    expect(drawn()).toBe(1)
+    expect(seen).toEqual([{ lambda, rxm: 0, tm, gens: [1, 1], tree: { kind: 'tree', tree }, build: 1 }])
+    expect(asked).toEqual([])
+  })
+})
+
+/**
  * A `PoolPort` with no thread behind it, recording what was posted and what a `retire` would have done
  * to it.
  *
@@ -261,7 +305,7 @@ const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session'
  * called straight, since none of them assert on `draw`'s call count or timing — only the coalescing
  * tests do, and they pass both overrides.
  */
-function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => void } = {}) {
+function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => void; trees?: LambdaTrees } = {}) {
   const reg = new SessionRegistry()
   const ports: (PoolPort & { sent: RunRequest[]; terminated: number })[] = []
   const pool = new SessionPool(
@@ -302,7 +346,7 @@ function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => vo
   })
   const replies = createReplies({
     setProgram: () => undefined,
-    trees: new LambdaTrees(() => undefined),
+    trees: opts.trees ?? new LambdaTrees(() => undefined),
     sessions: reg,
     scratchpad: buffers,
     results: undefined as unknown as HTMLElement,
@@ -445,6 +489,8 @@ describe('a poisoned buffer survives its own no-session reply', () => {
 
     replies.onScratchReply(id, {
       kind: 'scratch-compiled',
+      first: null,
+      lambdaTree: null,
       gen: 1,
       lambda: { available: true, reason: '', node: null, run: null },
       text: 'λx. x',
@@ -464,6 +510,8 @@ describe('a poisoned buffer survives its own no-session reply', () => {
     expect(notified(), 'precondition: the failure is said').toEqual(['the copy did not build — unexpected `(`'])
     const compiled = (text: string): RunReply => ({
       kind: 'scratch-compiled',
+      first: null,
+      lambdaTree: null,
       gen: 1,
       lambda: { available: true, reason: '', node: null, run: null },
       text,
@@ -535,6 +583,8 @@ describe('onScratchReply records a buffer’s text from its own scratch-compiled
 
     replies.onScratchReply(id, {
       kind: 'scratch-compiled',
+      first: null,
+      lambdaTree: null,
       gen: 1,
       lambda: { available: true, reason: '', node: null, run: null },
       text: 'built-term',
@@ -566,6 +616,8 @@ describe('onScratchReply records a buffer’s text from its own scratch-compiled
 
     replies.onScratchReply(id, {
       kind: 'scratch-compiled',
+      first: null,
+      lambdaTree: null,
       gen: 1,
       lambda: { available: false, reason: 'no scratch', node: null, run: null },
       text: null,
@@ -607,6 +659,7 @@ describe('a TM buffer retains what its panes were last told', () => {
 
   const built = (tapeNames: string[]): RunReply => ({
     kind: 'tm-scratch-compiled',
+    first: null,
     gen: 1,
     tm: STATUS,
     tmProgram: ONE_RULE_PROGRAM,
@@ -976,6 +1029,7 @@ describe('an rxm copy retains what its views were last told', () => {
   const LISTING: RxmProgram = { listing: ['halt'], labels: [] }
   const built = (value: Decoded): RunReply => ({
     kind: 'rxm-scratch-compiled',
+    first: null,
     gen: 1,
     rxm: STATUS,
     rxmProgram: LISTING,
@@ -1074,5 +1128,65 @@ describe('a session retains its rxm text beside its listing', () => {
 
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
     expect(entry.programs.rxm).toBeNull()
+  })
+})
+
+/**
+ * **A COPY'S BUILD PUTS ITS STEP 0 ON THE PAGE IN THE ONE DRAW ITS REPLY MAKES**, as the program's `compiled` does
+ * (recompile-flash design): the step-0 frame in the copy's ring and a λ copy's step-0 tree in the cache, so an edit in a
+ * copy's editor does not draw the copy's view emptied, or its term as flat text, first.
+ */
+describe("a copy's build reply's step-0 picture", () => {
+  it('is in the ring, and a λ copy’s tree in the cache, when each arm draws, and no tree is asked for', () => {
+    const asked: number[] = []
+    const trees = new LambdaTrees(() => ({ gen: 1, awaitingRun: false, tree: (step: number) => asked.push(step) }))
+    let look: () => unknown = () => null
+    const seen: unknown[] = []
+    const { buffers, reg, replies, slot } = scratchDriver({ trees, draw: () => seen.push(look()) })
+    const ringOf = (session: SessionId, leg: 'lambda' | 'rxm' | 'tm') => {
+      const state = reg.legOf({ session, leg })
+      return { current: state.hist.current, length: state.hist.length, gen: state.gen }
+    }
+    const tree = wireOf('λx. x')
+    const lambda = lambdaFrame('λx. x')
+    const tm = tmFrame(0, 0, '#')
+    const rxm = frameOf({ step: 0 })
+
+    const lam = buffers.fork(slot, 'λx. x', 0, 'lambda')
+    look = () => ({ ...ringOf(lam, 'lambda'), tree: trees.want(lam, 0) })
+    replies.onScratchReply(lam, {
+      kind: 'scratch-compiled',
+      gen: 1,
+      lambda: { available: true, reason: '', node: null, run: null },
+      text: 'λx. x',
+      first: lambda,
+      lambdaTree: tree,
+    })
+    expect(seen.splice(0)).toEqual([{ current: lambda, length: 1, gen: 1, tree: { kind: 'tree', tree } }])
+    expect(asked).toEqual([])
+
+    const tmCopy = buffers.forkBlank('tm')
+    look = () => ringOf(tmCopy, 'tm')
+    replies.onScratchReply(tmCopy, {
+      kind: 'tm-scratch-compiled',
+      gen: 1,
+      tm: { available: true, reason: '', width: 8, run: 'Running', header: false, reduction: null },
+      tmProgram: ONE_RULE_PROGRAM,
+      tapeNames: ['TAPE'],
+      first: tm,
+    })
+    expect(seen.splice(0)).toEqual([{ current: tm, length: 1, gen: 1 }])
+
+    const rxmCopy = buffers.forkBlank('rxm')
+    look = () => ringOf(rxmCopy, 'rxm')
+    replies.onScratchReply(rxmCopy, {
+      kind: 'rxm-scratch-compiled',
+      gen: 1,
+      rxm: { available: true, reason: '', run: 'Running', cap: null, total_steps: 1 },
+      rxmProgram: { listing: ['halt'], labels: [] },
+      value: 'Unfinished',
+      first: rxm,
+    })
+    expect(seen.splice(0)).toEqual([{ current: rxm, length: 1, gen: 1 }])
   })
 })

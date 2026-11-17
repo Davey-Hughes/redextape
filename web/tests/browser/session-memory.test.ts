@@ -113,21 +113,27 @@ function record(pool: SessionPool, slot: Slot): { rings: Rings; done: Promise<vo
   const done = new Promise<void>((resolve) => {
     settle = resolve
   })
+  const keepLambda = (f: LambdaState): void => {
+    const bytes = lambdaFrameBytes(f)
+    rings.frames.lambda += 1
+    rings.accounted.lambda += bytes
+    rings.lambda?.push(f, bytes)
+  }
+  const keepTm = (f: TmState): void => {
+    const bytes = tmFrameBytes(f)
+    rings.frames.tm += 1
+    rings.accounted.tm += bytes
+    rings.tm?.push(f, bytes)
+  }
   const client = pool.bind(slot.id, (r: RunReply) => {
-    if (r.kind === 'frames' && r.leg === 'lambda') {
-      for (const f of r.frames) {
-        const bytes = lambdaFrameBytes(f)
-        rings.frames.lambda += 1
-        rings.accounted.lambda += bytes
-        rings.lambda?.push(f, bytes)
-      }
+    // STEP 0 COMES ON `compiled`, the chunks record on from step 1, and `onReply` keeps both.
+    if (r.kind === 'compiled') {
+      if (r.first.lambda !== null) keepLambda(r.first.lambda)
+      if (r.first.tm !== null) keepTm(r.first.tm)
+    } else if (r.kind === 'frames' && r.leg === 'lambda') {
+      for (const f of r.frames) keepLambda(f)
     } else if (r.kind === 'frames' && r.leg === 'tm') {
-      for (const f of r.frames) {
-        const bytes = tmFrameBytes(f)
-        rings.frames.tm += 1
-        rings.accounted.tm += bytes
-        rings.tm?.push(f, bytes)
-      }
+      for (const f of r.frames) keepTm(f)
     } else if (r.kind === 'result' || r.kind === 'no-session' || r.kind === 'worker-error') {
       // TERMINAL IS `result`/`no-session`/`worker-error`, the same rule `pool-isolation.test.ts`'s
       // `open` follows and for the same reason: one generation produces `compiled`, then frame

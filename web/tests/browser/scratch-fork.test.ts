@@ -207,6 +207,10 @@ describe('detach is a fork', () => {
         historyBytes: HISTORY_BYTES,
         onReply: (_session, reply) => {
           seen.push(reply)
+          // STEP 0 ON THE BUILD REPLY, THE CHUNKS FROM STEP 1, kept as the page keeps them.
+          if (reply.kind === 'scratch-compiled' && reply.first !== null) {
+            reg.legOf({ session: SCRATCH, leg: 'lambda' }).hist.push(reply.first, lambdaFrameBytes(reply.first))
+          }
           if (reply.kind === 'frames' && reply.leg === 'lambda') {
             const l = reg.legOf({ session: SCRATCH, leg: 'lambda' })
             for (const f of reply.frames) l.hist.push(f, lambdaFrameBytes(f))

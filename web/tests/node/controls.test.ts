@@ -163,6 +163,15 @@ describe('controlState', () => {
     expect(controlState({ ...full, awaitingRun: true }).stepText).toBe('step 1,386 of 1,386 — recompiling')
   })
 
+  // RECOMPILE-FLASH DESIGN, review 1's I2: the step 0 `compiled` carried, waiting on the leg's first chunk, reads no
+  // longer than the line it turns into.
+  it("leaves the link's tail off while the leg holds only the step 0 its build reply carried", () => {
+    const waiting = view({ done: null, length: 1, head: 0, currentStep: 0, newestStep: 0, pending: 3 })
+    expect(controlState(waiting).stepText).toBe('step 0 of 0…')
+    const capped = view({ done: 'capped', length: 1, head: 0, currentStep: 0, newestStep: 0, pending: 3 })
+    expect(controlState(capped).stepText).toBe('step 0 of 0 — going to step 3 from the link')
+  })
+
   it('leaves back, ⏭, play and restart alone while awaiting a run', () => {
     const c = controlState(view({ length: 3, head: 1, done: 'budget', awaitingRun: true }))
     expect(c.canBack).toBe(true)

@@ -77,6 +77,13 @@ describe('LinkPositions', () => {
     expect(short).not.toHaveBeenCalled()
   })
 
+  it("holds no position of step 0, which the link's `compiled` reply has put in the leg's ring", () => {
+    positions.hold(GEN, { lambda: 0, tm: 2 })
+    positions.onReply(compiled())
+    expect(legs.lambda.pending).toBeUndefined()
+    expect(legs.tm.pending).toBe(2)
+  })
+
   it('seeks to the position once the frames hold one past it, mid-recording, and later frames leave it there', () => {
     positions.hold(GEN, { lambda: 3 })
     positions.onReply(compiled())

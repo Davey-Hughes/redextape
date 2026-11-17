@@ -111,8 +111,8 @@ export class TmPane implements EditablePane {
    * live region is announced from the accessibility tree, and `hidden` takes the element out of it, so a line that
    * is unhidden in the same write that fills it can be missed. While the run is going the line changes after every
    * `VALUE_CHUNK`, and a region that announced each count would talk over everything else; `aria-busy` holds the
-   * announcements until the run ends, and removing it announces the settled value once. `style.css` keeps the
-   * empty line from taking vertical space.
+   * announcements until the run ends, and removing it announces the settled value once. An empty line takes no
+   * vertical space (`style.css`), except a headered copy's, which `#drawValue` marks to keep one line's room.
    */
   #value: HTMLElement
 
@@ -641,12 +641,17 @@ export class TmPane implements EditablePane {
   }
 
   /**
-   * The one writer of `#value`, its text and its `aria-busy` alike. No scratch, no text: an attached pane shows no
-   * value run. See `#value`'s doc for why the line is emptied rather than hidden.
+   * The one writer of `#value`, its text, its `aria-busy` and its room alike. No scratch, no text: an attached pane
+   * shows no value run. See `#value`'s doc for why the line is emptied rather than hidden.
+   *
+   * **`has-value-run` KEEPS ONE LINE'S ROOM WHILE THE PANE SHOWS A HEADERED COPY**, reading or not: the first reading
+   * comes after the copy's first recording, and a line with no room until then would move the panels below it. A
+   * header is what gives a copy a value run. Every caller that sets a status sets a reading after it, so this sees it.
    */
   #drawValue(): void {
     const line = this.#scratch === null ? null : valueLine(this.#reading)
     this.#value.textContent = line ?? ''
+    this.#value.classList.toggle('has-value-run', this.#scratch?.header === true)
     if (line !== null && this.#reading?.run.run === 'Running') this.#value.setAttribute('aria-busy', 'true')
     else this.#value.removeAttribute('aria-busy')
   }

@@ -321,6 +321,8 @@ describe('ScratchBuffers.fork', () => {
 
     const compiled = (text: string): RunReply => ({
       kind: 'scratch-compiled',
+      first: null,
+      lambdaTree: null,
       gen: 1,
       lambda: { available: true, reason: '', node: null, run: 'Running' },
       text,
