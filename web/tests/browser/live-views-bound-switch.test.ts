@@ -85,7 +85,7 @@ describe('a switch, with 62 λ views on screen and the source view remembered', 
     await focusInPage('a press on the rxm toggle, whose switch is refused')
     expect
       .soft(noticeText(), 'the switch was not refused, or not in words true of 63')
-      .toBe(refusedAt('rxm and λ', 63, 65))
+      .toBe(refusedAt('λ and rxm', 63, 65))
     expect.soft(pressed(), 'the refused switch moved the toggles').toEqual(before.pressed)
     expect.soft(mounted(), 'the refused switch changed the views on the page').toEqual(before.mounted)
     expect.soft(storedLayoutText() === before.stored, 'the refused switch stored another workspace').toBe(true)

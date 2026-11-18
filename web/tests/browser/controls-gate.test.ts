@@ -465,7 +465,7 @@ describe('every control in Explorer, in a window wide enough for the views toggl
     const walked = check('wide: page')
     expect(toggles()).toHaveLength(4)
     for (const b of toggles()) expect(walked, `the walk skipped the ${b.textContent} toggle`).toContain(b)
-    expect(toggles().map(nameOf)).toEqual(['source', 'rxm', 'λ', 'TM'])
+    expect(toggles().map(nameOf)).toEqual(['source', 'λ', 'TM', 'rxm'])
   })
 
   // DISABLED BY `aria-disabled` (`app-header.ts`'s `viewToggles`), so the walk holds it to taking the focus too.

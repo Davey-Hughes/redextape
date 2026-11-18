@@ -45,7 +45,7 @@ describe('the views toggles', () => {
 
   it('starts with all four views on the page and all four toggles pressed', () => {
     expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
-    expect(pressed()).toEqual(['source', 'rxm', 'lambda', 'tm'])
+    expect(pressed()).toEqual(['source', 'lambda', 'tm', 'rxm'])
     expect(storedLayout<Stored>().arrangements, 'the stored workspace already remembers an arrangement').toBeUndefined()
   })
 
@@ -95,7 +95,7 @@ describe('the views toggles', () => {
     expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(storedLayout<Stored>().tree, 'the four views did not come back as they were left').toEqual(four)
     expect(storedLayout<Stored>().arrangements).toEqual({ 'source+lambda+tm': three })
-    expect(live()).toBe('showing source, rxm, λ and TM')
+    expect(live()).toBe('showing source, λ, TM and rxm')
     expect(toggle('rxm').title).toBe(`hide the rxm view\n${KIND_GLOSS.rxm}`)
   })
 

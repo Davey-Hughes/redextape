@@ -92,11 +92,11 @@ describe('the focus ring of a views toggle', () => {
     async (style) => {
       await chooseStyle(style)
       await document.fonts.ready
-      // ALL FOUR PRESSED, THEN THE SOURCE AND TM ALONE: a pressed toggle beside pressed ones, and each unpressed one
-      // beside a pressed one, rxm on its left and λ on its right.
+      // ALL FOUR PRESSED, THEN THE SOURCE AND rxm ALONE: a pressed toggle beside pressed ones, and each unpressed one
+      // beside a pressed one, the source on λ's left and rxm on TM's right.
       for (const shown of [
-        ['source', 'rxm', 'lambda', 'tm'],
-        ['source', 'tm'],
+        ['source', 'lambda', 'tm', 'rxm'],
+        ['source', 'rxm'],
       ]) {
         for (const kind of HEADER_ORDER) if (pressed().includes(kind) !== shown.includes(kind)) toggle(kind).click()
         expect(pressed(), 'precondition: the toggles pressed').toEqual(shown)
@@ -188,7 +188,7 @@ describe('the corners of a views toggle', () => {
       expect(
         HEADER_ORDER.map((kind) => [kind, corners(toggle(kind))]),
         style,
-      ).toEqual(['source', 'rxm', 'lambda', 'tm'].map((kind) => [kind, [radius, radius, radius, radius]]))
+      ).toEqual(['source', 'lambda', 'tm', 'rxm'].map((kind) => [kind, [radius, radius, radius, radius]]))
     }
   })
 })

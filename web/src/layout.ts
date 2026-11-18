@@ -77,14 +77,14 @@ export const KIND_ORDER: readonly PaneKind[] = Object.keys({
 } satisfies Record<PaneKind, 0>) as PaneKind[]
 
 /**
- * The four kinds in the order the header's `views` toggles have them: source, rxm, λ, TM (the user's decision,
- * 2026-10-11). The toggle keys `1` to `4`, the cycle and the sentence the live region reads follow it, so what is said
- * and pressed runs left to right across the header.
+ * The four kinds in the order the header's `views` toggles have them: source, λ, TM, rxm (the user's decision). The
+ * toggle keys `1` to `4`, the cycle and the sentence the live region reads follow it, so what is said and pressed runs
+ * left to right across the header.
  *
  * **A SECOND LIST, SO IT IS HELD TO THE FIRST**: `tests/node/arrangements.test.ts` asserts it is `KIND_ORDER`'s kinds,
  * each once. A kind added to `PaneKind` is a type error in `KIND_ORDER`, and that test is what then asks for it here.
  */
-export const HEADER_ORDER: readonly PaneKind[] = ['source', 'rxm', 'lambda', 'tm']
+export const HEADER_ORDER: readonly PaneKind[] = ['source', 'lambda', 'tm', 'rxm']
 
 /**
  * A kind's word where the app says it to a reader: in what its `views` toggle says in its tooltip and on the notice

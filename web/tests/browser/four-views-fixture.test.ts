@@ -64,7 +64,7 @@ describe('the four-view fixtures', () => {
 
   it('leaves two arrangements remembered, the live region on what is shown, and the focus in the λ view', () => {
     expect(Object.keys(storedLayout<Stored>().arrangements ?? {})).toEqual(['source+tm', 'source+lambda+tm'])
-    expect(live()).toBe('showing source, rxm, λ and TM')
+    expect(live()).toBe('showing source, λ, TM and rxm')
     expect(focusedView()).toBe('lambda-0')
     expect(storedLayout<Stored>().focused).toBe('lambda-0')
   })

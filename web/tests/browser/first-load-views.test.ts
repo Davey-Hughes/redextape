@@ -56,16 +56,39 @@ describe('a first load, in a window wider than it is tall', () => {
   it('presses the source and TM toggles and leaves λ and rxm unpressed', () => {
     expect(pressed()).toEqual(['source', 'tm'])
     const all = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
-    expect(all.map((b) => b.textContent)).toEqual(['source', 'rxm', 'λ', 'TM'])
+    expect(all.map((b) => b.textContent)).toEqual(['source', 'λ', 'TM', 'rxm'])
     expect(all.map((b) => b.title)).toEqual([
       'hide the source view',
-      `show the rxm view\n${KIND_GLOSS.rxm}`,
       'show the λ view',
       'hide the TM view',
+      `show the rxm view\n${KIND_GLOSS.rxm}`,
     ])
     // `aria-disabled` IS HOW A TOGGLE IS DISABLED (`app-header.ts`'s `viewToggles`): the `disabled` property is
     // false of every toggle whatever the page shows.
     expect(all.map((b) => b.getAttribute('aria-disabled'))).toEqual([null, null, null, null])
+  })
+
+  /**
+   * **WHERE THE TOGGLES ARE DRAWN, AND NOT THE ORDER THE MARKUP LISTS THEM IN**: a stylesheet can lay a row out in
+   * another order than its document's, and the order a reader goes by is the one across the header.
+   */
+  it('draws the toggles left to right as source, λ, TM and rxm, on one line', () => {
+    const onScreen = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
+      .map((b) => ({ word: b.textContent, box: b.getBoundingClientRect() }))
+      .sort((a, b) => a.box.left - b.box.left)
+    expect(onScreen.map((toggle) => toggle.word)).toEqual(['source', 'λ', 'TM', 'rxm'])
+    for (const [i, { word, box }] of onScreen.entries()) {
+      expect(box.width, `the ${word} toggle has no width`).toBeGreaterThan(0)
+      const before = onScreen[i - 1]
+      if (before === undefined) continue
+      expect(box.left, `the ${word} toggle starts inside the ${before.word} toggle`).toBeGreaterThanOrEqual(
+        before.box.right,
+      )
+      expect(
+        Math.abs(box.top - before.box.top),
+        `the ${word} toggle left the ${before.word} toggle’s line`,
+      ).toBeLessThan(1)
+    }
   })
 
   /**
@@ -95,9 +118,9 @@ describe('a first load, in a window wider than it is tall', () => {
     const names = { [accent]: 'accent', [rule]: 'rule' }
     expect(toggles().map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), edges(b, names)])).toEqual([
       ['source', 'true', ['solid accent']],
-      ['rxm', 'false', ['solid rule']],
       ['lambda', 'false', ['solid rule']],
       ['tm', 'true', ['solid accent']],
+      ['rxm', 'false', ['solid rule']],
     ])
   })
 
@@ -105,9 +128,9 @@ describe('a first load, in a window wider than it is tall', () => {
     const accent = token('--accent')
     expect(toggles().map((b) => [b.dataset.shows, getComputedStyle(b).boxShadow])).toEqual([
       ['source', `${accent} 0px -2px 0px 0px inset`],
-      ['rxm', 'none'],
       ['lambda', 'none'],
       ['tm', `${accent} 0px -2px 0px 0px inset`],
+      ['rxm', 'none'],
     ])
   })
 
@@ -135,9 +158,9 @@ describe('a first load, in a window wider than it is tall', () => {
       const names = { [highlight]: 'Highlight', [button]: 'a button’s' }
       expect(toggles().map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), edges(b, names)])).toEqual([
         ['source', 'true', ['solid Highlight']],
-        ['rxm', 'false', ['dashed a button’s']],
         ['lambda', 'false', ['dashed a button’s']],
         ['tm', 'true', ['solid Highlight']],
+        ['rxm', 'false', ['dashed a button’s']],
       ])
     } finally {
       await cdp().send('Emulation.setEmulatedMedia', { features: [] })

@@ -35,7 +35,7 @@ async function keepsItsTextAcrossAKey(editor: EditorView, messy: string, caret: 
   editor.dispatch({ selection: { anchor: caret } })
   await until(() => editor.hasFocus, 'the editor to take the focus')
   const before = formats.length
-  await viewKey('2')
+  await viewKey('4')
   expect(mounted(), 'precondition: the key hid the rxm view').not.toContain('rxm-0')
   expect(formats.length, 'the view key asked for a format of text the user had not left').toBe(before)
   expect(editor.state.doc.toString(), 'the view key changed the text').toBe(messy)

@@ -54,7 +54,7 @@ describe('toggleTitle', () => {
 describe('the help page', () => {
   it('says what the rxm view is where it names the views', () => {
     expect(readRelative('../../help.html').replace(/\s+/g, ' ')).toContain(
-      "<strong>λ</strong> and <strong>TM</strong>. The rxm view shows redextape's register machine, the IR between" +
+      "<strong>TM</strong> and <strong>rxm</strong>. The rxm view shows redextape's register machine, the IR between" +
         " the source and the Turing machine: its control flow becomes the machine's states, and its registers, stack" +
         " and heap become the machine's tapes. A software interpreter steps it, and it is not x86, ARM, WebAssembly" +
         ' or LLVM output. Each combination of views keeps its own arrangement,',
@@ -73,7 +73,7 @@ describe('shownSentence', () => {
     expect(shownSentence(['tm'])).toBe('showing TM')
     expect(shownSentence(['tm', 'source'])).toBe('showing source and TM')
     expect(shownSentence(['tm', 'lambda', 'source'])).toBe('showing source, λ and TM')
-    expect(shownSentence(['tm', 'lambda', 'rxm', 'source'])).toBe('showing source, rxm, λ and TM')
+    expect(shownSentence(['tm', 'lambda', 'rxm', 'source'])).toBe('showing source, λ, TM and rxm')
   })
 })
 

@@ -473,30 +473,30 @@ describe('enter, over generated sequences of switches and edits', () => {
 })
 
 describe('the cycle', () => {
-  it('has four stops: the source beside rxm, λ and TM in turn, as the header has them, then all four', () => {
-    expect(CYCLE.map(keyOf)).toEqual(['source+rxm', 'source+lambda', 'source+tm', 'source+lambda+rxm+tm'])
+  it('has four stops: the source beside λ, TM and rxm in turn, as the header has them, then all four', () => {
+    expect(CYCLE.map(keyOf)).toEqual(['source+lambda', 'source+tm', 'source+rxm', 'source+lambda+rxm+tm'])
     for (const stop of CYCLE) expect(parseKey(keyOf(stop)), keyOf(stop)).toEqual(stop)
   })
 
   it('steps to the next and the previous stop, wrapping', () => {
-    expect(cycleFrom(['source', 'rxm'], 1)).toEqual(['source', 'lambda'])
     expect(cycleFrom(['source', 'lambda'], 1)).toEqual(['source', 'tm'])
-    expect(cycleFrom(['source', 'tm'], 1)).toEqual(KIND_ORDER)
-    expect(cycleFrom(KIND_ORDER, 1)).toEqual(['source', 'rxm'])
-    expect(cycleFrom(['source', 'rxm'], -1)).toEqual(KIND_ORDER)
-    expect(cycleFrom(['source', 'tm'], -1)).toEqual(['source', 'lambda'])
+    expect(cycleFrom(['source', 'tm'], 1)).toEqual(['source', 'rxm'])
+    expect(cycleFrom(['source', 'rxm'], 1)).toEqual(KIND_ORDER)
+    expect(cycleFrom(KIND_ORDER, 1)).toEqual(['source', 'lambda'])
+    expect(cycleFrom(['source', 'lambda'], -1)).toEqual(KIND_ORDER)
+    expect(cycleFrom(['source', 'rxm'], -1)).toEqual(['source', 'tm'])
   })
 
   it('goes to the first stop forward and the last stop back from a combination that is not a stop', () => {
-    expect(cycleFrom(['tm'], 1)).toEqual(['source', 'rxm'])
+    expect(cycleFrom(['tm'], 1)).toEqual(['source', 'lambda'])
     expect(cycleFrom(['tm'], -1)).toEqual(KIND_ORDER)
-    expect(cycleFrom(['source', 'lambda', 'tm'], 1)).toEqual(['source', 'rxm'])
+    expect(cycleFrom(['source', 'lambda', 'tm'], 1)).toEqual(['source', 'lambda'])
   })
 })
 
 describe('the header’s order', () => {
-  it('is source, rxm, λ, TM: every kind of KIND_ORDER, each once', () => {
-    expect(HEADER_ORDER).toEqual(['source', 'rxm', 'lambda', 'tm'])
+  it('is source, λ, TM, rxm: every kind of KIND_ORDER, each once', () => {
+    expect(HEADER_ORDER).toEqual(['source', 'lambda', 'tm', 'rxm'])
     expect([...HEADER_ORDER].sort()).toEqual([...KIND_ORDER].sort())
     expect(new Set(HEADER_ORDER).size).toBe(KIND_ORDER.length)
   })

@@ -37560,3 +37560,177 @@ named by their SHAs after the rebase; every other row was measured before the re
 | two | node sabotages | `ls sab-r2-*-node.log \| wc -l` (fin/entry-figures2.log) |
 | seven; five | browser and node tests review 1's fixes added | 25 less 18, at `de25908`; 21 less 16: the node file's count at `de25908` (fin/node-link-clear.log, "Tests  21 passed (21)") and in `progress.md`'s first build, "`web/tests/node/link-clear.test.ts` (16)" |
 | four | the restore's guard cases that failed with the guard dropped | `grep -h "Tests " sab-r2-N7-no-guard-node.log`, "Tests  4 failed \| 17 passed (21)" (fin/entry-figures2.log) |
+
+#### THE HEADER'S VIEWS TOGGLES READ SOURCE, λ, TM, RXM; THE `1` TO `4` KEYS, THE LAYOUT CYCLE AND THE LIVE REGION'S SENTENCE FOLLOW THEM, AND THE DEFAULT FOUR-VIEW GRID AND STORED WORKSPACES STAY AS THEY WERE (2026-11-17, branch `view-button-order`, `eb12e11..fbc573f`, 4 commits, plus this entry and one commit correcting it and the design doc)
+
+The user, 2026-11-17: "we should make the order of the buttons at the top 'source, lambda, tm, rxm'". The toggles read
+source, rxm, λ, TM. The design is in
+`docs/superpowers/specs/2026-11-17-view-button-order-design.md`. The lane's record is
+`~/temp/redextape-view-button-order-record/`, `$R` below: `brief.md`, `progress.md`, `review-1.md` and the logs this
+entry names.
+
+##### DECISIONS
+
+The user's, 2026-11-17:
+
+- **The order**, in the words above.
+- **"yes keep"**, on the layout cycle. Following the new order changes what `]` does from a first load, the source
+  beside the TM view (review 1's table, read from the running app by real key presses at 1280 x 896). The controller
+  asked "should the `]` key follow the new button order? It currently does", showing that table, and said
+  "I recommend keeping it, so the buttons, keys and cycle all share one order". The user answered "yes keep". The cycle
+  goes on reading `HEADER_ORDER`.
+
+| press of `]` | on `eb12e11` | on this branch |
+|---|---|---|
+| 1 | all four | the source beside rxm, the TM view hidden |
+| 2 | the source beside rxm | all four |
+| 3 | the source beside λ | the source beside λ |
+| 4 | the source beside TM | the source beside TM |
+
+The controller's, in the lane's brief: the `1` to `4` keys, the layout cycle and the live region's sentence follow the
+new order, since they read `HEADER_ORDER` on purpose; the default four-view grid does not move; `KIND_ORDER` does not
+change, since stored workspaces are keyed by it.
+
+The implementer's, each with its reason in the design doc: a test about a view keeps its view and changes its key,
+while a test whose subject is the digit keeps the digit; `step-focus-recording` presses `2` where it pressed `]`; the
+focus ring case presses the source and rxm, where it pressed the source and TM; and a stored workspace is pinned as
+written text in a file of its own.
+
+##### WHAT CHANGED
+
+- **`HEADER_ORDER`** (`web/src/layout.ts`) is source, λ, TM, rxm. What reads it follows: key `2` is λ, `3` TM and `4` rxm,
+  the hint says so, the cycle's stops are the source beside λ, beside TM, beside rxm, then all four, and the live region
+  says "showing source, λ, TM and rxm".
+- **The lists written by hand**: the four toggles in `web/index.html`, their copy in `SHELL` in
+  `web/tests/browser/harness.ts`, and in `web/help.html` the views sentence, the keys table and the cycle's sentence.
+- **What did not move**: `KIND_ORDER` and the default grid, source over rxm beside λ over TM. `web/tests/node/layout.test.ts`
+  held the grid's leaves to `HEADER_ORDER`, which was a coincidence of the old order, and now spells the grid's own order.
+- **New tests**: `first-load-views.test.ts` reads the toggles' order across the screen from `getBoundingClientRect`;
+  `workspace-stored-views-order.test.ts` restores a workspace whose record is written out as text.
+
+##### WHAT THE REVIEW CAUGHT
+
+Review 1 (`$R/review-1.md`, at `61ac5c6`): no Critical findings, one Important and four Minor. The Important one,
+`]` from a first load hiding the TM view, went to the user and is his "yes keep" above, with no code change. In
+`8cedbe5`: the design doc names the controller's calls as the controller's, a date leaves a code comment, and the
+stored-workspace test asserts the focus it stores. The fifth, the README's image, is below.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The README's demo image** (`https://daveyhughes.com/readme/redextape/demo.webp`) still shows the old order. It is to
+  be retaken after this merges.
+- **31 tests in the files this branch touches fail in Firefox, some in every run and some in only some, on `eb12e11`
+  and on this branch alike**, named under VERIFICATION. CI does not run Firefox, so no check reports them.
+- **Whether the caret at offset 0 reaches a real Firefox user or comes from the test driver** is not answered. Neither
+  review 1 nor this lane tried it by hand.
+- **The LLVM tier was not run here**: the gate below is `scripts/check-all.sh --no-llvm`, whose last line says the run is
+  partial. CI's workflow runs `scripts/check-all.sh --llvm-only`.
+
+##### VERIFICATION
+
+No Rust changed in `eb12e11..fbc573f`, so `cargo llvm-cov nextest` and `scripts/check-slow.sh` were not run. The gate ran
+on 2026-11-17 at `fbc573f`, by `$R/gate.sh`, each step into its log in `$R/fin1/`, from the worktree and then from `web/`:
+
+```
+TREE_SITTER=<the pinned 0.25.10> flock ~/temp/redextape-heavy.lock scripts/check-all.sh --no-llvm
+                                                     → exit 0, "green, but PARTIAL — these tiers were SKIPPED: LLVM."
+scripts/check-<scan>.sh --self-test, then scripts/check-<scan>.sh, for text-bytes, citations, attributions, doc-figures,
+  shared-docs, colours, grammar-wasm, lua and licences
+                                                     → exit 0, all 18
+node scripts/check-comments.mjs --self-test          → exit 0
+node scripts/check-comments.mjs --base eb12e11       → exit 0, "no history and no grown block in 24 changed files"
+pnpm exec biome ci --error-on-warnings               → exit 0
+pnpm run typecheck                                   → exit 0
+pnpm run test:coverage (in a systemd-run unit, MemoryMax=16G, under the browser lock)
+                                                     → exit 0, "Test Files  310 passed (310)",
+                                                       "Tests  3497 passed (3497)", all files 97.87%, 92.03%, 98.61%, 99.11%
+pnpm run build:app                                   → exit 0
+```
+
+The pins were changed first and run against the old order: `$R/red-node.log`, "Tests  6 failed | 1557 passed (1563)", and
+`$R/red-browser.log`, "Tests  66 failed | 114 passed (180)". Each new test failed under a sabotage, the source saved,
+broken, restored and compared with `cmp` (`progress.md`): the toggles' row reversed (`sab-a-flv.log`, 2 failed), `HEADER_ORDER` wrong
+(`sab-b-vkb.log`, 8 failed, and `sab-b-vkn.log`, 2 failed), `KIND_ORDER` reordered (`sab-c-ws.log`, 3 failed), the grid read
+from `HEADER_ORDER` (`sab-d-layout.log`, 4 failed), and for the focus assertion review 1 asked for, `minor4-sabotage.log`,
+1 failed, "expected 'source' to be 'rxm-0'", whose saved `web/src/main.ts` compares equal to the tree's (`cmp $R/main.ts.saved web/src/main.ts`).
+
+**Firefox, against `eb12e11`.** `pnpm run test:firefox` on the 15 browser test files this branch changes or adds, 14 of
+them on `eb12e11`, where `workspace-stored-views-order.test.ts` does not exist: six runs of the set a side, then twenty of
+`view-keys.test.ts` alone a side with `VITEST_MAX_WORKERS=1`, the sides taking turns (`$R/ff-finish/drive.sh`). The
+baseline is a worktree of `eb12e11` with its own `pnpm install`. All 52 runs exit 1. A set run fails 25 to 28 tests on the branch and 27 to 29 on `eb12e11`; a run of
+`view-keys.test.ts` alone fails 15 to 20 on the branch and 15 to 19 on `eb12e11`.
+
+Over all the runs the same 31 tests fail on each side, none on one side only, in five files: `controls-gate`,
+`focus-scroll`, `view-keys-focus`, `view-keys-format-on-blur` and `view-keys`. `tm-view-narrow.test.ts`, known to fail on
+`main`, is not among the files this branch touches and was not run. In 25 of the 31 every failure is the caret or the
+text at offset 0. The other six are the two `focus-scroll` cases (the caret is out of sight), the two `view-keys-focus` cases
+that narrow the window, "ends when the window loses the focus", and "walks the four toggles", which failed in 3 of 6
+set runs on the branch and 6 of 6 on `eb12e11`.
+
+**The held key.** Review 1 saw `view-keys.test.ts`'s "lets a key held since before the prefix repeat into the editor, and
+stays armed" fail on the branch alone. Measured again it fails on both: 1 of 6 set runs and 4 of 20 alone on the branch,
+1 of 6 and 4 of 20 on `eb12e11`, each time with the same message, "the repeats of a key the editor was given were kept
+from it: expected 'xxxlet x = 40;\nx + 2' to be 'let x = 40;\nx xxx+ 2'". It passes in the other runs on both sides. These
+runs show that this branch did not bring it; they do not show why it fails only some of the time.
+
+Every name, by the failures in each kind of run, branch / `eb12e11` (`node $R/ff-finish/compare.mjs`, `$R/ff-finish/compare.log`):
+
+```
+set: 6 runs   alone: 20 runs
+branch/base  branch/base
+
+ 3 /  6    -  / -    controls-gate.test.ts > every control in Explorer, in a window wide enough for the views toggles walks the four toggles, each named by its own word
+ 6 /  6    -  / -    focus-scroll.test.ts > the scroll of the view a gesture gives the focus to on all four views, in the wide default follows the caret when a view key halves the view its editor is in
+ 6 /  6    -  / -    focus-scroll.test.ts > the scroll of the view a gesture gives the focus to on the first load’s two views is kept when a view key is pressed from the source editor, at 120 px and at the top
+ 2 /  2    -  / -    view-keys-focus.test.ts > the focus after a view key in Stage leaves the caret in the source editor, and the key chooses the tabs
+ 6 /  6    -  / -    view-keys-focus.test.ts > the focus after a view key in a copy’s editor stays in the editor of a machine copy with its caret, and leaves with its view
+ 6 /  6    -  / -    view-keys-focus.test.ts > the focus after a view key in a copy’s editor stays in the editor of a λ copy with its caret, and leaves with its view
+ 6 /  6    -  / -    view-keys-focus.test.ts > the focus after a view key on a views toggle goes to + view when the window is narrowed past 40rem, and is there when it is widened again
+ 6 /  6    -  / -    view-keys-focus.test.ts > the focus after a view key on a views toggle leaves the focus alone when the window is narrowed with the focus elsewhere
+ 6 /  6    -  / -    view-keys-format-on-blur.test.ts > a view key from an editor, with format on blur on leaves a machine copy’s editor’s text as it was typed
+ 5 /  6    -  / -    view-keys-format-on-blur.test.ts > a view key from an editor, with format on blur on leaves the source editor’s text as it was typed
+ 5 /  6   18 / 14   view-keys.test.ts > view keys a key held down acts once on a table key held after the prefix, and its repeats type nothing
+ 4 /  6   13 / 18   view-keys.test.ts > view keys a key held down acts once with Ctrl held through a held ], and its repeats are not the editor’s Ctrl+]
+ 6 /  6   20 / 20   view-keys.test.ts > view keys a key held down leaves vim no count from the repeats of a table key, and no command from the prefix’s
+ 1 /  1    4 /  4   view-keys.test.ts > view keys a key held down lets a key held since before the prefix repeat into the editor, and stays armed
+ 5 /  5    9 / 14   view-keys.test.ts > view keys a key held down stays armed while the prefix is held
+ 6 /  6   20 / 20   view-keys.test.ts > view keys a key held down takes the repeats of a table key as its own after another key is pressed, until it is pressed again
+ 6 /  6   20 / 20   view-keys.test.ts > view keys answers the second key with Ctrl still held
+ 0 /  1    2 /  1   view-keys.test.ts > view keys ends on a key it does not know, which types as it does while the mode is idle
+ 6 /  6   20 / 20   view-keys.test.ts > view keys ends when the window loses the focus
+ 6 /  6   20 / 20   view-keys.test.ts > view keys goes to the next layout on ] and the previous on [, with the caret where it was in the editor
+ 6 /  6   20 / 20   view-keys.test.ts > view keys is over after one action: the next 3 is the editor’s, typed where the caret was
+ 6 /  6   20 / 20   view-keys.test.ts > view keys runs ahead of vim: 2 after the prefix is the mode’s and no count of vim’s, and x after a prefix is vim’s
+ 6 /  6   20 / 20   view-keys.test.ts > view keys says why on the notice line when the key is for the only view shown
+ 6 /  6   15 / 15   view-keys.test.ts > view keys stays armed through Alt pressed alone, and the key after it acts
+ 6 /  6   17 / 16   view-keys.test.ts > view keys stays armed through CapsLock pressed alone, and the key after it acts
+ 4 /  5   16 / 18   view-keys.test.ts > view keys stays armed through Control pressed alone, and the key after it acts
+ 5 /  5   15 / 14   view-keys.test.ts > view keys stays armed through Meta pressed alone, and the key after it acts
+ 6 /  6   16 / 10   view-keys.test.ts > view keys stays armed through NumLock pressed alone, and the key after it acts
+ 6 /  5   18 / 19   view-keys.test.ts > view keys stays armed through ScrollLock pressed alone, and the key after it acts
+ 5 /  6   15 / 11   view-keys.test.ts > view keys stays armed through Shift pressed alone, and the key after it acts
+ 6 /  6   20 / 20   view-keys.test.ts > view keys toggles the four kinds on 1 to 4, in the header’s order
+```
+
+**Counts this entry quotes, with what produces each.**
+
+| Value | What | Produced by |
+|---|---|---|
+| 4 | commits in the range | `git rev-list --count eb12e11..fbc573f` |
+| 0 | Rust and Cargo files changed in the range | `git diff --name-only eb12e11 fbc573f \| grep -cE '\.rs$\|Cargo\.(toml\|lock)$'` |
+| none, one, four | review 1's Critical, Important and Minor findings | `grep -n '^Verdict' $R/review-1.md` |
+| 6, 1557, 1563 | the node pins against the old order: failed, passed, in all | the `Tests` line of `$R/red-node.log` |
+| 66, 114, 180 | the browser pins against the old order: failed, passed, in all | the `Tests` line of `$R/red-browser.log` |
+| 2; 8; 2; 3; 4; 1 | tests failed under each sabotage, in the order the paragraph names them | the `Tests` lines of `sab-a-flv.log`, `sab-b-vkb.log`, `sab-b-vkn.log`, `sab-c-ws.log`, `sab-d-layout.log` and `minor4-sabotage.log` |
+| 18 | the nine scans' runs, each with `--self-test` and alone, that exited 0 | `grep -cE '^(text-bytes\|citations\|attributions\|doc-figures\|shared-docs\|colours\|grammar-wasm\|lua\|licences)(-self-test)? exit 0 ' $R/fin1/summary.log` |
+| 24 | files the comment guard read as changed since `eb12e11` | `tail -2 $R/fin1/comments.log` |
+| 310; 3497; 97.87, 92.03, 98.61, 99.11 | coverage's test files and tests, all passed; statements, branches, functions and lines over all files | its `Test Files`, `Tests` and `All files` lines in `$R/fin1/coverage.log` |
+| 15; 14 | the browser test files in the Firefox runs, on the branch; on `eb12e11` | `wc -l` of `$R/ff-finish/files-branch.txt` and `files-base.txt` |
+| 52; 0 | Firefox runs that exited 1; that exited 0 | `grep -c ' exit 1 '` and `grep -c ' exit 0 '` on `$R/ff-finish/summary.log` |
+| 25 to 28; 27 to 29 | tests failed per set run, branch; `eb12e11` | the `per run` lines of `node $R/ff-finish/compare.mjs` |
+| 15 to 20; 15 to 19 | tests failed per run of `view-keys.test.ts` alone, branch; `eb12e11` | the same |
+| 31, 31, 0, 0 | names failing over all runs on the branch, on `eb12e11`, on the branch alone, on `eb12e11` alone | the last line of `node $R/ff-finish/compare.mjs` |
+| 25; 6 | of the 31, names whose every failure is at offset 0; names with another message | the first line of `node $R/ff-finish/messages.mjs` |
+| 3 of 6; 6 of 6 | set runs in which "walks the four toggles" failed, branch; `eb12e11` | its row in `$R/ff-finish/compare.log` |
+| 1 of 6, 4 of 20; 1 of 6, 4 of 20 | runs in which the held-key case failed, branch; `eb12e11` | the `held-key` lines of `node $R/ff-finish/compare.mjs` |
+| 0 | mentions of Firefox in CI's workflow | `grep -ci firefox .forgejo/workflows/ci.yml` |

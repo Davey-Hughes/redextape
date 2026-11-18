@@ -365,7 +365,7 @@ export function toggleTitle(kind: PaneKind, count: number, state: 'shown' | 'hid
 
 /**
  * The kinds on screen as a sentence for the live region, in the header's order whatever order they are handed in:
- * `showing source and TM`, `showing source, rxm, λ and TM`.
+ * `showing source and TM`, `showing source, λ, TM and rxm`.
  */
 export function shownSentence(shown: readonly PaneKind[]): string {
   const words = HEADER_ORDER.filter((k) => shown.includes(k)).map((k) => KIND_WORD[k])

@@ -44,9 +44,9 @@ export const SHELL = `
     </div>
     <div id="views-shown" class="views-shown" role="group" aria-label="views">
       <button type="button" class="view-toggle" data-shows="source" aria-pressed="false">source</button>
-      <button type="button" class="view-toggle" data-shows="rxm" aria-pressed="false">rxm</button>
       <button type="button" class="view-toggle" data-shows="lambda" aria-pressed="false">λ</button>
       <button type="button" class="view-toggle" data-shows="tm" aria-pressed="false">TM</button>
+      <button type="button" class="view-toggle" data-shows="rxm" aria-pressed="false">rxm</button>
     </div>
     <button type="button" id="new-view" aria-haspopup="menu" aria-controls="new-view-menu" aria-expanded="false">+ view</button>
     <div id="new-view-menu" class="header-menu" popover></div>
@@ -1299,7 +1299,7 @@ export const drawn = (): string => {
  *
  * - Two arrangements remembered in the stored workspace, the two the toggles pass through: the source beside the TM
  *   view, and those two with the λ view. The reset alone remembers none.
- * - The live region on `showing source, rxm, λ and TM`, the last switch's sentence.
+ * - The live region on `showing source, λ, TM and rxm`, the last switch's sentence.
  * - A λ and an rxm view built new, and the TM view kept where it showed the program: the reset closes the first two,
  *   which its tree does not hold, and their toggles build others under their ids.
  * - The focus in the λ view, on its first control, and `lambda-0` as the workspace's focused view. The reset alone

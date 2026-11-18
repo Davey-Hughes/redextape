@@ -4,7 +4,6 @@ import {
   closeLeaf,
   defaultArrangement,
   defaultLayout,
-  HEADER_ORDER,
   holdsMostLeaves,
   insertBeside,
   KIND_ORDER,
@@ -153,8 +152,9 @@ describe('defaultArrangement', () => {
     expect(defaultArrangement(['tm', 'rxm', 'lambda', 'source'], 'wide')).toEqual(
       defaultArrangement(KIND_ORDER, 'wide'),
     )
-    // A WIDE AREA'S LEAVES COME IN THE HEADER'S ORDER, down each column in turn, and a tall one's in `KIND_ORDER`.
-    expect(leaves(defaultArrangement(KIND_ORDER, 'wide')).map((l) => l.pane)).toEqual([...HEADER_ORDER])
+    // A WIDE AREA'S LEAVES RUN DOWN EACH COLUMN IN TURN, and a tall one's are in `KIND_ORDER`. Spelled out and not read
+    // from `HEADER_ORDER`: where a view sits in the grid is its own decision, so moving a toggle cannot move a view.
+    expect(leaves(defaultArrangement(KIND_ORDER, 'wide')).map((l) => l.pane)).toEqual(['source', 'rxm', 'lambda', 'tm'])
     expect(leaves(defaultArrangement(KIND_ORDER, 'tall')).map((l) => l.pane)).toEqual([...KIND_ORDER])
   })
 

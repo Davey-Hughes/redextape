@@ -205,7 +205,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       expect(tmViewHost().scrollTop, 'the TM view did not move up to its first control').toBeLessThan(10)
     })
 
-    /** The key's half again, for a view key: `4` hides the TM view, which has the focus, and the source view takes it. */
+    /** The key's half again, for a view key: `3` hides the TM view, which has the focus, and the source view takes it. */
     it('shows the focused control and keeps the editor when a view key hides the view that had the focus', async () => {
       await resetToFirstLoad()
       await userEvent.click(tmViewHost().querySelector('.state-table') as HTMLElement)
@@ -213,7 +213,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
         host('tm-0'),
       )
       await scrolled('source', 120)
-      await viewKey('4')
+      await viewKey('3')
       expect(mounted()).toEqual(['source'])
       const focused = await focusedOn('source', 'after the view key')
       expect(focused.matches(':focus-visible')).toBe(true)
@@ -247,7 +247,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       await scrolled('source', 120)
       await caretAt(300)
       expect(sourceScroller().scrollTop, 'precondition: the click in the editor left the view at 120').toBe(120)
-      await viewKey('3')
+      await viewKey('2')
       expect(mounted()).toEqual(['source', 'lambda-0', 'tm-0'])
       await frames()
       expect(view.hasFocus, 'the source editor lost the focus').toBe(true)
@@ -257,7 +257,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       await scrolled('source', 0)
       await caretAt(60)
       expect(sourceScroller().scrollTop, 'precondition: the click in the editor left the view at its top').toBe(0)
-      await viewKey('3')
+      await viewKey('2')
       expect(mounted()).toEqual(['source', 'tm-0'])
       await frames()
       expect(view.hasFocus).toBe(true)
@@ -328,7 +328,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
 
     /**
      * **A VIEW KEY THAT MAKES THE EDITOR'S VIEW SHORTER BRINGS THE CARET BACK INTO SIGHT.** With three views the
-     * source view is the window's height; `2` shows the rxm view under it and halves it. The caret is put lower in
+     * source view is the window's height; `4` shows the rxm view under it and halves it. The caret is put lower in
      * the view than the halved view is tall, so the view has to move for it to show.
      */
     it('follows the caret when a view key halves the view its editor is in', async () => {
@@ -339,7 +339,7 @@ describe('the scroll of the view a gesture gives the focus to', () => {
       await caretAt(tall - 80)
       const down = caret().top - sourcePane().getBoundingClientRect().top
       const before = sourceScroller().scrollTop
-      await viewKey('2')
+      await viewKey('4')
       expect(drawn()).toBe('row[50](column[50](source rxm-0) column[50](lambda-0 tm-0))')
       await frames()
       expect(sourcePane().clientHeight, 'precondition: the source view was made shorter').toBeLessThan(tall - 100)
