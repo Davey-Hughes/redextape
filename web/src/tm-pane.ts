@@ -352,10 +352,20 @@ export class TmPane implements EditablePane {
                 ? 'this machine has no program level: its states carry no instruction and no dotted name to group by'
                 : null,
           },
-          { value: 'local', label: 'local' },
+          {
+            value: 'local',
+            label: 'local',
+            hint: () => (this.#diagram.shown === 'local' ? 'press again to reset the view' : null),
+          },
         ],
         current: () => this.#diagram.shown,
-        pick: (v) => this.#setDisplay({ ...this.#display, level: v === 'local' ? 'local' : 'program' }),
+        pick: (v) => {
+          // *LOCAL* PRESSED WHILE IT SHOWS PUTS IT BACK (`StateDiagram.resetLocal`), read before the pick: a press that
+          // brings it in from the program level keeps the zoom; the change of level centres the current state.
+          const again = v === 'local' && this.#diagram.shown === 'local'
+          this.#setDisplay({ ...this.#display, level: v === 'local' ? 'local' : 'program' })
+          if (again) this.#diagram.resetLocal()
+        },
       },
       'diagram-mode',
     )

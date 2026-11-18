@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, commands, page, userEvent } from 'vitest/browser'
 import { CHROMIUM, chromiumOnly } from './engine'
-import { control, diagram, frame, frames, SHELL, stateIdle, tmPane, tmStatus, until } from './harness'
+import { control, diagram, diagramChoice, frame, frames, SHELL, stateIdle, tmPane, tmStatus, until } from './harness'
 
 /**
  * Moving the state diagram's local level in its panel like a map
@@ -21,7 +21,10 @@ const MACHINE = `tapes 1\nstart s\n\nstate s:\n  [*] -> write [*], move [R], got
 ).join('')}`
 
 const level = () => diagram().querySelector('.local-level') as HTMLElement
+/** The box the part of the drawing anything is drawn in takes, at the zoom: what the room for a pan is round. */
 const content = () => diagram().querySelector('.local-content') as HTMLElement
+/** The whole drawing, at the size it was laid out at and on screen at the zoom. */
+const drawing = () => diagram().querySelector('.local-drawing') as HTMLElement
 const group = () => diagram().querySelector('.local-nodes') as HTMLElement
 const nodes = () => [...group().querySelectorAll<HTMLElement>('.local-node')]
 const nodeNamed = (name: string) => group().querySelector<HTMLElement>(`.local-node[title="${name}"]`) as HTMLElement
@@ -116,6 +119,29 @@ const wheelBy = (f: number) => (-100 * Math.log(f)) / Math.log(1.1)
 const larger = () => content().offsetWidth > level().clientWidth || content().offsetHeight > level().clientHeight
 
 /**
+ * The box round everything the level draws, its nodes, lines and labels, as the page has it. In a panel wider than
+ * the level, the drawing's own box also holds the room its outer gaps spread into, where nothing is drawn.
+ */
+function drawn(): { left: number; top: number; right: number; bottom: number } {
+  const boxes = [...nodes(), ...content().querySelectorAll('.local-edge, .local-label')].map((e) =>
+    e.getBoundingClientRect(),
+  )
+  return {
+    left: Math.min(...boxes.map((b) => b.left)),
+    top: Math.min(...boxes.map((b) => b.top)),
+    right: Math.max(...boxes.map((b) => b.right)),
+    bottom: Math.max(...boxes.map((b) => b.bottom)),
+  }
+}
+
+/** Where the middle of what the level draws is from the panel's middle. */
+function drawnFromMiddle(): { x: number; y: number } {
+  const d = drawn()
+  const m = middle()
+  return { x: (d.left + d.right) / 2 - m.x, y: (d.top + d.bottom) / 2 - m.y }
+}
+
+/**
  * Whether `el`'s centre is at the panel's middle on `axis`, within a pixel, or the drawing is as near as it goes with
  * the panel still covered: its edge on that side at the panel's own.
  */
@@ -150,6 +176,31 @@ afterEach(async () => {
 })
 
 describe('a level in its panel', () => {
+  // FIRST, BEFORE ANY CASE MOVES THE LEVEL, so the resize centres it as a first draw does. Around `s`, a panel wider
+  // than the level spreads it into gaps on its left that hold no state, so the room in its box is all on one side.
+  it('centres what it draws in a panel wider than the level, not the room its outer gaps spread into', async () => {
+    const before = group().firstElementChild
+    await panel(1000, 300)
+    await until(() => group().firstElementChild !== before, 'the level to be laid out again')
+    await frames()
+    try {
+      const k = drawing().getBoundingClientRect()
+      const d = drawn()
+      expect(
+        Math.abs(d.left - k.left - (k.right - d.right)),
+        'precondition: more room in its box on one side of what it draws than on the other',
+      ).toBeGreaterThan(20)
+      expect(Math.abs(drawnFromMiddle().x), `centred across, at ${JSON.stringify(scroll())}`).toBeLessThanOrEqual(1)
+      expect(d.left >= viewport().left && d.right <= viewport().right, 'all it draws in the panel').toBe(true)
+    } finally {
+      // THE PANEL THE CASES AFTER THIS ONE ARE DRAWN IN, whether or not this one passed.
+      const wide = group().firstElementChild
+      await panel(300, 160)
+      await until(() => group().firstElementChild !== wide, 'the level to be laid out again')
+      await frames()
+    }
+  })
+
   it('pans with a mouse drag on its background, by the distance dragged, on both axes', async () => {
     expect(larger(), 'precondition: larger than its panel').toBe(true)
     level().scrollLeft = 60
@@ -308,6 +359,50 @@ describe('a level in its panel', () => {
     expect(r.right, 'its right edge in the panel').toBeLessThanOrEqual(v.right + 0.5)
   })
 
+  // BEFORE THE STEP BELOW: around `s`, a panel wider than the level has room in its box on one side only.
+  it('goes back to full size, where a first draw puts it, on a press of local while local shows, or on 0', async () => {
+    const local = () => diagramChoice('local') as HTMLButtonElement
+    expect(local().getAttribute('aria-checked'), 'precondition: local shown').toBe('true')
+    for (const [w, h] of [
+      [1000, 300],
+      [300, 160],
+    ] as const) {
+      const before = group().firstElementChild
+      const relaid = level().clientWidth !== w
+      await panel(w, h)
+      if (relaid) await until(() => group().firstElementChild !== before, 'the level to be laid out again')
+      await frames()
+      for (const how of ['a click on local', 'Enter on local', '0'] as const) {
+        const at = `${how}, ${w} by ${h}`
+        const was = scroll()
+        await userEvent.wheel(nodeNamed('s'), { delta: { y: wheelBy(1.8) } })
+        await frame()
+        await drag(-25, -15)
+        expect(zoom(), `precondition: zoomed, for ${at}`).toBeCloseTo(1.8, 2)
+        expect(Math.abs(scroll().left - was.left), `precondition: moved, for ${at}`).toBeGreaterThan(10)
+        if (how === 'a click on local') await userEvent.click(local())
+        else if (how === 'Enter on local') {
+          local().focus()
+          await userEvent.keyboard('{Enter}')
+        } else {
+          nodes()
+            .find((n) => n.tabIndex === 0)
+            ?.focus({ preventScroll: true })
+          await userEvent.keyboard('0')
+        }
+        await frames()
+        expect(zoom(), `full size, after ${at}`).toBeCloseTo(1, 3)
+        // WHAT IT DRAWS CENTRED WHERE THE PANEL HOLDS IT ALL ACROSS, AND THE CURRENT STATE WHERE IT DOES NOT.
+        const off = w === 1000 ? drawnFromMiddle().x : fromMiddle(nodeNamed('s')).x
+        expect(Math.abs(off), `centred across, after ${at}`).toBeLessThanOrEqual(1)
+        expect(
+          Math.abs(drawnFromMiddle().y) <= 1 || centredOrClamped(nodeNamed('s'), 'y'),
+          `centred down, after ${at}`,
+        ).toBe(true)
+      }
+    }
+  })
+
   // THESE TWO LAST: they step the run on from `s`, which the cases above are drawn around.
   it('centres the current state after a step to a new one, and again after a resize when it was not moved', async () => {
     level().scrollLeft = 0
@@ -331,8 +426,8 @@ describe('a level in its panel', () => {
     await panel(1000, 160)
     await until(() => group().firstElementChild !== before, 'the level to be laid out again')
     await frames()
-    expect(content().offsetWidth, 'precondition: spread to the panel').toBe(level().clientWidth)
-    const k = content().getBoundingClientRect()
+    expect(drawing().offsetWidth, 'precondition: spread to the panel').toBe(level().clientWidth)
+    const k = drawing().getBoundingClientRect()
     expect(Math.abs(k.left - viewport().left), 'its left edge at the panel’s').toBeLessThanOrEqual(1)
     expect(Math.abs(k.right - viewport().right), 'its right edge at the panel’s').toBeLessThanOrEqual(1)
     expect(centredOrClamped(current(), 'y'), `centred down again, at ${JSON.stringify(scroll())}`).toBe(true)
@@ -548,28 +643,6 @@ describe('the zoom', () => {
     }
   })
 
-  it('goes back to full size, centred on the current state, on a double-click on its background or the 0 key', async () => {
-    for (const how of ['double-click', '0'] as const) {
-      await userEvent.wheel(current(), { delta: { y: wheelBy(1.8) } })
-      await frame()
-      expect(zoom(), `precondition: zoomed, for the ${how}`).toBeCloseTo(1.8, 2)
-      await drag(-25, -15)
-      expect(Math.hypot(fromMiddle(current()).x, fromMiddle(current()).y), 'precondition: moved').toBeGreaterThan(10)
-      const from = background()
-      const box = level().getBoundingClientRect()
-      if (how === 'double-click') {
-        await userEvent.dblClick(level(), { position: { x: from.x - box.left, y: from.y - box.top } })
-      } else {
-        await userEvent.click(level(), { position: { x: from.x - box.left, y: from.y - box.top } })
-        await userEvent.keyboard('0')
-      }
-      await frames()
-      expect(zoom(), `full size, after the ${how}`).toBeCloseTo(1, 3)
-      expect(centredOrClamped(current(), 'x'), `centred across, after the ${how}`).toBe(true)
-      expect(centredOrClamped(current(), 'y'), `centred down, after the ${how}`).toBe(true)
-    }
-  })
-
   it('zooms in with + and =, and out with -, about the middle of the panel', async () => {
     const from = background()
     const box = level().getBoundingClientRect()
@@ -756,12 +829,12 @@ describe('the zoom', () => {
     await until(() => group().firstElementChild !== before, 'the layout, with no press to wait for')
   })
 
-  it('does not go back to full size for a double-click either of whose presses was a drag', async () => {
-    for (const [first, second, resets] of [
-      ['click', 'click', true],
-      ['drag', 'drag', false],
-      ['drag', 'click', false],
-      ['click', 'drag', false],
+  it('keeps its zoom through a double-click on its background, and its place where neither press was a drag', async () => {
+    for (const [first, second] of [
+      ['click', 'click'],
+      ['drag', 'drag'],
+      ['drag', 'click'],
+      ['click', 'drag'],
     ] as const) {
       const how = `${first} then ${second}`
       await userEvent.wheel(level(), { delta: { y: wheelBy(1.8) } })
@@ -770,18 +843,35 @@ describe('the zoom', () => {
       // FROM ONE SPOT, AS THE SYSTEM COUNTS A DOUBLE-CLICK: the second press and its release count 2. A drag goes out
       // and back, so the spot is still the background for the press after it.
       const from = background(60)
-      for (const [i, gesture] of [first, second].entries()) {
-        await press('move', from)
-        await press('down', from, i + 1)
-        if (gesture === 'drag') {
-          await press('move', { x: from.x - 30, y: from.y - 20 })
-          await press('move', from)
-        }
-        await press('up', from, i + 1)
-        await frames()
+      const was = scroll()
+      let doubles = 0
+      const heard = () => {
+        doubles += 1
       }
-      expect(zoom(), `after ${how}`).toBeCloseTo(resets ? 1 : 1.8, 2)
-      if (!resets) await unzoom()
+      level().addEventListener('dblclick', heard)
+      try {
+        for (const [i, gesture] of [first, second].entries()) {
+          await press('move', from)
+          await press('down', from, i + 1)
+          if (gesture === 'drag') {
+            await press('move', { x: from.x - 30, y: from.y - 20 })
+            await press('move', from)
+          }
+          await press('up', from, i + 1)
+          await frames()
+        }
+      } finally {
+        level().removeEventListener('dblclick', heard)
+      }
+      expect(zoom(), `after ${how}`).toBeCloseTo(1.8, 2)
+      if (first === 'click' && second === 'click') {
+        expect(doubles, 'precondition: a double-click to the browser').toBe(1)
+        expect(
+          Math.abs(scroll().left - was.left) + Math.abs(scroll().top - was.top),
+          'where it was',
+        ).toBeLessThanOrEqual(1)
+      }
+      await unzoom()
     }
   })
 
@@ -830,5 +920,65 @@ describe('the zoom', () => {
     await frames()
     expect(centredOrClamped(current(), 'x'), 'the new state centred across').toBe(true)
     expect(centredOrClamped(current(), 'y'), 'the new state centred down').toBe(true)
+  })
+})
+
+describe('the reach of a pan', () => {
+  /**
+   * A machine whose start state has nothing before it, as a program's first state has not: in a panel wider than the
+   * level, the gaps before its column spread into blank room on its left.
+   */
+  const FIRST = `tapes 1\nstart s\n\nstate s:\n  [*] -> write [*], move [R], goto t\nstate t:\n  [*] -> write [*], move [R], goto u\nstate u: accept\n`
+  /** `local-layout.ts`'s `PAD`, the margin the part of the drawing anything is drawn in keeps round it. */
+  const PAD = 8
+
+  beforeAll(async () => {
+    const copy = (await import('@codemirror/view')).EditorView.findFromDOM(editor())
+    copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: FIRST } })
+    await until(() => nodes().length === 3, 'the copy to draw s and the two states after it')
+    await panel(634, 300)
+  })
+
+  it('keeps what the level draws in the panel at each end, zoomed in, where it holds blank room on one side', async () => {
+    await userEvent.wheel(level(), { delta: { y: wheelBy(3) } })
+    await frame()
+    const z = zoom()
+    expect(z, 'precondition: at three times its size').toBeCloseTo(3, 2)
+    // AROUND `s`, WITH NOTHING BEFORE IT, THE BLANK IS ON THE LEFT; AROUND `u`, TWO STEPS ON WITH NOTHING AFTER IT, ON
+    // THE RIGHT, which only the box's clip keeps out of the scroll's range.
+    for (const side of ['left', 'right'] as const) {
+      if (side === 'right') {
+        const before = group().firstElementChild
+        for (let i = 0; i < 2; i += 1) control('▶')?.click()
+        await until(() => tmStatus().split(' ')[0] === 'u', 'the run to reach u')
+        await until(() => group().firstElementChild !== before, 'the level to be laid out around u')
+        await frames()
+        expect(zoom(), 'precondition: the zoom kept through the steps').toBeCloseTo(z, 2)
+      }
+      const whole = drawing().getBoundingClientRect()
+      const blank = side === 'left' ? drawn().left - whole.left : whole.right - drawn().right
+      expect(blank, `precondition: more blank on the ${side} than half the panel`).toBeGreaterThan(
+        level().clientWidth / 2,
+      )
+      for (const [axis, end] of [
+        ['x', 'start'],
+        ['x', 'end'],
+        ['y', 'start'],
+        ['y', 'end'],
+      ] as const) {
+        if (axis === 'x') level().scrollLeft = end === 'start' ? 0 : maxScroll().left
+        else level().scrollTop = end === 'start' ? 0 : maxScroll().top
+        await frame()
+        const d = drawn()
+        const v = viewport()
+        const [lo, hi, from, to] =
+          axis === 'x' ? [d.left, d.right, v.left, v.right] : [d.top, d.bottom, v.top, v.bottom]
+        // AS MUCH AS REACHES THE PANEL'S MIDDLE, BAR THE MARGIN: a corner of what is drawn stops there.
+        expect(
+          Math.min(hi, to) - Math.max(lo, from),
+          `drawn in the panel, blank on the ${side}, ${axis} at its ${end}`,
+        ).toBeGreaterThanOrEqual(Math.min(hi - lo, (to - from) / 2) - PAD * z - 1)
+      }
+    }
   })
 })

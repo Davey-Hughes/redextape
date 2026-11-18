@@ -123,6 +123,12 @@ export type LocalLayout = {
   readonly edges: readonly PlacedEdge[]
   readonly width: number
   readonly height: number
+  /**
+   * The part of the drawing anything is drawn in, with `PAD` round it as over it, held to the drawing: what a placing
+   * centres. Not the drawing's whole width, which in a panel wider than the level also spreads the gaps past its
+   * outermost columns, and holds nothing there.
+   */
+  readonly inked: Box
 }
 
 type Quad = readonly [number, number, number, number]
@@ -892,6 +898,17 @@ export function layoutLocal(
   const drawnTop = Math.min(...boxes.map((b) => b.top))
   const drawnBottom = Math.max(...boxes.map((b) => b.bottom))
   const shift = PAD - drawnTop
+  const height = drawnBottom - drawnTop + 2 * PAD
+  const across = [
+    ...local.nodes.map((n) => ({ left: xOf(n.state), right: xOf(n.state) + wOf(n.state) })),
+    ...drawn.flatMap((d) => [cubicBox(d.path), d.label.box]),
+  ]
+  const inked = {
+    left: Math.max(0, Math.min(...across.map((b) => b.left)) - PAD),
+    top: 0,
+    right: Math.min(totalWidth, Math.max(...across.map((b) => b.right)) + PAD),
+    bottom: height,
+  }
   const n = (v: number) => String(Math.round(v * 100) / 100)
   const byEdge = new Map(drawn.map((d) => [d.edge, d]))
   return {
@@ -918,6 +935,7 @@ export function layoutLocal(
       ]
     }),
     width: totalWidth,
-    height: drawnBottom - drawnTop + 2 * PAD,
+    height,
+    inked,
   }
 }

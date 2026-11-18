@@ -2753,15 +2753,19 @@ main {
 .program-level[hidden] {
   display: none;
 }
-/* HALF THE PANEL'S WIDTH AND HEIGHT OF ROOM ON EVERY SIDE, so the scroll goes exactly as far as puts a corner of the
-   drawing at the panel's middle: a drag can move any part of it there, and cannot lose it. Where the drawing sits in
-   that room is `state-diagram.ts`'s `#place`. The box is the drawing's size at its zoom, so the reach holds at any. */
+/* HALF THE PANEL'S WIDTH AND HEIGHT OF ROOM ON EVERY SIDE, so the scroll goes exactly as far as puts a corner of what
+   is drawn at the panel's middle: a drag can move any part of it there, and cannot lose it. Where the drawing sits in
+   that room is `state-diagram.ts`'s `#place`. The box is the part of the drawing anything is drawn in, at its zoom
+   (`#sizeLocal`), so the reach holds at any. IT CLIPS THE DRAWING: the blank past that part would widen the scroll's
+   range as far as it reaches, and holds nothing to show. */
 .local-content {
   position: relative;
   flex: none;
   margin: 50cqh 50cqw;
+  overflow: clip;
 }
-/* THE DRAWING AT THE SIZE IT WAS LAID OUT AT, scaled from its top left corner to fill `.local-content`. */
+/* THE DRAWING AT THE SIZE IT WAS LAID OUT AT, scaled from its top left corner, and set so the part of it anything is
+   drawn in fills `.local-content`. */
 .local-drawing {
   position: absolute;
   top: 0;

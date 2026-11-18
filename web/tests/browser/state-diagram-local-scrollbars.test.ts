@@ -51,7 +51,8 @@ state q9:
 `
 
 const level = () => diagram().querySelector('.local-level') as HTMLElement
-const content = () => diagram().querySelector('.local-content') as HTMLElement
+/** The whole drawing, at the size it was laid out at. */
+const drawing = () => diagram().querySelector('.local-drawing') as HTMLElement
 const group = () => diagram().querySelector('.local-nodes') as HTMLElement
 
 /** How many times the level has been laid out: each layout builds its nodes anew. */
@@ -116,14 +117,14 @@ describe('under classic scroll bars', () => {
     // THE LEVEL'S HEIGHT AT EACH WIDTH IT IS SPREAD OVER, in a panel too tall to scroll, from the narrowest that holds
     // it: where its labels fall on its sloping lines, and so how tall its rows stand, depends on the spread.
     await resize(200)
-    const natural = Number.parseFloat(content().style.width)
+    const natural = Number.parseFloat(drawing().style.width)
     await resize(560)
     const gutter = level().offsetWidth - level().clientWidth
     const height = new Map<number, number>()
     for (let spread = natural; spread <= natural + 150; spread += 1) {
       await resize(spread + gutter)
-      expect(content().style.width).toBe(`${spread}px`)
-      height.set(spread, Number.parseFloat(content().style.height))
+      expect(drawing().style.width).toBe(`${spread}px`)
+      height.set(spread, Number.parseFloat(drawing().style.height))
     }
     // A PANEL THAT FITS THE LEVEL SPREAD OVER A SCROLL BAR LESS THAN ITS WIDTH, BUT NOT SPREAD OVER ALL OF IT: a level
     // spread over the width it has without a scroll bar would overflow, gain one, fit, lose it, and so on.
@@ -138,13 +139,13 @@ describe('under classic scroll bars', () => {
     for (let i = 0; i < 30; i += 1) await frame()
     expect(layouts - settled, 'layouts over 30 frames').toBe(0)
     // AND LAID OUT FOR THE WIDTH IT HAS: not left spread over a width a scroll bar took or gave back.
-    expect(content().style.width).toBe(`${level().clientWidth}px`)
+    expect(drawing().style.width).toBe(`${level().clientWidth}px`)
   })
 
   it('draws no scroll bar, even where it is larger than its panel both ways', async () => {
     await resize(200, 100)
-    expect(content().offsetWidth, 'precondition: wider than its panel').toBeGreaterThan(level().clientWidth)
-    expect(content().offsetHeight, 'precondition: taller than its panel').toBeGreaterThan(level().clientHeight)
+    expect(drawing().offsetWidth, 'precondition: wider than its panel').toBeGreaterThan(level().clientWidth)
+    expect(drawing().offsetHeight, 'precondition: taller than its panel').toBeGreaterThan(level().clientHeight)
     expect(level().offsetWidth - level().clientWidth, 'the room a vertical scroll bar takes').toBe(0)
     expect(level().offsetHeight - level().clientHeight, 'the room a horizontal scroll bar takes').toBe(0)
   })
@@ -158,7 +159,7 @@ describe('under classic scroll bars', () => {
     for (const panel of [40, 2000]) {
       level().style.height = `${panel}px`
       for (let i = 0; i < 3; i += 1) await frame()
-      expect(content().offsetHeight > level().clientHeight, `${panel} px tall overflows`).toBe(panel === 40)
+      expect(drawing().offsetHeight > level().clientHeight, `${panel} px tall overflows`).toBe(panel === 40)
       widths.push(level().clientWidth)
     }
     expect(widths[0], 'the width it is laid out for, overflowing and fitting').toBe(widths[1])

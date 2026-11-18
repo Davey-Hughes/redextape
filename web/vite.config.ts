@@ -93,6 +93,7 @@ export const CAPTURE_FILES = [
   'tests/browser/default-views-gestures.test.ts',
   'tests/browser/divider-drag-focus.test.ts',
   'tests/browser/divider-drag-format-on-blur.test.ts',
+  'tests/browser/link-clear.test.ts',
   'tests/browser/panel-boundaries.test.ts',
   'tests/browser/panel-regions.test.ts',
   'tests/browser/panel-sizes-stored.test.ts',

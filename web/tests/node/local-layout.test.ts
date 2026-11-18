@@ -596,6 +596,31 @@ describe('the local level laid out (decisions 1-3)', () => {
     }
   })
 
+  it('names the part of the drawing anything is drawn in, with the margin it leaves above it round it', () => {
+    // A LEVEL WITH NOTHING BEFORE ITS CURRENT STATE, in a panel wider than it: the gaps on its left, which hold no
+    // state, spread with the rest, and leave room in the drawing that holds nothing.
+    const ahead: Local = {
+      nodes: [0, 1, 2].map((state) => ({ state, column: state })),
+      edges: [
+        { from: 0, to: 1, labels: [['REG:# R']], next: true },
+        { from: 1, to: 2, labels: [['REG:# R']], next: false },
+      ],
+    }
+    const lopsided = layoutLocal(ahead, (s) => ['start', 'middle', 'end'][s] ?? '', METRICS, 1000)
+    for (const [name, layout] of Object.entries({ screenshot, crowded, lopsided })) {
+      const boxes = [...layout.nodes.map(nodeBox), ...layout.edges.flatMap((e) => [e.box, e.label.box])]
+      const margin = Math.min(...boxes.map((b) => b.top))
+      const left = Math.min(...boxes.map((b) => b.left))
+      const right = Math.max(...boxes.map((b) => b.right))
+      expect(layout.inked.left, `${name}, its left`).toBeCloseTo(Math.max(0, left - margin), 6)
+      expect(layout.inked.right, `${name}, its right`).toBeCloseTo(Math.min(layout.width, right + margin), 6)
+      expect(layout.inked.top, `${name}, its top`).toBe(0)
+      expect(layout.inked.bottom, `${name}, its bottom`).toBe(layout.height)
+    }
+    expect(lopsided.width, 'precondition: spread to the panel').toBe(1000)
+    expect(lopsided.inked.left, 'precondition: room on its left that holds nothing').toBeGreaterThan(100)
+  })
+
   it('leaves the same margin above and below what it draws', () => {
     for (const layout of [screenshot, crowded]) {
       const boxes = [...layout.nodes.map(nodeBox), ...layout.edges.flatMap((e) => [e.box, e.label.box])]

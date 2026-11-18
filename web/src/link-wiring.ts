@@ -52,6 +52,19 @@ export type LinkWiring = {
   get linkable(): boolean
   get link(): Pin | null
   clearLink(): void
+  /**
+   * A user's clear: a click on empty space in a view, or Escape in one (the link-clear design). Nothing is pinned and
+   * everything that draws the link is redrawn, as for a source click on no construct, and linking stays on. NOT
+   * `clearLink`, an edit's clear, which turns linking off until the next compile. Nothing pinned, it does nothing, so
+   * a click on empty space costs no frame.
+   */
+  unpin(): void
+  /**
+   * How many link gestures `setLinkTo` has taken: read before and after a click's own handlers, it tells the clear's
+   * listener whether the click linked. Only the view's handler knows whether a row links (a label row, an instruction
+   * `defunc` minted, a row of a copy), and a clear after one that did would undo it.
+   */
+  get gestures(): number
   drawLink(l: Link | null, focusCoincident: boolean, rxmCoincident: boolean, lambda: LambdaLinkState): void
   setLinkTo(node: number | null, origin: Pin['origin']): void
   linkAtSourceOffset(byteOffset: number): void
@@ -137,6 +150,7 @@ export function createLinkWiring(deps: {
    * with no owner does not set it — that click clears the pin silently, which the amendment keeps.
    */
   let ownerless = false
+  let gestures = 0
 
   /**
    * Paint the link status line from `draw()`'s already-resolved link, or `null` when there is nothing
@@ -187,10 +201,20 @@ export function createLinkWiring(deps: {
    * for its own.
    */
   const setLinkTo = (node: number | null, origin: Pin['origin']) => {
+    gestures += 1
     link = node === null ? null : { node, origin }
     // AN RXM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (Plan 7 part 5 spec
     // amendment 11); any other gesture, a resolved rxm click included, replaces that explanation.
     ownerless = node === null && origin === 'rxm'
+    paint(origin !== 'tm', origin !== 'rxm')
+  }
+
+  /**
+   * Draw `link` everywhere it is drawn; `scrollTm` and `scrollRxm` say whether the rule tables and the rxm listings
+   * scroll to it, or, with nothing pinned there, drop the hold an earlier link's scroll took.
+   */
+  const paint = (scrollTm: boolean, scrollRxm: boolean) => {
+    const node = link?.node ?? null
     // ONE `linkFor` CALL, reused for the source editor's mark and both fan-outs below — the comment where `draw()`
     // resolves its own link (`draw.ts`) says why a `linkFor` call is not free.
     const l = node === null || index === null ? null : index.linkFor(node)
@@ -213,9 +237,9 @@ export function createLinkWiring(deps: {
     // seeded, and `draw.ts`'s seed gives it the pin again, with this scroll, after the render that shows it.
     const before = linkStatusHost.textContent ?? ''
     draw()
-    // ANNOUNCED HERE AND NOWHERE ELSE (spec §11): `setLinkTo` is the link gesture — a source click or
-    // `Mod-'`, a λ token, a rule row. `draw()` just wrote the sentence; a keystroke reaches `drawLink`
-    // through `draw()` alone and says nothing.
+    // ANNOUNCED HERE AND NOWHERE ELSE (spec §11): this runs for a link gesture — a source click or `Mod-'`, a λ
+    // token, a rule row — and for a user's clear, `unpin`. `draw()` just wrote the sentence; a keystroke reaches
+    // `drawLink` through `draw()` alone and says nothing.
     //
     // **WHAT CHANGED IS MEASURED AGAINST THE LINE, NOT AGAINST THE LAST THING ANNOUNCED.** A memo of the
     // last announcement goes stale the moment anything else writes the line — and something does, on
@@ -229,7 +253,7 @@ export function createLinkWiring(deps: {
     // PER-LEG, NOT PER-PANE — every TM pane follows the same link, resolved once above and fanned out
     // here, HIDDEN ONES INCLUDED. `p.pane` NEEDS THE CAST for the reason `draw.ts`'s identical loop
     // documents: `PaneView<T>` is deliberately narrow and does not carry `setLink`, which is a fact
-    // about the concrete `TmPane` class. `scrollTo` is `origin !== 'tm'`: a click that came from the
+    // about the concrete `TmPane` class. `scrollTm` is false for a click on a rule table: a click that came from the
     // table itself must not scroll the table it was just clicked in out from under the cursor; a click
     // from source or λ should bring the state block into view — or, when the pin names no state there, let the
     // table follow the machine again rather than stay held on the block an earlier link scrolled to.
@@ -250,13 +274,13 @@ export function createLinkWiring(deps: {
     // the inbound direction). `detached` is the session's own fact, read here because the view's binding moves.
     for (const p of panes.of('tm')) {
       const states = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.states ?? [])
-      ;(p.pane as TmPane).setLink(states, origin !== 'tm')
+      ;(p.pane as TmPane).setLink(states, scrollTm)
     }
     // AND EVERY RXM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, a copy marking nothing,
     // and scrolled to the construct's first instruction unless the click came from an rxm listing (spec §6.6).
     for (const p of panes.of('rxm')) {
       const instrs = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.instrs ?? [])
-      ;(p.pane as RxmPane).setLink(instrs, origin !== 'rxm')
+      ;(p.pane as RxmPane).setLink(instrs, scrollRxm)
     }
   }
 
@@ -286,6 +310,20 @@ export function createLinkWiring(deps: {
       linkable = false
       link = null
       ownerless = false
+    },
+    unpin(): void {
+      // LINKING OFF IS NOTHING PINNED TOO: `clearLink` and `setIndex` empty both, and every link gesture asks
+      // `linkable` first. So this one test leaves an edit's state alone as well.
+      if (link === null && !ownerless) return
+      link = null
+      ownerless = false
+      // SCROLLED NEITHER WAY: a rule table or rxm listing a link scrolled keeps the hold that scroll took
+      // (`VirtualGrid.scrollToRow`), so nothing moves on the clear and the list follows the run again at its next step.
+      // Dropping the hold would send it back to the run's row at once, which can be far.
+      paint(false, false)
+    },
+    get gestures(): number {
+      return gestures
     },
     drawLink,
     setLinkTo,

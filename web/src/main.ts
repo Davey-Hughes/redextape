@@ -73,6 +73,7 @@ import {
 } from './layout'
 import { retitleStage } from './layout-view'
 import { LEG_NAME, LEGS } from './legs'
+import { wireLinkClear } from './link-clear'
 import { createLinkWiring, LINK_KEY, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { lspHover } from './lsp-hover'
@@ -1795,6 +1796,8 @@ async function main(): Promise<EditorView> {
     },
     blocked: () => document.querySelector('dialog:modal') !== null,
   })
+  // THUNKS: `linkWiring` is assigned further down this function.
+  wireLinkClear(root, { unpin: () => linkWiring.unpin(), gestures: () => linkWiring.gestures })
 
   /**
    * A view's title, in the title-selector's own spelling — the bar's prefix (spec §8) and a Stage tab's label (§5).

@@ -1,4 +1,5 @@
-import { CAP_CHARS, layoutLocal, type Metrics } from './local-layout'
+import { DRAG_THRESHOLD } from './link-clear'
+import { type Box, CAP_CHARS, layoutLocal, type Metrics } from './local-layout'
 import { type Local, localLevel, predecessors, REACH } from './local-level'
 import { type Arc, arcsOf, chipsOf, type Edges, type ProgramRow, programRows } from './program-level'
 import { type Groups, groupStates, stepOf, type Tier } from './state-groups'
@@ -15,9 +16,6 @@ const BOX_WIDTH = 104
 const SVG = 'http://www.w3.org/2000/svg'
 
 let minted = 0
-
-/** How far a mouse press on the local level moves, in pixels, before it pans rather than clicks. */
-const PAN_THRESHOLD = 4
 
 /**
  * The local level's zoom (decision 12): a wheel notch, a key press, or a hundred pixels of a trackpad's wheel scale
@@ -50,6 +48,9 @@ function scrolledBox(el: HTMLElement): { left: number; top: number; right: numbe
   const top = box.top + el.clientTop
   return { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight }
 }
+
+/** The part of an empty local level anything is drawn in. */
+const NOTHING_INKED: Box = { left: 0, top: 0, right: 0, bottom: 0 }
 
 /**
  * How far to scroll along one axis to centre the point `at` of a drawing that runs `from`..`to` in a panel that runs
@@ -153,11 +154,12 @@ export class StateDiagram {
   #programEl: HTMLElement
   #localEl: HTMLElement
   /**
-   * The box the level's drawing takes on screen, at its zoom, with room around it in `#localEl` to be moved into.
-   * The scroll's range is this box's size, so a drag's reach holds at any zoom.
+   * The box the part of the level's drawing anything is drawn in (`LocalLayout.inked`) takes on screen, at its zoom,
+   * with room around it in `#localEl` to be moved into. The scroll's range is this box's size, so a drag's reach holds
+   * at any zoom and ends where a corner of what is drawn reaches the panel's middle.
    */
   #localContent: HTMLElement
-  /** The drawing at the size it was laid out at, scaled by the zoom into `#localContent`. */
+  /** The drawing at the size it was laid out at, scaled by the zoom and set in `#localContent`, which clips it. */
   #localDrawing: HTMLElement
   #localEdges: SVGSVGElement
   #localNodes: HTMLElement
@@ -184,14 +186,15 @@ export class StateDiagram {
   #centredAt = { left: 0, top: 0 }
   /** The local level's zoom, which a step, a new state and a resize keep (decision 12). */
   #zoom = 1
-  /** The size the local level was last laid out at, which the zoom scales. */
-  #drawn = { width: 0, height: 0 }
+  /**
+   * The size the local level was last laid out at, which the zoom scales, and the part of it anything is drawn in
+   * (`LocalLayout.inked`), which `#localContent` takes and a placing centres.
+   */
+  #drawn: { width: number; height: number; inked: Box } = { width: 0, height: 0, inked: NOTHING_INKED }
   /** A mouse press on the local level, armed or panning, or `null`. */
   #press: Press | null = null
   /** Whether a draw that would move the local level waited for a press to end (`#drawLocal`). */
   #waited = false
-  /** Whether each of the last two presses on the local level panned, for a double-click to tell (`#zoomLocal`). */
-  #panned: [boolean, boolean] = [false, false]
   /** The scroll the last zoom asked for, which an engine that keeps whole pixels rounds (`#zoomAt`). */
   #zoomedTo = { left: Number.NaN, top: Number.NaN }
   /** The local level's roving cursor: the state whose node holds the one tab stop. */
@@ -801,7 +804,7 @@ export class StateDiagram {
       this.#localEdges.replaceChildren()
       // NOTHING LEFT TO SCROLL OR DRAG: the last drawing's size would keep a scroll range, and the open hand, over a
       // level with nothing in it.
-      this.#drawn = { width: 0, height: 0 }
+      this.#drawn = { width: 0, height: 0, inked: NOTHING_INKED }
       this.#sizeLocal()
       this.#localEdges.setAttribute('width', '0')
       this.#localEdges.setAttribute('height', '0')
@@ -856,7 +859,7 @@ export class StateDiagram {
     if (this.#localActive === null || !local.nodes.some((n) => n.state === this.#localActive)) {
       this.#localActive = current
     }
-    this.#drawn = { width: layout.width, height: layout.height }
+    this.#drawn = { width: layout.width, height: layout.height, inked: layout.inked }
     this.#sizeLocal()
     this.#localEdges.setAttribute('width', String(layout.width))
     this.#localEdges.setAttribute('height', String(layout.height))
@@ -933,7 +936,11 @@ export class StateDiagram {
   /**
    * Scroll the local level so `state`'s node is `kept` from the middle of the panel, where the user left it, or with
    * `kept` null, centre it (`towards`) and remember that. The browser holds either to the scroll's range, which puts a
-   * corner of the drawing at the panel's middle at its ends (`.local-content` in style.css).
+   * corner of what is drawn at the panel's middle at its ends (`.local-content` in style.css).
+   *
+   * **THE PART ANYTHING IS DRAWN IN, NOT THE DRAWING'S BOX** (`LocalLayout.inked`, `#localContent`'s box): a drawing
+   * spread to a panel wider than the level can hold room on one side only, and centring the drawing would show what is
+   * drawn off to the other.
    */
   #place(state: number, kept: { x: number; y: number } | null): void {
     const node = this.#nodeOf(state)
@@ -957,7 +964,7 @@ export class StateDiagram {
 
   /**
    * A mouse drag on the local level, on its background or a node, moves it in its panel both ways, at any size
-   * (decisions 10 and 11). A press is a click until it has moved more than `PAN_THRESHOLD` px, so a click on a node
+   * (decisions 10 and 11). A press is a click until it has moved more than `DRAG_THRESHOLD` px, so a click on a node
    * still links it; one that moved further pans, captures the pointer, and neither links nor moves the roving tab
    * stop. A pen and a finger keep the browser's own scrolling, which the level's room to move gives as much reach.
    */
@@ -977,7 +984,7 @@ export class StateDiagram {
       const dx = e.clientX - press.x
       const dy = e.clientY - press.y
       if (!press.panning) {
-        if (Math.hypot(dx, dy) <= PAN_THRESHOLD) return
+        if (Math.hypot(dx, dy) <= DRAG_THRESHOLD) return
         press.panning = true
         el.dataset.dragging = 'true'
         // CAPTURED ONCE IT PANS, AND NOT BEFORE: a captured release sends its click to the level rather than to the
@@ -999,7 +1006,6 @@ export class StateDiagram {
     /** End `press`; `released` when by its own release, which may make it a click. */
     const stop = (press: Press, released: boolean) => {
       this.#press = null
-      this.#panned = [this.#panned[1], press.panning]
       el.ownerDocument.removeEventListener('pointermove', move, true)
       el.ownerDocument.removeEventListener('pointerup', end, true)
       el.ownerDocument.removeEventListener('pointercancel', end, true)
@@ -1051,8 +1057,8 @@ export class StateDiagram {
 
   /**
    * The local level's zoom (decision 12): the wheel, and a pinch, which browsers send as a wheel with Ctrl, scale the
-   * drawing about the pointer; a double-click on its background puts it back at full size, centred on the current
-   * state; with the focus in it, `+` or `=` and `-` zoom about the panel's middle and `0` is the double-click's.
+   * drawing about the pointer; with the focus in it, `+` or `=` and `-` zoom about the panel's middle, and `0` puts it
+   * back as `resetLocal` does.
    */
   #zoomLocal(): void {
     const el = this.#localEl
@@ -1070,13 +1076,6 @@ export class StateDiagram {
       },
       { passive: false },
     )
-    el.addEventListener('dblclick', (e) => {
-      if (e.target instanceof Element && e.target.closest('.local-node') !== null) return
-      // TWO CLICKS, NOT A DRAG AND A CLICK: a drag's release clicks the level it captured, and a press soon after at
-      // the same spot is counted the second of a double-click, which would reset a zoom the user is moving around in.
-      if (this.#panned[0] || this.#panned[1]) return
-      this.#unzoom()
-    })
     el.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || !el.hasAttribute('data-pans')) return
       const v = scrolledBox(el)
@@ -1111,7 +1110,8 @@ export class StateDiagram {
     const z = this.#zoomedTo
     const left = Math.abs(el.scrollLeft - z.left) < 1 ? z.left : el.scrollLeft
     const top = Math.abs(el.scrollTop - z.top) < 1 ? z.top : el.scrollTop
-    // THE DRAWING'S CORNER WHERE THAT SCROLL PUTS IT.
+    // THE BOX'S CORNER WHERE THAT SCROLL PUTS IT, from which a point of the drawing is its distance at the zoom
+    // (`#sizeLocal`).
     const x = k.left + el.scrollLeft - left
     const y = k.top + el.scrollTop - top
     this.#zoom = zoom
@@ -1124,7 +1124,15 @@ export class StateDiagram {
     this.#rebase(left, top)
   }
 
-  /** Put the local level back at full size, centred on the current state as a new one is. */
+  /**
+   * Put the local level back at full size, placed as a first draw places it (`#place`): a press of *local* while the
+   * local level shows (spec §8's *program | local*), and the `0` key. Nothing while the program level shows.
+   */
+  resetLocal(): void {
+    if (this.shown === 'local') this.#unzoom()
+  }
+
+  /** Put the local level back at full size, placed as a new state is. */
   #unzoom(): void {
     const current = this.#frame?.state ?? null
     if (this.#drawn.width === 0 || current === null) return
@@ -1146,12 +1154,20 @@ export class StateDiagram {
     this.#press.top += this.#localEl.scrollTop - top
   }
 
-  /** Size the local level's drawing at its zoom: the box it takes on screen, and the scale that fills it. */
+  /**
+   * Size the local level's drawing at its zoom: the box the part anything is drawn in takes on screen, the drawing set
+   * in it so that part fills it, and the scale.
+   */
   #sizeLocal(): void {
-    const { width, height } = this.#drawn
+    const { width, height, inked } = this.#drawn
     const z = this.#zoom
-    this.#localContent.style.width = `${width * z}px`
-    this.#localContent.style.height = `${height * z}px`
+    // THE BOX IS THE INKED PART, NOT THE DRAWING: the room round it is the pan's reach (style.css), which then ends where
+    // a corner of what is drawn reaches the panel's middle, and a drag cannot lose the drawing in the blank a panel wider
+    // than the level spreads on one side of it.
+    this.#localContent.style.width = `${(inked.right - inked.left) * z}px`
+    this.#localContent.style.height = `${(inked.bottom - inked.top) * z}px`
+    this.#localDrawing.style.left = `${-inked.left * z}px`
+    this.#localDrawing.style.top = `${-inked.top * z}px`
     this.#localDrawing.style.width = `${width}px`
     this.#localDrawing.style.height = `${height}px`
     // A TRANSFORM, NOT A LAYOUT AT ANOTHER SIZE: the drawing scales as one, every box, line and label in proportion,

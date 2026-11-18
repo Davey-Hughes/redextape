@@ -37207,3 +37207,356 @@ rebase; every other row was measured before the rebase, on `486df8d`.
 | 3, 42, 2; 2, 22 | after the rebase, in Firefox: the width files, their tests passed and skipped; #180's two files, their tests passed | the two `--project firefox` commands above, their summary lines (rebase2/gate/firefox-width.log, firefox-recompile.log) |
 | 0 | after the rebase: `cargo deny --locked check advisories`'s exit, cargo-deny 0.20.2 | `rebase2/gate/summary.txt`'s `deny-advisories` line (rebase2/gate-figures.log) |
 | 28, 8; 8 | commits whose `git patch-id --stable` the rebase kept; those git stopped on, the roadmap alone conflicting; the conflict blocks it showed in them | `awk '!/^#/{print $4}' rebase2/sha-map.txt \| sort \| uniq -c`; `grep -c 'conflict-blocks=1' rebase2/resolve.log` (rebase2/gate-figures.log) |
+
+#### A CLICK ON EMPTY SPACE IN A VIEW, A COPY'S INCLUDED, OR ESCAPE WITH THE FOCUS IN ONE, CLEARS THE LINK AND LEAVES LINKING ON; A CLICK THAT LINKS, ON A CONTROL OR A VIEW'S CHROME, ENDING A DRAG, CLOSING A MENU OR WITH SHIFT HELD CLEARS NOTHING, AND NO LIST MOVES ON THE CLEAR; THE LOCAL DIAGRAM'S DOUBLE-CLICK RESETS NOTHING, *LOCAL* PRESSED WHILE IT SHOWS PUTS IT BACK AT FULL SIZE, AND A FIRST DRAW OR A RESET CENTRES WHAT IT DRAWS, AND A PAN STOPS WITH SOME OF IT IN THE PANEL (2026-11-17, branch `link-clear`, `2cdf0b0..280cb35`, 18 commits, this entry's first and three updates of it among them, plus the commit that updates it and the design doc for review 2, the one that adds the full gate's figures, one that changes a code comment and three that correct this entry, 24 in all)
+
+The user, 2026-11-17, trying the state diagram's drag: "we should also make it so if you click outside it deselects
+that code section". An edit clears a pinned link (Plan 5b's click-linking design, decision 6), and
+that clear turns linking off until the next compile. The decisions and every call, with who made it, are in
+`docs/superpowers/specs/2026-11-17-link-clear-design.md`. The lane's record is `~/temp/redextape-link-clear-record/`,
+`$R` below: `brief.md`, `design-draft.md` (the recon),
+`progress.md`, `review-1.md`, `review-2.md` and the logs this entry names.
+
+A SHA this entry gives for a run, a measurement, a sabotage, a review or a trial of the user's from before the rebase
+onto `2cdf0b0` (`30d5228`, `de25908`, `74bfdab` and `d7f2049`) is that commit's SHA then, measured before the rebase,
+on `0230e6b`, and `$R/r6/sha-map.txt` maps each to its SHA after it (the local branch `link-clear-pre-rebase-1` keeps
+them). Every other SHA is one after the rebase: review 2's and those of the runs from it on (`523bfd4`, `280cb35`,
+`0e21c07` and `7e5c36f`), and a SHA that names what a commit changes, the branch's range or a count of its commits.
+
+##### DECISIONS
+
+The user's, 2026-11-17:
+
+- **"Empty space, any view"**, put to him as: a click on empty space in any view clears the highlight (the diagram's
+  background, blank rows of the rules list, the tapes panel, the λ and rxm views), and Escape clears it too.
+- **"ok" to the short design**: a click on anything in a view that does not link clears (the tapes, the diagram's
+  background, the blank beside a λ line, rows that link nothing); a press that moves more than 4 px is a drag and
+  clears nothing; Escape clears with the focus in a view, not in the code editors and not with a menu or dialog open;
+  a click on empty space in a copy's view clears the program's highlight too; the source editor works as before.
+- **"clear highlight seems good"**, after trying `30d5228`.
+- **"Stay put"**, after review 1 found that the clear sent the rule table and the rxm listing back to the run's row:
+  "The lists stay where they are when the highlight clears; they pick up following the running state again on the
+  next step. Nothing moves on the click itself."
+- **"Keep the highlight"**, asked whether a double-click on the diagram's background should both reset the zoom and
+  clear the highlight: "A double-click only resets the zoom; the highlight the first click cleared comes back."
+- **"the blink bothers me, it shouldn't do that"**, after trying `de25908`, whose double-click took the highlight off
+  at its first click and put it back at its second.
+- **"Shorter wait"**, after trying the half-second wait: "half a second is way too slow, how does something like
+  youtube handle double clicking to full screen the video". Told that YouTube acts on the first click and lets the
+  second undo it, the blink already turned down: keep the highlight through a double-click, but wait about a quarter
+  of a second instead of half; a quick double-click keeps it, a slow one clears it on its first click, without a blink.
+- **"drop the double click"**, which overtakes the three before it, after trying the quarter-second wait: "ok I don't
+  like it, I think I wuld rather drop the double click, and we can actually make pressing "local" after it's already
+  highlighted reset the view"; and of the local level, "when it's "reset" it would be nice if it was centered and not
+  right aligned".
+- **"yes looks good"**, after trying what that asked for, at `d7f2049`.
+
+The controller's: the rows that link nothing and the blank beside a λ line counted as empty space, the copy's clear,
+and the editors' Escape (all three shown to the user inside the design he approved); after review 1, no clear for a
+press with a menu or popover open, a copy's diagram node and runtime box left to the gesture count as rows are, the
+double-click ruling applied to a word selected on the tapes and to a Shift-click, the Escape listener returning at
+once for other keys, and a test for a row that links nothing. After "drop the double click": every click clears at
+once; the local diagram's double-click reset goes, and the tapes' word selection stays the browser's; a press of
+*local* while the local level shows puts it back at full size where a first draw places it, by keyboard too, and
+clears no link; and the centring rides in this branch. After review 2: one Escape does one thing, the innermost first,
+so a TM view's width box keeps the Escape that puts back a width typed there; and the pan's reach follows what is
+drawn, fixed in this branch, being the same blank room the centring met. At the finish, on review 2's M2, which
+asked for the zoom and the place: a press of *local* from the program level keeps the zoom and centres the current
+state again, as `setLevel` does on `main`, because a change of level shows the level afresh. Measured after review 2:
+zoomed to 1.5 and moved 57 px off the middle across, the state came back at 0 in Chromium (59.1 and 0 in Firefox;
+`r7/red-chromium.log`, `r7/red-firefox.log`).
+
+##### WHAT CHANGED
+
+- **`web/src/link-clear.ts`**, new: listeners on `#views` (a `pointerdown` and a `click` in the capture phase, a
+  `click` in the bubble phase) and a `keydown` on the document. A click clears at once unless it linked, landed on something
+  `KEEPS` names (a control, a widget role, a popover, an editor, a view's or panel's header, the λ term map and its
+  fold and open toggles), ended a press that went more than `DRAG_THRESHOLD` (4 px) from where it began, followed a
+  press made with a menu open, or had Shift held. Escape's rule is a pure function, `escapeClears`.
+- **`LinkWiring.unpin()`** (`web/src/link-wiring.ts`): the user's clear. Nothing pinned, every mark redrawn with no
+  scroll, and linking left on, where `clearLink` (an edit's) turns it off. `gestures` counts `setLinkTo`'s link
+  gestures: read around a click's own handlers, it says whether the click linked, which only the view knows.
+- **`DRAG_THRESHOLD`** replaces the state diagram's `PAN_THRESHOLD`, so a press that pans never clears.
+- **The local level** (`web/src/state-diagram.ts`): a double-click on its background resets nothing; `resetLocal()`
+  puts it back at full size where a first draw places it, which a press of *local* while it shows does
+  (`web/src/tm-pane.ts`) and the `0` key does; and `#place` centres `LocalLayout.inked` (`web/src/local-layout.ts`),
+  the part of the drawing anything is drawn in, not the drawing's box, which in a panel wider than the level also
+  holds the spread of the gaps past its outermost columns.
+- **A `hint` on a `radioGroup` choice** (`web/src/view-header.ts`): what a press does beyond choosing, its `title` and
+  `aria-description` while it can be made. *local* says "press again to reset the view" while the local level shows.
+- **A TM view's width box** (`web/src/field-width.ts`): the Escape that puts back a width typed there is prevented,
+  and the clear passes over a prevented Escape, as it does an editor's; with nothing typed the box uses no Escape, and
+  the link clears.
+- **The local level's reach**: `.local-content`, whose room in the panel is the pan's reach (`web/src/style.css`), is
+  the part of the drawing anything is drawn in, at the zoom, with the drawing set in it and clipped to it
+  (`#sizeLocal`), so a pan ends where a corner of what is drawn reaches the panel's middle; `#place` centres that box.
+- **The help page** (`web/help.html`): a row for Escape clearing the link, and the local level's row names `+`, `=`,
+  `-`, `0` and a second press of *local*.
+- Tests: `web/tests/browser/link-clear.test.ts` (in `CAPTURE_FILES`) and `web/tests/node/link-clear.test.ts`; for
+  the local level, `web/tests/browser/state-diagram-local-pan.test.ts`, `web/tests/browser/state-diagram-local.test.ts`
+  and `web/tests/node/local-layout.test.ts`; `state-diagram-local-layout.test.ts` and
+  `state-diagram-local-scrollbars.test.ts` read the whole drawing from `.local-drawing` now that `.local-content` is
+  its inked part.
+
+The implementer's calls, each with its reason in the design doc: whether a click linked is read off the gesture
+count rather than a list of rows that link; a click is classified by its `composedPath()`, because a grid's click
+can redraw the rows under it before the event reaches `#views`; no guard for a scroll bar (no engine measured sends a
+click for a press on one); Escape with the focus on the body counts as in a view; "Stay put" is `unpin` drawing with
+no scroll; a Shift-click clears nothing, because the clear's redraw would take away the selection it extends; a later
+click of a run that cleared needs no rule of its own, finding nothing pinned; a press of *local* reads what shows
+before it picks, so one that brings the level in from the program level keeps its zoom; the first draw's placing is
+tested through a resize, which places a level not moved since by the same function; and, after review 2, the reach's
+box is the inked part, clipped, rather than a margin less the blank, which would leave the drawing's own box in the
+scroll's range on the far side.
+
+##### WHAT THE REVIEW CAUGHT
+
+Review 1 (`review-1.md`, at `30d5228`): 0 Critical, 4 Important, 2 Minor, all fixed. I1, a click that closed a menu
+also cleared, and I3, a copy's diagram node kept the pin while a row of the same copy cleared it, with M1 and M2, in
+`f31afeb`; I4, the lists moving on the clear, by the user's "Stay put", in `62ce45c`; I2, the double-click, by his "Keep
+the highlight", in `560f629`, and, after he had tried two ways of keeping it, by his "drop the double click", in
+`4526dc3`.
+
+Review 2 (`review-2.md`, at `523bfd4`): 0 Critical, 1 Important, 6 Minor, all fixed. I1, Escape in a TM view's width
+box put back a width typed there and cleared the link too, in `85355a4`, with the tests M1 (the box, its label and
+arrows keep the link) and M6 (the lists stay put after a clear of a pin made outside the rxm listing) and M4's
+leftover; M3, a pan could leave a zoomed level's drawing wholly out of the panel where the level holds blank room on
+one side, in `0c09901`, with M2's test (a press of *local* from the program level keeps the zoom); M5, the help page,
+in `280cb35`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A view off the page whose link row was still waiting for a draw** keeps that row after the clear, and scrolls to
+  the block it names when it is next shown, as after an edit's clear (by reading `VirtualGrid.scrollToRow`, not
+  measured).
+- **A selection in the tapes, the registers, the call stack or the heap goes on any redraw**: each draw rebuilds
+  those nodes (`replaceChildren`), so a link made in another view, a step or a clear drops it. Read from the code. A
+  double-click's word is kept: its first click's clear redraws before its second press selects the word (the browser
+  test).
+- **A Shift-click clears nothing** whether or not there is a selection for it to extend.
+- **No test clicks an rxm label row**: the test's program has none. Review 1 checked the rule by reading the code.
+- **A press on a scroll bar**: no test. Review 1 measured that no click reaches `#views` in Chromium and in Firefox,
+  headed under Xvfb with classic and overlay bars.
+
+##### VERIFICATION
+
+Measured before the rebase, on `0230e6b`: run on 2026-11-17 in the lane's worktree, `~/temp/redextape-link-clear`, at
+`d7f2049`, the last code commit, before this entry's update was committed, each into its log in `$R`; the browser runs under `flock ~/temp/redextape-browser.lock`, from `web/`:
+
+```
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run
+  --project browser --project firefox-capture
+  tests/browser/link-clear.test.ts tests/browser/state-diagram-local-pan.test.ts
+                                                     → "Test Files  4 passed (4)",
+                                                       "Tests  115 passed | 3 skipped (118)" (r5-fin/touched-both.log)
+pnpm exec vitest run --project browser tests/browser/state-diagram-local.test.ts
+                                                     → "Tests  15 passed (15)" (r5-fin/touched-plain-chromium.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run
+  --project firefox tests/browser/state-diagram-local.test.ts
+                                                     → "Tests  15 passed (15)" (r5-fin/touched-plain-firefox.log)
+pnpm run test:node                                   → "Test Files  75 passed (75)",
+                                                       "Tests  1540 passed (1540)" (r5-fin/test-node.log)
+pnpm exec vitest run --project browser               → "Test Files  1 failed | 225 passed (226)",
+                                                       "Tests  1 failed | 1862 passed (1863)" (r5-fin/full-chromium.log)
+pnpm run test:coverage                               → "Test Files  302 passed (302)",
+                                                       "Tests  3406 passed (3406)", all files 97.84%, 91.92%, 98.6%, 99.1%
+                                                       (r5-fin/coverage.log)
+```
+
+The Chromium project's one failure is in `copy-edit-leaving.test.ts`, which this branch does not touch: the window
+its `vi.mock` sets read 300 ms where it sets 3000. That file then passed alone, 6 of 6, and in the coverage run.
+
+The three skipped are `state-diagram-local-pan.test.ts`'s cases that hold a press through moves with CDP, in Firefox.
+Each new browser test was seen to fail and was sabotaged once, in both engines, and each new node test failed under a
+sabotage. The first build's: `run1-red.log`, and the sabotages `sab-*.log` that `progress.md` lists. Review 1's fixes
+added seven browser tests and five node tests. Against `30d5228`'s sources seven of the eight new browser tests then
+written failed in each engine (`r2-red-chromium.log`, `r2-red-firefox.log`): six of the seven kept, all but the click
+on a copy's rule row, which passed there, and a click on an rxm label row, whose precondition failed because the
+test's program has none, so it was dropped. Then eight browser sabotages (`sab-r2.sh`, `sab-r2-*-chromium.log` and
+`sab-r2-*-firefox.log`): the menu check dropped; the restore dropped; the restore without keeping the selection; a
+repeated click clearing again; Shift ignored; `KEEPS` matching every button; `unpin` scrolling both ways; and `KEEPS`
+matching rows, which failed the copy's rule-row test. Two node sabotages (`sab-r2-N6-no-undo-node.log`,
+`sab-r2-N7-no-guard-node.log`): `unpin` returning nothing, which failed the restore's test, and the restore's guard
+dropped, which failed its four cases. The Escape listener's early return has no test: it changes no outcome,
+`escapeClears` refusing any other key already. The sabotaged source was saved, broken, restored and compared with
+`cmp`. The full gate ran on `de25908` (`fin/gate-summary.log`), and again on `0e21c07`, below.
+
+After "drop the double click", `4526dc3`. Against round 4's code (`74bfdab`) the new and rewritten tests failed
+(`r5/red-chromium.log`, `r5/red-firefox.log`, and after the local-pan file was reworked, `r5/red2-chromium.log`,
+`r5/red2-firefox.log`): in `link-clear.test.ts`, in each engine, the clears at once on the tapes and on a tape's cell,
+a double-click's first click clearing on a cell and on a copy's diagram background, a click on that background
+clearing at once, and a click on *local* that resets the copy's diagram and keeps the pin; in
+`state-diagram-local-pan.test.ts`, in each engine, the first draw's centring (71.1 px off across in Chromium,
+70.0 in Firefox), the reset by *local* and by `0`, and a double-click keeping the zoom and the pan, with later
+cases failing after them, the level left zoomed or in a wide panel. The node test of `LocalLayout.inked` failed,
+there being none (`r5/node-red.log`), and the hint test failed on round 4's `tm-pane.ts` in each engine
+(`r5/sab-red-hint-chromium.log`, `r5/sab-red-hint-firefox.log`). Five browser sabotages, each in both engines
+(`r5/sab.sh`, `r5/sab.log`, `r5/sab-*-chromium.log`, `r5/sab-*-firefox.log`), and one node: the hint not said, which
+failed its test; no reset on the press, which failed the reset's and the kept pin's tests; `#place` centring the
+drawing's box, which failed the first draw's and the reset's centring; the background's double-click reset put back,
+which failed the two double-click tests; Shift ignored, which failed the Shift-click test; and `inked` from the
+drawing's left edge, which failed the node test. Each sabotaged file was restored from a saved copy and compared with
+`cmp`.
+
+After review 2, on the rebased tree, each run into its log in `$R/r7/`. Against `523bfd4`'s sources
+(`red-chromium.log`, `red-firefox.log`) the new tests that hold a change failed in each engine: Escape in the width
+box keeping the pin, and the pan's reach (-482.5 px of what is drawn in the panel at its left end in Chromium,
+-482.15 in Firefox). The tests for M1, M6 and M2 hold what `523bfd4` already did, so each was seen to fail under a
+sabotage instead. Seven sabotages, each in both engines (`sab.sh`, `sab-edit.py`, `sab-*-chromium.log`,
+`sab-*-firefox.log`, `green2-sab.out`): the box's Escape not prevented, which failed the kept pin's test; the focus in
+any `input` counted as an editor's, which failed the clear with nothing typed; `KEEPS` without `input`, `label` and
+`.view-header`, which failed the width box's test (and the typed Escape's); `unpin` scrolling the rxm listing, which
+failed M6's; `again` read after the pick, which failed M2's; `.local-content` the whole drawing again, which failed
+the reach's test and four of the centring tests; and the clip dropped, which failed the reach's test at the level
+around `u`, whose blank is on the right. Each file was restored from a saved copy and compared with `cmp`. With
+`.view-header` dropped from `KEEPS` the older test that clicks a view's header still passed: the point it picks on
+the TM view's header lies on something else `KEEPS` names. Then on `280cb35`, from `web/`, each into `r7/fin/`:
+
+```
+pnpm exec biome ci --error-on-warnings              → exit 0 (fin/biome.log)
+pnpm run typecheck                                   → exit 0 (fin/typecheck.log)
+pnpm run test:node                                   → "Test Files  75 passed (75)",
+                                                       "Tests  1563 passed (1563)" (fin/node.log)
+VITEST_MAX_WORKERS=3 pnpm exec vitest run --project browser <six files>
+                                                     → "Test Files  6 passed (6)",
+                                                       "Tests  132 passed (132)" (fin/touched-chromium.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=3 pnpm exec vitest run
+  --project firefox --project firefox-capture <six files>
+                                                     → "Test Files  6 passed (6)",
+                                                       "Tests  127 passed | 5 skipped (132)"
+                                                       (fin/touched-firefox.log)
+pnpm exec vitest run --project browser-scrollbars tests/browser/state-diagram-local-scrollbars.test.ts
+                                                     → "Tests  3 passed (3)" (fin/scrollbars-chromium.log)
+VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser
+                                                     → "Test Files  1 failed | 232 passed (233)",
+                                                       "Tests  1 failed | 1926 passed (1927)"
+                                                       (fin/full-chromium.log)
+```
+
+The six files: `link-clear`, `state-diagram-local`, `state-diagram-local-pan`, `state-diagram-local-layout`,
+`state-diagram-no-machine` and #184's `field-width`, each `tests/browser/<name>.test.ts`. The five skipped in Firefox
+are cases these files run in Chromium alone, three in `state-diagram-local-pan` and two in `field-width`. The full
+Chromium project's one failure is `first-load-views.test.ts`'s forced-colours case, which this branch does not touch;
+that file then passed alone, "Tests  10 passed (10)" (fin/first-load-alone.log).
+
+The full gate, on `0e21c07`, the commit before the one that adds this paragraph, which changes docs
+alone. Run on 2026-11-17 in the worktree by `fin2/gate.sh`, then `fin2/after.sh`, `fin2/after2.sh` and
+`fin2/after3.sh`, each step into its log in `$R/fin2/`, every log ending in its exit status and `fin2/summary.log`
+listing them; each `test:coverage` in a `systemd-run --user` unit with `MemoryMax=16G`, every browser run under the
+browser lock. The branch changes no Rust (`git diff --stat 2cdf0b0..0e21c07 -- '*.rs' Cargo.lock` prints nothing,
+fin2/figures.log), so neither `cargo llvm-cov nextest --workspace --fail-under-lines 90` nor `scripts/check-slow.sh`
+ran. From the worktree, then from `web/`:
+
+```
+TREE_SITTER=<the pinned 0.25.10> flock ~/temp/redextape-heavy.lock scripts/check-all.sh --no-llvm
+                                                     → exit 0 (fin2/check-all.log)
+scripts/check-<scan>.sh --self-test, then scripts/check-<scan>.sh, for attributions, citations, colours,
+  doc-figures, grammar-wasm, lua, shared-docs, text-bytes and licences
+                                                     → exit 0, all 18 (fin2/summary.log)
+scripts/check-scoped.sh none..0e21c07                → exit 0 (fin2/scoped.log)
+node scripts/check-comments.mjs --self-test          → exit 0 (fin2/comments-self-test.log)
+node scripts/check-comments.mjs --base 2cdf0b0       → exit 0, "no history and no grown block in 18 changed files
+                                                       since 2cdf0b042b" (fin2/comments.log)
+pnpm exec biome ci --error-on-warnings              → exit 0 (fin2/biome.log)
+pnpm run typecheck                                   → exit 0 (fin2/typecheck.log)
+pnpm run build:app                                   → exit 0 (fin2/build-app.log)
+pnpm run test:coverage                               → exit 1, "Test Files  1 failed | 308 passed (309)",
+                                                       "Tests  3479 passed (3479)" (fin2/coverage.log)
+pnpm run test:coverage                               → exit 1, "Test Files  1 failed | 308 passed (309)",
+                                                       "Tests  1 failed | 3492 passed (3493)" (fin2/coverage-2.log)
+pnpm run test:coverage                               → stopped, no output for 31 minutes
+                                                       (fin2/coverage-3.log, fin2/hang-note.log)
+pnpm run test:coverage                               → exit 0, "Test Files  309 passed (309)",
+                                                       "Tests  3493 passed (3493)", all files 97.87%, 92.03%,
+                                                       98.61%, 99.11% (fin2/coverage-4.log)
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=4 pnpm exec vitest run
+  --project firefox --project firefox-capture <14 files>
+                                                     → exit 1, "Test Files  1 failed | 13 passed (14)",
+                                                       "Tests  11 failed | 170 passed | 5 skipped (186)"
+                                                       (fin2/firefox.log)
+```
+
+The first coverage run's failed file, `follow-kept.test.ts`, which this branch does not touch, could not import its
+setup ("Failed to import test file …/setup.ts", "NetworkError: A network error occurred."), so none of its tests ran
+and the run printed no coverage; alone it passed twice, "Tests  14 passed (14)" each
+(`pnpm exec vitest run --project browser tests/browser/follow-kept.test.ts`, fin2/follow-kept-alone-1.log and
+fin2/follow-kept-alone-2.log). The second run's one failure was `first-load-views.test.ts`'s forced-colours case
+again, the λ toggle reading "dashed Highlight" where the test expects "dashed a button’s"; alone that file passed
+twice, "Tests  10 passed (10)" each (fin2/first-load-alone-1.log and fin2/first-load-alone-2.log). The third printed
+nothing from 16:23 to 16:55, `base16-import.test.ts`, which this branch does not touch, being the one file of the 309
+with no result, and was stopped; its `systemd-run` then exited 0, the unit ending on `status=15/TERM`, so that exit is
+the stop and not a pass. Alone that file passed twice, "Tests  15 passed (15)" each (fin2/base16-import-alone-1.log
+and fin2/base16-import-alone-2.log). The fourth run passed. The 14 Firefox files are the six above and eight more
+of #184's TM-bar and width files: `tm-status-line`, `strip-pinned-width`, `program-quota-width`,
+`program-restore-width`, `share-open-width`, `share-open-width-own`, `tm-view-narrow` and `view-strip-narrow`. Its 11
+failures are all in `tm-view-narrow.test.ts`, which this branch does not touch; alone, in `--project firefox`, that
+file failed the same way twice, "Tests  11 failed | 12 passed (23)" (fin2/ff-narrow-alone-1.log and
+fin2/ff-narrow-alone-2.log), and in all three runs the failing tests are the 11 that fail by name on `2cdf0b0`
+(`r6/ff-narrow-base.log`; each list of names sorted and compared with `diff`, which printed nothing, fin2/figures.log).
+The five skipped are the cases these files run in Chromium alone, as above.
+
+After the gate, `7e5c36f` changes a code comment alone (`git diff --stat 51eef25..7e5c36f` names `web/src/tm-pane.ts`
+alone, fc1/figures.log), and no test ran on it. On it, by `fc1/runs.sh`, each step into its log in `$R/fc1/`, every
+log ending in its exit status and `fc1/summary.log` listing them, from the worktree, then from `web/`:
+
+```
+scripts/check-<scan>.sh --self-test, then scripts/check-<scan>.sh, for the same nine scans
+                                                     → exit 0, all 18 (fc1/summary.log)
+node scripts/check-comments.mjs --self-test          → exit 0 (fc1/comments-self-test.log)
+node scripts/check-comments.mjs --base 2cdf0b0       → exit 0 (fc1/comments.log)
+pnpm exec biome ci --error-on-warnings              → exit 0 (fc1/biome.log)
+pnpm run typecheck                                   → exit 0 (fc1/typecheck.log)
+pnpm run build:app                                   → exit 0 (fc1/build-app.log)
+```
+
+**Every count this entry quotes, with what produces it.** A command ran in the worktree, and its output is in the log
+the row names, in `$R`. A row whose log is in `r6/`, `r7/`, `fin2/` or `fc1/` was counted on the rebased tree, its commits
+named by their SHAs after the rebase; every other row was measured before the rebase, on `0230e6b`.
+
+| Value | What | Produced by |
+|---|---|---|
+| `0e21c07`; 19 | the commit the full gate ran at; commits in `2cdf0b0..0e21c07` | `git rev-parse --short HEAD`, in the first line of each `fin2/` log; `git rev-list --count 2cdf0b0..0e21c07` (fin2/figures.log) |
+| 18 | the nine scans' runs, each with `--self-test` and alone, that exited 0 | `grep -cE '^(attributions\|citations\|colours\|doc-figures\|grammar-wasm\|lua\|shared-docs\|text-bytes\|licences)(-self-test)? exit 0 ' fin2/summary.log` (fc1/figures.log) |
+| 18 | the same on `7e5c36f` | the same `grep -cE` on fc1/summary.log (fc1/figures.log) |
+| 18 | files the comment guard read as changed since `2cdf0b0` | `node scripts/check-comments.mjs --base 2cdf0b0` (fin2/comments.log) |
+| 309; 1, 308; 3479 | the first coverage run's test files; failed and passed; tests passed | its `Test Files` and `Tests` lines (fin2/coverage.log) |
+| 1, 308; 1, 3492 | the second coverage run's test files failed and passed; tests failed and passed | its `Test Files` and `Tests` lines (fin2/coverage-2.log) |
+| 309; 3493; 97.87, 92.03, 98.61, 99.11 | the fourth coverage run's test files and tests, all passed; statements, branches, functions and lines over all files | its `Test Files`, `Tests` and `All files` lines (fin2/coverage-4.log) |
+| 31 | minutes the third coverage run printed nothing, 16:23 to 16:55, before it was stopped | the log's last change, `stat -c %y fin2/coverage-3.log`, and the stop's time (fin2/hang-note.log) |
+| 15 | `base16-import.test.ts`'s tests, passed alone twice | `pnpm exec vitest run --project browser tests/browser/base16-import.test.ts` (fin2/base16-import-alone-1.log, fin2/base16-import-alone-2.log) |
+| 14 | `follow-kept.test.ts`'s tests, passed alone twice | `pnpm exec vitest run --project browser tests/browser/follow-kept.test.ts` (fin2/follow-kept-alone-1.log, fin2/follow-kept-alone-2.log) |
+| 10 | `first-load-views.test.ts`'s tests, passed alone twice | `pnpm exec vitest run --project browser tests/browser/first-load-views.test.ts` (fin2/first-load-alone-1.log, fin2/first-load-alone-2.log) |
+| 14; 1, 13; 11, 170, 5 | the Firefox run's files; files failed and passed; tests failed, passed and skipped | the last command of the gate's block (fin2/firefox.log) |
+| 23; 11, 12 | `tm-view-narrow.test.ts`'s tests; failed and passed alone in Firefox, twice | `REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project firefox tests/browser/tm-view-narrow.test.ts` (fin2/ff-narrow-alone-1.log, fin2/ff-narrow-alone-2.log) |
+| 11 | failing tests named the same in the 14-file run, both lone runs and on `2cdf0b0` | `diff` of the sorted `×` lines against `r6/ff-narrow-base.log`'s, printing nothing (fin2/figures.log) |
+| 18; `280cb35` | commits in the range; its last | `git rev-list --count 2cdf0b0..280cb35` (r7/figures.log) |
+| 20, 1670, 100 | files changed, insertions and deletions in the range | `git diff --shortstat 2cdf0b0..280cb35` (r7/figures.log) |
+| 0, 1, 6 | review 2's Critical, Important and Minor findings | `grep -n '^Counts' review-2.md` (r7/figures.log) |
+| 3, 77; 3, 74, 3 | review 2's red, the three files against `523bfd4`'s sources: failed and passed in Chromium; failed, passed and skipped in Firefox | the `Tests` lines of r7/red-chromium.log and r7/red-firefox.log (r7/figures.log) |
+| -482.5; -482.15 | px of what is drawn in the panel at the reach's left end, zoom 3, a 634 px panel, at `523bfd4` | the reach test's failure in r7/red-chromium.log and r7/red-firefox.log |
+| 57, 0; 59.1, 0 | px the current state stood off the middle across before and after *program* and *local* were pressed, Chromium; Firefox | the M2 probe's failure in r7/red-chromium.log and r7/red-firefox.log |
+| seven | review 2's sabotages, each failing in both engines and restored | `grep -c "^== sabotage"` and `grep -c "restored and cmp identical"` on r7/green2-sab.out, and `grep -L failed r7/sab-*-*.log`, which prints none (r7/figures.log) |
+| 38 | `link-clear.test.ts`'s tests | "(38)" in the `Tests` lines of r7/sab-i1-prevent-chromium.log and r7/sab-i1-prevent-firefox.log, that file alone in each engine |
+| 6; 132; 127, 5 | the six browser files; tests passed in Chromium; passed and skipped in Firefox | the fourth and fifth commands of the block after review 2 (r7/fin/touched-chromium.log, r7/fin/touched-firefox.log) |
+| 75; 1563 | the node project's test files and tests, on `280cb35` | the third command of that block (r7/fin/node.log) |
+| 1, 232; 1, 1926; 10 | the Chromium project's test files failed and passed, on `280cb35`; tests failed and passed; `first-load-views.test.ts`'s tests passed alone | the last command of that block (r7/fin/full-chromium.log); `pnpm exec vitest run --project browser tests/browser/first-load-views.test.ts` (r7/fin/first-load-alone.log) |
+| 3 | `state-diagram-local-scrollbars.test.ts`'s tests | the sixth command of that block (r7/fin/scrollbars-chromium.log) |
+| 0, 4, 2 | review 1's Critical, Important and Minor findings | `grep -n '^Counts' review-1.md` (fin/entry-figures.log) |
+| 4 px | `DRAG_THRESHOLD` | `rg -n 'export const DRAG_THRESHOLD' web/src/link-clear.ts` (fin/entry-figures.log) |
+| 174 rows | how far review 1 measured a clear moving the rule table, "map and fold" pinned from the source | `review-1.md`, its I4 |
+| 4; 115, 3 | test files, two in each engine; tests passed and skipped | the first command above (r5-fin/touched-both.log) |
+| 15; 15 | `state-diagram-local.test.ts`'s tests passed in Chromium; in Firefox | the second and third commands above (r5-fin/touched-plain-chromium.log, r5-fin/touched-plain-firefox.log); both projects in one run printed no result in six minutes and was stopped (r5-fin/touched-plain.log) |
+| 75; 1540 | the node project's test files and tests | the fourth command above (r5-fin/test-node.log) |
+| 1, 225; 1, 1862; 6 | the Chromium project's test files failed and passed; tests failed and passed; `copy-edit-leaving.test.ts`'s tests passed alone | the fifth command above (r5-fin/full-chromium.log); `pnpm exec vitest run --project browser tests/browser/copy-edit-leaving.test.ts`, "Tests  6 passed (6)" (r5-fin/copy-edit-leaving-alone.log) |
+| 302; 3406; 97.84, 91.92, 98.6, 99.1 | coverage's test files and tests; statements, branches, functions and lines over all files | the sixth command above (r5-fin/coverage.log) |
+| 25; 18 | the browser file's tests at `de25908`; before review 1's fixes | "Tests  25 passed (25)" at `de25908` (fin/entry-figures2.log); `progress.md`'s first build, "18, in CAPTURE_FILES" |
+| 12, 47; 12, 44, 3 | round 5's red, both browser files against `74bfdab`: failed and passed in Chromium; failed, passed and skipped in Firefox | the `Tests` lines of r5/red-chromium.log and r5/red-firefox.log (r5-figures.log) |
+| 8, 17; 6, 16, 3 | the reworked local-pan file against `74bfdab`, the same | the `Tests` lines of r5/red2-chromium.log and r5/red2-firefox.log (r5-figures.log) |
+| 71.1; 70.0 | px the first draw left the drawing off the panel's middle at `74bfdab`, Chromium; Firefox | the "centred across" failures in r5/red2-chromium.log and r5/red2-firefox.log |
+| five; one | round 5's browser sabotages; node sabotages | `grep -E '^==\|Tests \|node exit' r5/sab.log` (r5-figures.log): five `== sabotage` lines, each with a failed `Tests` line per engine, and one node |
+| 24 | `web/tests/node/local-layout.test.ts`'s tests | `pnpm exec vitest run --project node tests/node/local-layout.test.ts`, "Tests  24 passed (24)" (r5/node-green.log) |
+| eight; 7, 19 | the new browser tests run against `30d5228`'s sources; tests failed and passed there in each engine | the two commands in the row above, on that tree, their `Tests` lines (fin/entry-figures.log) |
+| seven; eight; 16 | browser sabotages `sab-r2.sh` ran; with the rows one, run by hand through `sabotage.sh`; their logs in the two engines, each with a failure | `grep -c '^== r2-' sab-r2.log` (fin/entry-figures.log); `ls sab-r2-*-chromium.log sab-r2-*-firefox.log \| wc -l` (fin/entry-figures2.log); `grep -L failed sab-r2-*.log`, which prints none (fin/entry-figures.log) |
+| two | node sabotages | `ls sab-r2-*-node.log \| wc -l` (fin/entry-figures2.log) |
+| seven; five | browser and node tests review 1's fixes added | 25 less 18, at `de25908`; 21 less 16: the node file's count at `de25908` (fin/node-link-clear.log, "Tests  21 passed (21)") and in `progress.md`'s first build, "`web/tests/node/link-clear.test.ts` (16)" |
+| four | the restore's guard cases that failed with the guard dropped | `grep -h "Tests " sab-r2-N7-no-guard-node.log`, "Tests  4 failed \| 17 passed (21)" (fin/entry-figures2.log) |

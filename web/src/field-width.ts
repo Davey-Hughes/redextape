@@ -118,8 +118,12 @@ export function fieldWidthControl(on: FieldWidth): { readonly el: HTMLLabelEleme
   box.addEventListener('keydown', (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return
     if (e.key === 'Enter') apply()
-    else if (e.key === 'Escape' && entered) show()
-    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    else if (e.key === 'Escape' && entered) {
+      // ONE ESCAPE DOES ONE THING, THE INNERMOST FIRST: prevented, so a listener further out, the link's clear, leaves
+      // it. With nothing to put back it is not the box's, and goes on to them.
+      e.preventDefault()
+      show()
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault()
       step(e.key === 'ArrowUp' ? 1 : -1)
     }

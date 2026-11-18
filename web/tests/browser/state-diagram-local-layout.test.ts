@@ -54,7 +54,7 @@ function strokeBox(p: SVGPathElement): DOMRect {
 const nodeOf = (state: string | undefined) =>
   diagram().querySelector<HTMLElement>(`.local-node[data-state="${state}"]`) as HTMLElement
 const columns = () => nodes().map((n) => Number(n.dataset.column))
-const drawing = () => diagram().querySelector('.local-content') as HTMLElement
+const drawing = () => diagram().querySelector('.local-drawing') as HTMLElement
 const wider = () => drawing().offsetWidth > level().clientWidth
 
 /** The level's scrolled box, as the page sees it: inside its border. */

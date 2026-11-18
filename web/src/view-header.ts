@@ -265,6 +265,8 @@ export type DisplayGroup = {
     readonly label: string
     /** Why this choice cannot be made now, or `null` when it can — umbrella rule 4's disabled-with-its-reason. */
     readonly disabled?: () => string | null
+    /** What a press of this choice does now beyond choosing it, or `null` for nothing: said while it can be made. */
+    readonly hint?: () => string | null
   }[]
   readonly current: () => string
   readonly pick: (value: string) => void
@@ -327,12 +329,13 @@ export function radioGroup(
       b.tabIndex = on ? 0 : -1
       const reason = whole ?? g.choices[i]?.disabled?.() ?? null
       b.disabled = reason !== null
-      if (reason === null) {
+      const said = reason ?? g.choices[i]?.hint?.() ?? null
+      if (said === null) {
         b.removeAttribute('aria-description')
         b.removeAttribute('title')
       } else {
-        b.setAttribute('aria-description', reason)
-        b.title = reason
+        b.setAttribute('aria-description', said)
+        b.title = said
       }
     }
   }

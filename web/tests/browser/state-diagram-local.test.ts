@@ -219,6 +219,47 @@ describe('the local level (spec §8)', () => {
     await until(() => moved.classList.contains('is-linked'), 'the state to be linked')
   })
 
+  it('says on local, while it shows, that a press of it again resets the view', async () => {
+    const said = (value: string) => [
+      diagramChoice(value)?.getAttribute('aria-description'),
+      diagramChoice(value)?.title,
+    ]
+    expect(diagramChoice('local')?.getAttribute('aria-checked'), 'precondition: local shown').toBe('true')
+    expect(said('local'), 'local, shown').toEqual(['press again to reset the view', 'press again to reset the view'])
+    expect(said('program'), 'program, not shown').toEqual([null, ''])
+    await userEvent.click(diagramChoice('program') as HTMLElement)
+    expect(said('local'), 'local, not shown').toEqual([null, ''])
+    expect(said('program'), 'program, shown').toEqual([null, ''])
+    await userEvent.click(diagramChoice('local') as HTMLElement)
+    expect(said('local'), 'local, shown again').toEqual([
+      'press again to reset the view',
+      'press again to reset the view',
+    ])
+  })
+
+  // THE ZOOM AND NOT THE PLACE: a change of level centres the current state again (`setLevel`), as a first draw does.
+  it('comes back from the program level at the zoom it was left at, on a press of local', async () => {
+    const level = diagram().querySelector('.local-level') as HTMLElement
+    /** The zoom as the page draws it: a node's width on screen over the width it was laid out at. */
+    const zoom = () => {
+      const n = nodes()[0] as HTMLElement
+      return n.getBoundingClientRect().width / n.offsetWidth
+    }
+    expect(diagramChoice('local')?.getAttribute('aria-checked'), 'precondition: local shown').toBe('true')
+    // A NOTCH OF 100 PX UP ZOOMS IN BY 1.1.
+    await userEvent.wheel(level, { delta: { y: (-100 * Math.log(1.5)) / Math.log(1.1) } })
+    await frame()
+    expect(zoom(), 'precondition: zoomed').toBeCloseTo(1.5, 2)
+    await userEvent.click(diagramChoice('program') as HTMLElement)
+    await userEvent.click(diagramChoice('local') as HTMLElement)
+    await frame()
+    expect(zoom(), 'the zoom').toBeCloseTo(1.5, 2)
+    // AND A SECOND PRESS PUTS IT BACK, for the cases after this one.
+    await userEvent.click(diagramChoice('local') as HTMLElement)
+    await frame()
+    expect(zoom(), 'back at full size').toBeCloseTo(1, 3)
+  })
+
   it('disables arcs | chips there, and says why', () => {
     for (const value of ['arcs', 'chips']) {
       expect(diagramChoice(value)?.disabled).toBe(true)
