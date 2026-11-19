@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { HEADER_ORDER, KIND_WORD } from '../../src/layout'
+import { inlineViewToggles } from '../../src/view-toggle-markup'
 import { SHELL, until, type Walk, walkInParts } from '../browser/harness'
 
 describe('SHELL', () => {
@@ -61,7 +62,7 @@ describe('SHELL', () => {
  * `main.ts` itself, so it must not carry a second copy.
  */
 describe('SHELL against index.html', () => {
-  const html = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8')
+  const html = inlineViewToggles(readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8'))
 
   /** Markup with every run of whitespace between tags collapsed, so indentation is not a difference. */
   const shape = (markup: string): string =>
@@ -78,11 +79,11 @@ describe('SHELL against index.html', () => {
   })
 
   /**
-   * **THE `views` TOGGLES ARE MARKUP, SO THE MARKUP IS HELD TO THE TABLES.** `app-header.ts`'s `viewToggles` adopts
-   * the four buttons the page ships, so a kind added to `HEADER_ORDER` and `KIND_WORD`, or a word changed, is asked
-   * for here. Read from `index.html`, which the case above holds `SHELL` to.
+   * **THE `views` TOGGLES ARE HELD TO A TEMPLATE WRITTEN OUT HERE.** `SHELL` and the page both take their buttons from
+   * `viewToggleButtons`, so the case above cannot see a wrong button, and `app-header.ts`'s `viewToggles` adopts them
+   * by these attributes.
    */
-  it('ships the four views toggles in the header’s order, each named by its kind’s word and not pressed', () => {
+  it('ships the views toggles in the header’s order, each named by its kind’s word and not pressed', () => {
     const group = /<div id="views-shown"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? ''
     const toggles = [...group.matchAll(/<button ([^>]*)>([^<]*)<\/button>/g)].map(([, attributes, word]) => [
       attributes,

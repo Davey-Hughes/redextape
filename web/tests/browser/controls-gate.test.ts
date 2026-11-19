@@ -2,6 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
+import { HEADER_ORDER, KIND_WORD } from '../../src/layout'
 import { DAY, EMBER, legacyLayout } from '../node/base16-fixtures'
 import { base16Dialog, SHELL, stateIdle, until } from './harness'
 
@@ -461,11 +462,11 @@ describe('every control in Explorer, in a window wide enough for the views toggl
     await page.viewport(414, 896)
   })
 
-  it('walks the four toggles, each named by its own word', () => {
+  it('walks every toggle, each named by its own word', () => {
     const walked = check('wide: page')
-    expect(toggles()).toHaveLength(4)
+    expect(toggles()).toHaveLength(HEADER_ORDER.length)
     for (const b of toggles()) expect(walked, `the walk skipped the ${b.textContent} toggle`).toContain(b)
-    expect(toggles().map(nameOf)).toEqual(['source', 'λ', 'TM', 'rxm'])
+    expect(toggles().map(nameOf)).toEqual(HEADER_ORDER.map((kind) => KIND_WORD[kind]))
   })
 
   // DISABLED BY `aria-disabled` (`app-header.ts`'s `viewToggles`), so the walk holds it to taking the focus too.

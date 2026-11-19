@@ -1,4 +1,4 @@
-import type { LeafId, PaneKind } from './panes'
+import type { LeafId, PaneKind } from './panes.ts'
 
 export type Dir = 'row' | 'column'
 
@@ -61,8 +61,8 @@ export const MIN_PANE_FRACTION = 0.1
 export const SOURCE_LEAF: LeafId = 'source'
 
 /**
- * The four kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, rxm,
- * TM (the view layouts spec §4.1) — the order all four views have on the page.
+ * The kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, rxm, TM
+ * (the view layouts spec §4.1) — the order the views have on the page.
  *
  * **KEYED BY `PaneKind` AND THEN LISTED**: a kind left out is a type error here, and the keys are the list.
  *
@@ -77,23 +77,27 @@ export const KIND_ORDER: readonly PaneKind[] = Object.keys({
 } satisfies Record<PaneKind, 0>) as PaneKind[]
 
 /**
- * The four kinds in the order the header's `views` toggles have them: source, λ, TM, rxm (the user's decision). The
- * toggle keys `1` to `4`, the cycle and the sentence the live region reads follow it, so what is said and pressed runs
- * left to right across the header.
+ * The kinds in the order the header's `views` toggles have them: source, λ, TM, rxm (the user's decision). The toggle
+ * keys `1` to `N`, the cycle and the sentence the live region reads follow it, so what is said and pressed runs left
+ * to right across the header.
  *
- * **A SECOND LIST, SO IT IS HELD TO THE FIRST**: `tests/node/arrangements.test.ts` asserts it is `KIND_ORDER`'s kinds,
- * each once. A kind added to `PaneKind` is a type error in `KIND_ORDER`, and that test is what then asks for it here.
+ * **KEYED BY `PaneKind` AND THEN LISTED, AS `KIND_ORDER` IS**: a kind left out is a type error here, and the keys are
+ * the list. Only the order is this list's own, and `tests/node/arrangements.test.ts` asserts it.
  */
-export const HEADER_ORDER: readonly PaneKind[] = ['source', 'lambda', 'tm', 'rxm']
+export const HEADER_ORDER: readonly PaneKind[] = Object.keys({
+  source: 0,
+  lambda: 0,
+  tm: 0,
+  rxm: 0,
+} satisfies Record<PaneKind, 0>) as PaneKind[]
 
 /**
  * A kind's word where the app says it to a reader: in what its `views` toggle says in its tooltip and on the notice
  * line, in the view keys' hint, and in the sentence the live region reads after a switch, each of which reads this
  * table.
  *
- * **THE TOGGLES' LABELS ARE `index.html`'S MARKUP, WHICH READS NOTHING.** `tests/node/harness.test.ts` holds each
- * label to its word here, and `tests/node/pages.test.ts` the help page's list of the layouts the cycle keys step
- * through, so a kind spelled another way in either fails a test.
+ * **THE TOGGLES' LABELS ARE THESE WORDS**, written into the page as it is built (`view-toggle-markup.ts`). The help
+ * page's list of the layouts the cycle keys step through reads nothing, so `tests/node/pages.test.ts` holds it to them.
  */
 export const KIND_WORD: Readonly<Record<PaneKind, string>> = { source: 'source', lambda: 'λ', rxm: 'rxm', tm: 'TM' }
 
@@ -106,6 +110,53 @@ const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
   lambda: 'lambda-0',
   rxm: 'rxm-0',
   tm: 'tm-0',
+}
+
+/**
+ * How many views each line of a default grid holds, first line first: `count` views in `ceil(sqrt(count))` lines, the
+ * lengths at most one apart.
+ *
+ * **THE SHORT LINES COME FIRST**, so the views a reader meets first are the ones given the most room.
+ */
+export function gridLines(count: number): number[] {
+  const lines = Math.ceil(Math.sqrt(count))
+  const long = Math.ceil(count / lines)
+  const short = lines * long - count
+  return Array.from({ length: lines }, (_, line) => (line < short ? long - 1 : long))
+}
+
+/** `children` sharing `dir` equally, or the child itself when there is one: `validate` refuses a split of one. */
+function evenSplit(dir: Dir, children: LayoutNode[]): LayoutNode {
+  const [first, second] = children
+  if (first !== undefined && second === undefined) return first
+  return { kind: 'split', dir, sizes: children.map(() => 1 / children.length), children }
+}
+
+/**
+ * `views` in the lines `gridLines` gives, in reading order: a line is a column in a wide area and a row in a tall one.
+ *
+ * **A WIDE AREA FILLS ONE ROW ACROSS ALL ITS COLUMNS AT A TIME**, skipping a column that is already full, so the views
+ * read left to right along the top in both shapes. Filling by column would stack views down a column before the top
+ * row is full.
+ *
+ * **IT THROWS FOR NO VIEWS**: a tree has a leaf or more.
+ */
+export function gridArrangement(views: readonly LayoutNode[], shape: Shape): LayoutNode {
+  if (views.length === 0) throw new Error('a default arrangement needs a kind or more')
+  const lines = gridLines(views.length).map((length) => ({ length, held: [] as LayoutNode[] }))
+  const waiting = [...views]
+  while (waiting.length > 0) {
+    for (const line of lines) {
+      const room = line.length - line.held.length
+      line.held.push(...waiting.splice(0, shape === 'tall' ? room : Math.min(room, 1)))
+    }
+  }
+  // ACROSS THE AREA'S LONG SIDE FIRST, THEN ALONG ITS SHORT ONE.
+  const [outer, inner]: [Dir, Dir] = shape === 'tall' ? ['column', 'row'] : ['row', 'column']
+  return evenSplit(
+    outer,
+    lines.map((line) => evenSplit(inner, line.held)),
+  )
 }
 
 /**
@@ -130,24 +181,10 @@ const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
  * **IT THROWS FOR NO KINDS**: a tree has a leaf or more, and every caller holds a combination, which is not empty.
  */
 export function defaultArrangement(kinds: readonly PaneKind[], shape: Shape): LayoutNode {
-  const pair = (dir: Dir, a: LayoutNode, b: LayoutNode): LayoutNode => ({
-    kind: 'split',
-    dir,
-    sizes: [0.5, 0.5],
-    children: [a, b],
-  })
-  const [a, b, c, d] = KIND_ORDER.filter((k) => kinds.includes(k)).map(
+  const views = KIND_ORDER.filter((k) => kinds.includes(k)).map(
     (k): LayoutNode => ({ kind: 'leaf', id: DEFAULT_LEAF[k], pane: k }),
   )
-  // ACROSS THE AREA'S LONG SIDE FIRST, THEN ALONG ITS SHORT ONE.
-  const [outer, inner]: [Dir, Dir] = shape === 'tall' ? ['column', 'row'] : ['row', 'column']
-  if (a === undefined) throw new Error('a default arrangement needs a kind or more')
-  if (b === undefined) return a
-  if (c === undefined) return pair(outer, a, b)
-  if (d === undefined) return pair(outer, a, pair(inner, b, c))
-  return shape === 'tall'
-    ? pair('column', pair('row', a, b), pair('row', c, d))
-    : pair('row', pair('column', a, c), pair('column', b, d))
+  return gridArrangement(views, shape)
 }
 
 /**

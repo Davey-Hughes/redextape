@@ -7,7 +7,7 @@ import { diagram, diagramChoice, diagramShows, fourViewWorkspace, SHELL, stateId
 /**
  * **A TM VIEW IS BUILT WITH THE DISPLAY ITS WORKSPACE STORED** (Plan 7 part 4, spec §8 and §11). Seeded before
  * `main.ts` is imported, as `lambda-display-restore.test.ts` is, and for its reason: only the seed crosses all
- * three places the display does on its way back — `main.ts` restoring it into the workspace, `tmDisplayOf`
+ * three places the display does on its way back — `main.ts` restoring it into the workspace, `displayOf`
  * answering for the leaf, and `pane-host.ts` building the view with it. A click reads a display this page wrote a
  * moment earlier, never one it loaded.
  *

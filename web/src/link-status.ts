@@ -1,4 +1,5 @@
 import { LEG_NAME, LEGS, perLeg } from './legs'
+import { LINKED, LINKED_LEGS, type LinkedLeg } from './linked-legs'
 import type { Leg } from './protocol'
 
 /**
@@ -121,34 +122,12 @@ export type LinkStatus = {
   | { state: 'ownerless' }
   | {
       state: 'linked'
-      tm: boolean
-      /** Whether the pinned construct emits any rxm instruction — `Link.instrs` is not empty. */
-      instrs: boolean
       lambda: LambdaLinkState
       /**
-       * Whether the TM leg's running focus — the construct its CURRENT δ-step belongs to,
-       * `TmState.source_node` — names this SAME pinned construct right now (`link.ts`'s
-       * `isCoincident`). "The moment the app exists to show" (`2026-08-10-plan5c-dual-focus-design.md`
-       * §4.3), and worth a word here because THE δ-TABLE HAS NO SIGNAL OF ITS OWN FOR IT.
-       * `.state-row.is-focus` landing on an already-`.is-linked` row does not combine into a third class
-       * the way the source pane's `.is-focus-coincident` does: both rules set `background` at equal
-       * specificity and `.is-focus` is declared second in `style.css`, so the focus wash replaces the
-       * pin's. `TmPane.setFocus` never scrolls either, so the row can be off-screen entirely. THIS LINE IS
-       * THEREFORE THE TM LEG'S ONE SIGNAL THAT NAMES THE COINCIDENCE — which is more weight than a status
-       * line usually carries, and the reason to think twice before dropping it.
-       *
-       * `#link-status` IS A PLAIN `<div>` THAT ANNOUNCES NOTHING TO A SCREEN READER. This is its
-       * SECOND live-updating job (the pin's own answer above was its first) — both are deferred to
-       * this project's accessibility pass rather than fixed here; see the roadmap's deferred-a11y list.
+       * Each linked leg's two answers about the pinned construct: `emits`, whether the leg's rows of its `Link` are not
+       * empty, and `here`, whether the leg's running focus is on it. `LINKED`'s entries say why `here` is worth a word.
        */
-      focus: boolean
-      /**
-       * Whether the rxm leg's running focus — the construct its CURRENT instruction belongs to, `RxmState.source_node`
-       * — names this same pinned construct right now: `focus` one leg over (spec §6.6). The rxm view marks its focus
-       * rows beside its linked ones, so unlike the TM table's this is not the leg's only signal, but it is the only one
-       * a user watching another view hears of.
-       */
-      rxmFocus: boolean
+      legs: Readonly<Record<LinkedLeg, { emits: boolean; here: boolean }>>
     }
 )
 
@@ -258,16 +237,14 @@ export function linkStatus(s: LinkStatus): string {
     // surface. A leg whose every view shows a copy has its own clauses suppressed, each leg by its own entry (this
     // function's doc).
     const off = perLeg((leg) => allCopies(detached[leg]))
-    if (!off.rxm && s.rxmFocus) parts.push('the rxm run is here right now')
-    if (!off.tm && s.focus) parts.push('the machine is here right now')
+    for (const leg of LINKED_LEGS) {
+      if (!off[leg] && s.legs[leg].here) parts.push(LINKED[leg].here)
+    }
     // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the rxm lowering bills nothing to —
     // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
     // one fact twice on the constructs that are most often clicked.
-    const noInstrs = !off.rxm && !s.instrs
-    const noStates = !off.tm && !s.tm
-    if (noInstrs && noStates) parts.push('this construct emits no instructions or machine states')
-    else if (noInstrs) parts.push('this construct emits no instructions')
-    else if (noStates) parts.push('this construct emits no machine states')
+    const nouns = LINKED_LEGS.filter((leg) => !off[leg] && !s.legs[leg].emits).map((leg) => LINKED[leg].emits)
+    if (nouns.length > 0) parts.push(`this construct emits no ${nouns.join(' or ')}`)
     if (!off.lambda) {
       const lambda = LAMBDA_TEXT[s.lambda]
       if (lambda !== '') parts.push(lambda)

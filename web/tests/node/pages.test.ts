@@ -139,9 +139,13 @@ describe('the help page’s view keys', () => {
    * word, and then every kind.
    */
   it('lists the layouts the cycle keys step through, in the cycle’s order', () => {
-    expect(KIND_ORDER).toHaveLength(4)
+    // `help.html` SPELLS THE COUNT AS A WORD, AND ONLY THIS ONE HAS A WORD: another kind fails here until its sentence
+    // is rewritten.
+    const countWord: Readonly<Record<number, string>> = { 4: 'four' }
     const stops = CYCLE.map((stop) =>
-      stop.length === KIND_ORDER.length ? 'all four' : stop.map((kind) => KIND_WORD[kind]).join(' beside '),
+      stop.length === KIND_ORDER.length
+        ? `all ${countWord[KIND_ORDER.length]}`
+        : stop.map((kind) => KIND_WORD[kind]).join(' beside '),
     )
     expect(stops.slice(0, -1).every((stop) => stop.startsWith('source beside '))).toBe(true)
     expect(prose('view-keys-cycle')).toBe(

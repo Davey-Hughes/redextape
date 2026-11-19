@@ -188,7 +188,7 @@ describe('the corners of a views toggle', () => {
       expect(
         HEADER_ORDER.map((kind) => [kind, corners(toggle(kind))]),
         style,
-      ).toEqual(['source', 'lambda', 'tm', 'rxm'].map((kind) => [kind, [radius, radius, radius, radius]]))
+      ).toEqual(HEADER_ORDER.map((kind) => [kind, [radius, radius, radius, radius]]))
     }
   })
 })

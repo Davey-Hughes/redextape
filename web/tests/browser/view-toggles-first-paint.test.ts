@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
+import { HEADER_ORDER } from '../../src/layout'
 import { STYLE_IDS, type StyleId } from '../../src/skin'
 import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
 
 /**
- * THE `views` TOGGLES HOLD THEIR PLACE FROM THE FIRST PAINT — the view layouts spec §6. They are `index.html`'s own
- * markup, and `app-header.ts`'s `viewToggles` adopts them.
+ * THE `views` TOGGLES HOLD THEIR PLACE FROM THE FIRST PAINT — the view layouts spec §6. `view-toggle-markup.ts` writes
+ * them into the page as it is built, and `app-header.ts`'s `viewToggles` adopts them.
  *
  * Were they built after the wasm loads, in a header already on the page, `+ view`, `copies`, `examples` and `encoding`
  * would each move right by the group's width as it arrived.
@@ -46,8 +47,6 @@ const places = (): Record<string, number | number[]> => ({
   encoding: tenth(queryEl('label.encoding').getBoundingClientRect().left),
 })
 
-const FOUR = ['source', 'lambda', 'tm', 'rxm']
-
 /**
  * What the markup alone drew, read before the mount: the group at 390 px, and `places()` in each style at 1280 px.
  * Each starts as a value its case refuses, so a reading the hook did not take fails the case that asserts on it.
@@ -55,7 +54,7 @@ const FOUR = ['source', 'lambda', 'tm', 'rxm']
 const markup = {
   narrow: { hidden: true, display: '' },
   wide: new Map<StyleId, ReturnType<typeof places>>(),
-  pressed: FOUR,
+  pressed: [...HEADER_ORDER] as string[],
 }
 
 beforeAll(async () => {
@@ -93,8 +92,9 @@ describe('the views toggles, in the page’s markup before the app is up', () =>
     expect(markup.narrow.display, 'the group is drawn in a narrow window').toBe('none')
   })
 
-  it('are the four, none of them pressed', () => {
-    for (const style of STYLE_IDS) expect(markup.wide.get(style)?.toggles, `${style}: the four`).toHaveLength(4)
+  it('are one for each kind, none of them pressed', () => {
+    for (const style of STYLE_IDS)
+      expect(markup.wide.get(style)?.toggles, `${style}: one for each kind`).toHaveLength(HEADER_ORDER.length)
     expect(markup.pressed).toEqual([])
   })
 })
@@ -103,7 +103,7 @@ describe('the views toggles, once the app is up', () => {
   it.each(STYLE_IDS)('are where the markup had them and as wide, in %s', async (style) => {
     await page.viewport(1280, 896)
     // ALL FOUR VIEWS (`setup.ts` stores that workspace), so every toggle is pressed where none was.
-    expect(pressed(), 'precondition: the app pressed the toggles of the views it shows').toEqual(FOUR)
+    expect(pressed(), 'precondition: the app pressed the toggles of the views it shows').toEqual(HEADER_ORDER)
     await chooseStyle(style)
     await document.fonts.ready
     await frames()

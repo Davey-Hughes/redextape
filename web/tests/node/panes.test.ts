@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ControlState } from '../../src/controls'
-import { PaneCollection, type PaneEntry } from '../../src/panes'
+import { PaneCollection, type PaneEntry, storedPanels } from '../../src/panes'
 import type { Leg } from '../../src/protocol'
 import type { SessionId } from '../../src/session-client'
 import type { Binding, PaneOption, PaneView } from '../../src/sessions'
@@ -270,5 +270,18 @@ describe('shown', () => {
     panes.add(tmEntry('b', 'source'))
     expect(panes.shown('lambda', onPage('b'))).toBeUndefined()
     expect(panes.shown('tm', onPage('a'))).toBeUndefined()
+  })
+})
+
+describe('storedPanels', () => {
+  it('storedPanels passes the stored names and leaves the rest out', () => {
+    const stored = new Map([
+      ['rules', false],
+      ['outline', true],
+    ])
+    expect(storedPanels(['rules', 'diagram', 'outline'], (name) => stored.get(name))).toStrictEqual({
+      rules: false,
+      outline: true,
+    })
   })
 })

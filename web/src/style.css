@@ -294,9 +294,9 @@ select option {
    would cost the header a row, and at 320 × 568 the page would no longer fit its window. The attribute and not a
    `display` in a media rule alone, so that a control no one can reach is one `controls-gate.test.ts` does not walk.
 
-   **AND THE MEDIA RULE BESIDE IT, FOR THE PAINT BEFORE `main.ts` RUNS.** The four buttons are `index.html`'s own
-   markup, so that they hold their place in a wide window from the first paint, and the attribute is not set until
-   the app is up. Without this rule the header would be a row taller at 390px until then.
+   **AND THE MEDIA RULE BESIDE IT, FOR THE PAINT BEFORE `main.ts` RUNS.** The buttons are in the page as it is built
+   (`view-toggle-markup.ts`), so that they hold their place in a wide window from the first paint, and the attribute
+   is not set until the app is up. Without this rule the header would be a row taller at 390px until then.
 
    **THE RULE'S WIDTH IS `app-header.ts`'s `NARROW_WINDOW`, WRITTEN AGAIN**, since nothing here can read it:
    `tests/node/app-header.test.ts` holds this rule's query to that one. */

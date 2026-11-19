@@ -17,10 +17,9 @@ import {
   splitLeaf,
 } from './layout'
 import { DIVIDER_PX, renderLayout, renderStage, syncSizes } from './layout-view'
-import { unhandled } from './legs'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { Shares } from './panel-stack'
-import type { LeafId, PaneCollection, PaneEntry, PaneKind } from './panes'
+import { LEG_PANELS, type LeafId, type PaneCollection, type PaneEntry, type PaneKind, storedPanels } from './panes'
 import type { Leg, LegFrame, LegProgram } from './protocol'
 import { RxmPane } from './rxm-pane'
 import { seedRxm } from './rxm-seed'
@@ -30,7 +29,7 @@ import { type Binding, type LegReading, PaneSlot, type PaneView } from './sessio
 import { restoreScroll } from './state-table'
 import { TmPane } from './tm-pane'
 import { seedTm } from './tm-seed'
-import { DEFAULT_DISPLAY, DEFAULT_TM_DISPLAY, type LambdaDisplay, type TmDisplay } from './workspace'
+import { type DisplayLeg, type LambdaDisplay, LEG_DISPLAY, type LegDisplay, type TmDisplay } from './workspace'
 
 /**
  * THE PANE LIFECYCLE — which panes exist, what element each one lives in, and what its controls do.
@@ -287,14 +286,10 @@ export function createPaneHost(deps: {
   panelSizesOf(leaf: LeafId): Shares | undefined
   /** Record a view's shares; `persist` is the caller's to make. */
   setPanelSizes(leaf: LeafId, sizes: Shares): void
-  /** A λ view's stored display settings, or `undefined` for none (Plan 7 part 4 spec §5.1, §6). */
-  displayOf(leaf: LeafId): LambdaDisplay | undefined
-  /** Record a λ view's display settings; `persist` is the caller's to make. */
-  setDisplay(leaf: LeafId, d: LambdaDisplay): void
-  /** A TM view's stored display settings, or `undefined` for none (Plan 7 part 4 spec §8). */
-  tmDisplayOf(leaf: LeafId): TmDisplay | undefined
-  /** Record a TM view's display settings; `persist` is the caller's to make. */
-  setTmDisplay(leaf: LeafId, d: TmDisplay): void
+  /** A view's stored display settings, or `undefined` for none (Plan 7 part 4 spec §5.1, §6 and §8). */
+  displayOf<K extends DisplayLeg>(leg: K, leaf: LeafId): LegDisplay[K] | undefined
+  /** Record a view's display settings; `persist` is the caller's to make. */
+  setLegDisplay<K extends DisplayLeg>(leg: K, leaf: LeafId, d: LegDisplay[K]): void
   /** A view was added, closed, or switched to show something else — `main.ts` says it as a notice (spec §11). */
   layoutChanged(e: LayoutEvent): void
   /** An add was refused, and nothing changed — `main.ts` says why as a notice. */
@@ -368,9 +363,7 @@ export function createPaneHost(deps: {
     panelSizesOf,
     setPanelSizes,
     displayOf,
-    setDisplay,
-    tmDisplayOf,
-    setTmDisplay,
+    setLegDisplay,
     layoutChanged,
     refused,
     draw,
@@ -490,13 +483,119 @@ export function createPaneHost(deps: {
 
   /**
    * `SEED`'s entry for `entry`'s view, taken whole so that its kind and its pane come from one entry. **THE ONE CAST
-   * CLAIMS THE PANE IS THE CLASS OF THE LEG ITS KIND NAMES.** For an entry `panes` holds, `PaneCollection.add` ties the
-   * kind to the pane's frame by type, and `applyLayout`'s creation arm builds each entry with its leg's class, which no
-   * field changes after. An entry assembled by hand is held by neither, so every caller passes one from `panes`.
+   * CLAIMS THE PANE IS THE CLASS OF THE LEG ITS KIND NAMES.** For an entry `panes` holds, `buildPane` took the pane from
+   * `PANE_BUILD`'s entry for that kind, and no field changes after. An entry assembled by hand has no such tie, so every
+   * caller passes one from `panes`.
    */
   const seedPane = (entry: PaneEntry<Leg>, session: SessionId): void => seedLeg(entry.kind, entry.pane, session)
   const seedLeg = <K extends Leg>(kind: K, pane: PaneView<LegFrame[K]>, session: SessionId): void =>
     SEED[kind](pane as unknown as LegPane[K], session)
+
+  /**
+   * What builds a view of each leg from its host, its events and its leaf. **A MAPPED TYPE, SO A NEW LEG WITH NO VIEW
+   * IS A TYPE ERROR HERE.** A view's stored panels are read by the names in `LEG_PANELS`.
+   */
+  const PANE_BUILD: { readonly [K in Leg]: (host: HTMLElement, on: PaneEvents, leaf: LeafId) => LegPane[K] } = {
+    lambda: (host, on, leaf) =>
+      // ITS DISPLAY IS READ BACK LIKE A TM VIEW'S PANELS BELOW — stored per leaf, defaulted when absent.
+      new LambdaPane(host, on, {
+        display: displayOf('lambda', leaf) ?? LEG_DISPLAY.lambda.fallback,
+        ...storedPanels(LEG_PANELS.lambda, (name) => panelOpen(leaf, name)),
+        sizes: panelSizesOf(leaf) ?? {},
+      }),
+    rxm: (host, on, leaf) =>
+      new RxmPane(
+        host,
+        on,
+        storedPanels(LEG_PANELS.rxm, (name) => panelOpen(leaf, name)),
+        panelSizesOf(leaf) ?? {},
+      ),
+    tm: (host, on, leaf) =>
+      // **EVERY PANEL A VIEW OWNS HAS TO BE READ BACK, NOT JUST THE FIRST ONE.** A panel that writes
+      // its state through `on.panel` and is not read here would persist correctly and restore to its
+      // default every time. An entry is passed only when it is stored, so each panel keeps its own
+      // default — `rules` opens, `outline` does not.
+      new TmPane(
+        host,
+        on,
+        storedPanels(LEG_PANELS.tm, (name) => panelOpen(leaf, name)),
+        displayOf('tm', leaf) ?? LEG_DISPLAY.tm.fallback,
+        panelSizesOf(leaf) ?? {},
+      ),
+  }
+
+  /**
+   * Build `leaf`'s view of `kind` in `host`, bound to `session`, and enter it in `panes`: what `applyLayout`'s creation
+   * pass does for each leaf that has no view.
+   *
+   * **THE ONE CAST CLAIMS THE VIEW `PANE_BUILD` MADE IS THE ONE `K`'S ENTRY HOLDS**, `seedLeg`'s claim in the other
+   * direction, and that this `K`'s entry is one `PaneCollection.add` takes. Both follow from one class per leg, which
+   * `tsc` cannot follow through a generic `K`. The `satisfies` before it checks every other field of the entry.
+   */
+  const buildPane = <K extends Leg>(kind: K, leaf: LeafId, session: SessionId, host: HTMLElement): void => {
+    const slot = new PaneSlot(kind, session)
+    const pane = PANE_BUILD[kind](host, paneEvents(leaf, slot), leaf)
+    // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
+    // ALREADY BEEN AND GONE.** Unseeded, a pane created after its session's last `compiled` reply would
+    // render no tapes, no status line and no δ-rows until something recompiled — the whole machine
+    // missing from a pane the user just asked for. Seeded here rather than at the gesture because every
+    // route to a new pane comes through this function — a split, a cross-leg pick (which drops the entry in
+    // pass 1 and arrives back here under the same leaf id), and `reset preset`. Seeding at one route
+    // instead would leave the others blank for no reason a reader could infer.
+    //
+    // **`reset preset` IS A ROUTE ONLY WHERE THE TREE ACTUALLY LOST A TM PANE, OR THE PANE SHOWED A COPY,
+    // WHICH IS NARROWER THAN "it rebuilds the panes".** Pass 1 drops an entry when `live.get(p.id) !==
+    // p.kind`, or, for the reset (`resetViews`), when it shows a copy, so a `tm-0` that is still a live TM
+    // pane on the program survives the reset untouched and never reaches this line. Close that pane, point
+    // its leaf at another leg, or show a copy in it, and the reset re-mints `tm-0` — a leaf with no
+    // entry, arriving here long after the session's `compiled` reply, which is the same stale-blank state a
+    // split produces.
+    //
+    // A LAYOUT RESTORED FROM `localStorage` COMES THROUGH THIS FUNCTION TOO AND IS NOT ONE OF THOSE
+    // ROUTES, WHICH IS WORTH SAYING BECAUSE IT LOOKS LIKE ONE. It runs at page load, before anything
+    // has compiled, so the session holds nothing and the seed tells a fresh pane the `null`s it already
+    // holds, rather than repairing anything.
+    //
+    // **A SESSION WITH NOTHING COMPILED PUSHES `null`.** A pane one statement old is already in that
+    // state, so here the pushes redraw an empty table and change nothing. They are made anyway because
+    // `SEED.tm` is also the same-leg `rebind` arm's seed and `reseedingSlots`' seed for a buffer's cool
+    // or retire, where the pane is NOT fresh and a skipped `null` would leave the previous session's
+    // machine and reduced sentence on screen; one function for every route is what keeps them from
+    // disagreeing about what a pane is told.
+    //
+    // **`setForkAvailable` RIDES THE SAME SEED.** `TmCompiled.text`'s own doc names the reason this
+    // field rides beside `program`/`tapeNames` at all: `setForkAvailable`'s decision "needs it the moment
+    // a TM pane exists," so with a bare `setProgram` here a pane split onto an already compiled session
+    // would render the whole machine and offer no fork until the next source recompile called
+    // `replies.ts`'s `setLegProgram` again. `tm-seed.ts` imports `ruleCount`, as `replies.ts` does:
+    // `setForkAvailable`'s second argument is a count, not a boolean, and the two callers must not
+    // compute it two different ways.
+    //
+    // **SAFE TO CALL BEFORE THIS PANE'S OWN `#detached` HAS EVER BEEN SET, BECAUSE OF WHEN IT RUNS.**
+    // `TmPane`'s `CopyEditor` starts with `#detached` `false`, so a pane bound to a session that IS
+    // detached (a split onto a TM scratch) would show the control live for the instant between this
+    // line and the `draw()` inside `applyLayout`'s own `finally` — except nothing paints in that
+    // instant: `draw()` runs synchronously, later in this same call, and its `PaneSlot.render` ->
+    // `TmPane.setDetached` reaches `CopyEditor.#refreshDetach` before the browser ever renders a frame.
+    SEED[kind](pane, session)
+    // **A NEW λ PANE IS SEEDED FROM ITS SESSION FOR THE IDENTICAL REASON A TM PANE IS ABOVE.**
+    // `scratch-compiled` is the reply that mounts a scratch editor and it fires once per build, so a pane
+    // created after that reply — a split onto an existing buffer, a cross-leg pick back to λ, a views
+    // toggle, or a restored layout whose buffer the warming loop above `applyLayout()` has already
+    // warmed — never gets one from that reply. ONLY THE LAST OF THOSE FOUR IS A BUFFER WITH NO EDITOR
+    // ANYWHERE: the other three name a buffer whose editor is already mounted on a sibling pane or waiting
+    // in `heldEditors`, so `mountScratchEditor` is a no-op for them (its `hasEditor` gate), and the
+    // route to that editor is the claim control, correctly offered. `mountScratchEditor`'s own doc
+    // carries the argument.
+    //
+    // AFTER `applyLayout`'S `dropClaimsOn(l.id)` AND BEFORE ITS `custody.reconcile()`, which is the only
+    // ordering it needs: the drop cannot delete a claim this line has not made yet, and the sweep
+    // finds this pane already installed as its session's home and so takes nothing off it.
+    mountScratchEditor(leaf, pane, session)
+    panes.add({ id: leaf, kind, slot, pane, host } satisfies Omit<PaneEntry<K>, 'pane'> & {
+      readonly pane: LegPane[K]
+    } as unknown as Parameters<PaneCollection['add']>[0])
+  }
 
   /**
    * The session a leaf with no pane yet should be bound to, consulted once by `applyLayout`'s
@@ -961,11 +1060,11 @@ export function createPaneHost(deps: {
         persist()
       },
       display: (d: LambdaDisplay) => {
-        setDisplay(id, d)
+        setLegDisplay('lambda', id, d)
         persist()
       },
       tmDisplay: (d: TmDisplay) => {
-        setTmDisplay(id, d)
+        setLegDisplay('tm', id, d)
         persist()
       },
     }
@@ -1487,133 +1586,7 @@ export function createPaneHost(deps: {
       host.dataset.kind = l.pane
       const session = pendingBinding.get(l.id) ?? SOURCE_SESSION
       pendingBinding.delete(l.id)
-      switch (l.pane) {
-        case 'lambda': {
-          const slot = new PaneSlot('lambda', session)
-          // ITS DISPLAY IS READ BACK LIKE A TM VIEW'S PANELS BELOW — stored per leaf, defaulted when absent.
-          const map = panelOpen(l.id, 'map')
-          const pane = new LambdaPane(host, paneEvents(l.id, slot), {
-            display: displayOf(l.id) ?? DEFAULT_DISPLAY,
-            ...(map === undefined ? {} : { map }),
-            sizes: panelSizesOf(l.id) ?? {},
-          })
-          // **A NEW λ PANE IS SEEDED FROM ITS SESSION FOR THE IDENTICAL REASON THE TM ARM BELOW IS.**
-          // `scratch-compiled` is the reply that mounts a scratch editor and it fires once per build, so a pane
-          // created after that reply — a split onto an existing buffer, a cross-leg pick back to λ, a views
-          // toggle, or a restored layout whose buffer the warming loop above `applyLayout()` has already
-          // warmed — never gets one from that reply. ONLY THE LAST OF THOSE FOUR IS A BUFFER WITH NO EDITOR
-          // ANYWHERE: the other three name a buffer whose editor is already mounted on a sibling pane or waiting
-          // in `heldEditors`, so `mountScratchEditor` is a no-op for them (its `hasEditor` gate below), and the
-          // route to that editor is the claim control, correctly offered. `mountScratchEditor`'s own doc
-          // carries the argument.
-          //
-          // AFTER `dropClaimsOn(l.id)` ABOVE AND BEFORE `custody.reconcile()` BELOW, which is the only
-          // ordering it needs: the drop cannot delete a claim this line has not made yet, and the sweep
-          // finds this pane already installed as its session's home and so takes nothing off it.
-          mountScratchEditor(l.id, pane, session)
-          panes.add({ id: l.id, kind: 'lambda', slot, pane, host })
-          break
-        }
-        case 'tm': {
-          const slot = new PaneSlot('tm', session)
-          // **EVERY PANEL A VIEW OWNS HAS TO BE READ BACK, NOT JUST THE FIRST ONE.** A panel that writes
-          // its state through `on.panel` and is not read here would persist correctly and restore to its
-          // default every time. An entry is passed only when it is stored, so each panel keeps its own
-          // default — `rules` opens, `outline` does not.
-          const rules = panelOpen(l.id, 'rules')
-          const diagram = panelOpen(l.id, 'diagram')
-          const outline = panelOpen(l.id, 'outline')
-          const pane = new TmPane(
-            host,
-            paneEvents(l.id, slot),
-            {
-              ...(rules === undefined ? {} : { rules }),
-              ...(diagram === undefined ? {} : { diagram }),
-              ...(outline === undefined ? {} : { outline }),
-            },
-            tmDisplayOf(l.id) ?? DEFAULT_TM_DISPLAY,
-            panelSizesOf(l.id) ?? {},
-          )
-          // **A NEW TM PANE IS SEEDED FROM ITS SESSION, BECAUSE THE REPLY THAT WOULD HAVE TOLD IT HAS
-          // ALREADY BEEN AND GONE.** Unseeded, a pane created after its session's last `compiled` reply would
-          // render no tapes, no status line and no δ-rows until something recompiled — the whole machine
-          // missing from a pane the user just asked for. Seeded here rather than at the gesture because every
-          // route to a new pane comes through this loop — a split, a cross-leg pick (which drops the entry in
-          // pass 1 and arrives back here under the same leaf id), and `reset preset`. Seeding at one route
-          // instead would leave the others blank for no reason a reader could infer.
-          //
-          // **`reset preset` IS A ROUTE ONLY WHERE THE TREE ACTUALLY LOST A TM PANE, OR THE PANE SHOWED A COPY,
-          // WHICH IS NARROWER THAN "it rebuilds the panes".** Pass 1 drops an entry when `live.get(p.id) !==
-          // p.kind`, or, for the reset (`resetViews`), when it shows a copy, so a `tm-0` that is still a live TM
-          // pane on the program survives the reset untouched and never reaches this line. Close that pane, point
-          // its leaf at another leg, or show a copy in it, and the reset re-mints `tm-0` — a leaf with no
-          // entry, arriving here long after the session's `compiled` reply, which is the same stale-blank state a
-          // split produces.
-          //
-          // A LAYOUT RESTORED FROM `localStorage` COMES THROUGH THIS LOOP TOO AND IS NOT ONE OF THOSE
-          // ROUTES, WHICH IS WORTH SAYING BECAUSE IT LOOKS LIKE ONE. It runs at page load, before anything
-          // has compiled, so the session holds nothing and the seed tells a fresh pane the `null`s it already
-          // holds, rather than repairing anything.
-          //
-          // **A SESSION WITH NOTHING COMPILED PUSHES `null`.** A pane one statement old is already in that
-          // state, so here the pushes redraw an empty table and change nothing. They are made anyway because
-          // `SEED.tm` is also the same-leg `rebind` arm's seed and `reseedingSlots`' seed for a buffer's cool
-          // or retire, where the pane is NOT fresh and a skipped `null` would leave the previous session's
-          // machine and reduced sentence on screen; one function for every route is what keeps them from
-          // disagreeing about what a pane is told.
-          //
-          // **`setForkAvailable` RIDES THE SAME SEED.** `TmCompiled.text`'s own doc names the reason this
-          // field rides beside `program`/`tapeNames` at all: `setForkAvailable`'s decision "needs it the moment
-          // a TM pane exists," so with a bare `setProgram` here a pane split onto an already compiled session
-          // would render the whole machine and offer no fork until the next source recompile called
-          // `replies.ts`'s `setLegProgram` again. `tm-seed.ts` imports `ruleCount`, as `replies.ts` does:
-          // `setForkAvailable`'s second argument is a count, not a boolean, and the two callers must not
-          // compute it two different ways.
-          //
-          // **SAFE TO CALL BEFORE THIS PANE'S OWN `#detached` HAS EVER BEEN SET, BECAUSE OF WHEN IT RUNS.**
-          // `TmPane`'s `CopyEditor` starts with `#detached` `false`, so a pane bound to a session that IS
-          // detached (a split onto a TM scratch) would show the control live for the instant between this
-          // line and the `draw()` inside `applyLayout`'s own `finally` — except nothing paints in that
-          // instant: `draw()` runs synchronously, later in this same call, and its `PaneSlot.render` ->
-          // `TmPane.setDetached` reaches `CopyEditor.#refreshDetach` before the browser ever renders a frame.
-          SEED.tm(pane, session)
-          // AND ITS COPY'S EDITOR WHEN NO VIEW HOLDS ONE, as the λ arm mounts a λ copy's — `mountScratchEditor`'s doc
-          // has the routes that would show a copy here with no editor and no way to one.
-          mountScratchEditor(l.id, pane, session)
-          panes.add({ id: l.id, kind: 'tm', slot, pane, host })
-          break
-        }
-        case 'rxm': {
-          const slot = new PaneSlot('rxm', session)
-          // EVERY PANEL READ BACK, each passed only when stored so it keeps its own default — the TM arm's rule.
-          const listing = panelOpen(l.id, 'listing')
-          const registers = panelOpen(l.id, 'registers')
-          const stack = panelOpen(l.id, 'stack')
-          const heap = panelOpen(l.id, 'heap')
-          const outline = panelOpen(l.id, 'outline')
-          const pane = new RxmPane(
-            host,
-            paneEvents(l.id, slot),
-            {
-              ...(listing === undefined ? {} : { listing }),
-              ...(registers === undefined ? {} : { registers }),
-              ...(stack === undefined ? {} : { stack }),
-              ...(heap === undefined ? {} : { heap }),
-              ...(outline === undefined ? {} : { outline }),
-            },
-            panelSizesOf(l.id) ?? {},
-          )
-          // SEEDED FROM ITS SESSION, for the TM arm's reason just above: the `compiled` reply that told the other
-          // rxm views has already been and gone for a view built by a split, a pick or a views toggle.
-          SEED.rxm(pane, session)
-          // AND ITS COPY'S EDITOR WHEN NO VIEW HOLDS ONE, the TM arm's line for the TM arm's reason.
-          mountScratchEditor(l.id, pane, session)
-          panes.add({ id: l.id, kind: 'rxm', slot, pane, host })
-          break
-        }
-        default:
-          unhandled(l.pane)
-      }
+      buildPane(l.pane, l.id, session, host)
     }
 
     // A COPY WHOSE EDITOR PASS 1 DESTROYED, ON A VIEW STILL SHOWING IT — after pass 2, so a view this call built

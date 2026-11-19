@@ -1,10 +1,12 @@
 import { n } from './format'
+import { type Labels, placeLabels } from './label-rows'
+import type { HeapView, StackView, ValuesView } from './machine-panels'
 import type { RxmProgram, RxmState, RxmWord, WordTag } from './types'
 
 /**
  * The rxm view as data (Plan 7 part 5 spec §6): the listing's rows, how a word reads, and what the registers, call
- * stack and heap panels say. Pure, so the DOM that draws them (`rxm-pane.ts`) holds nothing a node test cannot
- * reach — `program-level.ts`'s arrangement for the TM view's state diagram.
+ * stack and heap panels say. Pure, so the DOM that draws them (`rxm-pane.ts`, `machine-panels.ts`) holds nothing a
+ * node test cannot reach — `program-level.ts`'s arrangement for the TM view's state diagram.
  */
 
 /** One row of the listing: a label, above the instruction it names, or an instruction. Every row is one grid row. */
@@ -12,19 +14,15 @@ export type ListingRow =
   | { readonly kind: 'label'; readonly name: string }
   | { readonly kind: 'instr'; readonly pc: number }
 
-/**
- * The listing's rows. **AN INSTRUCTION'S LABELS COME FIRST, IN `labels` ORDER, AS `print_rxm` PRINTS THEM** (spec
- * §6.2); a label one past the last instruction is printed after it, and so drawn after it — `program-level.ts`'s
- * `programRows` places the TM view's labels by the same rule.
- */
-export function listingRows(p: RxmProgram): ListingRow[] {
-  const at = new Map<number, string[]>()
-  for (const [name, index] of p.labels) at.set(index, [...(at.get(index) ?? []), name])
+/** The listing's rows, with the labels where `placeLabels` puts them (spec §6.2). */
+export function listingRows(p: { readonly listing: readonly string[]; readonly labels: Labels }): ListingRow[] {
   const rows: ListingRow[] = []
-  for (let pc = 0; pc <= p.listing.length; pc += 1) {
-    for (const name of at.get(pc) ?? []) rows.push({ kind: 'label', name })
-    if (pc < p.listing.length) rows.push({ kind: 'instr', pc })
-  }
+  placeLabels(
+    p.listing.length,
+    p.labels,
+    (name) => rows.push({ kind: 'label', name }),
+    (pc) => rows.push({ kind: 'instr', pc }),
+  )
   return rows
 }
 
@@ -151,4 +149,72 @@ export function frames(count: number): string {
 export function heapSummary(s: RxmState): string {
   const cells = `${n(s.heap_len)} ${s.heap_len === 1 ? 'cell' : 'cells'}`
   return s.box_len === 0 ? cells : `${cells} · ${n(s.box_len)} ${s.box_len === 1 ? 'box' : 'boxes'}`
+}
+
+/** The registers panel at `s`: its rows, then how many arguments and locals the window hides, then the legend. */
+export function rxmValues(s: RxmState): ValuesView {
+  const rows = registerRows(s)
+  const notes: { text: string; legend: boolean }[] = []
+  const more = (hidden: number, what: string) => {
+    if (hidden > 0) notes.push({ text: `+${n(hidden)} more ${what}`, legend: false })
+  }
+  const hiddenArgs = s.args_len - s.args.length
+  const hiddenLocals = s.locals_len - s.locals.length
+  more(hiddenArgs, hiddenArgs === 1 ? 'argument' : 'arguments')
+  more(hiddenLocals, hiddenLocals === 1 ? 'local' : 'locals')
+  const legend = unwrittenLegend(s, rows)
+  if (legend !== null) notes.push({ text: legend, legend: true })
+  return {
+    rows: rows.map((r) => {
+      const says: string[] = []
+      if (r.changed) says.push('changed by the last instruction')
+      if (r.unwritten) says.push(unwrittenMeaning(s))
+      return { ...r, says }
+    }),
+    notes,
+  }
+}
+
+/** The call stack panel at `s`, top first. `program` names each frame's function: `calleeOf`. */
+export function rxmStack(s: RxmState, program: RxmProgram): StackView {
+  const count = frames(s.depth)
+  if (s.depth === 0) return { count, frames: [], notes: ['not inside a call'] }
+  const hidden = s.depth - s.frames.length
+  return {
+    count,
+    frames: s.frames.map((f) => {
+      const words = f.saved.map((w, i) => `r${i} ${wordText(w)}`)
+      if (f.saved_len > f.saved.length) words.push(`+${n(f.saved_len - f.saved.length)} more`)
+      return { callee: calleeOf(program, f.ret_pc) ?? '?', ret: `→ pc${f.ret_pc}`, saved: words.join(' · ') }
+    }),
+    notes: hidden > 0 ? [`+${n(hidden)} more`] : [],
+  }
+}
+
+/** The heap panel at `s`: the cells, how many older ones the window hides, then the same for the boxes. */
+export function rxmHeap(s: RxmState): HeapView {
+  const items: HeapView['items'][number][] = []
+  const note = (text: string) => items.push({ kind: 'note', text })
+  for (const c of s.cells) {
+    items.push({
+      kind: 'line',
+      lead: `#${c.cell}`,
+      body: `${wordText(c.head)} → ${wordText(c.tail)}`,
+      refs: backRefs(s, c.cell, 'List'),
+    })
+  }
+  const olderCells = s.heap_len - s.cells.length
+  if (olderCells > 0) note(`+${n(olderCells)} older`)
+  for (const b of s.boxes) {
+    items.push({
+      kind: 'line',
+      lead: `box #${b.handle}`,
+      body: wordText(b.content),
+      refs: backRefs(s, b.handle, 'Box'),
+    })
+  }
+  const olderBoxes = s.box_len - s.boxes.length
+  if (olderBoxes > 0) note(`+${n(olderBoxes)} older ${olderBoxes === 1 ? 'box' : 'boxes'}`)
+  if (items.length === 0) note('empty')
+  return { count: heapSummary(s), items }
 }

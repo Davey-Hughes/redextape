@@ -1,3 +1,4 @@
+import { type Labels, placeLabels } from './label-rows'
 import type { Groups } from './state-groups'
 
 /**
@@ -23,14 +24,11 @@ export type ProgramRow =
 /** An arc in *arcs*' gutter: a jump or call between two rows of the listing, by group, and its lane. */
 export type Arc = { readonly from: number; readonly to: number; readonly lane: number }
 
-type Labels = readonly (readonly [string, number])[]
-
 /**
- * The rows, in order, for `edges`, with `open`'s sub-steps under it.
+ * The rows, in order, for `edges`, with `open`'s sub-steps under it and the labels where `placeLabels` puts them.
  *
- * **AN INSTRUCTION'S LABELS COME FIRST**, in `labels` order, as `print_rxm` prints them; a label one past the
- * last instruction is printed after it, and so drawn after it. **THE RUNTIME ROUTINES ARE ROWS ONLY IN *CHIPS*,**
- * under a `runtime` heading: *arcs* draws them in a side column, where their connectors can reach them.
+ * **THE RUNTIME ROUTINES ARE ROWS ONLY IN *CHIPS*,** under a `runtime` heading: *arcs* draws them in a side column,
+ * where their connectors can reach them.
  */
 export function programRows(g: Groups, labels: Labels, edges: Edges, open: number | null): ProgramRow[] {
   const rows: ProgramRow[] = []
@@ -42,13 +40,8 @@ export function programRows(g: Groups, labels: Labels, edges: Edges, open: numbe
     for (let i = 0; i < g.groups.length; i += 1) push(i)
     return rows
   }
-  const at = new Map<number, string[]>()
-  for (const [name, index] of labels) at.set(index, [...(at.get(index) ?? []), name])
   const listed = g.groups.filter((x) => !x.runtime).length
-  for (let i = 0; i <= listed; i += 1) {
-    for (const name of at.get(i) ?? []) rows.push({ kind: 'label', name })
-    if (i < listed) push(i)
-  }
+  placeLabels(listed, labels, (name) => rows.push({ kind: 'label', name }), push)
   if (edges === 'chips' && listed < g.groups.length) {
     rows.push({ kind: 'heading', name: 'runtime' })
     for (let i = listed; i < g.groups.length; i += 1) push(i)

@@ -264,9 +264,9 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * on screen holds a view of that kind. `pick` is handed the kind a press asks to add or remove; `sync` is called with
  * the kinds on screen whenever they may have changed.
  *
- * **THE FOUR BUTTONS ARE THE PAGE'S OWN MARKUP, AND THIS ADOPTS THEM.** In `index.html` they hold their place from the
- * first paint, as not pressed, which is true of a page with no view built yet. `tests/node/harness.test.ts` holds that
- * markup to `HEADER_ORDER` and `KIND_WORD`, so the page cannot spell a kind another way than the tables do.
+ * **THE BUTTONS ARE IN THE PAGE AS IT IS BUILT, AND THIS ADOPTS THEM.** `view-toggle-markup.ts` writes them from
+ * `HEADER_ORDER` and `KIND_WORD`, so they hold their place from the first paint, as not pressed, which is true of a
+ * page with no view built yet.
  *
  * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `rxm` and
  * `TM` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`

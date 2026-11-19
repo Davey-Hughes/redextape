@@ -37734,3 +37734,300 @@ branch/base  branch/base
 | 3 of 6; 6 of 6 | set runs in which "walks the four toggles" failed, branch; `eb12e11` | its row in `$R/ff-finish/compare.log` |
 | 1 of 6, 4 of 20; 1 of 6, 4 of 20 | runs in which the held-key case failed, branch; `eb12e11` | the `held-key` lines of `node $R/ff-finish/compare.mjs` |
 | 0 | mentions of Firefox in CI's workflow | `grep -ci firefox .forgejo/workflows/ci.yml` |
+
+#### IR VIEWS GROUNDWORK PR 4: PANES, LAYOUT AND LINKS (2026-11-18, branch `ir-panes`, `6b77731..3c880f3`, 23 commits, plus this entry and the commits that correct it)
+
+**Spec §5.2 to §5.4** (`docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md`), the groundwork's fourth pull
+request in §6's order, held by §7.2 (no hot path slows) and §7.3 (the app behaves the same). The plan is
+`docs/superpowers/plans/2026-11-18-ir-views-pr4-panes-layout-links.md`, committed as `b2a5c34`. This is a refactor of
+the web app: it adds no view, pane kind, leg, stored key or workspace version, and it changes no file under `crates/`.
+The lane's record is `~/temp/redextape-ir-panes-record/`, `$R` below. Its ledger and task reports are in the worktree's
+`.superpowers/sdd/2026-11-18-ir-views-pr4-panes-layout-links/`, `$S` below.
+
+**§7.2's timing is INCONCLUSIVE.** Nothing flagged, but the machine was too busy for that to mean much: the comparison
+could not have seen a rise of up to about 60% in the median frame. VERIFICATION has the figures, and WHAT THIS DID NOT
+CLOSE carries it.
+
+##### DECISIONS
+
+The user's four, 2026-11-18, each the plan's recommendation:
+
+| | Question | The user's answer |
+|---|---|---|
+| Q1 | How are the header toggles generated? | **At build time.** `index.html` holds the container and a slot, a Vite plugin fills the slot, and the shipped page is unchanged. |
+| Q2 | Does `PaneKind` derive from `Leg`? | **Yes:** `'source' \| Leg`. |
+| Q3 | Do the per-leg display settings move in this PR? | **Yes**, as Task 15, the last panes task. |
+| Q4 | Does a click on a TM state carry a pc? | **No.** Only an rxm click carries one, and nothing reads it yet. |
+
+##### WHAT CHANGED
+
+**Layout (§5.3), `8c1320b` to `6270b5e`.**
+
+- `gridLines` and `gridArrangement` (`web/src/layout.ts`) place any number of views by one rule: `ceil(sqrt(count))`
+  lines whose lengths are at most one apart, the short lines first. `defaultArrangement` goes through them.
+- `PaneKind` is `'source' | Leg`, and `HEADER_ORDER` names every kind.
+- The header's toggles are generated when the page is built. `web/src/view-toggle-markup.ts` writes one button a kind
+  from `HEADER_ORDER` and `KIND_WORD`, and the `redextape-view-toggles` plugin in `web/vite.config.ts` fills the
+  `<!-- view-toggles -->` slot in `web/index.html`. The whole-branch review built `6b77731` and `cf16caf` and found
+  `dist/index.html` identical once asset hashes and the whitespace between tags are set aside.
+- Tests of the kinds read the tables, except those that pin the user's order.
+
+**Links (§5.4), `c708664` to `ca4855a`.**
+
+- `LINKED` in the new `web/src/linked-legs.ts` holds each linked leg's rows of a `Link`, its view and its words on the
+  status line. `link-status.ts`, `link-wiring.ts` and `draw.ts` fan out over it.
+- A `Pin` can name one rxm instruction: `pinAtInstr` (`web/src/link.ts`) writes `pc` when an rxm row is clicked.
+
+**Panes (§5.2), `b74658f` to `f7ce15d`.**
+
+- `placeLabels` (`web/src/label-rows.ts`) is the one walker under `listingRows` and `programRows`.
+- `MachineViewChrome` (`web/src/machine-view-chrome.ts`) is the header, step strip, `⋯` menu and copy editor that the
+  rxm and TM views share.
+- `followedGridPanel` (`web/src/followed-grid-panel.ts`) is the grid both views follow a run with, and `ListingPanel`
+  (`web/src/listing-panel.ts`) sits on it for rxm.
+- `valuesPanel`, `callStackPanel` and `heapPanel` (`web/src/machine-panels.ts`) draw finished rows, which `rxmValues`,
+  `rxmStack` and `rxmHeap` (`web/src/rxm-view.ts`) build.
+- `LEG_PANELS` (`web/src/panes.ts`), `PANE_BUILD` and `buildPane` (`web/src/pane-host.ts`) build each view from tables.
+- `LEG_DISPLAY` (`web/src/workspace.ts`) stores the λ and TM views' display settings through one table.
+
+**The closing commits.**
+
+- `cf16caf` writes the comment budget (below).
+- `d712dc7` fixes the whole-branch review's one Important finding: a display leg added to `LEG_DISPLAY` passed `tsc` and
+  was lost on reload. The stored fields and both prunes now walk the table.
+- `c408b98` fixes eight minor findings deferred from the task reviews.
+- `3c880f3` fixes the forced-colours race (below).
+
+**This branch added comment lines to `web/src`.** The share fell because code grew faster:
+
+| Commit | Comment lines | Code lines | Share |
+|---|---|---|---|
+| `6b77731`, the base | 16,618 | 18,685 | 0.4707 |
+| `f7ce15d`, the last panes task | 16,706 | 18,883 | 0.4694 |
+| `3c880f3`, this head | 16,716 | 18,893 | 0.4694 |
+
+`scripts/comment-budget.json` takes `web/src` from 0.4836 to 0.4694. Of that 0.0142, 0.0129 was slack already there at
+the base and 0.0013 is this branch's.
+
+##### THE SEVEN DEPARTURES FROM THE DESIGN
+
+From the plan's section of that name. Line numbers are at `6b77731`.
+
+| Design says | The branch does | Evidence |
+|---|---|---|
+| §5.3: the toggles are generated and `index.html` "keeps a container only" | The source file keeps the container and one slot comment. The buttons are generated from the tables at **build time**, not at run time. | The view layouts spec moved them into the markup because building them after the wasm loaded moved four controls right by 147.5 to 154.0 px (`docs/superpowers/specs/2026-10-11-view-layouts-design.md:500-502`, `:1073`). `web/tests/browser/view-toggles-first-paint.test.ts` holds that. |
+| §5.2: `ListingPanel`, with "both use the extractions" | Two layers. `followedGridPanel` (the grid, its panel and the re-attach) is used by both views. `ListingPanel` sits on it and is used by rxm alone. | TM's rule table has no listing or labels: its rows are `StateIndex`'s states and rules (`web/src/tm-pane.ts:269-286`). What the two share is `web/src/rxm-pane.ts:141-181` against `web/src/tm-pane.ts:250-310`. |
+| §5.2: "The heap panel reads the heap core's tagged view", with `registerRows`, `calleeOf` and `wordText` passed in | The panels take finished text rows. Pure builders in `rxm-view.ts` call those three. | The tags reach the web only as `RxmCell` and `RxmBox` windows on `RxmState` (`crates/redextape-core/src/viewmodel.rs:799-817`). native-rt's heap is `Heap<NoTags>` (`crates/redextape-native-rt/src/lib.rs:35`), so a later native pane would have no tags to pass. |
+| §5.4: `link-wiring.ts`, `draw.ts` and `link-status.ts` fan out over a table | A fourth fan-out moves too: `main.ts`'s direct `setLink([], false)` calls go into `clearLink`. | `web/src/main.ts:2836-2837`. Left alone, a new leg would keep its marks on a keystroke. |
+| §5.2: "`listingRows` and `programRows` become one" | One walker, `placeLabels`, under both. The two keep their names. | `programRows` adds a tier gate, a `steps` row and a runtime tail (`web/src/program-level.ts:39`, `:41-44`, `:52-55`) that a listing has no use for. |
+| §5.3: unit tests of `defaultArrangement` over synthetic lists of 5 to 7 | The tests go through `gridArrangement`, over 5 to 9 views. | `defaultArrangement` takes `PaneKind[]` and filters by `KIND_ORDER` (`web/src/layout.ts:139`), so a synthetic kind would be dropped. |
+| §5.3: tests that pin four "derive from the tables" | Most do. The ones that pin the user's order keep their literals. | A derived line follows the table "right or wrong" (`web/tests/node/view-keys.test.ts:49`), so deriving them would blind the tests to #186's order. |
+
+##### THE FORCED-COLOURS RACE
+
+The case "tells a pressed toggle from one that is not in forced colours" in `web/tests/browser/first-load-views.test.ts`
+failed the gate's first coverage run at `c408b98`, reading `dashed Highlight` on the λ toggle.
+
+**The root cause is a race in the test, and it was present on the base.** The pointer stays where the test file before
+this one left it, and in forced colours Chromium edges a hovered button in `Highlight`. So the case failed whenever an
+earlier file left the pointer on the toggle it read. `3c880f3` moves the pointer off the toggles and `+ view` and waits
+until none of them is hovered. It changes no product code.
+
+| Runs that failed | `c408b98`, before the fix | `6b77731`, the base | With the fix |
+|---|---|---|---|
+| A scratch file parks the pointer on the λ toggle first | 10 of 10 | 10 of 10 | 0 of 10 |
+| A scratch file parks the pointer away from the toggles first | 0 of 10 | 0 of 10 | 0 of 10 |
+| 14 browser files in shuffled order, seeds 1 to 12, one worker | 7 of 12 | 7 of 12 | 0 of 12 |
+
+##### WHAT THIS DID NOT CLOSE
+
+- **§7.2 is not settled.** The timing under VERIFICATION is inconclusive, so a slowdown could still be present.
+  `programRows.200.p95_us` leans from 2.8 to 3.0 µs across the 12 clean runs, and that path did change: `programRows`
+  now calls `placeLabels` with two callbacks where the base had the loop inline. A firmer answer needs a quiet machine.
+- **M1, known work for the CLIF view's design: a new linked leg's click is wired by hand.** `LINKED` drives only the
+  outbound half of a link. A new leg's rows get no click handler until someone widens the `slot.binding.leg === 'rxm'`
+  spread at `web/src/transport.ts:526`, and `linkInstr` (`web/src/link-wiring.ts:308`) always records origin `'rxm'`.
+- **M2, known work for the CLIF view's design: the pc stops at the `Pin`.** `rows(l: Link)`
+  (`web/src/linked-legs.ts:31`) receives only the `Link`, so the first view that marks one instruction must change that
+  signature and its callers.
+- **M3: `web/src/draw.ts` asks `isLinkedLeg` three times for one pane** (lines 216, 230 and 255). It is left alone
+  because it is on the per-frame path the timing measured.
+- **`normaliseWorkspace`'s display prune, `web/src/main.ts:1376`.** No browser test run against it caught its removal:
+  45 of the 46 files chosen for arrangements, parking and display passed, and the other 190 were not run against it. The
+  190 are the rest of the `browser` project's 236 files. The one failure was the forced-colours case, and the same
+  sabotage at the base passed the 45 of those files that exist there. The helper it calls, `withLegDisplaysKept`, is
+  held by node tests.
+- **Playwright could not click a TM copy's editor with four views at 1800 x 1300**, on the base as well. The cause was
+  not investigated. The walkthrough's item 6 edits each copy with two views on screen instead.
+- **The header moves as the fonts arrive**, on the base as well: `#views-shown` shifts under 2 px and widens by up to 6
+  px.
+- **Firefox failed these tests at `6b77731` and on this branch when Tasks 4, 5, 12 and 13 ran them, each on that task's
+  tree. None was re-run at this head.** They come from the browser files each task listed. Neither
+  `scripts/check-all.sh` nor CI runs Firefox, and the whole Firefox tier was not run here.
+
+| File | Tests failing | Runs |
+|---|---|---|
+| `view-keys.test.ts` | 16, 18, 17 and 17 on the branch; 16, 16, 17 and 17 at the base. The set varies from run to run, and every name that failed on the branch also failed at the base at least once | 4 a side |
+| `virtual-grid.test.ts` | 8 | 1 a side |
+| `panel-boundaries.test.ts` | 3 | 1 a side |
+| `follow-kept.test.ts` | 2 | 1 a side |
+| `tm-follow-clamp.test.ts` | 2 | 1 a side |
+| `app.test.ts` | 1 | 1 a side |
+| `controls-gate.test.ts` | 1 | 4 a side |
+
+- **Why one coverage run at this head could not load a test file is not known.** VERIFICATION gives the run.
+- **The header's width with a fifth toggle.** The view layouts spec's §6.1 measured Instrument's header at 1280 px with
+  6.0 px to spare at its widest, on the joined buttons that the view switcher restyle has since replaced. This PR adds
+  no kind, so nothing here measures a fifth.
+- **A default grid can go under `MIN_VIEW_PX`.** Five to nine views take three lines, which need 480 px at the 160 px
+  floor, and a default arrangement does not apply that floor, so a narrower area gets views under it. No page can show
+  five kinds yet.
+- **`pin.pc` has no reader yet.** §5.4 carries it for later views.
+
+##### VERIFICATION
+
+**§7.2, the timing, measured at `f7ce15d`: INCONCLUSIVE.** Task 16 timed `draw()` and `programRows`, the paths this PR
+moves. §7.2's rxm, native and compile-time measurements were not run, because no `crates/` or worker file changed. The
+machine is an AMD Ryzen 9 9950X3D, 16 cores and 32 threads, with 60 GiB of RAM, on Linux 7.3.4-arch1-2, Node v26.13.1
+and Chromium through Playwright 1.64.1. Each run was pinned with `taskset -c 8-15,24-31`. Both sides used the same wasm
+and glue. The record is `$R/timing.md`, and `$S/task-16-verify.md` is its independent check.
+
+```
+python3 -I $R/ab/instrument.py <each worktree>
+zsh -f $R/ab/run-unit3.zsh r2 8                       # the same for r3
+python3 -I $R/ab/cmp3.py $R/ab/rounds/r2 $R/ab/rounds/r3   # r2 and r3 alone, then pooled
+```
+
+A figure flags when the final median exceeds the base median by more than the base's spread, its largest run less its
+smallest. Pooled over the 16 pairs:
+
+```
+  figure                                base    spread       final   ratio
+  programRows.200.median_us            2.600     1.000       2.600   1.000
+  programRows.200.p95_us               2.900     4.400       3.000   1.034
+  programRows.2000.median_us          31.667    28.333      30.833   0.974
+  programRows.2000.p95_us             35.000    50.000      33.333   0.952
+  programRows.20000.median_us        475.000    50.000     450.000   0.947
+  programRows.20000.p95_us           537.500   400.000     512.500   0.953
+  draw.median_ms                       3.650     2.200       3.600   0.986
+  draw.p95_ms                          5.000    10.200       4.900   0.980
+FLAGGED (pooled) 0 of 8
+```
+
+- **0 of 8 figures flagged** in r2, in r3 and pooled.
+- **Only 12 of the 32 compared runs were clean** (5 of 16 in r2, 7 of 16 in r3), and **only 4 of the 16 pairs** had both
+  runs clean: r2 pair 1 and r3 pairs 2, 3 and 5. A clean run had every 1-second `vmstat` line, from 1 s before it to 1 s
+  after it, at us+sy of at most 20 and r of at most 8.
+- **That test reads the CPU and the run queue only.** 3 of the 4 clean pairs include a run paging at 20 MiB/s or more:
+  r2 pair 1's final run at 20.4 MiB/s in, r3 pair 2's base run at 20.5 MiB/s out, and r3 pair 5's runs at 25.3 and 34.2
+  MiB/s out.
+- **20 of the 32 compared runs had a busy second.** Over the limit were 24.5% of r2's whole window (131 of 534 s), 28.6%
+  of r3's whole window (364 of 1,272 s) and 20.6% of the seconds inside the 32 compared runs (180 of 873 s).
+- **The busy runs widened the rule's threshold.** Pooled `draw.median_ms` has a spread of 2.200 ms on 3.650 ms, so a
+  rise of up to about 60% could not have flagged. The same reading is 204.0% for `draw.p95_ms` and 151.7% for
+  `programRows.200.p95_us`.
+- **The 4 clean pairs, shown and not the verdict:** `draw.median_ms` is 3.300 ms at the base and 3.350 ms on the branch,
+  and 1 of 8 figures flags, `programRows.200.p95_us`. Across the 12 clean runs that figure is 2.8 µs in all 5 base runs,
+  and 2.8, 2.8, 3.0, 3.2, 3.0, 3.0 and 2.8 µs in the 7 on the branch.
+- **What must not vary did not**, across all 36 runs with the warm-ups: 831 frames drawn, TM step 69,008 and the pin
+  held at the end.
+- **The timing was not repeated after `f7ce15d`.** The later commits leave `draw.ts` and `program-level.ts` alone, and
+  in `label-rows.ts` they change only a doc comment.
+
+**§7.3, the walkthrough, at `f7ce15d`.** Each item drove the branch and the base side by side in a real browser.
+Chromium passed items 1 to 7, 148 of 148 checks a side, and Firefox items 1, 2, 3 and 5, 85 of 85 a side, with 0
+recorded fields differing from the base. 12 sabotages were caught. The first aims of `marks` and `stack` changed nothing
+the walkthrough read, so each was aimed again. 27 of 29 screenshot pairs are identical. The other two differ by 10 px
+each and vary between runs of one side: `chromium-item6-tm-copy-edited` differs between two runs of the base itself, and
+`chromium-item4-rules` shows the same two renderings on both sides, the rarer one in 1 of 7 takes a side.
+
+**The gate, at `c408b98`.** Each step ran through `$R/gate/step.sh`, in a `systemd-run` unit with `MemoryMax=16G`, into
+its log in `$R/gate/`. Only `web/tests/browser/first-load-views.test.ts` changed after this commit, in `3c880f3`.
+
+```
+scripts/install-treesitter-ci.sh .tools               → tree-sitter 0.25.10
+LLVM_SYS_231_PREFIX=/usr scripts/check-all.sh         → exit 0, "all configs green — base, LLVM and browser"
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                      → exit 0, 1991 passed, 33 skipped, lines 95.71%
+scripts/check-slow.sh                                 → exit 0, "slow tier green"
+scripts/check-<scan>.sh --self-test, then the scan, for text-bytes, citations, attributions, doc-figures, shared-docs,
+  colours, grammar-wasm and lua; node scripts/check-comments.mjs --self-test, then --base 6b77731
+                                                      → exit 0, all 18
+scripts/check-licences.sh --self-test, then the scan  → exit 0
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm run typecheck                                    → exit 0
+pnpm run test:coverage, first run                     → exit 1, the forced-colours race above
+pnpm run test:coverage, three reruns                  → exit 0 each, 315 files, 3554 tests
+pnpm run build:app                                    → exit 0
+docker build, then run the image                      → http=200 health=healthy data-shows=4
+```
+
+**The whole web suite at this head, `3c880f3`.** The first run failed and the second passed.
+
+```
+# from web/
+flock ~/temp/redextape-browser.lock env VITEST_MAX_WORKERS=6 pnpm run test:coverage
+    → exit 1, "Test Files  1 failed | 314 passed (315)", "Tests  3552 passed (3552)"
+$R/gate/step.sh t20-coverage-gate vitest "$PWD" 'pnpm run test:coverage'
+    → exit 0, "Test Files  315 passed (315)", "Tests  3554 passed (3554)",
+      all files 97.92% statements, 92.15% branches, 98.76% functions, 99.15% lines
+```
+
+The first run could not load `tests/browser/stored-panels-restore.test.ts`
+(`Failed to fetch dynamically imported module`), under a load average of about 45 to 51. No assertion failed: the file's
+2 tests never ran. The re-run through the gate's script, which also takes the heavy lock, waits for port 63315 and caps
+the memory, passed. The cause of the failed load was not established. At the base the same suite is 310 files and 3497
+tests, at 97.87%, 92.03%, 98.61% and 99.11%.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-ir-panes-record` and `S=.superpowers/sdd/2026-11-18-ir-views-pr4-panes-layout-links`. The scripts in
+`$R/verify-t20/` read the raw logs.
+
+| Value | What | Produced by |
+|---|---|---|
+| 23 | commits in the range | `git rev-list --count 6b77731..3c880f3` |
+| 0 | files changed under `crates/` | `git diff --name-only 6b77731 3c880f3 -- crates \| wc -l` |
+| 2, 2 | `WORKSPACE_VERSION` at the base and at this head | `git grep -h 'WORKSPACE_VERSION =' 6b77731 3c880f3 -- web/src/workspace.ts` |
+| 1 | files changed after the gate's commit | `git diff --name-only c408b98 3c880f3` |
+| 0 | changes to `draw.ts` and `program-level.ts` after the timing | `git diff --name-only f7ce15d 3c880f3 -- web/src/draw.ts web/src/program-level.ts \| wc -l` |
+| 7; 4 | the plan's departures from the design; its decisions | `sed -n '/^## Departures from the design/,/^## Order of the work/p' docs/superpowers/plans/2026-11-18-ir-views-pr4-panes-layout-links.md \| grep -c '^\| §'; grep -c '^\| Q[1-4] ' docs/superpowers/plans/2026-11-18-ir-views-pr4-panes-layout-links.md` |
+| 16,618, 18,685, 0.4707; 16,706, 18,883, 0.4694; 16,716, 18,893, 0.4694 | `web/src` comment lines, code lines and share at `6b77731`, `f7ce15d` and `3c880f3` | `bash $R/verify-t20/comments.sh` |
+| 0.4836, 0.4694 | the `web/src` budget at the base and at this head | `git diff 6b77731 3c880f3 -- scripts/comment-budget.json \| grep '^[-+] '` |
+| 1 Important; 8 | the whole-branch review's Important findings; the deferred minors it said to fix | `grep -n '^\*\*Counts' $S/final-review.md` |
+| identical | `dist/index.html` of the two sides, in the whole-branch review | `grep -n 'dist/index.html' $S/final-review.md \| cut -c1-170` |
+| 10 of 10, 10 of 10, 0 of 10; 0 of 10 three times; 7 of 12, 7 of 12, 0 of 12 | the forced-colours runs that failed, in the table's order | `bash $R/verify-t20/fc.sh` |
+| 14 | browser files in the shuffled runs | `grep '^FILES=' $R/scratch/mix.sh \| wc -w` |
+| 1 | `dashed Highlight` read in the gate's first coverage run | `grep -ac 'dashed Highlight' $R/gate/s7c-coverage.log` |
+| 2.8 to 3.0 µs; 5; 7 | the lean, from the base's value to the median of the branch's; clean runs a side | `node $R/verify-t20/figures.mjs $R/ab/rounds \| tail -n 1` |
+| 526; 308; 31; 3; 1376 | the lines M1, M2 and the prune name; `isLinkedLeg` tests in `draw.ts` | `grep -n "leg === 'rxm'" web/src/transport.ts \| cut -c1-40; grep -n 'const linkInstr' web/src/link-wiring.ts \| cut -c1-40; grep -n 'rows(l: Link)' web/src/linked-legs.ts; grep -c 'isLinkedLeg(boundLeg)' web/src/draw.ts; grep -n 'withLegDisplaysKept(' web/src/main.ts \| cut -c1-60` |
+| 45 of 46 | browser files passing with the normalise prune sabotaged | `grep -n '45 of the 46' $S/final-fix-report.md \| cut -c1-220` |
+| 45 | the files of those 46 that exist at the base, all passing under the same sabotage | `grep -a 'Test Files' $R/logs/ff-sab-base-normalise.log` |
+| 236; 190 | the `browser` project's files; those the sabotage was not run against, 236 less the 46 it ran on | `(cd web && pnpm exec vitest list --project browser --filesOnly) \| grep -c 'tests/browser/.*\.test\.ts'` |
+| 1800 x 1300 | the window in which the click timed out | `grep -c 'locator.click: Timeout' $R/logs/walk-chromium-4567.log; grep -n 'BIG =' $R/walk/items567.mjs $R/walk/lib.mjs \| cut -c1-110` |
+| under 2 px; up to 6 px | the toggles' shift and growth as fonts arrive, 222.9 to 224.7 and 149 to 155 in Chromium | `cut -c1-100 $R/logs/walk-fonts.log` |
+| 16, 18, 17, 17; 16, 16, 17, 17; 8; 3; 2; 2; 1; 1 | Firefox failures by file, as the table has them | `bash $R/verify-t20/ff.sh` |
+| every name | of `view-keys.test.ts`'s failures on the branch, also failed at the base | `grep -c 'All 20 names that failed on this branch also failed on the base at least once' $S/task-5-report.md` |
+| 0; 1 | mentions of Firefox in CI's workflow; in `scripts/check-all.sh`, a comment | `grep -ci firefox .forgejo/workflows/ci.yml; grep -in firefox scripts/check-all.sh \| cut -c1-90` |
+| 6.0 px | Instrument's spare width in the view layouts spec's §6.1 | `grep -n '6.0 px to spare' docs/superpowers/specs/2026-10-11-view-layouts-design.md \| cut -c1-120` |
+| 160; 480 | `MIN_VIEW_PX`; three lines at that floor, 3 x 160 | `grep -n 'export const MIN_VIEW_PX' web/src/layout.ts` |
+| 0 | reads of a `Pin`'s `pc`: the 6 lines that read a `.pc` read a row or an rxm state | `git grep -n '\.pc\b' 3c880f3 -- 'web/src/*.ts' \| cut -c9-90` |
+| the machine, the pin | `$R/timing.md`'s table | `grep -E '^\\| (Machine\|CPU pin) ' $R/timing.md \| cut -c1-150` |
+| 0 of 8, three times | figures flagged in r2, r3 and pooled | `grep -E '^FLAGGED \((all pairs\|pooled)\)' $R/logs/t16-cmp-pooled-r2-r3.log` |
+| 12 of 32; 5, 7; 4 of 16; the pairs; the paging peaks; 20; 24.5%, 131 of 534; 28.6%, 364 of 1,272; 20.6%, 180 of 873 | the runs, pairs, paging and busy seconds | `node $R/verify-t20/figures.mjs $R/ab/rounds` |
+| 60.3%, 204.0%, 151.7% | the rise each pooled figure could hide, spread over base median | `awk '/POOLED/{p=1} /pooled clean/{p=0} p&&/draw\.(median\|p95)_ms\|programRows\.200\.p95_us/{printf "%s %.1f%%\n",$1,100*$3/$2}' $R/logs/t16-cmp-pooled-r2-r3.log` |
+| 3.300, 3.350; 1 of 8 | the 4 clean pairs | `sed -n 134,146p $R/logs/t16-cmp-pooled-r2-r3.log \| grep -E 'draw.median_ms\|^FLAGGED'` |
+| 831; 69,008; held | what must not vary | `grep -A6 '^MUST NOT VARY' $R/timing.md` |
+| 148, 148; 85, 85; 0; 12; 27 of 29; 10 px | the walkthrough's checks a side, differing fields, sabotages caught and screenshot pairs | `node $R/verify-t20/walk.mjs` |
+| 6 and 1, on each side | takes of `chromium-item4-rules` in each rendering, of the first take and 6 more | `for s in base branch; do sha256sum $R/walk/chromium-item4-rules-$s.png $R/walk/repeat-rules/run[1-6]/rules-$s.png \| cut -c1-12 \| sort \| uniq -c \| tr '\n' ' '; echo $s; done` |
+| differs | `chromium-item6-tm-copy-edited` between two runs of the base | `sed -n 33,48p $R/logs/walk-pixel-matrix.log \| grep 'base1 vs base2'` |
+| 0.25.10 | the pinned tree-sitter | `tail -n 2 $R/gate/s1-treesitter.log \| head -n 1 \| cut -c1-20` |
+| exit 0, ten steps | the gate's steps but coverage, each log's last line | `tail -qn 1 $R/gate/{s1-treesitter,s2-check-all,s3-llvm-cov,s4-check-slow,s5-scans,s6-licences,s7a-biome,s7b-typecheck,s7d-build-app,s8-docker}.log \| sort \| uniq -c` |
+| 1991, 33; 95.71% | `cargo llvm-cov`'s tests and lines | `grep -aE 'Summary \[\|^TOTAL' $R/gate/s3-llvm-cov.log \| cut -c1-210` |
+| 18 | scan runs that exited 0 | `grep -c '^=== EXIT 0' $R/gate/s5-scans.log` |
+| 200, healthy, 4 | the image | `grep -a 'http=' $R/gate/s8-docker.log` |
+| 1 failed, 3553 passed; 3554 three times; 97.92, 92.15, 98.76, 99.15 | the gate's coverage runs at `c408b98` | `bash $R/verify-t20/sum.sh $R/gate/s7c-coverage.log $R/gate/s7c-coverage-rerun-{1,2,3}.log` |
+| 310, 3497; 97.87, 92.03, 98.61, 99.11 | the same suite at the base | `bash $R/verify-t20/sum.sh $R/gate/fc-cov-base-1.log` |
+| exit 1; 1 failed, 314 passed, 315 files; 3552 tests; 1 | this head's first run; the file it could not load | `cat $R/logs/t20-coverage.exit; bash $R/verify-t20/sum.sh $R/logs/t20-coverage.log; grep -ac 'Failed to import test file' $R/logs/t20-coverage.log` |
+| exit 0; 315; 3554; 97.92, 92.15, 98.76, 99.15 | this head's re-run through the gate's script | `bash $R/verify-t20/sum.sh $R/gate/t20-coverage-gate.log` |
+| 2 | tests in the file that could not load | `grep -cE '^ *it(\.each)?\(' web/tests/browser/stored-panels-restore.test.ts` |
+| 45.79, 51.60 | the load average over 1 and 5 minutes just after the first run | `uptime`, read by hand then; no log keeps it |

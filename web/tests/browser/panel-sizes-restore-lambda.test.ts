@@ -5,7 +5,7 @@ import { defaultWorkspace, serializeWorkspace } from '../../src/workspace'
 import { frames, heightOf, host, lambdaHost, SHELL, stateIdle, until } from './harness'
 
 /**
- * **A λ VIEW IS BUILT WITH THE SHARES ITS LEAF HOLDS** — the view layouts spec §11.4, `pane-host.ts`'s λ arm.
+ * **A λ VIEW IS BUILT WITH THE SHARES ITS LEAF HOLDS** — the view layouts spec §11.4, `pane-host.ts`'s `PANE_BUILD`.
  * `panel-sizes-restore.test.ts` has the TM view and the source view; a λ view takes its shares through its options
  * and not as an argument of its own. Seeded before `main.ts` is imported: the source beside a λ view, its map open,
  * and the map given a share even with the term's where it is built 120 px tall.

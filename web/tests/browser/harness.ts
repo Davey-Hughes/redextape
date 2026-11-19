@@ -7,6 +7,7 @@ import { insertBeside, LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../..
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { PaneKind } from '../../src/panes'
 import { PREPAINT } from '../../src/prepaint'
+import { viewToggleButtons } from '../../src/view-toggle-markup'
 import { defaultWorkspace, parseWorkspace, serializeWorkspace, type Workspace } from '../../src/workspace'
 import { until } from './until'
 
@@ -43,10 +44,7 @@ export const SHELL = `
       <button type="button" id="reset-preset">reset preset — restores the default views</button>
     </div>
     <div id="views-shown" class="views-shown" role="group" aria-label="views">
-      <button type="button" class="view-toggle" data-shows="source" aria-pressed="false">source</button>
-      <button type="button" class="view-toggle" data-shows="lambda" aria-pressed="false">λ</button>
-      <button type="button" class="view-toggle" data-shows="tm" aria-pressed="false">TM</button>
-      <button type="button" class="view-toggle" data-shows="rxm" aria-pressed="false">rxm</button>
+      ${viewToggleButtons()}
     </div>
     <button type="button" id="new-view" aria-haspopup="menu" aria-controls="new-view-menu" aria-expanded="false">+ view</button>
     <div id="new-view-menu" class="header-menu" popover></div>

@@ -432,7 +432,7 @@ describe('a view that missed the last compile', () => {
 
 describe('a pin made in a second view of the same leg', () => {
   /**
-   * THE SEED'S SAME-LEG BRANCH (`draw.ts`'s `linkWiring.link.origin !== 'tm'`): a view that missed the compile is
+   * THE SEED'S SAME-LEG BRANCH (`draw.ts`'s `linkWiring.link.origin !== boundLeg`): a view that missed the compile is
    * painted on reveal, but not scrolled, when the pin that reached it while it was away named ITS OWN leg — as a
    * pin made in a view that saw the compile only paints (`link-wiring.ts`'s fan-out). Reaching a `'tm'`-origin pin
    * needs a TM click, and the only way to click one while `tm-0` is off the page is a second TM view: Stage never

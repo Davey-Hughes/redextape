@@ -1,23 +1,19 @@
 import type { ControlState } from './controls'
-import { CopyEditor } from './copy-editor'
 import type { EditablePane } from './editor-custody'
 import { fieldWidthControl } from './field-width'
+import { followedGridPanel } from './followed-grid-panel'
 import { n } from './format'
-import type { Dir } from './layout'
-import type { PaneChoice, PaneEvents, SplitChoices } from './pane-chrome'
+import { MachineViewChrome } from './machine-view-chrome'
+import type { PaneEvents } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
-import type { Leg } from './protocol'
 import { valueLine } from './results'
-import type { ScratchEditor } from './scratch-editor'
-import type { Binding, PaneOption } from './sessions'
 import { StateDiagram } from './state-diagram'
 import { focusedRows, highlight, linkedRows, StateIndex } from './state-table'
-import { stepControls } from './step-controls'
 import { tapeLabel, tapeRows } from './tape'
 import type { TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
-import { radioGroup, type ViewHeader, type ViewMenu, viewHeader, viewMenu } from './view-header'
-import { type GridRows, VirtualGrid } from './virtual-grid'
+import { radioGroup } from './view-header'
+import type { GridRows, VirtualGrid } from './virtual-grid'
 import { DEFAULT_TM_DISPLAY, type TmDisplay } from './workspace'
 
 export { ROW_HEIGHT } from './state-table'
@@ -39,12 +35,12 @@ let gridsMinted = 0
  * **`implements EditablePane`, AS `LambdaPane` DOES.** The clause is load-bearing rather than decorative:
  * `editor-custody.ts`'s casts to `EditablePane` go through `unknown` of necessity, so without this clause `tsc`
  * verifies nothing about whether this class actually satisfies the shape custody casts to — a renamed method would
- * pass silently. The members below (`setEditor`, `takeEditor`, `receiveEditor`, `holdsEditor`, `flushEditor`) hand
- * off to `#copy`, the `CopyEditor` this view shares with the rxm view, which carries the clause too; `LambdaPane`'s
- * members of the same names hold the arguments for their contracts, and `CopyEditor`'s docs add what differs for a
- * machine view.
+ * pass silently. The members it inherits from `MachineViewChrome` (`setEditor`, `takeEditor`, `receiveEditor`,
+ * `holdsEditor`, `flushEditor`) hand off to `copy`, the `CopyEditor` this view shares with the rxm view, which carries
+ * the clause too; `LambdaPane`'s members of the same names hold the arguments for their contracts, and `CopyEditor`'s
+ * docs add what differs for a machine view.
  */
-export class TmPane implements EditablePane {
+export class TmPane extends MachineViewChrome implements EditablePane {
   #status: HTMLElement
   /**
    * The status line's first row, `state · step · width` (`#drawStatus`), apart from the sentences after it so that
@@ -65,14 +61,6 @@ export class TmPane implements EditablePane {
    */
   #stepAtNewest = ''
   #tapes: HTMLElement
-  #steps: ReturnType<typeof stepControls>
-  /** The view's header — `LambdaPane`'s `#header`, the same component. */
-  #header: ViewHeader
-  /**
-   * A copy's editor, its text panel and outline, and the facts behind *format* and *edit a copy* — the part this view
-   * shares with the rxm view (`copy-editor.ts`), whose comments carry the reasons behind the handoff.
-   */
-  #copy: CopyEditor
   /**
    * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
    * below.
@@ -83,12 +71,6 @@ export class TmPane implements EditablePane {
    * child of the text panel section, itself a sibling `#drawTable` never touches.
    */
   #body: HTMLElement
-  /**
-   * What this pane's split menus offer — `LambdaPane.#choices`'s twin. `SplitChoices`'s doc carries the
-   * argument for the starting value, and `LambdaPane.#choices`'s the one for reading it through a thunk
-   * rather than handing a list over once.
-   */
-  #choices: SplitChoices = { options: [], sourceAvailable: false, current: null }
   #program: TmProgram | null = null
   #names: string[] = []
   #frame: TmState | null = null
@@ -98,8 +80,8 @@ export class TmPane implements EditablePane {
    * this is stored rather than written straight to `#status`: composing that one element's text at one
    * private writer is what stops whichever of its writers runs last from erasing what the others said.
    *
-   * **CLEARED ON `setEditor(null)`, NOT ONLY SET IN `setScratchStatus`** — by the `onUnmount` this view hands
-   * `#copy`, and not on `takeEditor()` (`CopyEditor.takeEditor`'s doc has why). A pane rebound off the scratch it
+   * **CLEARED ON `setEditor(null)`, NOT ONLY SET IN `setScratchStatus`** — by this view's `editorUnmounted`,
+   * and not on `takeEditor()` (`CopyEditor.takeEditor`'s doc has why). A pane rebound off the scratch it
    * was reporting for must stop narrating that scratch's header — `LambdaPane.setDetached`'s rule pointed the other
    * way: there an editor must not outlive the fact that made it appear, here a sentence must not outlive the editor
    * it describes.
@@ -136,21 +118,13 @@ export class TmPane implements EditablePane {
   #value: HTMLElement
 
   /**
-   * The view's `⋯` menu and `✕` — `LambdaPane.#menu`'s twin. `edit a copy` is **BUILT ONLY WHEN THE
-   * HANDLER EXISTS**, for that field's own reason: a caller with no `detachProgram` gets a view with no
-   * copy offered rather than one that offers a copy and swallows it. *Move the editor here* likewise, for
-   * `PaneEvents.showEditor`. `#copy` keeps *format*, *edit a copy* and *move the editor here* in step.
-   */
-  #menu: ViewMenu
-
-  /**
    * The rule table: a `VirtualGrid`, whose box is the rules panel's body. This view says what each row shows and does
    * (`#tableRows`); the grid owns the drawn window, the active row, the keys, clicks and following.
    */
   #grid: VirtualGrid
   /**
    * The rule table as a panel (Plan 7 part 1, spec §8): the body is the grid's box, the header action is
-   * `#reattach`. The panel hides and shows the box and holds whether the table is open (`isOpen`);
+   * its re-attach. The panel hides and shows the box and holds whether the table is open (`isOpen`);
    * this class keeps no copy, so a `setOpen` cannot leave one stale. Its `onToggle` redraws.
    */
   #rulesPanel: Panel
@@ -166,7 +140,6 @@ export class TmPane implements EditablePane {
   /** This view's display settings, and where a change to them is recorded — `LambdaPane`'s pair. */
   #display: TmDisplay
   #onDisplay: ((d: TmDisplay) => void) | undefined
-  #reattach: HTMLButtonElement
   /** The program's width box, in the view's header; absent where the view was built without a width. */
   #width: ReturnType<typeof fieldWidthControl> | null
   #index: StateIndex | null = null
@@ -191,9 +164,14 @@ export class TmPane implements EditablePane {
     display: TmDisplay = DEFAULT_TM_DISPLAY,
     sizes: Shares = {},
   ) {
+    // THE COPY'S EDITOR, TEXT PANEL AND OUTLINE, AND THE MENU'S *FORMAT* AND *EDIT A COPY* (`copy-editor.ts`).
+    //
+    // **A TM VIEW'S OUTLINE IS ITS STATES**: the real server answers a `state` block per symbol at kind 5. Closed
+    // by default, like the source view's: a machine of 1,199 states is the ordinary case, and a list of them is not
+    // what a reader opened a TM view to see.
+    super(on, { what: 'the whole machine', noun: 'rules', outlineOpen: panels.outline ?? false })
     this.#display = display
     this.#onDisplay = on.tmDisplay
-    this.#header = viewHeader(on.rebind)
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
     this.#line = document.createElement('span')
@@ -205,115 +183,37 @@ export class TmPane implements EditablePane {
     this.#value.setAttribute('role', 'status')
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
-    this.#steps = stepControls(on)
     // THE READOUT LIVES ON THE STATUS LINE, NEVER IN THE STRIP (`#drawStatus` places it), so the bar holds no text
     // whose width grows with the step count.
-    this.#steps.step.remove()
-    // `detachProgram` carries no argument (`PaneEvents.detachProgram`'s own doc: a machine has no step-k
-    // text to report), so the item's run is the handler itself rather than a closure over a frame.
-    const detachProgram = on.detachProgram
-    this.#menu = viewMenu(this.#header.actions, {
-      // REMOVED WHERE THERE IS NO EDITOR, not disabled: a view showing a running leg has no
-      // document to format, which is the umbrella's rule for a control that cannot apply.
-      format: () => this.#copy.format(),
-      ...(on.splitRow !== undefined && on.splitColumn !== undefined
-        ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
-        : {}),
-      ...(on.close !== undefined ? { close: on.close } : {}),
-      ...(detachProgram !== undefined ? { editCopy: { run: detachProgram, what: 'the whole machine' } } : {}),
-      ...(on.showEditor !== undefined ? { claim: on.showEditor } : {}),
-      choices: () => this.#choices,
-    })
-    // THE COPY'S EDITOR, TEXT PANEL AND OUTLINE, AND THE MENU'S *FORMAT* AND *EDIT A COPY* (`copy-editor.ts`).
-    //
-    // **A TM VIEW'S OUTLINE IS ITS STATES**: the real server answers a `state` block per symbol at kind 5. Closed
-    // by default, like the source view's: a machine of 1,199 states is the ordinary case, and a list of them is not
-    // what a reader opened a TM view to see.
-    this.#copy = new CopyEditor(on, {
-      menu: this.#menu,
-      outlineOpen: panels.outline ?? false,
-      noun: 'rules',
-      // THE SCRATCH STATUS GOES WITH THE EDITOR'S UNMOUNT — see `#scratch`'s own doc. Cleared on the unmount rather
-      // than left for whatever `render` happens next, because a caller reading `host.textContent` between the unmount
-      // and the next frame must not see a sentence about a machine this pane no longer shows. Not on `takeEditor`: a
-      // pane that gives its editor to another view of the copy still shows the copy (`CopyEditor.takeEditor`'s doc).
-      onUnmount: () => {
-        this.#scratch = null
-        this.#drawStatus()
-        this.#drawValue()
-      },
-    })
-
-    // ADDED AND REMOVED, NEVER DISABLED — same idiom `step-controls.ts` states for the continue button.
-    // A reattach only does something while the table is detached, so it exists only then; the grid's
-    // `beforeDraw`, below, keeps `hidden` in sync every frame and every scroll, the one place both happen.
-    this.#reattach = document.createElement('button')
-    this.#reattach.type = 'button'
-    this.#reattach.className = 'table-reattach'
-    this.#reattach.textContent = 'follow current rule'
-    this.#reattach.hidden = true
-    this.#reattach.addEventListener('click', () => {
-      const had = document.activeElement === this.#reattach
-      // Follows and redraws now, not at the next step — otherwise the current row stays wherever the manual
-      // scroll left it until the machine happens to advance.
-      this.#grid.attach()
-      // THE BUTTON HIDES ITSELF — the draw sets `#reattach.hidden` once the table follows again — AND
-      // MUST NOT TAKE THE FOCUS WITH IT (spec §11): the rules panel's toggle, beside it, takes it.
-      if (had && this.#reattach.hidden) this.#rulesPanel.toggle.focus()
-    })
+    this.steps.step.remove()
 
     // THE TABLE IS A GRID (spec §9.2, accessibility item 3): one tab stop, one `gridcell` per row, and a roving active
     // row that `aria-activedescendant` names — `VirtualGrid`, whose doc carries the scroll, focus and clamp handling.
     // CLICK A ROW, LIGHT ITS SOURCE: the table is 127,881 rows for `list60` and nothing in it says what any row is
     // FOR; `activate` is the answer to that, for a click and for Enter alike.
-    this.#grid = new VirtualGrid({
+    const rules = followedGridPanel({
+      name: 'rules',
+      label: 'rules',
+      open: panels.rules ?? true,
+      reattachText: 'follow current rule',
       classes: { box: 'state-table', spacer: 'state-spacer', rows: 'state-rows', row: 'state-row' },
       idPrefix: `tm-grid-${gridsMinted++}`,
-      isOpen: () => this.#rulesPanel.isOpen(),
+      hasContent: () => this.#index !== null,
       rows: () => this.#tableRows(),
       activate: (i) => {
         const row = this.#index?.row(i) ?? null
         if (row !== null) on.linkState?.(row.kind === 'state' ? row.id : row.stateId)
       },
-      // KEPT IN SYNC HERE, not in the click handlers, because a draw is the one thing that runs on every frame AND
-      // every scroll — the two ways following can change. Hidden with no program at all (reattaching means nothing
-      // against an empty table) and while the table is closed, where the button would offer to reposition something
-      // nobody can see — the same idiom the control itself follows, which exists so a control is present only when
-      // it does something.
-      beforeDraw: () => {
-        this.#reattach.hidden = this.#index === null || this.#grid.following || !this.#rulesPanel.isOpen()
-      },
+      onToggle: (open) => on.panel?.('rules', open),
     })
-
-    // THE RULE TABLE IS A PANEL. `panel.ts` hides the grid's box itself and carries the state in
-    // `aria-expanded` rather than relabelling — accessibility item 2 — and keeps the box's `grid` role, labelled
-    // by the panel's own toggle. `follow current rule` rides in the panel's header, beside the thing it acts on.
-    //
-    // REDRAW IN BOTH DIRECTIONS, and the closing one is not symmetry for its own sake. A draw is where
-    // `#reattach.hidden` is maintained, so skipping it on the way down would leave a live "follow" button
-    // over a table that is not on screen — the idiom's own rule broken, and the closed-table term written
-    // for it could never fire because the draw, where it is evaluated, would not run. Reopening matters
-    // for a different reason: a hidden box has `clientHeight` 0, so a step taken while the table is closed
-    // computes its scroll target against a zero-height viewport, and without a redraw on reopening the head
-    // would stay parked off centre until some later step happened to recentre it.
-    this.#rulesPanel = createPanel({
-      name: 'rules',
-      label: 'rules',
-      body: this.#grid.el,
-      open: panels.rules ?? true,
-      onToggle: (open) => {
-        this.#drawTable()
-        on.panel?.('rules', open)
-      },
-      onDrawn: () => this.#drawTable(),
-    })
-    this.#rulesPanel.actions.append(this.#reattach)
+    this.#grid = rules.grid
+    this.#rulesPanel = rules.panel
     // THE PROGRAM'S WIDTH, ON THE VIEW'S HEADER BAR (the TM width design, decision 24): it sizes the whole machine the
     // view shows, not one panel of it. AT THE BAR'S END, RIGHT BEFORE `⋯` (decision 27): the first of the view's own
     // actions, as `LambdaPane`'s re-attach is, so it keeps `⋯`'s gap and order, and the Tab order follows the bar.
     // Prepended, so it is first whether or not `viewMenu` has mounted `⋯` yet, which it puts after the view's own.
     this.#width = on.fieldWidth === undefined ? null : fieldWidthControl(on.fieldWidth)
-    if (this.#width !== null) this.#header.actions.prepend(this.#width.el)
+    if (this.#width !== null) this.header.actions.prepend(this.#width.el)
 
     // THE STATE DIAGRAM (Plan 7 part 4 spec §8): a panel beside the rules, open by default since it is the view's
     // map of the machine, with *program | local* and *arcs | chips* (Plan 7 part 4 spec amendment 11) among its
@@ -408,29 +308,21 @@ export class TmPane implements EditablePane {
     this.#body.className = 'tm-pane'
     this.#body.append(
       this.#status,
-      this.#copy.textPanel,
+      this.copy.textPanel,
       this.#value,
       this.#tapes,
       this.#rulesPanel.el,
       this.#diagramPanel.el,
-      this.#copy.outline,
+      this.copy.outline,
     )
-    this.#header.steps.append(this.#steps.el)
-    host.replaceChildren(this.#header.el, this.#body)
+    this.mount(host, this.#body)
     // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The rules take two
     // shares and the diagram and the outline one each; a copy's text keeps its own height until a boundary is
     // dragged beside it.
     // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
     new PanelStack(
       [
-        {
-          name: 'text',
-          label: 'text',
-          el: this.#copy.text.el,
-          share: null,
-          panels: [this.#copy.text],
-          bodies: () => [this.#copy.text.body],
-        },
+        this.textRegion(),
         {
           name: 'rules',
           label: 'rules',
@@ -447,14 +339,7 @@ export class TmPane implements EditablePane {
           panels: [this.#diagramPanel],
           bodies: () => [this.#diagramPanel.body],
         },
-        {
-          name: 'outline',
-          label: 'outline',
-          el: this.#copy.outlinePanel.el,
-          share: 1,
-          panels: [this.#copy.outlinePanel],
-          bodies: () => [this.#copy.outlinePanel.body],
-        },
+        this.outlineRegion(),
       ],
       sizes,
       (next) => on.panelSizes?.(next),
@@ -571,7 +456,7 @@ export class TmPane implements EditablePane {
    * that method's doc carries the naming argument, which is not repeated here.
    *
    * **THIS FILE HAS TWO UNRELATED MEANINGS OF "DETACHED".**
-   * `Follow`'s detach — `#reattach`, the grid's `following`, `state-table.ts`'s own vocabulary — means
+   * `Follow`'s detach — the rule table's re-attach, the grid's `following`, `state-table.ts`'s own vocabulary — means
    * THE USER SCROLLED THE δ-TABLE AWAY FROM THE CURRENT ROW, a scroll-position fact about one widget
    * inside this pane, undone by the `follow current rule` button sitting a few lines above the table. 5d-i
    * §4.5's detached means THIS PANE IS BOUND TO A SCRATCH SESSION and is outside the correspondence
@@ -582,16 +467,14 @@ export class TmPane implements EditablePane {
    * The status reads `copy · not linked` (Plan 7 part 2 spec §12) and the two are not confusable ON
    * SCREEN — the status sits in the header's `<h2>`, after the view's title, while the follow state
    * is a button captioned `follow current rule` in the rules panel's header. In CODE they are one word
-   * apart, so the status lives in `#header` rather than in anything containing "detach", and this note
-   * exists so the next reader of the grid's `beforeDraw`, which sets `#reattach.hidden`, does not go looking
-   * for a connection.
+   * apart, so the status lives in `header` rather than in anything containing "detach", and the `hidden` that
+   * `followed-grid-panel.ts` keeps on the re-attach has no connection to this method.
    *
-   * **THE COPY'S EDITOR AND *EDIT A COPY* FOLLOW `detached` TOO**, in `#copy` (`CopyEditor.setDetached`, whose doc
+   * **THE COPY'S EDITOR AND *EDIT A COPY* FOLLOW `detached` TOO**, in `copy` (`CopyEditor.setDetached`, whose doc
    * has why): an editor cannot outlive the copy it edits, and a view already showing a copy has nothing left to copy.
    */
-  setDetached(detached: boolean): void {
-    this.#header.setDetached(detached)
-    this.#copy.setDetached(detached)
+  override setDetached(detached: boolean): void {
+    super.setDetached(detached)
     // A COPY RUNS AT THE WIDTH ITS HEADER RECORDS, so the program's width cannot apply to it, and a control that cannot
     // apply is removed.
     if (this.#width !== null) this.#width.el.hidden = detached
@@ -607,45 +490,21 @@ export class TmPane implements EditablePane {
   }
 
   /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
-  setStepsShown(shown: boolean): void {
-    this.#header.setStepsShown(shown)
+  override setStepsShown(shown: boolean): void {
+    super.setStepsShown(shown)
     if (shown === this.#stepsShown) return
     this.#stepsShown = shown
     this.#drawStatus()
   }
 
-  /**
-   * Mount a copy's editor over this pane's body seeded with `text`, or unmount it with `null` — `CopyEditor.setEditor`,
-   * whose contract `LambdaPane.setEditor`'s doc carries. An unmount clears the copy's status with it
-   * (`#scratch`'s doc).
-   */
-  setEditor(text: string | null, collapsed = false): void {
-    this.#copy.setEditor(text, collapsed)
-  }
-
-  /** Give up the mounted editor without destroying it — `CopyEditor.takeEditor`. */
-  takeEditor(): ScratchEditor | null {
-    return this.#copy.takeEditor()
-  }
-
-  /** Mount an editor this pane did not build — `CopyEditor.receiveEditor`, for *move the editor here*. */
-  receiveEditor(editor: ScratchEditor, collapsed = false): void {
-    this.#copy.receiveEditor(editor, collapsed)
-  }
-
-  /** Whether this pane is showing an editor — `CopyEditor.holdsEditor`. */
-  holdsEditor(): boolean {
-    return this.#copy.holdsEditor()
-  }
-
-  /** Whether another view holds this copy's editor, for *move the editor here* — `CopyEditor.setEditorAvailable`. */
-  setEditorAvailable(available: boolean): void {
-    this.#copy.setEditorAvailable(available)
-  }
-
-  /** Send the mounted editor's pending edit now — `CopyEditor.flushEditor`. */
-  flushEditor(): void {
-    this.#copy.flushEditor()
+  protected override editorUnmounted(): void {
+    // THE SCRATCH STATUS GOES WITH THE EDITOR'S UNMOUNT — see `#scratch`'s own doc. Cleared on the unmount rather
+    // than left for whatever `render` happens next, because a caller reading `host.textContent` between the unmount
+    // and the next frame must not see a sentence about a machine this pane no longer shows. Not on `takeEditor`: a
+    // pane that gives its editor to another view of the copy still shows the copy (`CopyEditor.takeEditor`'s doc).
+    this.#scratch = null
+    this.#drawStatus()
+    this.#drawValue()
   }
 
   /**
@@ -711,36 +570,17 @@ export class TmPane implements EditablePane {
    * Record the machine a fork would carry, its rule count, and whether its result type has a decoding a
    * header can name — the three facts that word a refusal — `CopyEditor.setForkAvailable`, whose doc and
    * `#refreshDetach`'s carry the rule behind it.
+   *
+   * **`resultDecodable` IS REQUIRED HERE**, where the shared method defaults it for the rxm view: a TM caller that left
+   * it out would have a function-valued program refused for its size, or not offered at all.
    */
-  setForkAvailable(text: string | null, rules: number, resultDecodable: boolean): void {
-    this.#copy.setForkAvailable(text, rules, resultDecodable)
-  }
-
-  /**
-   * Offer `options` in the pane selector and show `current` as the pair in force. Same shape and same
-   * contract as `LambdaPane.setBindings`; that method's doc carries the argument for pushing the list
-   * in rather than letting a pane hold a registry, and the argument for `Binding<Leg>` rather than
-   * `Binding<'tm'>`, and neither is repeated here.
-   */
-  setBindings(options: PaneOption[], current: Binding<Leg>): void {
-    this.#header.setBindings(options, current)
-  }
-
-  /**
-   * Which layout gestures this pane currently offers, and what a split may create. Same shape and same
-   * contract as `LambdaPane.setLayoutControls`; that method's doc carries the argument for driving this
-   * from the draw pass `draw.ts`'s `createDraw` builds rather than from the pane, and
-   * `PaneView.setLayoutControls` carries the argument for `choices` riding this call. Neither is
-   * repeated here.
-   */
-  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
-    this.#choices = choices
-    this.#menu.setLayout(canClose, canSplit)
+  override setForkAvailable(text: string | null, rules: number, resultDecodable: boolean): void {
+    super.setForkAvailable(text, rules, resultDecodable)
   }
 
   render(frame: TmState | null, controls: ControlState): void {
     this.#frame = frame
-    this.#steps.update(controls)
+    this.steps.update(controls)
     this.#stepAtNewest = controls.stepTextAtNewest
     this.#width?.sync()
     this.#diagram.render(this.#program === null ? null : frame)
@@ -831,7 +671,7 @@ export class TmPane implements EditablePane {
       this.#stateName.title = name
       parts.push(this.#stateName)
     }
-    if (this.#stepsShown && this.#steps.step.textContent !== '') part(this.#steps.step, this.#stepAtNewest)
+    if (this.#stepsShown && this.steps.step.textContent !== '') part(this.steps.step, this.#stepAtNewest)
     if (named) part(`width ${n(program.width)}`)
     this.#line.replaceChildren(...parts)
     const scratch = this.#scratch
@@ -848,7 +688,7 @@ export class TmPane implements EditablePane {
   /**
    * Draw the rule table: `VirtualGrid.draw`, with this view's rows (`#tableRows`). The grid also draws on its own for
    * a scroll, a resize, a key and a click; this is the draw for everything the grid cannot see change — a frame, a
-   * program, a link, the panel opening.
+   * program, a link.
    */
   #drawTable(): void {
     this.#grid.draw()

@@ -6,22 +6,20 @@ import type { PaneSlot, PaneView } from './sessions'
 export type LeafId = string
 
 /**
- * What a leaf renders.
+ * What a leaf renders: the source, or one of the legs.
  *
- * NOT A `Leg`, BECAUSE `'source'` IS NOT ONE. The source pane renders an editor rather than a leg's
- * frames, so a `Leg`-typed field could not name it. `'lambda'`, `'rxm'` and `'tm'` coincide with `Leg`'s
- * members and are deliberately not aliased to it — the day another pane kind exists that is not a leg,
- * this type extends and `Leg` does not.
+ * NOT JUST A `Leg`, BECAUSE `'source'` IS NOT ONE. The source pane renders an editor rather than a leg's
+ * frames, so a `Leg`-typed field could not name it. **EVERY LEG IS A KIND**, so a new leg asks each table keyed
+ * by kind for its entry. A pane kind that is not a leg extends this union, and `Leg` stays as it is.
  */
-export type PaneKind = 'source' | 'lambda' | 'rxm' | 'tm'
+export type PaneKind = 'source' | Leg
 
 /**
  * The leg a pane of `kind` renders, or `null` for the source pane, which renders an editor and no leg.
  *
- * **A `switch`, SO THAT A NEW KIND IS A TYPE ERROR HERE RATHER THAN A SILENT ANSWER.** Because the kinds that
- * are legs are not aliased to `Leg` (`PaneKind`'s own doc), asking "is this kind a leg" by listing them —
- * `kind === 'lambda' || kind === 'rxm' || kind === 'tm'` — would answer `false` for a new leg's kind with
- * `tsc` green (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
+ * **A `switch`, SO THAT A NEW KIND IS A TYPE ERROR HERE RATHER THAN A SILENT ANSWER.** Asking "is this kind a
+ * leg" by listing them — `kind === 'lambda' || kind === 'rxm' || kind === 'tm'` — would answer `false` for a new
+ * leg's kind with `tsc` green (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
  */
 export function legOfPane(kind: PaneKind): Leg | null {
   switch (kind) {
@@ -34,6 +32,32 @@ export function legOfPane(kind: PaneKind): Leg | null {
     case 'tm':
       return 'tm'
   }
+}
+
+/**
+ * The panels a view of each leg reads back from a stored workspace, by the name `data-panel` and `Panels` know them
+ * by. The text panel is not one: its collapse reaches the view's owner through `on.collapse`, not `on.panel`.
+ */
+export const LEG_PANELS = {
+  lambda: ['map'],
+  rxm: ['listing', 'registers', 'stack', 'heap', 'outline'],
+  tm: ['rules', 'diagram', 'outline'],
+} as const satisfies { readonly [K in Leg]: readonly string[] }
+
+/**
+ * What `open` has stored for each of `names`. **A NAME WITH NOTHING STORED IS LEFT OUT, NOT PASSED AS `undefined`**, so
+ * the view's own default for that panel stands.
+ */
+export function storedPanels<N extends string>(
+  names: readonly N[],
+  open: (name: N) => boolean | undefined,
+): Partial<Record<N, boolean>> {
+  const stored: Partial<Record<N, boolean>> = {}
+  for (const name of names) {
+    const isOpen = open(name)
+    if (isOpen !== undefined) stored[name] = isOpen
+  }
+  return stored
 }
 
 /**

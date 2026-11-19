@@ -3,9 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { STORAGE_KEY } from '../../src/appearance'
+import { HEADER_ORDER, KIND_WORD } from '../../src/layout'
 import { PALETTE_CSS_PATTERN, PALETTES, paletteDeclarations } from '../../src/palettes'
 import { inlinePrepaint, PREPAINT, PREPAINT_SLOT } from '../../src/prepaint'
 import { PALETTE_CSS_KEY, resolvePalette, STYLE_IDS, STYLE_KEY } from '../../src/skin'
+import { VIEW_TOGGLES_SLOT } from '../../src/view-toggle-markup'
 import { DAY, NEON, storedHalf } from './base16-fixtures'
 
 const script = PREPAINT
@@ -168,5 +170,22 @@ describe('the build', () => {
     const out = await server.transformIndexHtml(`/${name}`, page(name))
     expect(out).toContain(`<script>${PREPAINT}</script>`)
     expect(out).not.toContain(PREPAINT_SLOT)
+  })
+
+  it('keeps only the slot inside the source page’s #views-shown', () => {
+    expect(page('index.html')).toMatch(/<div id="views-shown"[^>]*>\s*<!-- view-toggles -->\s*<\/div>/)
+  })
+
+  /**
+   * **WHAT THE BROWSER TIER CANNOT SEE.** Vitest serves it its own HTML, and `SHELL` writes the toggles itself, so a
+   * page shipped with an empty `#views-shown` would leave every browser test green.
+   */
+  it('serves one toggle per kind, in the header’s order, named by its word', async () => {
+    const out = await server.transformIndexHtml('/index.html', page('index.html'))
+    const toggles = [...out.matchAll(/<button [^>]*data-shows="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map(
+      ([, kind, word]) => [kind, word],
+    )
+    expect(toggles).toEqual(HEADER_ORDER.map((kind) => [kind, KIND_WORD[kind]]))
+    expect(out).not.toContain(VIEW_TOGGLES_SLOT)
   })
 })

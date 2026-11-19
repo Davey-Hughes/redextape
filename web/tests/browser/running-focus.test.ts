@@ -350,9 +350,9 @@ describe('the running focus', () => {
   }, 30_000)
 
   // THE TM LEG'S OWN RUNNING FOCUS, THROUGH THE RUNNING APP. `focusedRows`, `sourceNodeOwner`,
-  // `isCoincident` and `linkStatus({focus: true})` are each unit-tested in `tests/node/`, which does not
-  // reach `draw.ts`'s `tmFocus`/`tmFocusLink` block: replaced wholesale by `tmPane.setFocus([])`, it
-  // would fail every assertion below the frontier here.
+  // `isCoincident` and `linkStatus`'s `here` clause are each unit-tested in `tests/node/`, which does not
+  // reach `draw.ts`'s `running` table: with `setFocus([])` handed to the TM view in its place, every
+  // assertion below the frontier here would fail.
   //
   // MEASURED AGAINST THE RUNNING APP, NOT ASSUMED, the same way `SAMPLE`'s own owner sequence above
   // was. `let x = 40; x + 2` is 2,870 δ-steps, and its tail reads:
@@ -409,7 +409,7 @@ describe('the running focus', () => {
     // THE COINCIDENCE, AND WHY THE STATUS LINE CARRIES IT ALONE ON THIS LEG. The pinned rows carry
     // BOTH classes on one element — `.state-row.is-linked` and `.state-row.is-focus` set `background`
     // at equal specificity with `.is-focus` declared second, so the focus wash replaces the pin's
-    // (`link-status.ts`'s `focus` doc). Nothing in the δ table says "the run reached what you
+    // (`linked-legs.ts`'s `LINKED` doc). Nothing in the δ table says "the run reached what you
     // pinned"; `#link-status` is the whole signal, so it is asserted here.
     expect(tmFocusRows()[0]?.classList.contains('is-linked'), 'one row, both classes').toBe(true)
     expect(linkStatus()).toContain('the machine is here right now')

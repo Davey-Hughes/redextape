@@ -3,9 +3,10 @@ import { setFocus } from './highlight'
 import type { LambdaPane } from './lambda-pane'
 import type { LambdaTrees } from './lambda-trees'
 import { perLeg } from './legs'
-import { isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
+import { type Focus, isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
 import type { LambdaLinkState } from './link-status'
 import type { LinkWiring } from './link-wiring'
+import { isLinkedLeg, LINKED, type LinkedLeg, perLinkedLeg } from './linked-legs'
 import type { PaneHost } from './pane-host'
 import { type LeafId, onPage, type PaneCollection } from './panes'
 import {
@@ -20,15 +21,13 @@ import {
   programSegments,
 } from './readout'
 import type { UnseenViews } from './replies'
-import type { RxmPane } from './rxm-pane'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
-import type { TmPane } from './tm-pane'
 
 /**
  * ONE FRAME, PAINTED ONCE — the per-frame pass that runs on every recorded frame during playback.
  *
- * THE ORDER INSIDE IT IS LOAD-BEARING. The tm-kind branch of the render loop below calls `setFocus` before
+ * THE ORDER INSIDE IT IS LOAD-BEARING. The render loop below calls a linked leg's `setFocus` before
  * `PaneSlot.render` because `TmPane`'s `#drawTable` runs unconditionally on every render, so a focus handed
  * over afterwards would build every row against the previous frame's value and rebuild them all on the next
  * call. Read the inline notes before reordering anything here.
@@ -132,7 +131,7 @@ export function createDraw(deps: {
     // to insertion order.
     //
     // A LEG WITH NO PANE CONTRIBUTES NOTHING, RATHER THAN BEING FAKED WITH A DEFAULT. The scalar reads
-    // below (`tmFocus`'s `tm.hist...`, the source editor's `lam.hist...`) feed the ONE shared status
+    // below (`running`'s `hist` reads, the source editor's `lam.hist...`) feed the ONE shared status
     // line and the ONE source editor's decoration, neither of which has a per-pane identity. What a
     // leg with NO pane contributes is `null` at both sites.
     //
@@ -144,7 +143,7 @@ export function createDraw(deps: {
     // never the source. With no view of the program on a leg, that leg has no running focus, as a leg with no
     // view has none.
     //
-    // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam`, `rxm` and `tm` ask `active` — in Stage
+    // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam` and `running` ask `active` — in Stage
     // possibly a view off the page. They read the leg's own history through the pane's binding, which is live
     // whether or not the pane is drawn, so a hidden pane still answers truly for its session; and part 2's spec §8
     // keeps the step bar on "the last view that could" step, so a hidden view's leg can still move. The λ link
@@ -161,8 +160,7 @@ export function createDraw(deps: {
       readonly slot: { readonly binding: { readonly session: SessionId } }
     }): boolean => arranged(e.id) && onProgram(e)
     const lam = panes.active('lambda', watched)?.slot.resolve(sessions)
-    const tm = panes.active('tm', watched)?.slot.resolve(sessions)
-    // THE TM LEG'S OWN RUNNING FOCUS — `TmState.source_node`, NOT `lam.hist.current?.owner` below.
+    // EACH LINKED LEG'S OWN RUNNING FOCUS — its frame's `source_node`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2). Each pane reports what ITS OWN leg
     // is doing right now — the two clocks never synchronize (§0), so feeding the δ-table from the λ
     // leg's owner would show it whatever the OTHER model was doing, not its own. `sourceNodeOwner` wraps
@@ -170,62 +168,52 @@ export function createDraw(deps: {
     // leg does.
     //
     // COMPUTED BEFORE THE RENDER LOOP BELOW, NOT AFTER — ONE `#drawTable` PER FRAME, NOT TWO. Nothing
-    // here reads anything a render writes (`runningFocus` wants `linkable`/`index`/`tm.hist`, none of
+    // here reads anything a render writes (`runningFocus` wants `linkable`/`index`/the leg's `hist`, none of
     // which `PaneSlot.render` touches), so hoisting this ahead of the render loop changes nothing
-    // observable — it only has to be resolved before the loop reaches a tm-kind pane, which the loop's
+    // observable — it only has to be resolved before the loop reaches a linked leg's pane, which the loop's
     // own comment covers.
     //
-    // `tm !== undefined` IS A THIRD GATE ALONGSIDE `linkable`/`index`, NOT A NULL-CHECK BOLTED ON. With
-    // no TM view of the program there is no TM leg of the program's being watched, so there is nothing for a
+    // `active !== undefined` IS A THIRD GATE ALONGSIDE `linkable`/`index`, NOT A NULL-CHECK BOLTED ON. With
+    // no view of the program on a leg there is no run of the program's being watched there, so there is nothing for a
     // running focus to mark — and feeding `sourceNodeOwner(null)` through anyway would report a definite "the
     // machine is nowhere" where the honest answer is "no one is asking".
-    const tmFocus =
-      linkWiring.linkable && linkWiring.index !== null && tm !== undefined
-        ? runningFocus(linkWiring.index, sourceNodeOwner(tm.hist.current?.source_node ?? null))
-        : null
-    const tmFocusLink: Link | null =
-      tmFocus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(tmFocus.node) : null
-    // THE RXM LEG'S OWN RUNNING FOCUS, BY THE TM LEG'S RULES (Plan 7 part 5 spec §6.6): `RxmState.source_node`, the owner
-    // of the instruction about to run, read off the rxm view of the program the user focused most recently, and
-    // nothing when no rxm view of the program is asking. It marks the program's rxm views' rows and feeds the status
-    // line's coincidence; the source editor's focus mark stays λ's, as Plan 5c's dual-focus design settled.
-    const rxm = panes.active('rxm', watched)?.slot.resolve(sessions)
-    const rxmFocus =
-      linkWiring.linkable && linkWiring.index !== null && rxm !== undefined
-        ? runningFocus(linkWiring.index, sourceNodeOwner(rxm.hist.current?.source_node ?? null))
-        : null
-    const rxmFocusLink: Link | null =
-      rxmFocus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(rxmFocus.node) : null
+    //
+    // A leg's focus marks the rows of its views of the program and feeds the status line's coincidence; the source
+    // editor's focus mark stays λ's, as Plan 5c's dual-focus design settled.
+    const running: Record<LinkedLeg, { focus: Focus | null; link: Link | null }> = perLinkedLeg((leg) => {
+      const active = panes.active(leg, watched)?.slot.resolve(sessions)
+      const focus =
+        linkWiring.linkable && linkWiring.index !== null && active !== undefined
+          ? runningFocus(linkWiring.index, sourceNodeOwner(active.hist.current?.source_node ?? null))
+          : null
+      const link = focus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(focus.node) : null
+      return { focus, link }
+    })
 
     // THE SPLIT MENU'S TWO SHARED INPUTS, RESOLVED ONCE PER FRAME RATHER THAN ONCE PER PANE. Both answers
     // are app-wide — every pane may be pointed at the same set of pairs, and "is there a source leaf" is
-    // a question about the one tree — so this is the same fan-out `tmFocusLink` above already performs,
+    // a question about the one tree — so this is the same fan-out `running` above already performs,
     // and it keeps the per-pane cost of the `setLayoutControls` call below to one small object.
     // `PaneSlot.render` calls `pairs()` again for the binding selector; hoisting THAT would mean handing
     // the slot a list it is documented to fetch for itself.
     const pairs = sessions.pairs()
     const canCreateSource = sourceAvailable()
 
-    // THE DRAW PASS, OVER EVERY PANE. `setFocus` runs BEFORE `render` for a tm-kind pane and for the
-    // reason above; `tmFocusLink` is the SAME value handed to every tm-kind pane found here, matching
-    // `setFocus`'s per-leg classification — it is app-wide link state every pane on the tm leg follows,
-    // not something each pane recomputes for itself. `p.pane` NEEDS THE CAST: `PaneCollection` stores it
-    // as `PaneView<T>`, the narrow structural type `PaneSlot.render` needs (see that type's own doc in
-    // `sessions.ts`), which does not carry `setFocus` — a fact about the CONCRETE `TmPane` class, not
-    // about what a slot's render pass requires. Safe here because `p.slot.binding.leg === 'tm'` is exactly
-    // the condition under which `pane-host.ts` ever constructs a `PaneEntry` with a `TmPane` in `.pane`.
+    // THE DRAW PASS, OVER EVERY PANE. `setFocus` runs BEFORE `render` for a linked leg's pane and for the
+    // reason above; `running[leg].link` is the SAME value handed to every pane of that leg found here, matching
+    // `setFocus`'s per-leg classification — it is app-wide link state every pane on the leg follows,
+    // not something each pane recomputes for itself.
     for (const p of panes.all()) {
       // **A VIEW THAT IS NOT ON THE PAGE IS NOT PAINTED** (spec §5). In Stage every host but one is in
       // `pane-host.ts`'s map and out of the document, and a `render` into a detached subtree is work whose
       // only observer is the next `innerHTML` read. Selecting a tab re-attaches the host and ends in a
       // `draw()`, so nothing comes back stale.
       if (!p.host.isConnected) continue
-      // ONE LOCAL FOR THE ONE CAST THIS WHOLE PANE NEEDS — `p.pane` IS `PaneView<T>`, the narrow type
-      // `PaneSlot.render` requires (see that type's own doc), which does not carry `TmPane`'s own
-      // methods; `null` on a non-tm leg keeps every read below honest about which leg it is on.
-      const tmPane = p.slot.binding.leg === 'tm' ? (p.pane as TmPane) : null
-      const rxmPane = p.slot.binding.leg === 'rxm' ? (p.pane as RxmPane) : null
-      const machine = tmPane ?? rxmPane
+      // ONE LOCAL FOR THE ONE CAST THIS WHOLE PANE NEEDS, WHICH `LINKED`'s `pane` HOLDS — `p.pane` IS `PaneView<T>`,
+      // the narrow type `PaneSlot.render` requires (see that type's own doc), which does not carry the view classes'
+      // own methods; `null` on a leg no link reaches keeps every read below honest about which leg it is on.
+      const boundLeg = p.slot.binding.leg
+      const machine = isLinkedLeg(boundLeg) ? LINKED[boundLeg].pane(p) : null
       // A VIEW THAT MISSED WHAT ITS SESSION WAS TOLD, by being off the page when it came, is seeded from what the
       // session kept: because it is in `unseen`, whatever its leg, so `SEED` reaches every leg with a program here.
       const seeded = unseen.has(p.pane)
@@ -239,8 +227,10 @@ export function createDraw(deps: {
       // an index read there names whatever the copy has at it (spec amendment 32, in the inbound direction): the λ
       // loop's guard below, "A COPY IS NOT LINKED", for the machine views. Asked only of a TM or rxm view.
       const unlinked = machine !== null && sessions.entryOf(p.slot.binding.session).detached
-      if (tmPane !== null) tmPane.setFocus(unlinked ? [] : (tmFocusLink?.states ?? []))
-      if (rxmPane !== null) rxmPane.setFocus(unlinked ? [] : (rxmFocusLink?.instrs ?? []))
+      if (machine !== null && isLinkedLeg(boundLeg)) {
+        const focusLink = running[boundLeg].link
+        machine.setFocus(unlinked || focusLink === null ? [] : LINKED[boundLeg].rows(focusLink))
+      }
       p.slot.render(sessions, p.pane, leg)
       // **THE SEED DROPPED THE PIN AND ITS SCROLL, AND BOTH ARE GIVEN BACK AFTER THE VIEW'S RENDER.** The view missed
       // the compile, so its seed's `setProgram` dropped the pin it held and any link row still waiting in its grid —
@@ -262,12 +252,11 @@ export function createDraw(deps: {
         seeded && !unlinked && linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
           ? linkWiring.index.linkFor(linkWiring.link.node)
           : null
-      if (seeded && tmPane !== null) {
-        tmPane.setLink(seededPin?.states ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'tm')
-      }
-      // THE RXM VIEW'S PIN, by the TM view's rules above and for their reasons.
-      if (seeded && rxmPane !== null) {
-        rxmPane.setLink(seededPin?.instrs ?? [], linkWiring.link !== null && linkWiring.link.origin !== 'rxm')
+      if (seeded && machine !== null && isLinkedLeg(boundLeg)) {
+        machine.setLink(
+          seededPin === null ? [] : LINKED[boundLeg].rows(seededPin),
+          linkWiring.link !== null && linkWiring.link.origin !== boundLeg,
+        )
       }
       // WHICH LAYOUT GESTURES THIS PANE OFFERS — driven from here for the same reason `setBindings` already
       // is (`PaneSlot.render`'s doc): both are facts about something OTHER than the frame just rendered, so
@@ -337,7 +326,7 @@ export function createDraw(deps: {
     // NOT ONLY `index !== null` — the same distinction `linkAtSourceOffset` already draws: `index` can
     // be non-null and still stale (see `linkable`'s own doc in `link-wiring.ts`), and `runningFocus`
     // only ever sees `null` for the case where `index` itself is null.
-    // `lam !== undefined` FOR THE REASON `tmFocus` ABOVE TAKES `tm !== undefined`, and here the
+    // `lam !== undefined` FOR THE REASON `running` ABOVE TAKES `active !== undefined`, and here the
     // consequence is visible rather than internal: with no λ pane the source editor's focus decoration
     // is cleared by the `focus === null` branch below, which is what a user who just closed the last λ
     // pane should see — a highlight tracking a reduction nobody is watching is a claim about an empty
@@ -363,7 +352,7 @@ export function createDraw(deps: {
       view().dispatch({ effects: setFocus.of({ span: focusLink.source, claim }) })
     }
     // `drawLink` RUNS HERE, AFTER THE RENDER LOOP, NOT AT THE TOP OF THIS FUNCTION — `link-status.ts`'s
-    // SECOND job needs `tmFocus` (resolved above the render loop) to answer whether it coincides with the
+    // SECOND job needs `running` (resolved above the render loop) to answer whether it coincides with the
     // pin. What it reads is settled by here, and the readout pass below reads nothing it writes.
     // THE λ HALF OF THE STATUS COMES FROM THE VIEW THAT DREW THE TREE (Plan 7 part 4 spec §5.4), after the
     // loop above has handed it this frame's pin.
@@ -384,7 +373,11 @@ export function createDraw(deps: {
         : linkWiring.index === null || linkWiring.index.lambdaText === ''
           ? 'declined'
           : (drewLambda.pane as LambdaPane).linkState()
-    linkWiring.drawLink(l, isCoincident(linkWiring.link, tmFocus), isCoincident(linkWiring.link, rxmFocus), lambdaLink)
+    linkWiring.drawLink(
+      l,
+      perLinkedLeg((leg) => isCoincident(linkWiring.link, running[leg].focus)),
+      lambdaLink,
+    )
 
     // THE READOUT (spec §9): the focused view's session. A focused source view has no pane entry
     // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.

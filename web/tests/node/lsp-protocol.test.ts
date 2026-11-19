@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { KIND_ORDER } from '../../src/layout'
 import { documentUri, EXTENSION_OF_LANGUAGE, isResponse, LANGUAGE_IDS, LANGUAGE_OF_PANE } from '../../src/lsp-protocol'
 
 const LANGUAGE_RS = fileURLToPath(new URL('../../../crates/redextape-lsp/src/language.rs', import.meta.url))
@@ -27,7 +28,7 @@ describe('the language ids the client sends', () => {
 
   it('cover every pane kind that has an editor, and every id has an extension', () => {
     // EVERY `PaneKind`, rxm included: an rxm view's editor is an rxm copy's, which takes its language from here.
-    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual(['lambda', 'rxm', 'source', 'tm'])
+    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual([...KIND_ORDER].sort())
     expect(LANGUAGE_OF_PANE.rxm).toBe('redextape_rxm')
     for (const id of Object.values(LANGUAGE_OF_PANE)) expect(LANGUAGE_IDS).toContain(id)
     for (const id of LANGUAGE_IDS) expect(EXTENSION_OF_LANGUAGE[id]).toBeTruthy()

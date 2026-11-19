@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { cdp } from 'vitest/browser'
+import { cdp, userEvent } from 'vitest/browser'
 import { KIND_GLOSS } from '../../src/app-header'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { chromiumOnly } from './engine'
@@ -148,6 +148,11 @@ describe('a first load, in a window wider than it is tall', () => {
    */
   it('tells a pressed toggle from one that is not in forced colours, solid in Highlight against dashed', async (ctx) => {
     chromiumOnly(ctx, 'forced colours are CDP’s Emulation.setEmulatedMedia, which only Chromium has')
+    // **THE POINTER STAYS WHERE THE FILE BEFORE THIS ONE LEFT IT**, and forced colours edge a button under it in
+    // `Highlight`, so the edges read below are the resting ones only once it is off every button they name.
+    const read = [...toggles(), document.querySelector('#new-view') as HTMLElement]
+    await userEvent.unhover(read[0] as HTMLElement)
+    await until(() => !read.some((b) => b.matches(':hover')), 'the pointer off the toggles and + view')
     await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] })
     try {
       expect(matchMedia('(forced-colors: active)').matches, 'precondition: forced colours').toBe(true)

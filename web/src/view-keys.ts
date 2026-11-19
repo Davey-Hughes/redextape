@@ -40,8 +40,8 @@ export const PREFIX_LABEL = 'Ctrl+.'
  * The keys an armed machine answers, in the order the hint and the help page list them: the key, what it does, and
  * the words for it. `Escape` and the prefix pressed again leave and do nothing; they are `step`'s, not rows here.
  *
- * **THE TOGGLE KEYS ARE `HEADER_ORDER`'s POSITIONS**, `1` to `4`, so the keys and the header's buttons cannot be in
- * two orders.
+ * **THE TOGGLE KEYS ARE `HEADER_ORDER`'s POSITIONS**, `1` to `N`, nine at most, so the keys and the header's buttons
+ * cannot be in two orders.
  */
 export const VIEW_KEYS: readonly { readonly key: string; readonly action: ViewKeyAction; readonly does: string }[] = [
   { key: ']', action: { kind: 'cycle', step: 1 }, does: 'the next layout' },

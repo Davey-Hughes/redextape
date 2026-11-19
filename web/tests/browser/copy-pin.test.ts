@@ -92,6 +92,18 @@ describe('a view on the page showing a copy', () => {
     expect(rxm().querySelector('.rxm-row.is-linked')).toBeNull()
   })
 
+  it('clears the program’s pin on a click on a row of an rxm copy', async () => {
+    await pin()
+    await until(() => tm().querySelector('.state-row.is-linked') !== null, 'the program’s TM view to mark the pin')
+    await userEvent.click(rxm().querySelector('.rxm-pc')?.closest('.rxm-row') as HTMLElement)
+    await until(
+      () => sourceLinked() === null && tm().querySelector('.state-row.is-linked') === null,
+      'the program’s marks to go',
+    )
+    // THE NEXT CASE OPENS BY CLEARING A HELD PIN, and its wait for that is only a check while one is held.
+    await pin()
+  })
+
   it('marks no state of a TM copy', async () => {
     await pickInViewMenu(tm(), 'detach')
     await until(() => editorOf(tm()) !== null, 'the TM copy’s editor')

@@ -15,6 +15,7 @@ import type { Browser } from 'playwright'
 import { configDefaults, defineConfig, type TestProjectInlineConfiguration } from 'vitest/config'
 import type { BrowserCommand } from 'vitest/node'
 import { inlinePrepaint } from './src/prepaint.ts'
+import { inlineViewToggles } from './src/view-toggle-markup.ts'
 
 // `pkg/` is built to the REPO ROOT, one level above this Vite root, because the Dockerfile places
 // stage 1's output at /app/pkg beside /app/web. Vite's dev server refuses to serve outside its root
@@ -278,7 +279,10 @@ function browserProject(
 
 export default defineConfig({
   server: { fs: { allow: [REPO_ROOT] } },
-  plugins: [{ name: 'redextape-prepaint', transformIndexHtml: { order: 'pre', handler: inlinePrepaint } }],
+  plugins: [
+    { name: 'redextape-prepaint', transformIndexHtml: { order: 'pre', handler: inlinePrepaint } },
+    { name: 'redextape-view-toggles', transformIndexHtml: { order: 'pre', handler: inlineViewToggles } },
+  ],
   define: { 'import.meta.env.VITE_COMMIT_HASH': JSON.stringify(process.env.COMMIT_HASH ?? '') },
   worker: { format: 'es' },
   // `assetsInlineLimit` — WITHOUT THIS, ONE OF FOUR GRAMMAR `.wasm` FILES INLINES AND THE OTHER

@@ -600,7 +600,7 @@ export class PaneSlot<K extends Leg> {
    * The leg this slot currently shows.
    *
    * SEPARATE FROM `render` BECAUSE THE TM SLOT HAS TO LOOK AT ITS FRAME BEFORE IT PAINTS. `draw()`
-   * computes the δ-table's running focus from `tm.hist.current?.source_node` and must hand it over
+   * computes the δ-table's running focus from its frame's `source_node` and must hand it over
    * with `TmPane.setFocus` BEFORE `render`, or the render pass builds every row against the previous
    * frame's focus and a second pass immediately rebuilds them (see `draw()`'s own note).
    */

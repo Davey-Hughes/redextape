@@ -1,12 +1,11 @@
 import type { EditorView } from '@codemirror/view'
 import { setLink } from './highlight'
 import { perLeg } from './legs'
-import type { Link, LinkIndex, Pin } from './link'
+import { type Link, type LinkIndex, type Pin, pinAtInstr } from './link'
 import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
+import { LINKED, LINKED_LEGS, type LinkedLeg, perLinkedLeg } from './linked-legs'
 import type { LeafId, PaneCollection } from './panes'
-import type { RxmPane } from './rxm-pane'
 import type { SessionRegistry } from './sessions'
-import type { TmPane } from './tm-pane'
 
 /**
  * The source editor's key for linking at the caret, the keyboard route to a click. `main.ts` binds it and the help
@@ -51,6 +50,13 @@ export type LinkWiring = {
   get index(): LinkIndex | null
   get linkable(): boolean
   get link(): Pin | null
+  /**
+   * An edit's clear: nothing is pinned, linking is off until the next compile, and every linked view drops its marks.
+   * `draw()` sets a view's link only when it seeds that view: a link gesture sets it otherwise, and a compile's
+   * `setProgram` clears it, so without this the marks would stay until the next compile lands. Hidden views are
+   * cleared too, since a hidden one would show its rows again when its tab is selected. `setLink` redraws with the old
+   * running focus still in it; the `draw()` that the edit's `compile.schedule` causes repaints it without.
+   */
   clearLink(): void
   /**
    * A user's clear: a click on empty space in a view, or Escape in one (the link-clear design). Nothing is pinned and
@@ -60,13 +66,15 @@ export type LinkWiring = {
    */
   unpin(): void
   /**
-   * How many link gestures `setLinkTo` has taken: read before and after a click's own handlers, it tells the clear's
-   * listener whether the click linked. Only the view's handler knows whether a row links (a label row, an instruction
-   * `defunc` minted, a row of a copy), and a clear after one that did would undo it.
+   * How many link gestures `setLinkTo` and `linkInstr` have taken: read before and after a click's own handlers, it
+   * tells the clear's listener whether the click linked. Only the view's handler knows whether a row links (a label
+   * row, an instruction `defunc` minted, a row of a copy), and a clear after one that did would undo it.
    */
   get gestures(): number
-  drawLink(l: Link | null, focusCoincident: boolean, rxmCoincident: boolean, lambda: LambdaLinkState): void
-  setLinkTo(node: number | null, origin: Pin['origin']): void
+  drawLink(l: Link | null, here: Readonly<Record<LinkedLeg, boolean>>, lambda: LambdaLinkState): void
+  setLinkTo(node: number | null, origin: Exclude<Pin['origin'], 'rxm'>): void
+  /** Link the construct that owns instruction `pc`, or say on the status line that none does. */
+  linkInstr(pc: number): void
   linkAtSourceOffset(byteOffset: number): void
   /**
    * Per leg, how many views it has and the title of each one showing a copy — what the status line's detachment clause
@@ -161,18 +169,17 @@ export function createLinkWiring(deps: {
    * is stale", but those still report DIFFERENT statuses (`none` vs `stale`), so `linkable` is consulted
    * directly rather than folded into what made `l` null.
    *
-   * `focusCoincident` IS A PARAMETER TOO, for the same reason: `draw()` already resolved the TM leg's
-   * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `tmFocus`
-   * threaded in anyway — passing the boolean it produces is the smaller surface. Meaningless when
+   * `here` IS A PARAMETER TOO, for the same reason: `draw()` already resolved each linked leg's
+   * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `running`
+   * threaded in anyway — passing the booleans it produces is the smaller surface. Meaningless when
    * `l === null` (nothing is pinned to coincide with) or `!linkable` (both return before reading it).
-   * `rxmCoincident` is the same boolean for the rxm leg's running focus.
    *
    * `detached` IS ON EVERY ARM, NOT ONLY `'linked'`, and that is §4.5's obligation rather than
    * symmetry: `{state:'none'}` with a detached λ pane is precisely the case where this line goes from
    * blank to speaking. `linkStatus` is the one function that reads the field and it suppresses a
    * detached pane's own clauses itself, so nothing here has to know which clauses those are.
    */
-  const drawLink = (l: Link | null, focusCoincident: boolean, rxmCoincident: boolean, lambda: LambdaLinkState) => {
+  const drawLink = (l: Link | null, here: Readonly<Record<LinkedLeg, boolean>>, lambda: LambdaLinkState) => {
     const detached = detachedPanes()
     if (!linkable) {
       linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
@@ -184,38 +191,76 @@ export function createLinkWiring(deps: {
     }
     linkStatusHost.textContent = linkStatus({
       state: 'linked',
-      tm: l.states.length > 0,
-      instrs: l.instrs.length > 0,
+      legs: perLinkedLeg((leg) => ({ emits: LINKED[leg].rows(l).length > 0, here: here[leg] })),
       lambda,
-      focus: focusCoincident,
-      rxmFocus: rxmCoincident,
       detached,
     })
   }
 
   /**
-   * Resolve a link and paint every view: the source editor's mark, and each λ, rxm and TM view's.
+   * Take a gesture's resolved pin: count the gesture, write the pin and whether its click found no owner, and paint
+   * every view: the source editor's mark, and each λ, rxm and TM view's.
    *
    * `origin` DRIVES SCROLLING ONLY. A scroll-into-view triggered by the pane the user is already
    * looking at moves the thing under their cursor, so the table scrolls for a source click and not
    * for its own.
    */
-  const setLinkTo = (node: number | null, origin: Pin['origin']) => {
+  const commitLink = (pin: Pin | null, origin: Pin['origin'], noOwner: boolean) => {
     gestures += 1
-    link = node === null ? null : { node, origin }
-    // AN RXM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (Plan 7 part 5 spec
-    // amendment 11); any other gesture, a resolved rxm click included, replaces that explanation.
-    ownerless = node === null && origin === 'rxm'
-    paint(origin !== 'tm', origin !== 'rxm')
+    link = pin
+    ownerless = noOwner
+    paint(origin)
+  }
+
+  const setLinkTo = (node: number | null, origin: Exclude<Pin['origin'], 'rxm'>) => {
+    commitLink(node === null ? null : { node, origin }, origin, false)
   }
 
   /**
-   * Draw `link` everywhere it is drawn; `scrollTm` and `scrollRxm` say whether the rule tables and the rxm listings
-   * scroll to it, or, with nothing pinned there, drop the hold an earlier link's scroll took.
+   * Give every view of every linked leg its rows of `l`. `from` is where the click came from, `null` for no click:
+   * a view scrolls to its rows, or, with none there, drops the hold an earlier link's scroll took, only for a click
+   * from outside its own leg.
    */
-  const paint = (scrollTm: boolean, scrollRxm: boolean) => {
+  const fanOut = (l: Link | null, from: Pin['origin'] | null) => {
+    // PER-LEG, NOT PER-PANE — every view of a leg follows the same link, resolved once by the caller and fanned out
+    // here, HIDDEN ONES INCLUDED. `LINKED`'s `pane` HOLDS THE CAST: `PaneView<T>` is deliberately narrow and does not
+    // carry `setLink`, which is a fact about the concrete view classes. A click that came from a view's own leg
+    // must not scroll the table it was just clicked in out from under the cursor; a click
+    // from elsewhere should bring the state block or the construct's first instruction (spec §6.6) into view — or, when
+    // the pin names no row there, let the view follow the run again rather than stay held on the block an earlier link
+    // scrolled to.
+    //
+    // **NOT SKIPPED FOR A HIDDEN PANE, UNLIKE `draw()`'S OWN RENDER LOOP.** A pane that saw the last
+    // compile is not in `replies.ts`'s `unseen` set, so `draw()`'s seed block never runs for it —
+    // this fan-out is the only place a pin made after that compile reaches it, hidden or not, and
+    // skipping a hidden one here would leave it painting whatever pin it had before it was hidden,
+    // unable to hear a later one made while it was off the page. A pane that MISSED the compile (in
+    // `unseen`) has a stale `#index`, so the states this call resolves against the CURRENT index can
+    // name the wrong rows there, or none — but that pane is about to be reseeded before it is next
+    // shown, and `draw.ts`'s seed block re-applies the CURRENT pin once it is, so a wrong answer
+    // written here never reaches the screen.
+    //
+    // **A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned** — `draw.ts`'s λ guard, for
+    // the machine views. `l` holds the PROGRAM's state and instruction indices, and a view showing a copy numbers its
+    // rows by the copy, so an index read there names whatever the copy has at it (Plan 7 part 5 spec amendment 32, in
+    // the inbound direction). `detached` is the session's own fact, read here because the view's binding moves.
+    for (const leg of LINKED_LEGS) {
+      const { rows, pane } = LINKED[leg]
+      const scrollTo = from !== null && from !== leg
+      for (const p of panes.of(leg)) {
+        const marked = l === null || sessions.entryOf(p.slot.binding.session).detached ? [] : rows(l)
+        pane(p).setLink(marked, scrollTo)
+      }
+    }
+  }
+
+  /**
+   * Draw `link` everywhere it is drawn; `from` is where the click came from, `null` when no click made this paint, and
+   * says which views `fanOut` scrolls.
+   */
+  const paint = (from: Pin['origin'] | null) => {
     const node = link?.node ?? null
-    // ONE `linkFor` CALL, reused for the source editor's mark and both fan-outs below — the comment where `draw()`
+    // ONE `linkFor` CALL, reused for the source editor's mark and the fan-out below — the comment where `draw()`
     // resolves its own link (`draw.ts`) says why a `linkFor` call is not free.
     const l = node === null || index === null ? null : index.linkFor(node)
     view().dispatch({ effects: setLink.of(l?.source ?? null) })
@@ -250,44 +295,22 @@ export function createLinkWiring(deps: {
     // sentence — which is the accessibility item this announcement exists to close.
     const sentence = linkStatusHost.textContent ?? ''
     if (sentence !== before) announce(sentence)
-    // PER-LEG, NOT PER-PANE — every TM pane follows the same link, resolved once above and fanned out
-    // here, HIDDEN ONES INCLUDED. `p.pane` NEEDS THE CAST for the reason `draw.ts`'s identical loop
-    // documents: `PaneView<T>` is deliberately narrow and does not carry `setLink`, which is a fact
-    // about the concrete `TmPane` class. `scrollTm` is false for a click on a rule table: a click that came from the
-    // table itself must not scroll the table it was just clicked in out from under the cursor; a click
-    // from source or λ should bring the state block into view — or, when the pin names no state there, let the
-    // table follow the machine again rather than stay held on the block an earlier link scrolled to.
-    //
-    // **NOT SKIPPED FOR A HIDDEN PANE, UNLIKE `draw()`'S OWN RENDER LOOP.** A pane that saw the last
-    // compile is not in `replies.ts`'s `unseen` set, so `draw()`'s seed block never runs for it —
-    // this fan-out is the only place a pin made after that compile reaches it, hidden or not, and
-    // skipping a hidden one here would leave it painting whatever pin it had before it was hidden,
-    // unable to hear a later one made while it was off the page. A pane that MISSED the compile (in
-    // `unseen`) has a stale `#index`, so the states this call resolves against the CURRENT index can
-    // name the wrong rows there, or none — but that pane is about to be reseeded before it is next
-    // shown, and `draw.ts`'s seed block re-applies the CURRENT pin once it is, so a wrong answer
-    // written here never reaches the screen.
-    //
-    // **A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned** — `draw.ts`'s λ guard, for
-    // the machine views. `l` holds the PROGRAM's state and instruction indices, and a view showing a copy numbers its
-    // rows by the copy, so an index read there names whatever the copy has at it (Plan 7 part 5 spec amendment 32, in
-    // the inbound direction). `detached` is the session's own fact, read here because the view's binding moves.
-    for (const p of panes.of('tm')) {
-      const states = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.states ?? [])
-      ;(p.pane as TmPane).setLink(states, scrollTm)
-    }
-    // AND EVERY RXM VIEW, BY THE TM FAN-OUT'S RULES AND FOR ITS REASONS: hidden ones included, a copy marking nothing,
-    // and scrolled to the construct's first instruction unless the click came from an rxm listing (spec §6.6).
-    for (const p of panes.of('rxm')) {
-      const instrs = sessions.entryOf(p.slot.binding.session).detached ? [] : (l?.instrs ?? [])
-      ;(p.pane as RxmPane).setLink(instrs, scrollRxm)
-    }
+    fanOut(l, from)
   }
 
   /** Link at a byte offset into the source document, or clear if nothing contains it. */
   const linkAtSourceOffset = (byteOffset: number) => {
     if (!linkable || index === null) return
     setLinkTo(index.nodeAtSource(byteOffset), 'source')
+  }
+
+  /** Link the construct that owns an rxm instruction, or clear and say why if none does. */
+  const linkInstr = (pc: number) => {
+    if (!linkable || index === null) return
+    const pin = pinAtInstr(index, pc, 'rxm')
+    // AN RXM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (Plan 7 part 5 spec
+    // amendment 11); any other gesture, a resolved rxm click included, replaces that explanation.
+    commitLink(pin, 'rxm', pin === null)
   }
 
   return {
@@ -310,6 +333,7 @@ export function createLinkWiring(deps: {
       linkable = false
       link = null
       ownerless = false
+      fanOut(null, null)
     },
     unpin(): void {
       // LINKING OFF IS NOTHING PINNED TOO: `clearLink` and `setIndex` empty both, and every link gesture asks
@@ -320,13 +344,14 @@ export function createLinkWiring(deps: {
       // SCROLLED NEITHER WAY: a rule table or rxm listing a link scrolled keeps the hold that scroll took
       // (`VirtualGrid.scrollToRow`), so nothing moves on the clear and the list follows the run again at its next step.
       // Dropping the hold would send it back to the run's row at once, which can be far.
-      paint(false, false)
+      paint(null)
     },
     get gestures(): number {
       return gestures
     },
     drawLink,
     setLinkTo,
+    linkInstr,
     linkAtSourceOffset,
     detachedPanes,
   }

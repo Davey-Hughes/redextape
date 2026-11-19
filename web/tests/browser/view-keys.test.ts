@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
+import { HEADER_ORDER } from '../../src/layout'
 import { HINT_ROWS, HINT_SENTENCE } from '../../src/view-keys'
 import { chromiumOnly } from './engine'
 import {
@@ -127,7 +128,12 @@ describe('view keys', () => {
     expect(box.bottom, 'the hint is below the window').toBeLessThanOrEqual(window.innerHeight)
     // THE HINT'S ROWS ARE THE TABLE'S, EACH A KEY AND WHAT IT DOES, AND THE LIVE REGION SAYS THEM AS ONE SENTENCE
     // (`tests/node/view-keys.test.ts` holds the sentence's words): a reader who does not see the hint hears it.
-    expect([...hint().querySelectorAll('kbd')].map((k) => k.textContent)).toEqual([']', '[', '1', '2', '3', '4', 'Esc'])
+    expect([...hint().querySelectorAll('kbd')].map((k) => k.textContent)).toEqual([
+      ']',
+      '[',
+      ...HEADER_ORDER.map((_, i) => String(i + 1)),
+      'Esc',
+    ])
     expect([...hint().children].map((row) => row.textContent)).toEqual([
       'view keys',
       ...HINT_ROWS.map((row) => `${row.key} ${row.does}`),

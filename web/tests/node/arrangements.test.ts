@@ -44,7 +44,7 @@ const ALL = treeKey(FOUR)
 /** All four views after *TM · program* is picked in the rxm view's title: `rxm-0` is a TM view, under its own id. */
 const PICKED = setLeafKind(FOUR, 'rxm-0', 'tm')
 
-/** Every combination: the 15 sets of kinds that are not empty, each in `KIND_ORDER`. */
+/** Every combination: the sets of kinds that are not empty, each in `KIND_ORDER`. */
 const COMBINATIONS: PaneKind[][] = []
 for (let mask = 1; mask < 1 << KIND_ORDER.length; mask++)
   COMBINATIONS.push(KIND_ORDER.filter((_, i) => (mask & (1 << i)) !== 0))
@@ -63,9 +63,8 @@ describe('a combination and its key', () => {
     expect(treeKey(of('rxm'))).toBe('rxm')
   })
 
-  it('has 15 combinations, each with a key of its own that parses back to it', () => {
-    expect(COMBINATIONS).toHaveLength(15)
-    expect(new Set(COMBINATIONS.map(keyOf)).size).toBe(15)
+  it('has a combination for every set of kinds that is not empty, each with a key that parses back to it', () => {
+    expect(new Set(COMBINATIONS.map(keyOf)).size).toBe(2 ** KIND_ORDER.length - 1)
     for (const kinds of COMBINATIONS) expect(parseKey(keyOf(kinds))).toEqual(kinds)
   })
 

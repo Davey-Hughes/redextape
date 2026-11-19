@@ -19,7 +19,7 @@ export type CopyEditorOptions = {
   /**
    * Called by `setEditor(null)`, whether or not an editor was mounted — not by a take, since a view that gives its
    * editor to another view of the copy still shows the copy (`takeEditor`'s doc). `TmPane` clears its copy's status
-   * line here; the rxm view has nothing to clear (`RxmPane.setDetached`'s doc).
+   * line here; the rxm view has nothing to clear (`RxmPane.#value`'s doc).
    */
   readonly onUnmount?: () => void
 }
@@ -98,10 +98,10 @@ export class CopyEditor implements EditablePane {
   #count = 0
   /**
    * Whether `#forkText === null`'s reason is NOT the result type — the TM view's third `setForkAvailable` argument,
-   * `true` by default for the rxm view's own two-argument calls (`RxmPane.setForkAvailable`), which never have a
-   * second reason to distinguish (the rxm leg's header is optional, so a function-valued program still gets text —
-   * `RxmHeader::for_type`'s doc). `#refreshDetach` reads it only when `#forkText` is `null`, and before it looks at
-   * `#count` at all: `false` here means the control is disabled with the function-valued reason regardless of
+   * `true` by default for the rxm view's own two-argument calls (`MachineViewChrome.setForkAvailable`), which never
+   * have a second reason to distinguish (the rxm leg's header is optional, so a function-valued program still gets
+   * text — `RxmHeader::for_type`'s doc). `#refreshDetach` reads it only when `#forkText` is `null`, and before it
+   * looks at `#count` at all: `false` here means the control is disabled with the function-valued reason regardless of
    * `#count`, since a function-valued program's own machine can have as few rules as a declined leg has (zero) —
    * `#refreshDetach`'s own doc carries the argument for why `#count` cannot be asked first.
    */
@@ -339,14 +339,14 @@ export class CopyEditor implements EditablePane {
    * Record the program a fork would carry, the count a refusal would name, and — for the TM view only —
    * whether the result type is the reason `text` is withheld — `viewMenu`'s `CopyState` rule, as a data
    * dependency rather than a convention — 5d-iv design §4.3. `text` is the program's text, or `null` when there
-   * is none to copy; `count` is how many rules or instructions it has; `resultDecodable` defaults to
-   * `true`, which is every rxm call's own answer (`#resultDecodable`'s own doc — the rxm leg's header is
+   * is none to copy; `count` is how many rules or instructions it has; `resultDecodable` is
+   * `true` on every rxm call (`#resultDecodable`'s own doc — the rxm leg's header is
    * optional, so it has no second reason to distinguish). Stores the facts and defers to `#refreshDetach`,
    * the same split `setDetached` above and `LambdaPane.setEditor`/`setDetached` already use: a setter that only ever
    * WROTE the control from here would go stale the moment the view stopped being one `replies.ts`'s fan-out still
    * calls it on — see `#forkText`'s own doc.
    */
-  setForkAvailable(text: string | null, count: number, resultDecodable = true): void {
+  setForkAvailable(text: string | null, count: number, resultDecodable: boolean): void {
     this.#forkText = text
     this.#count = count
     this.#resultDecodable = resultDecodable

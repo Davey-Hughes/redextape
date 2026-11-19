@@ -516,7 +516,7 @@ export function createTransport(deps: {
     // `PaneSlot`'s: a slot's leg cannot change, so a fact decided from it at construction cannot go stale
     // the way one decided from its session would.
     // THE RXM VIEW'S ROWS LINK THE SAME WAY, BY THE INSTRUCTION'S OWNER (Plan 7 part 5 spec §6.6) — an instruction
-    // `defunc` minted has none, and `setLinkTo` says so on the status line rather than leaving it blank.
+    // `defunc` minted has none, and `linkInstr` says so on the status line rather than leaving it blank.
     //
     // **A ROW IN A COPY LINKS NOTHING AND SAYS NOTHING** (spec amendment 28), in either view that numbers its rows by
     // the machine it shows. The link index describes the PROGRAM, so an instruction or state index read in a copy names
@@ -527,9 +527,9 @@ export function createTransport(deps: {
       ? {
           linkInstr: (pc: number) => {
             const wiring = linkWiring()
-            if (!wiring.linkable || wiring.index === null) return
+            // AHEAD OF `linkInstr`: a row of a copy counts no link gesture, so the click clears the program's pin.
             if (sessions.entryOf(slot.binding.session).detached) return
-            wiring.setLinkTo(wiring.index.nodeForInstr(pc), 'rxm')
+            wiring.linkInstr(pc)
           },
         }
       : {}),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCoincident, LinkIndex, type LinkIndexWire, runningFocus, sourceNodeOwner } from '../../src/link'
+import { isCoincident, LinkIndex, type LinkIndexWire, pinAtInstr, runningFocus, sourceNodeOwner } from '../../src/link'
 
 /**
  * A hand-built index. Source spans are deliberately NESTED — `[0,17)` contains `[4,5)` and `[12,17)` —
@@ -94,6 +94,19 @@ describe('LinkIndex.nodeForInstr', () => {
     const ix = new LinkIndex(wire())
     expect(ix.nodeForInstr(4)).toBeNull()
     expect(ix.nodeForInstr(-1)).toBeNull()
+  })
+})
+
+describe('pinAtInstr', () => {
+  it('pins an owned instruction by its node and pc', () => {
+    expect(pinAtInstr(new LinkIndex(wire()), 2, 'rxm')).toStrictEqual({ node: 101, origin: 'rxm', pc: 2 })
+  })
+
+  it('pins nothing for a minted, past-the-end or negative pc', () => {
+    const ix = new LinkIndex(wire())
+    expect(pinAtInstr(ix, 1, 'rxm')).toBeNull()
+    expect(pinAtInstr(ix, 4, 'rxm')).toBeNull()
+    expect(pinAtInstr(ix, -1, 'rxm')).toBeNull()
   })
 })
 

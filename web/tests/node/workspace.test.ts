@@ -10,9 +10,12 @@ import {
 } from '../../src/layout'
 import {
   DEFAULT_SPEED,
+  type DisplayLeg,
   defaultFocus,
   defaultWorkspace,
   isSpeed,
+  LEG_DISPLAY,
+  legDisplayOf,
   PRESETS,
   parseWorkspace,
   presetOf,
@@ -20,10 +23,10 @@ import {
   type Switches,
   serializeWorkspace,
   WORKSPACE_VERSION,
-  withDisplay,
+  withLegDisplay,
+  withLegDisplaysKept,
   withPanel,
   withPanelSizes,
-  withTmDisplay,
 } from '../../src/workspace'
 import { fourViews, fourViewWorkspace } from '../browser/harness'
 
@@ -275,21 +278,85 @@ describe('serializeWorkspace', () => {
     expect(back.inspector).toBe(true)
     expect(JSON.parse(serializeWorkspace({ ...ws, inspector: false })).inspector).toBe(false)
   })
-})
 
-describe('withDisplay', () => {
-  it('records one view’s display without touching the others', () => {
-    const a = { layout: 'code' as const, vars: 'names' as const, map: 'icicle' as const }
-    const b = { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const }
-    expect(withDisplay({ 'lambda-0': a }, 'pane-1', b)).toEqual({ 'lambda-0': a, 'pane-1': b })
+  /** Written out rather than built from the types: this text is what a returning user's browser already holds. */
+  it('reads and writes a stored version 2 workspace’s display settings unchanged', () => {
+    const stored = `{
+      "version": 2,
+      "tree": {
+        "kind": "split",
+        "dir": "row",
+        "sizes": [0.5, 0.5],
+        "children": [
+          { "kind": "leaf", "id": "lambda-0", "pane": "lambda" },
+          { "kind": "leaf", "id": "tm-0", "pane": "tm" }
+        ]
+      },
+      "switches": { "steps": "view", "views": "tiles", "readout": "strip" },
+      "speed": 8,
+      "focused": "lambda-0",
+      "panels": {},
+      "inspector": true,
+      "display": { "lambda-0": { "layout": "outline", "vars": "debruijn", "map": "minimap" } },
+      "tmDisplay": { "tm-0": { "level": "local", "edges": "chips" } }
+    }`
+    const display = { 'lambda-0': { layout: 'outline', vars: 'debruijn', map: 'minimap' } }
+    const tmDisplay = { 'tm-0': { level: 'local', edges: 'chips' } }
+    const ws = parseWorkspace(stored)
+    if (ws === null) throw new Error('the stored workspace was refused')
+    expect(ws.display).toEqual(display)
+    expect(ws.tmDisplay).toEqual(tmDisplay)
+    const written = JSON.parse(serializeWorkspace(ws))
+    expect(written.display).toEqual(display)
+    expect(written.tmDisplay).toEqual(tmDisplay)
   })
 })
 
-describe('withTmDisplay', () => {
-  it('records one view’s display without touching the others', () => {
+describe('withLegDisplay', () => {
+  it('records one λ view’s display without touching the others', () => {
+    const a = { layout: 'code' as const, vars: 'names' as const, map: 'icicle' as const }
+    const b = { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const }
+    const tmDisplay = { 'tm-0': { level: 'local' as const, edges: 'chips' as const } }
+    const ws = { ...fourViewWorkspace(), display: { 'lambda-0': a }, tmDisplay }
+    const next = withLegDisplay(ws, 'lambda', 'pane-1', b)
+    expect(next.display).toEqual({ 'lambda-0': a, 'pane-1': b })
+    expect(next.tmDisplay).toEqual(tmDisplay)
+    expect(legDisplayOf(next, 'lambda', 'pane-1')).toEqual(b)
+    expect(legDisplayOf(ws, 'lambda', 'pane-1'), 'the workspace it was given is left as it was').toBeUndefined()
+  })
+
+  it('records one TM view’s display without touching the others', () => {
     const program = { level: 'program' as const, edges: 'arcs' as const }
     const local = { level: 'local' as const, edges: 'chips' as const }
-    expect(withTmDisplay({ 'tm-0': program }, 'pane-1', local)).toEqual({ 'tm-0': program, 'pane-1': local })
+    const display = { 'lambda-0': { layout: 'outline' as const, vars: 'names' as const, map: 'icicle' as const } }
+    const ws = { ...fourViewWorkspace(), display, tmDisplay: { 'tm-0': program } }
+    const next = withLegDisplay(ws, 'tm', 'pane-1', local)
+    expect(next.tmDisplay).toEqual({ 'tm-0': program, 'pane-1': local })
+    expect(next.display).toEqual(display)
+    expect(legDisplayOf(next, 'tm', 'pane-1')).toEqual(local)
+    expect(legDisplayOf(ws, 'tm', 'pane-1'), 'the workspace it was given is left as it was').toBeUndefined()
+  })
+})
+
+/** Walks the table, so an entry added to it is held to both without this file changing. */
+describe('every entry of LEG_DISPLAY', () => {
+  const legs = Object.keys(LEG_DISPLAY) as DisplayLeg[]
+
+  it.each(legs)('stores the settings of a live %s view and reads them back', (leg) => {
+    const { fallback } = LEG_DISPLAY[leg]
+    const ws = withLegDisplay(fourViewWorkspace(), leg, 'lambda-0', fallback)
+    const back = parseWorkspace(serializeWorkspace(ws))
+    if (back === null) throw new Error('the written workspace was refused')
+    expect(legDisplayOf(back, leg, 'lambda-0')).toEqual(fallback)
+  })
+
+  it.each(legs)('drops the %s settings of a pruned view and keeps those of the others', (leg) => {
+    const { fallback } = LEG_DISPLAY[leg]
+    const ws = withLegDisplay(withLegDisplay(fourViewWorkspace(), leg, 'tm-0', fallback), leg, 'pane-9', fallback)
+    const kept = withLegDisplaysKept(ws, (leaf) => leaf !== 'pane-9')
+    expect(legDisplayOf(kept, leg, 'pane-9')).toBeUndefined()
+    expect(legDisplayOf(kept, leg, 'tm-0')).toEqual(fallback)
+    expect(legDisplayOf(ws, leg, 'pane-9'), 'the workspace it was given is left as it was').toEqual(fallback)
   })
 })
 

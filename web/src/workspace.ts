@@ -84,6 +84,49 @@ export const DEFAULT_TM_DISPLAY: TmDisplay = { level: 'program', edges: 'arcs' }
 /** Each TM view's display settings, by leaf — a view with none stored draws with `DEFAULT_TM_DISPLAY`. */
 export type TmDisplays = Readonly<Record<LeafId, TmDisplay>>
 
+/** The settings of each leg whose views have any. */
+export type LegDisplay = { lambda: LambdaDisplay; tm: TmDisplay }
+
+export type DisplayLeg = keyof LegDisplay
+
+/**
+ * Each such leg's settings: `field` names both the `Workspace` field and the key they are stored under, `fallback`
+ * draws a view with none stored, and `parse` reads one stored entry, `null` for a malformed one.
+ *
+ * **A MAPPED TYPE, SO A LEG ADDED TO `LegDisplay` WITH NO ENTRY IS A TYPE ERROR HERE.**
+ */
+export const LEG_DISPLAY: {
+  readonly [K in DisplayLeg]: {
+    readonly field: 'display' | 'tmDisplay'
+    readonly fallback: LegDisplay[K]
+    parse(entry: unknown): LegDisplay[K] | null
+  }
+} = {
+  lambda: {
+    field: 'display',
+    fallback: DEFAULT_DISPLAY,
+    parse(entry) {
+      if (typeof entry !== 'object' || entry === null) return null
+      const { layout, vars, map } = entry as Record<string, unknown>
+      if (layout !== 'code' && layout !== 'outline') return null
+      if (vars !== 'names' && vars !== 'debruijn') return null
+      if (map !== 'icicle' && map !== 'minimap') return null
+      return { layout, vars, map }
+    },
+  },
+  tm: {
+    field: 'tmDisplay',
+    fallback: DEFAULT_TM_DISPLAY,
+    parse(entry) {
+      if (typeof entry !== 'object' || entry === null) return null
+      const { level, edges } = entry as Record<string, unknown>
+      if (level !== 'program' && level !== 'local') return null
+      if (edges !== 'arcs' && edges !== 'chips') return null
+      return { level, edges }
+    },
+  },
+}
+
 /**
  * Per view, per region name, the share of the view's height the region takes (the view layouts spec §11.4). A region
  * with no entry has the share it is built with.
@@ -155,14 +198,50 @@ export function defaultWorkspace(shape: Shape): Workspace {
   }
 }
 
-/** `display` with one λ view's settings recorded — a new object, as `withPanel` returns. */
-export function withDisplay(display: Displays, leaf: LeafId, d: LambdaDisplay): Displays {
-  return { ...display, [leaf]: d }
+/** One view's stored settings. The cast holds because `LEG_DISPLAY` names each leg's own field. */
+export function legDisplayOf<K extends DisplayLeg>(
+  ws: Pick<Workspace, 'display' | 'tmDisplay'>,
+  leg: K,
+  leaf: LeafId,
+): LegDisplay[K] | undefined {
+  return ws[LEG_DISPLAY[leg].field][leaf] as LegDisplay[K] | undefined
 }
 
-/** `tmDisplay` with one TM view's settings recorded — `withDisplay`'s twin. */
-export function withTmDisplay(tmDisplay: TmDisplays, leaf: LeafId, d: TmDisplay): TmDisplays {
-  return { ...tmDisplay, [leaf]: d }
+/** `ws` with one view's settings recorded — a new object, as `withPanel` returns. */
+export function withLegDisplay<W extends Pick<Workspace, 'display' | 'tmDisplay'>, K extends DisplayLeg>(
+  ws: W,
+  leg: K,
+  leaf: LeafId,
+  d: LegDisplay[K],
+): W {
+  const { field } = LEG_DISPLAY[leg]
+  return { ...ws, [field]: { ...ws[field], [leaf]: d } }
+}
+
+/**
+ * Every `LEG_DISPLAY` entry's field, holding only the views `keep` accepts.
+ *
+ * **WALKS THE TABLE RATHER THAN NAMING THE FIELDS**: nothing in the type system asks a store or a prune to learn of a
+ * new entry, so a field named by hand would lose that leg's settings on reload.
+ */
+function keptLegDisplays(
+  ws: Pick<Workspace, 'display' | 'tmDisplay'>,
+  keep: (leaf: LeafId) => boolean,
+): Record<string, Readonly<Record<LeafId, unknown>>> {
+  return Object.fromEntries(
+    (Object.keys(LEG_DISPLAY) as DisplayLeg[]).map((leg) => {
+      const { field } = LEG_DISPLAY[leg]
+      return [field, Object.fromEntries(Object.entries(ws[field]).filter(([leaf]) => keep(leaf)))]
+    }),
+  )
+}
+
+/** `ws` with every leg's settings dropped for the views `keep` refuses — a new object, as `withLegDisplay` returns. */
+export function withLegDisplaysKept<W extends Pick<Workspace, 'display' | 'tmDisplay'>>(
+  ws: W,
+  keep: (leaf: LeafId) => boolean,
+): W {
+  return { ...ws, ...keptLegDisplays(ws, keep) }
 }
 
 /** `panelSizes` with one view's shares recorded, or with the view left out where it holds none. */
@@ -201,10 +280,6 @@ export function serializeWorkspace(ws: Workspace): string {
   for (const [leaf, open] of Object.entries(ws.panels)) if (live.has(leaf)) panels[leaf] = { ...open }
   const panelSizes: Record<LeafId, Record<string, number>> = {}
   for (const [leaf, sizes] of Object.entries(ws.panelSizes)) if (live.has(leaf)) panelSizes[leaf] = { ...sizes }
-  const display: Record<LeafId, LambdaDisplay> = {}
-  for (const [leaf, d] of Object.entries(ws.display)) if (live.has(leaf)) display[leaf] = d
-  const tmDisplay: Record<LeafId, TmDisplay> = {}
-  for (const [leaf, d] of Object.entries(ws.tmDisplay)) if (live.has(leaf)) tmDisplay[leaf] = d
   return JSON.stringify({
     version: WORKSPACE_VERSION,
     tree: ws.tree,
@@ -213,8 +288,7 @@ export function serializeWorkspace(ws: Workspace): string {
     focused: onScreen.has(ws.focused) ? ws.focused : defaultFocus(ws.tree),
     panels,
     inspector: ws.inspector,
-    display,
-    tmDisplay,
+    ...keptLegDisplays(ws, (leaf) => live.has(leaf)),
     ...(Object.keys(panelSizes).length === 0 ? {} : { panelSizes }),
     ...(Object.keys(ws.arrangements).length === 0 ? {} : { arrangements: ws.arrangements }),
   })
@@ -237,34 +311,24 @@ export function parseSwitches(v: unknown): Switches | null {
 }
 
 /**
- * A stored `display`, or `null` for a malformed one. **ABSENT IS NOT MALFORMED**: a workspace stored
- * before the field existed has none, and refusing it would reset the upgrading user's layout;
- * `parseWorkspace` maps absence to `{}`.
+ * A leg's stored settings, or `null` for malformed ones. **ABSENT IS NOT MALFORMED**: a workspace stored
+ * before the field existed has none, and refusing it would reset the upgrading user's layout.
  */
-function parseDisplay(v: unknown, ids: ReadonlySet<string>): Displays | null {
+function parseDisplays<K extends DisplayLeg>(
+  leg: K,
+  stored: Readonly<Record<string, unknown>>,
+  ids: ReadonlySet<string>,
+): Readonly<Record<LeafId, LegDisplay[K]>> | null {
+  const { field, parse } = LEG_DISPLAY[leg]
+  const v = stored[field]
+  if (v === undefined) return {}
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
-  const out: Record<LeafId, LambdaDisplay> = {}
-  for (const [leaf, d] of Object.entries(v as Record<string, unknown>)) {
-    if (!ids.has(leaf) || typeof d !== 'object' || d === null) return null
-    const { layout, vars, map } = d as Record<string, unknown>
-    if (layout !== 'code' && layout !== 'outline') return null
-    if (vars !== 'names' && vars !== 'debruijn') return null
-    if (map !== 'icicle' && map !== 'minimap') return null
-    out[leaf] = { layout, vars, map }
-  }
-  return out
-}
-
-/** A stored `tmDisplay`, or `null` for a malformed one — absent is not malformed, for `parseDisplay`'s reason. */
-function parseTmDisplay(v: unknown, ids: ReadonlySet<string>): TmDisplays | null {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
-  const out: Record<LeafId, TmDisplay> = {}
-  for (const [leaf, d] of Object.entries(v as Record<string, unknown>)) {
-    if (!ids.has(leaf) || typeof d !== 'object' || d === null) return null
-    const { level, edges } = d as Record<string, unknown>
-    if (level !== 'program' && level !== 'local') return null
-    if (edges !== 'arcs' && edges !== 'chips') return null
-    out[leaf] = { level, edges }
+  const out: Record<LeafId, LegDisplay[K]> = {}
+  for (const [leaf, entry] of Object.entries(v as Record<string, unknown>)) {
+    if (!ids.has(leaf)) return null
+    const d = parse(entry)
+    if (d === null) return null
+    out[leaf] = d
   }
   return out
 }
@@ -383,9 +447,9 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   // across. A field that IS there and is not a boolean is held to the standard above like every other
   // (Plan 7 part 2 spec §3).
   if (e.inspector !== undefined && typeof e.inspector !== 'boolean') return null
-  const display = e.display === undefined ? {} : parseDisplay(e.display, ids)
+  const display = parseDisplays('lambda', e, ids)
   if (display === null) return null
-  const tmDisplay = e.tmDisplay === undefined ? {} : parseTmDisplay(e.tmDisplay, ids)
+  const tmDisplay = parseDisplays('tm', e, ids)
   if (tmDisplay === null) return null
   return {
     tree,

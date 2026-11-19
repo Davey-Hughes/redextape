@@ -35,8 +35,8 @@ describe('a restored workspace', () => {
   })
 
   /**
-   * **THE RXM VIEW READS ITS PANELS BACK TOO**, not only stores them: each of the rxm view's four is read back by name
-   * (`pane-host.ts`'s rxm arm), and the ones not stored keep their default.
+   * **THE RXM VIEW READS ITS PANELS BACK TOO**, not only stores them: each of the rxm view's panels is read back by name
+   * (`pane-host.ts`'s `PANE_BUILD`), and the ones not stored keep their default.
    */
   it('opens the rxm view with its heap panel closed, as stored, and the panels not stored open', () => {
     expect(rxmToggle('heap')?.getAttribute('aria-expanded')).toBe('false')

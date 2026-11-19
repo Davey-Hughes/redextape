@@ -8,6 +8,9 @@ import {
   listingRows,
   registerRows,
   rowsOfPcs,
+  rxmHeap,
+  rxmStack,
+  rxmValues,
   unwrittenLegend,
   unwrittenMeaning,
   wordText,
@@ -180,5 +183,40 @@ describe('the heap', () => {
   it('counts frames', () => {
     expect(frames(1)).toBe('1 frame')
     expect(frames(1001)).toBe('1,001 frames')
+  })
+})
+
+describe('what the panels are handed', () => {
+  it('adds +N more to a frame’s saved locals past the window', () => {
+    const saved = [valueWord('5'), listWord('3')]
+    const stack = rxmStack(
+      frameOf({
+        depth: 2,
+        frames: [
+          { ret_pc: 14, saved, saved_len: 5 },
+          { ret_pc: 20, saved, saved_len: 2 },
+        ],
+      }),
+      FACT3,
+    )
+    expect(stack.frames).toEqual([
+      { callee: 'fact.0', ret: '→ pc14', saved: 'r0 5 · r1 #3 · +3 more' },
+      { callee: 'fact.0', ret: '→ pc20', saved: 'r0 5 · r1 #3' },
+    ])
+  })
+
+  it('counts older cells and boxes, boxes in the plural only past one', () => {
+    const cells = [{ cell: 9, head: valueWord('1'), tail: listWord('8') }]
+    const boxes = [{ handle: 2, content: valueWord('7') }]
+    const notes = (s: RxmState) => rxmHeap(s).items.flatMap((item) => (item.kind === 'note' ? [item.text] : []))
+    expect(notes(frameOf({ cells, heap_len: 3, boxes, box_len: 2 }))).toEqual(['+2 older', '+1 older box'])
+    expect(notes(frameOf({ cells, heap_len: 1, boxes, box_len: 4 }))).toEqual(['+3 older boxes'])
+    expect(notes(frameOf({ cells, heap_len: 1, boxes, box_len: 1 }))).toEqual([])
+  })
+
+  it('says a hidden argument and a hidden local in the singular', () => {
+    const notes = (s: RxmState) => rxmValues(s).notes.map((note) => note.text)
+    expect(notes(frameOf({ args_len: 1, locals_len: 1 }))).toEqual(['+1 more argument', '+1 more local'])
+    expect(notes(frameOf({ args_len: 3, locals_len: 2 }))).toEqual(['+3 more arguments', '+2 more locals'])
   })
 })

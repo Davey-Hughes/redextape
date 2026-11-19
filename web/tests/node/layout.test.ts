@@ -4,6 +4,7 @@ import {
   closeLeaf,
   defaultArrangement,
   defaultLayout,
+  gridArrangement,
   holdsMostLeaves,
   insertBeside,
   KIND_ORDER,
@@ -159,10 +160,8 @@ describe('defaultArrangement', () => {
   })
 
   it('makes a tree parseTree takes, holding the kinds asked, for every combination and both shapes', () => {
-    let combinations = 0
     for (let mask = 1; mask < 1 << KIND_ORDER.length; mask++) {
       const kinds = KIND_ORDER.filter((_, i) => (mask & (1 << i)) !== 0)
-      combinations++
       for (const shape of ['wide', 'tall'] as const) {
         const tree = defaultArrangement(kinds, shape)
         expect(parseTree(JSON.parse(JSON.stringify(tree)))).toEqual(tree)
@@ -173,11 +172,62 @@ describe('defaultArrangement', () => {
         ).toEqual([...kinds].sort())
       }
     }
-    expect(combinations).toBe(15)
   })
 
   it('refuses no kinds, since a tree has a leaf or more', () => {
     expect(() => defaultArrangement([], 'wide')).toThrow(/a kind or more/)
+  })
+})
+
+describe('gridArrangement', () => {
+  const views = (n: number): LayoutNode[] => Array.from({ length: n }, (_, i) => leafOf(String(i), 'tm'))
+  const linesOf = (tree: LayoutNode): string[][] =>
+    tree.kind === 'split' ? tree.children.map((line) => leaves(line).map((l) => l.id)) : []
+
+  // WRITTEN OUT AND NEVER COMPUTED WITH `gridLines`: a table read from the function under test agrees with any rule.
+  it.each([
+    [5, '0 / 1 3 / 2 4', '0 / 1 2 / 3 4'],
+    [6, '0 3 / 1 4 / 2 5', '0 1 / 2 3 / 4 5'],
+    [7, '0 3 / 1 4 / 2 5 6', '0 1 / 2 3 / 4 5 6'],
+    [8, '0 3 / 1 4 6 / 2 5 7', '0 1 / 2 3 4 / 5 6 7'],
+    [9, '0 3 6 / 1 4 7 / 2 5 8', '0 1 2 / 3 4 5 / 6 7 8'],
+  ] as const)('arranges %i views by the rule, written out', (n, wide, tall) => {
+    const written = (tree: LayoutNode): string =>
+      linesOf(tree)
+        .map((line) => line.join(' '))
+        .join(' / ')
+    expect(written(gridArrangement(views(n), 'wide'))).toBe(wide)
+    expect(written(gridArrangement(views(n), 'tall'))).toBe(tall)
+  })
+
+  it('keeps every view once, along the long side, in lines one apart, in a tree parseTree takes', () => {
+    for (let n = 5; n <= 9; n++) {
+      for (const shape of ['wide', 'tall'] as const) {
+        const tree = gridArrangement(views(n), shape)
+        const label = `${n} views, ${shape}`
+        const ids = leaves(tree).map((l) => l.id)
+        expect([...ids].sort(), label).toEqual(views(n).flatMap((v) => (v.kind === 'leaf' ? [v.id] : [])))
+        expect(tree.kind === 'split' && tree.dir, label).toBe(shape === 'wide' ? 'row' : 'column')
+        const lengths = linesOf(tree).map((line) => line.length)
+        expect(Math.max(...lengths) - Math.min(...lengths), label).toBeLessThanOrEqual(1)
+        expect(parseTree(JSON.parse(JSON.stringify(tree))), label).toEqual(tree)
+      }
+    }
+  })
+
+  // `parseTree` ASKS ONLY THAT A SPLIT'S SIZES SUM TO 1, so it would take three lines at a half and two quarters.
+  it('runs each line across the long side, and gives a split of k children 1/k each', () => {
+    for (let n = 5; n <= 9; n++) {
+      for (const shape of ['wide', 'tall'] as const) {
+        const tree = gridArrangement(views(n), shape)
+        if (tree.kind !== 'split') throw new Error(`${n} views make no split`)
+        for (const split of [tree, ...tree.children]) {
+          if (split.kind !== 'split') continue
+          expect(split.sizes).toEqual(split.children.map(() => 1 / split.children.length))
+          expect(split.dir).toBe((split === tree) === (shape === 'wide') ? 'row' : 'column')
+        }
+      }
+    }
   })
 })
 

@@ -40,10 +40,10 @@ describe('armed', () => {
       expect(step(true, key(row.key)), row.key).toEqual({ armed: false, consume: true, action: row.action })
   })
 
-  it('cycles on ] and [, and toggles the four kinds on 1 to 4 in the header order', () => {
+  it('cycles on ] and [, and toggles each kind on its place in the header order', () => {
     expect(step(true, key(']')).action).toEqual({ kind: 'cycle', step: 1 })
     expect(step(true, key('[')).action).toEqual({ kind: 'cycle', step: -1 })
-    expect(['1', '2', '3', '4'].map((k) => step(true, key(k)).action)).toEqual(
+    expect(HEADER_ORDER.map((_, i) => step(true, key(String(i + 1))).action)).toEqual(
       HEADER_ORDER.map((pane) => ({ kind: 'toggle', pane })),
     )
     // SPELLED OUT AS WELL: the line above follows `HEADER_ORDER` wherever it goes, right or wrong.
@@ -145,7 +145,19 @@ describe('armed', () => {
 describe('the table', () => {
   it('names each key once', () => {
     expect(new Set(VIEW_KEYS.map((r) => r.key)).size).toBe(VIEW_KEYS.length)
-    expect(VIEW_KEYS.map((r) => r.key)).toEqual([']', '[', '1', '2', '3', '4'])
+    expect(VIEW_KEYS.map((r) => r.key)).toEqual([']', '[', ...HEADER_ORDER.map((_, i) => String(i + 1))])
+  })
+})
+
+describe('the toggle keys', () => {
+  const toggleRows = VIEW_KEYS.filter((row) => row.action.kind === 'toggle')
+
+  it('are single digits, so a tenth kind is a decision', () => {
+    for (const row of toggleRows) expect(row.key).toMatch(/^[1-9]$/)
+  })
+
+  it('are 1 to N in the header’s order', () => {
+    expect(toggleRows.map((row) => row.key)).toEqual(HEADER_ORDER.map((_, i) => String(i + 1)))
   })
 })
 

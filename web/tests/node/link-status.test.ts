@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { linkStatus } from '../../src/link-status'
+import { type DetachedPanes, type LambdaLinkState, type LinkStatus, linkStatus } from '../../src/link-status'
+
+/** The `linked` arm, from whether the construct emits on TM and on rxm and whether each leg's focus is on it. */
+function pinned({
+  tm,
+  instrs,
+  focus,
+  rxmFocus,
+  ...rest
+}: {
+  tm: boolean
+  instrs: boolean
+  lambda: LambdaLinkState
+  focus: boolean
+  rxmFocus: boolean
+  detached?: DetachedPanes
+}): LinkStatus {
+  return { state: 'linked', legs: { rxm: { emits: instrs, here: rxmFocus }, tm: { emits: tm, here: focus } }, ...rest }
+}
 
 describe('linkStatus', () => {
   it('says nothing when nothing is linked', () => {
@@ -7,25 +25,23 @@ describe('linkStatus', () => {
   })
 
   it('names the one absence that is the common case', () => {
-    expect(
-      linkStatus({ state: 'linked', tm: false, instrs: true, lambda: 'shown', focus: false, rxmFocus: false }),
-    ).toBe('this construct emits no machine states')
+    expect(linkStatus(pinned({ tm: false, instrs: true, lambda: 'shown', focus: false, rxmFocus: false }))).toBe(
+      'this construct emits no machine states',
+    )
   })
 
   it('distinguishes the reasons the λ view shows no link', () => {
-    expect(
-      linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'none-here', focus: false, rxmFocus: false }),
-    ).toBe('this construct has no node in the λ term at this step')
-    expect(
-      linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'too-large', focus: false, rxmFocus: false }),
-    ).toBe('the λ term at this step is too large to lay out')
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'none-here', focus: false, rxmFocus: false }))).toBe(
+      'this construct has no node in the λ term at this step',
+    )
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'too-large', focus: false, rxmFocus: false }))).toBe(
+      'the λ term at this step is too large to lay out',
+    )
     // `'waiting'` SAYS NOTHING: a tree one round trip away is a moment, not a state to explain.
-    expect(
-      linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'waiting', focus: false, rxmFocus: false }),
-    ).toBe('')
-    expect(
-      linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'declined', focus: false, rxmFocus: false }),
-    ).toBe('this program has no λ lowering, so no construct has a λ link')
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'waiting', focus: false, rxmFocus: false }))).toBe('')
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'declined', focus: false, rxmFocus: false }))).toBe(
+      'this program has no λ lowering, so no construct has a λ link',
+    )
   })
 
   // `'absent'` SAYS NOTHING ABOUT λ, AS `'shown'` AND `'waiting'` DO, BUT FOR ITS OWN REASON: there is no
@@ -33,39 +49,35 @@ describe('linkStatus', () => {
   // `'declined'` along with the rest. Checked against both TM answers, so it is seen to drop the λ clause
   // alone: the TM leg's absence still speaks.
   it('says nothing about λ when there is no λ pane to say it about', () => {
-    expect(
-      linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'absent', focus: false, rxmFocus: false }),
-    ).toBe('')
-    expect(
-      linkStatus({ state: 'linked', tm: false, instrs: true, lambda: 'absent', focus: false, rxmFocus: false }),
-    ).toBe('this construct emits no machine states')
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'absent', focus: false, rxmFocus: false }))).toBe('')
+    expect(linkStatus(pinned({ tm: false, instrs: true, lambda: 'absent', focus: false, rxmFocus: false }))).toBe(
+      'this construct emits no machine states',
+    )
   })
 
   it('says nothing extra when every leg resolved and neither running focus is on the pinned construct', () => {
-    expect(
-      linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'shown', focus: false, rxmFocus: false }),
-    ).toBe('')
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'shown', focus: false, rxmFocus: false }))).toBe('')
   })
 
   it('reports both absences together rather than picking one', () => {
-    expect(
-      linkStatus({ state: 'linked', tm: false, instrs: true, lambda: 'declined', focus: false, rxmFocus: false }),
-    ).toBe('this construct emits no machine states · this program has no λ lowering, so no construct has a λ link')
+    expect(linkStatus(pinned({ tm: false, instrs: true, lambda: 'declined', focus: false, rxmFocus: false }))).toBe(
+      'this construct emits no machine states · this program has no λ lowering, so no construct has a λ link',
+    )
   })
 
   // ONE CLAUSE FOR A CONSTRUCT NEITHER LOWERING BILLS ANYTHING TO — the common case among clicks, since a
   // transparent `let` or a `Lambda` emits no instruction and so no state — and each alone otherwise.
   it('says what the construct emits no instructions of, and no machine states of, in one clause', () => {
-    const linked = { state: 'linked', lambda: 'shown', focus: false, rxmFocus: false } as const
-    expect(linkStatus({ ...linked, tm: false, instrs: false })).toBe(
+    const linked = { lambda: 'shown', focus: false, rxmFocus: false } as const
+    expect(linkStatus(pinned({ ...linked, tm: false, instrs: false }))).toBe(
       'this construct emits no instructions or machine states',
     )
-    expect(linkStatus({ ...linked, tm: true, instrs: false })).toBe('this construct emits no instructions')
-    expect(linkStatus({ ...linked, tm: false, instrs: true })).toBe('this construct emits no machine states')
+    expect(linkStatus(pinned({ ...linked, tm: true, instrs: false }))).toBe('this construct emits no instructions')
+    expect(linkStatus(pinned({ ...linked, tm: false, instrs: true }))).toBe('this construct emits no machine states')
   })
 
   it('reports the rxm run reaching the pin, ahead of the machine and of any absence', () => {
-    expect(linkStatus({ state: 'linked', tm: false, instrs: true, lambda: 'shown', focus: true, rxmFocus: true })).toBe(
+    expect(linkStatus(pinned({ tm: false, instrs: true, lambda: 'shown', focus: true, rxmFocus: true }))).toBe(
       'the rxm run is here right now · the machine is here right now · this construct emits no machine states',
     )
   })
@@ -83,7 +95,7 @@ describe('linkStatus', () => {
   // THE COINCIDENCE OF THE RUNNING FOCUS AND THE PIN. If `focus` were read nowhere, this test, which sets
   // it `true` against an otherwise-silent link, would report '' and fail.
   it('reports the running focus when it coincides with the pin', () => {
-    expect(linkStatus({ state: 'linked', tm: true, instrs: true, lambda: 'shown', focus: true, rxmFocus: false })).toBe(
+    expect(linkStatus(pinned({ tm: true, instrs: true, lambda: 'shown', focus: true, rxmFocus: false }))).toBe(
       'the machine is here right now',
     )
   })
@@ -92,9 +104,9 @@ describe('linkStatus', () => {
   // absence rather than after it. A version that pushed `tm`'s absence first would produce the same
   // TWO PARTS but in the wrong order, and `toBe` (not a set/array comparison) catches that.
   it('reports the focus ahead of an absence, not after it', () => {
-    expect(
-      linkStatus({ state: 'linked', tm: false, instrs: true, lambda: 'shown', focus: true, rxmFocus: false }),
-    ).toBe('the machine is here right now · this construct emits no machine states')
+    expect(linkStatus(pinned({ tm: false, instrs: true, lambda: 'shown', focus: true, rxmFocus: false }))).toBe(
+      'the machine is here right now · this construct emits no machine states',
+    )
   })
 })
 
@@ -120,15 +132,16 @@ describe('linkStatus · detachment', () => {
     expect(linkStatus({ state: 'none' })).toBe('')
     expect(linkStatus({ state: 'none', detached: ON_PROGRAM })).toBe('')
     expect(
-      linkStatus({
-        state: 'linked',
-        tm: true,
-        instrs: true,
-        lambda: 'shown',
-        focus: true,
-        rxmFocus: false,
-        detached: ON_PROGRAM,
-      }),
+      linkStatus(
+        pinned({
+          tm: true,
+          instrs: true,
+          lambda: 'shown',
+          focus: true,
+          rxmFocus: false,
+          detached: ON_PROGRAM,
+        }),
+      ),
     ).toBe('the machine is here right now')
   })
 
@@ -197,15 +210,16 @@ describe('linkStatus · detachment', () => {
   // view is still bound to the program, stays.
   it('suppresses the λ clause when the λ view shows a copy and keeps the TM one', () => {
     expect(
-      linkStatus({
-        state: 'linked',
-        tm: false,
-        instrs: true,
-        lambda: 'none-here',
-        focus: false,
-        rxmFocus: false,
-        detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1') },
-      }),
+      linkStatus(
+        pinned({
+          tm: false,
+          instrs: true,
+          lambda: 'none-here',
+          focus: false,
+          rxmFocus: false,
+          detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1') },
+        }),
+      ),
     ).toBe('λ view shows a copy — not linked to the program · this construct emits no machine states')
   })
 
@@ -214,15 +228,16 @@ describe('linkStatus · detachment', () => {
   // is a claim no scratch can make. Suppressed rather than trusted from the caller.
   it('suppresses the TM clauses when the TM view shows a copy and keeps the λ one', () => {
     expect(
-      linkStatus({
-        state: 'linked',
-        tm: false,
-        instrs: true,
-        lambda: 'none-here',
-        focus: true,
-        rxmFocus: false,
-        detached: { ...ON_PROGRAM, tm: views(1, 'TM · copy 2') },
-      }),
+      linkStatus(
+        pinned({
+          tm: false,
+          instrs: true,
+          lambda: 'none-here',
+          focus: true,
+          rxmFocus: false,
+          detached: { ...ON_PROGRAM, tm: views(1, 'TM · copy 2') },
+        }),
+      ),
     ).toBe('TM view shows a copy — not linked to the program · this construct has no node in the λ term at this step')
   })
 
@@ -230,15 +245,16 @@ describe('linkStatus · detachment', () => {
   // copy's run, which no construct of the program's owns.
   it('suppresses the rxm clauses when the rxm view shows a copy and keeps the others', () => {
     expect(
-      linkStatus({
-        state: 'linked',
-        tm: true,
-        instrs: false,
-        lambda: 'shown',
-        focus: true,
-        rxmFocus: true,
-        detached: { ...ON_PROGRAM, rxm: views(1, 'rxm · copy 1') },
-      }),
+      linkStatus(
+        pinned({
+          tm: true,
+          instrs: false,
+          lambda: 'shown',
+          focus: true,
+          rxmFocus: true,
+          detached: { ...ON_PROGRAM, rxm: views(1, 'rxm · copy 1') },
+        }),
+      ),
     ).toBe('rxm view shows a copy — not linked to the program · the machine is here right now')
   })
 
@@ -246,47 +262,48 @@ describe('linkStatus · detachment', () => {
   // and the λ link state off a view of the program, so they are about that view. Every view on a copy suppresses them.
   it('keeps a leg’s clauses while one of its views shows the program, and suppresses them when none does', () => {
     const linked = {
-      state: 'linked',
       tm: true,
       instrs: false,
       lambda: 'shown',
       focus: false,
       rxmFocus: true,
     } as const
-    expect(linkStatus({ ...linked, detached: { ...ON_PROGRAM, rxm: views(2, 'rxm · copy 1') } })).toBe(
+    expect(linkStatus(pinned({ ...linked, detached: { ...ON_PROGRAM, rxm: views(2, 'rxm · copy 1') } }))).toBe(
       'rxm · copy 1 view shows a copy — not linked to the program · the rxm run is here right now · this construct emits no instructions',
     )
-    expect(linkStatus({ ...linked, detached: { ...ON_PROGRAM, rxm: views(2, 'rxm · copy 1', 'rxm · copy 2') } })).toBe(
-      'rxm · copy 1 and rxm · copy 2 views show copies — not linked to the program',
-    )
+    expect(
+      linkStatus(pinned({ ...linked, detached: { ...ON_PROGRAM, rxm: views(2, 'rxm · copy 1', 'rxm · copy 2') } })),
+    ).toBe('rxm · copy 1 and rxm · copy 2 views show copies — not linked to the program')
   })
 
   // A LEG WITH NO VIEW IS NOT DETACHED: there is no binding to read, so its clauses stand.
   it('reads a leg with no view as attached', () => {
     expect(
-      linkStatus({
-        state: 'linked',
-        tm: false,
-        instrs: true,
-        lambda: 'shown',
-        focus: false,
-        rxmFocus: false,
-        detached: { ...ON_PROGRAM, tm: views(0) },
-      }),
+      linkStatus(
+        pinned({
+          tm: false,
+          instrs: true,
+          lambda: 'shown',
+          focus: false,
+          rxmFocus: false,
+          detached: { ...ON_PROGRAM, tm: views(0) },
+        }),
+      ),
     ).toBe('this construct emits no machine states')
   })
 
   it('leaves only the detachment clause when two legs show copies', () => {
     expect(
-      linkStatus({
-        state: 'linked',
-        tm: false,
-        instrs: true,
-        lambda: 'declined',
-        focus: true,
-        rxmFocus: false,
-        detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1'), tm: views(1, 'TM · copy 2') },
-      }),
+      linkStatus(
+        pinned({
+          tm: false,
+          instrs: true,
+          lambda: 'declined',
+          focus: true,
+          rxmFocus: false,
+          detached: { ...ON_PROGRAM, lambda: views(1, 'λ · copy 1'), tm: views(1, 'TM · copy 2') },
+        }),
+      ),
     ).toBe('λ and TM views show copies — not linked to the program')
   })
 })

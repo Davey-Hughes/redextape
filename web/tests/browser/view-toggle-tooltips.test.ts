@@ -4,7 +4,7 @@ import { SHELL, toggle } from './harness'
 
 /**
  * WHAT THE LAST `views` TOGGLE PRESSED SAYS TO A READER WHO DOES NOT HOVER — `app-header.ts`'s `viewToggles` on
- * `index.html`'s markup (`SHELL`), with no app behind it: its `aria-description` is its whole tooltip, so the rxm
+ * the page's markup (`SHELL`), with no app behind it: its `aria-description` is its whole tooltip, so the rxm
  * toggle's says what the view is as well as why a press does nothing.
  */
 describe('the last views toggle pressed', () => {

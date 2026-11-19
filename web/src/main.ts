@@ -94,7 +94,6 @@ import type { Leg, LegProgram, RunReply } from './protocol'
 import { HISTORY_BYTES } from './protocol'
 import { copyLegOf, copyRow, createReadout, type ProgramResult } from './readout'
 import { createReplies, type UnseenViews } from './replies'
-import type { RxmPane } from './rxm-pane'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
 import { freshLeg, type LegReading, legControlState, type SessionLegs, SessionRegistry } from './sessions'
@@ -118,16 +117,17 @@ import {
   STYLE_LABELS,
 } from './skin'
 import { type BarTarget, barTarget, createStepBar } from './step-bar'
-import type { TmPane } from './tm-pane'
 import { createTransport } from './transport'
 import { assertTokenClasses } from './types'
 import { createUnsaved, type Refusal, refusalOf } from './unsaved'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import { HINT_ROWS, HINT_SENTENCE, type ViewKeyAction, wireViewKeys } from './view-keys'
 import {
+  type DisplayLeg,
   defaultFocus,
   defaultWorkspace,
-  type LambdaDisplay,
+  type LegDisplay,
+  legDisplayOf,
   PRESETS,
   parseSwitches,
   parseWorkspace,
@@ -135,12 +135,11 @@ import {
   type Speed,
   type Switches,
   serializeWorkspace,
-  type TmDisplay,
   type Workspace,
-  withDisplay,
+  withLegDisplay,
+  withLegDisplaysKept,
   withPanel,
   withPanelSizes,
-  withTmDisplay,
 } from './workspace'
 
 /**
@@ -1337,13 +1336,10 @@ async function main(): Promise<EditorView> {
       if (closed.size > 0) {
         const without = <T>(by: Readonly<Record<LeafId, T>>): Record<LeafId, T> =>
           Object.fromEntries(Object.entries(by).filter(([leaf]) => !closed.has(leaf)))
-        ws = {
-          ...ws,
-          panels: without(ws.panels),
-          panelSizes: without(ws.panelSizes),
-          display: without(ws.display),
-          tmDisplay: without(ws.tmDisplay),
-        }
+        ws = withLegDisplaysKept(
+          { ...ws, panels: without(ws.panels), panelSizes: without(ws.panelSizes) },
+          (leaf) => !closed.has(leaf),
+        )
         if (closed.has(SOURCE_LEAF)) sourceClosed()
       }
     }
@@ -1376,10 +1372,8 @@ async function main(): Promise<EditorView> {
   const normaliseWorkspace = (): void => {
     const live = liveLeaves(tree, ws.arrangements)
     const panels = Object.fromEntries(Object.entries(ws.panels).filter(([leaf]) => live.has(leaf)))
-    const display = Object.fromEntries(Object.entries(ws.display).filter(([leaf]) => live.has(leaf)))
-    const tmDisplay = Object.fromEntries(Object.entries(ws.tmDisplay).filter(([leaf]) => live.has(leaf)))
     const panelSizes = Object.fromEntries(Object.entries(ws.panelSizes).filter(([leaf]) => live.has(leaf)))
-    ws = { ...ws, focused: focusedLeaf(), panels, panelSizes, display, tmDisplay }
+    ws = withLegDisplaysKept({ ...ws, focused: focusedLeaf(), panels, panelSizes }, (leaf) => live.has(leaf))
   }
 
   const persistWorkspace = (): void => {
@@ -1466,13 +1460,9 @@ async function main(): Promise<EditorView> {
     setPanelSizes: (leaf: LeafId, sizes: Shares) => {
       ws = { ...ws, panelSizes: withPanelSizes(ws.panelSizes, leaf, sizes) }
     },
-    displayOf: (leaf: LeafId) => ws.display[leaf],
-    setDisplay: (leaf: LeafId, d: LambdaDisplay) => {
-      ws = { ...ws, display: withDisplay(ws.display, leaf, d) }
-    },
-    tmDisplayOf: (leaf: LeafId) => ws.tmDisplay[leaf],
-    setTmDisplay: (leaf: LeafId, d: TmDisplay) => {
-      ws = { ...ws, tmDisplay: withTmDisplay(ws.tmDisplay, leaf, d) }
+    displayOf: <K extends DisplayLeg>(leg: K, leaf: LeafId) => legDisplayOf(ws, leg, leaf),
+    setLegDisplay: <K extends DisplayLeg>(leg: K, leaf: LeafId, d: LegDisplay[K]) => {
+      ws = withLegDisplay(ws, leg, leaf, d)
     },
     layoutChanged,
     refused,
@@ -2819,22 +2809,7 @@ async function main(): Promise<EditorView> {
           // page an empty running focus before it renders it; a TM view off the page gets its focus from the
           // `draw()` that shows it. `focusMark` (the CodeMirror decoration) clears itself on `docChanged`,
           // as `linkMark` does.
-          //
-          // **THE TM AND RXM VIEWS' `setLink([])` ARE DIRECT CALLS, AND THEY ARE NEEDED.**
-          // `draw()` never sets either view's link: `setLinkTo` does, and a compile's `setProgram` clears it.
-          // Without them the δ-table's and the listing's `.is-linked` rows would stay painted until the next
-          // compile lands. Every such view, hidden ones too, since a hidden one would show its rows again when
-          // its tab is selected.
-          // `setLink` redraws the table with the old running focus still in it; the `draw()` that
-          // `schedule` causes repaints it without.
-          //
-          // PER-LEG, FANNED OUT THROUGH `panes` — every pane on a leg follows the same app-wide link state,
-          // matching `draw.ts`'s and `link-wiring.ts`'s identical loops. `applyLayout` builds every pane from
-          // the tree's leaves, so a leg can hold more than one, and the collection is the one route every
-          // consumer of this rule shares.
           linkWiring.clearLink()
-          for (const p of panes.of('tm')) (p.pane as TmPane).setLink([], false)
-          for (const p of panes.of('rxm')) (p.pane as RxmPane).setLink([], false)
           compile.schedule(src)
         }),
       ],

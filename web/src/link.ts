@@ -179,9 +179,20 @@ export type Focus = { node: number; claim: 'exact' | 'within' }
  *
  * `origin` IS THE SOURCE VIEW OR A LEG, AND IS TYPED FROM `Leg` RATHER THAN SPELLED OUT, so a new leg can pin
  * without this union being found and widened by hand — and `link-wiring.ts`'s `setLinkTo` takes `Pin['origin']`
- * rather than spelling it a second time.
+ * less `'rxm'` rather than spelling it a second time, so an rxm pin cannot be made without its `pc`.
+ *
+ * `pc` IS THE INSTRUCTION A CLICK ON AN RXM ROW NAMED. `pinAtInstr` is the only code that writes it.
  */
-export type Pin = { node: number; origin: 'source' | Leg }
+export type Pin = { node: number; origin: 'source' | Leg; pc?: number }
+
+/**
+ * The pin a click on instruction `pc` makes, or `null` for an instruction with no owner: one `defunc` minted, or a
+ * `pc` outside the program.
+ */
+export function pinAtInstr(index: LinkIndex, pc: number, origin: Pin['origin']): Pin | null {
+  const node = index.nodeForInstr(pc)
+  return node === null ? null : { node, origin, pc }
+}
 
 /**
  * The source construct the CURRENT β-step belongs to — the source pane's running focus — as a node

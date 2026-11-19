@@ -3,7 +3,8 @@ import { page, userEvent } from 'vitest/browser'
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { RxmPanels } from '../../src/rxm-pane'
 import { RxmPane } from '../../src/rxm-pane'
-import type { RxmProgram } from '../../src/types'
+import { TmPane } from '../../src/tm-pane'
+import type { RxmProgram, TmProgram } from '../../src/types'
 import { boxWord, FACT3, frameOf, listWord, valueWord } from '../node/rxm-fixtures'
 import { controlState, inertEvents, panelOf, until } from './harness'
 
@@ -53,6 +54,17 @@ const lines = (host: HTMLElement, selector: string) =>
 /** A long straight-line program, so the listing has somewhere to scroll: `li r0, #i` 400 times, then `halt`. */
 const LONG: RxmProgram = {
   listing: [...Array.from({ length: 400 }, (_, i) => `li\tr0, #${i}`), 'halt'],
+  labels: [],
+}
+
+/** The least a TM view draws a rule table for: one state, so one row. */
+const ONE_STATE: TmProgram = {
+  states: [{ name: 'q0', accept: true, rules: [], instr: null }],
+  alphabet: ['_'],
+  tapes: 1,
+  width: 4,
+  start: 0,
+  listing: [],
   labels: [],
 }
 
@@ -109,6 +121,48 @@ describe('the rxm listing', () => {
     expect(rowOfPc(host, 301)).toBeDefined()
   })
 
+  it('hands the focus to the listing panel’s toggle when follow current instruction hides itself', async () => {
+    const { host, pane } = mount(LONG)
+    const reattach = panelOf(host, 'listing').querySelector('.table-reattach') as HTMLButtonElement
+    pane.render(frameOf({ pc: 300, next: 300 }), CONTROLS)
+    listing(host).scrollTop = 0
+    await until(() => !reattach.hidden, 'a user scroll to stop following')
+    reattach.focus()
+    expect(document.activeElement).toBe(reattach)
+    await userEvent.keyboard('{Enter}')
+    expect(reattach.hidden).toBe(true)
+    expect(document.activeElement).toBe(panelOf(host, 'listing').querySelector('.panel-toggle'))
+  })
+
+  it('gives two rxm views and two TM views on one page distinct grid cell ids', () => {
+    const first = listing(mount(FACT3).host)
+    const second = listing(mount(FACT3).host)
+    const tmTable = () => {
+      const tmHost = document.createElement('section')
+      tmHost.className = 'pane'
+      tmHost.dataset.kind = 'tm'
+      tmHost.style.height = '600px'
+      document.body.append(tmHost)
+      new TmPane(tmHost, inertEvents()).setProgram(ONE_STATE, ['t'])
+      return tmHost.querySelector('.state-table') as HTMLElement
+    }
+    const table = tmTable()
+    const otherTable = tmTable()
+
+    const cellIds = (grid: HTMLElement) => [...grid.querySelectorAll('[role="gridcell"]')].map((cell) => cell.id)
+    expect(cellIds(first)[0]).toMatch(/^rxm-grid-\d+-0$/)
+    expect(cellIds(second)[0]).toMatch(/^rxm-grid-\d+-0$/)
+    expect(cellIds(table)[0]).toMatch(/^tm-grid-\d+-0$/)
+    expect(cellIds(otherTable)[0]).toMatch(/^tm-grid-\d+-0$/)
+    const all = [first, second, table, otherTable].flatMap(cellIds)
+    expect(new Set(all).size).toBe(all.length)
+    // `aria-activedescendant` is read by id across the whole page, so each grid's must land in that grid.
+    for (const grid of [first, second, table, otherTable]) {
+      const active = document.getElementById(grid.getAttribute('aria-activedescendant') ?? '')
+      expect(active?.closest('[role="grid"]')).toBe(grid)
+    }
+  })
+
   it('links the instruction a real click lands on, from the focus elsewhere, and a label row links nothing', async () => {
     const linkInstr = vi.fn()
     const { host, pane } = mount(FACT3, inertEvents({ linkInstr }))
@@ -156,7 +210,7 @@ describe('the rxm listing', () => {
     pane.render(frameOf({ pc: 0, next: 0 }), CONTROLS)
     expect(rowOfPc(host, 350), 'a redraw of the same step keeps the link in view').toBeDefined()
     // A NEW step whose instruction about to run is the same — a jump to itself — still moved the run: the hold is
-    // keyed on the step (`RxmPane.#listingRows`'s `frame`), not on the followed row, so following brings the
+    // keyed on the step (`ListingPanel.#listingRows`'s `frame`), not on the followed row, so following brings the
     // listing back to the top and the linked rows leave the drawn window.
     pane.render(frameOf({ step: 1, pc: 0, next: 0 }), CONTROLS)
     expect(rowOfPc(host, 0)).toBeDefined()
