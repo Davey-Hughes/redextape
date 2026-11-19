@@ -168,6 +168,32 @@ pub fn reg_str(r: Reg) -> String {
     }
 }
 
+/// A register as a `u32` label: `rr` is 0, `aN` is `1 + 2N` and `rN` is `2 + 2N`, so the two banks
+/// interleave and neither caps the other's indices. `None` when the label would pass `u32::MAX`.
+///
+/// Public because `redextape-native`'s `build_clif` labels each value it reads from or writes to a
+/// register with that register (a Cranelift `ValueLabel` is a `u32`), and a reader names that register
+/// with `label_reg` then `reg_str`, the listing's own spelling, rather than with a second naming scheme.
+#[must_use]
+pub fn reg_label(r: Reg) -> Option<u32> {
+    match r {
+        Reg::Rr => Some(0),
+        Reg::Arg(n) => n.checked_mul(2)?.checked_add(1),
+        Reg::Loc(n) => n.checked_mul(2)?.checked_add(2),
+    }
+}
+
+/// The register `label` names under `reg_label`'s encoding, its inverse: `reg_label(label_reg(l))` is
+/// `Some(l)` for every `l`, so a reader decoding a label has no failure to handle.
+#[must_use]
+pub fn label_reg(label: u32) -> Reg {
+    match label {
+        0 => Reg::Rr,
+        l if l % 2 == 1 => Reg::Arg(l / 2),
+        l => Reg::Loc(l / 2 - 1),
+    }
+}
+
 fn bin_mnemonic(op: BinOp) -> &'static str {
     match op {
         BinOp::Add => "add",
@@ -991,6 +1017,26 @@ mod tests {
     use crate::parser::parse;
     use crate::tm::lower_rxm::lower_rxm;
     use crate::tm::test_fixtures::{arithmetic_program, branch_program, head_of_tail_program};
+
+    #[test]
+    fn registers_round_trip_through_their_labels() {
+        assert_eq!(reg_label(Reg::Rr), Some(0));
+        assert_eq!(reg_label(Reg::Arg(0)), Some(1));
+        assert_eq!(reg_label(Reg::Loc(0)), Some(2));
+        // Each bank's largest labelled index, and the next one, whose label would pass `u32::MAX`.
+        assert_eq!(reg_label(Reg::Arg(2_147_483_647)), Some(u32::MAX));
+        assert_eq!(reg_label(Reg::Arg(2_147_483_648)), None);
+        assert_eq!(reg_label(Reg::Loc(2_147_483_646)), Some(4_294_967_294));
+        assert_eq!(reg_label(Reg::Loc(2_147_483_647)), None);
+        for n in [0, 1, 7, 1_000_000] {
+            for r in [Reg::Rr, Reg::Arg(n), Reg::Loc(n)] {
+                assert_eq!(label_reg(reg_label(r).unwrap()), r);
+            }
+        }
+        for l in (0..=1_000).chain([u32::MAX - 1, u32::MAX]) {
+            assert_eq!(reg_label(label_reg(l)), Some(l), "label {l}");
+        }
+    }
 
     /// A flat `List<Nat>` over L cells spends exactly `3L + 1`: L spine steps, L `Nat` leaves, one `Nil`,
     /// L `Cons` nodes. Asserted as an EQUATION at more than one L, so a constant offset cannot pass it.

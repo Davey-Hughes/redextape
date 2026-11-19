@@ -1,6 +1,6 @@
 # redextape native object-size baseline
 # target: x86_64-unknown-linux-gnu
-# cranelift: 0.137.1
+# cranelift: 0.137.2
 # llvm: 231.0.2
 # regenerate: cargo run --release --example opt_report -p redextape-native --features llvm -- --write-baseline
 # program	backend	opt	bytes

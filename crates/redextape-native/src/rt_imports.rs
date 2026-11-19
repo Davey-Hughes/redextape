@@ -13,13 +13,13 @@ macro_rules! rt_imports {
         /// One runtime import. The order is the order both backends declare them in, which numbers
         /// Cranelift's imports `u0:0`-`u0:10` and orders LLVM's declarations: the snapshots record it.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub(crate) enum RtFn {
+        pub enum RtFn {
             $($variant,)*
         }
 
         impl RtFn {
             /// Every import, in declaration order.
-            pub(crate) const ALL: [RtFn; [$(stringify!($variant)),*].len()] = [$(Self::$variant,)*];
+            pub const ALL: [RtFn; [$(stringify!($variant)),*].len()] = [$(Self::$variant,)*];
 
             /// The symbol it is declared under. It shares `address`'s cfg so that wherever it is
             /// compiled, `address` checks the name against native-rt.
@@ -57,7 +57,8 @@ rt_imports! {
 
 impl RtFn {
     /// How many word (`i64`) parameters follow the leading `*mut Runtime`.
-    pub(crate) fn word_params(self) -> usize {
+    #[must_use]
+    pub fn word_params(self) -> usize {
         match self {
             Self::Cons | Self::BoxSet => 2,
             Self::Head | Self::Tail | Self::IsEmpty | Self::Box | Self::BoxGet => 1,
@@ -66,7 +67,8 @@ impl RtFn {
     }
 
     /// Whether it returns a word: all but `rt_box_set` and `rt_leave`, which return nothing.
-    pub(crate) fn returns_word(self) -> bool {
+    #[must_use]
+    pub fn returns_word(self) -> bool {
         !matches!(self, Self::BoxSet | Self::Leave)
     }
 }

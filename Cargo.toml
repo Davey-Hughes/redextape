@@ -2,6 +2,8 @@
 resolver = "3"
 members = [
     "crates/redextape-cli",
+    "crates/redextape-clif",
+    "crates/redextape-clif-wasm",
     "crates/redextape-core",
     "crates/redextape-grammar-check",
     "crates/redextape-lsp",

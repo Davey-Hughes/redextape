@@ -430,6 +430,16 @@ fn rxm_decline_reason(e: &tm::LowerError) -> String {
     }
 }
 
+/// What the CLIF package builds its leg from: the program the rxm cursor runs, the program's type, which its end
+/// value is decoded by, and the caps `compile` ran the program under. Borrowed, because it exists only to be
+/// serialised on its way to the other wasm module, and `redextape-clif` reads these three fields back by name.
+#[derive(serde::Serialize)]
+pub struct ClifInputRef<'a> {
+    pub program: &'a Program,
+    pub ty: &'a redextape_core::ty::Ty,
+    pub caps: tm::rxm::Caps,
+}
+
 /// How many β-steps apart the λ leg's checkpoints sit: a tree for any past step is rebuilt by replaying
 /// at most this many minus one. Spec §4.2: a whole `fact(4)` run re-reduces in about 13 ms natively,
 /// so 255 steps of it cost well under a millisecond.
@@ -1092,6 +1102,16 @@ impl Session {
     pub fn rxm_value(&self) -> Result<Decoded, SessionError> {
         let leg = self.rxm.as_ref().map_err(|_| SessionError::RxmAbsent)?;
         Ok(leg.value(Some(&self.ty)))
+    }
+
+    /// The rxm leg's program, the program's type and the caps `compile` ran it under, for the CLIF package; `None`
+    /// when the rxm leg is absent, since a program that did not lower has no `Program` to send.
+    ///
+    /// **COMPILE'S CAPS, NOT THE CURSOR'S**, which a raised cap may have moved: the CLIF leg starts at step 0, where
+    /// `rewind_rxm` puts the rxm cursor back under compile's caps.
+    pub fn clif_input(&self) -> Option<ClifInputRef<'_>> {
+        let leg = self.rxm.as_ref().ok()?;
+        Some(ClifInputRef { program: &leg.source, ty: &self.ty, caps: leg.caps })
     }
 
     /// This session's rxm program as `.rxm` text, headed by the program's result type — what *edit a copy*
@@ -3477,6 +3497,34 @@ mod tests {
         assert_eq!(s.rxm_value(), Err(SessionError::RxmAbsent));
         assert_eq!(s.rewind_rxm(), Err(SessionError::RxmAbsent));
         assert!(s.link_index(65_536).rxm_owner.is_empty(), "no program, no owners");
+    }
+
+    /// The CLIF package is handed the program the rxm cursor runs, the program's type and the caps `compile` ran
+    /// it under, read off the leg rather than defaulted, and a program that did not lower hands it nothing.
+    #[test]
+    fn the_clif_input_is_the_program_the_rxm_leg_runs() {
+        use redextape_core::ty::Ty;
+        let fact_src = include_str!("../../../web/src/examples/fact.rxt");
+        let defaults = tm::rxm::DEFAULT_CAPS;
+        let fields = |c: tm::rxm::Caps| (c.steps, c.stack, c.heap, c.mem);
+
+        let fact = Session::compile(fact_src, EncodingKind::Unary).session.expect("compiles");
+        let leg = fact.rxm.as_ref().expect("fact lowers");
+        let input = fact.clif_input().expect("fact has an rxm leg");
+        assert_eq!(*input.program, *leg.source, "the program the rxm cursor runs");
+        assert_eq!(*input.ty, Ty::Nat);
+        assert_eq!(fields(input.caps), fields(defaults));
+
+        let list = Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
+        assert_eq!(list.clif_input().map(|i| i.ty.clone()), Some(Ty::List(Box::new(Ty::Nat))));
+
+        let mut capped = compile_rxm_capped(fact_src, tm::rxm::Caps { steps: 77, ..defaults });
+        capped.raise_rxm_cap(1_000).expect("rxm available");
+        assert_eq!(capped.clif_input().map(|i| i.caps.steps), Some(77), "compile's caps, not the raised cursor's");
+
+        let src = format!("[{}]", (0..2048).map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+        let declined = Session::compile(&src, EncodingKind::Unary).session.expect("a declined leg is still a session");
+        assert!(declined.clif_input().is_none(), "no rxm leg, no program to send");
     }
 
     /// `defunc`'s refusal declines the rxm leg too, in its own words: `t` is both called by name and passed as

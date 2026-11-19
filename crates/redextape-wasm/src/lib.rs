@@ -19,6 +19,7 @@ mod session;
 
 use redextape_core::tm::EncodingKind;
 use redextape_wire::to_value;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -703,6 +704,26 @@ impl Session {
     #[wasm_bindgen(js_name = rxmValue)]
     pub fn rxm_value(&self) -> Result<JsValue, JsValue> {
         to_value(&self.0.rxm_value().map_err(err)?)
+    }
+
+    /// `clifInput()` -> `{ program, ty, caps } | null`: the rxm program, its type and compile's rxm caps, which a
+    /// CLIF session is built from; `null` when the rxm leg is absent.
+    ///
+    /// **NOT THROUGH `to_value`**, whose serializer refuses a `u64` of 2^53 or more, and an `li` can load any
+    /// word. This one writes every `u64` as a `BigInt`, and every `usize` too, since serde writes a `usize` as a
+    /// `u64`. It writes `None` as `null`, `to_value`'s rule, so the boundary still has one rule for `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` only if `serde_wasm_bindgen` cannot marshal the input; not expected, since a `BigInt` holds
+    /// any 64-bit number.
+    #[wasm_bindgen(js_name = clifInput)]
+    pub fn clif_input(&self) -> Result<JsValue, JsValue> {
+        let Some(input) = self.0.clif_input() else { return Ok(JsValue::NULL) };
+        let s = serde_wasm_bindgen::Serializer::new()
+            .serialize_missing_as_null(true)
+            .serialize_large_number_types_as_bigints(true);
+        Ok(input.serialize(&s)?)
     }
 
     /// `rxmText()` -> `string | null`. The rxm program as `.rxm` text, for a copy to seed an `RxmScratch` from;

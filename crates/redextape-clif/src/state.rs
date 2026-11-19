@@ -1,0 +1,151 @@
+//! The frame a view reads between two steps of a CLIF run: where it stands, the running frame's values
+//! with their tags and registers, the call stack, and the heap. Each list is cut to a `ClifWindow`, beside
+//! the length it was cut from, as `RxmState` is cut to an `RxmWindow`.
+
+use cranelift_codegen::data_value::DataValue;
+use cranelift_codegen::ir::{Function, Inst, Value, ValueLabelAssignments};
+use cranelift_interpreter::value::DataValueExt;
+use redextape_core::tm::{label_reg, reg_str};
+use redextape_core::trace::WordTag;
+use redextape_core::viewmodel::{RxmBox, RxmCell, RxmWord, heap_boxes, heap_cells};
+
+use crate::stepper::{Activation, ClifEnd, Stepper, pc_of};
+
+/// An instruction of the run's functions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ClifAt {
+    /// The function's index among the run's functions.
+    pub function: u32,
+    /// The instruction's `Inst` index in that function.
+    pub inst: u32,
+}
+
+/// How much of the run a `ClifState` carries: at most this many of each list.
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+pub struct ClifWindow {
+    pub values: usize,
+    pub frames: usize,
+    pub cells: usize,
+    pub boxes: usize,
+}
+
+/// One set value of the running frame.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ClifValue {
+    /// The value's number, `v4`'s 4.
+    pub value: u32,
+    pub word: RxmWord,
+    /// The rxm registers its value labels name, spelled as the rxm listing spells them, each once in the
+    /// order the labels give them. Empty for a value no label survives on.
+    pub regs: Vec<String>,
+}
+
+/// One step of a CLIF run, cut to a `ClifWindow`.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ClifState {
+    /// Instructions completed, `Stepper::steps_taken`.
+    pub step: u64,
+    /// `Stepper::at`.
+    pub at: ClifAt,
+    /// `Some(at)` while the run can go on, a pause at a cap included, and `None` once it has ended, as
+    /// `RxmState::next` reads.
+    pub next: Option<ClifAt>,
+    /// The rxm pc `at` was lowered from, `None` for an instruction lowered from none.
+    pub pc: Option<u32>,
+    /// The first `ClifWindow::values` of the running frame's set values, in value order.
+    pub values: Vec<ClifValue>,
+    /// How many values the running frame has set, however many `values` shows.
+    pub values_len: usize,
+    /// How many frames the run holds, however many `frames` shows.
+    pub depth: usize,
+    /// The top `ClifWindow::frames` frames, top first, for `RxmState::frames`' reason: each frame's
+    /// instruction, which in a caller is the call it waits on.
+    pub frames: Vec<ClifAt>,
+    /// How many cons cells the heap holds.
+    pub heap_len: usize,
+    /// The newest `ClifWindow::cells` cells, plus each cell a list word in `values` points at, newest
+    /// first, as `RxmState::cells` is chosen from its registers.
+    pub cells: Vec<RxmCell>,
+    /// How many boxes the heap holds.
+    pub box_len: usize,
+    /// The newest `ClifWindow::boxes` boxes, plus each box a box handle in `values` names, newest first.
+    pub boxes: Vec<RxmBox>,
+}
+
+impl Stepper<'_> {
+    /// The instruction about to run, or the one the run ended at: main's `return`, the runtime call a cap
+    /// refused, or the instruction that trapped or could not be stepped. A run that could not start stands
+    /// at instruction 0 of function 0.
+    #[must_use]
+    pub fn at(&self) -> ClifAt {
+        self.frames().last().map_or(ClifAt { function: 0, inst: 0 }, at_of)
+    }
+
+    /// The run between two steps, cut to `window`.
+    #[must_use]
+    pub fn state(&self, window: ClifWindow) -> ClifState {
+        let at = self.at();
+        let running = self.running();
+        let shown: Vec<(Value, &DataValue, WordTag)> = self.values().take(window.values).collect();
+        let named =
+            |tag: WordTag| shown.iter().filter(move |(_, _, t)| *t == tag).filter_map(|(_, held, _)| bits(held));
+        let heap = self.runtime().heap();
+        ClifState {
+            step: self.steps_taken(),
+            at,
+            next: match self.status() {
+                None | Some(ClifEnd::Capped(_)) => Some(at),
+                Some(ClifEnd::Ran(_) | ClifEnd::Fault { .. } | ClifEnd::Trap(_) | ClifEnd::Broken(_)) => None,
+            },
+            pc: running.and_then(|func| pc_of(func, Inst::from_u32(at.inst))),
+            values: shown
+                .iter()
+                .map(|&(value, held, tag)| ClifValue {
+                    value: value.as_u32(),
+                    word: word(held, tag),
+                    regs: running.map_or_default(|func| regs(func, value)),
+                })
+                .collect(),
+            values_len: self.values().count(),
+            depth: self.frames().len(),
+            frames: self.frames().iter().rev().take(window.frames).map(at_of).collect(),
+            heap_len: heap.cells().len(),
+            cells: heap_cells(heap.cells(), &heap.tags().cells, window.cells, named(WordTag::List)),
+            box_len: heap.boxes().len(),
+            boxes: heap_boxes(heap.boxes(), &heap.tags().boxes, window.boxes, named(WordTag::Box)),
+        }
+    }
+}
+
+fn at_of(activation: &Activation) -> ClifAt {
+    ClifAt { function: activation.function, inst: activation.inst.as_u32() }
+}
+
+/// An integer's bits, unsigned, when 64 hold them.
+fn bits(held: &DataValue) -> Option<u64> {
+    u64::try_from(held.clone().into_int_unsigned().ok()?).ok()
+}
+
+/// `held` as the views write a word: an integer's unsigned bits in decimal, and anything else, which no
+/// lowering makes, as Cranelift prints it.
+fn word(held: &DataValue, tag: WordTag) -> RxmWord {
+    match bits(held) {
+        Some(word) => RxmWord::of(word, tag),
+        None => RxmWord { word: held.to_string(), tag },
+    }
+}
+
+/// The registers `value`'s label starts name, each once, in the order they start.
+fn regs(func: &Function, value: Value) -> Vec<String> {
+    let mut regs: Vec<String> = Vec::new();
+    let labels = func.dfg.values_labels.as_ref().and_then(|labels| labels.get(&value));
+    if let Some(ValueLabelAssignments::Starts(starts)) = labels {
+        for start in starts {
+            let reg = reg_str(label_reg(start.label.as_u32()));
+            if !regs.contains(&reg) {
+                regs.push(reg);
+            }
+        }
+    }
+    regs
+}

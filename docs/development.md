@@ -20,7 +20,8 @@
   tag's `sha-` and version tags.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
   `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
-  stage 1 builds `crates/redextape-wasm` and `crates/redextape-lsp-wasm`, stage 2 builds `web/`.
+  stage 1 builds `crates/redextape-wasm`, `crates/redextape-lsp-wasm` and `crates/redextape-clif-wasm`, stage 2
+  builds `web/`.
 - **Advisories** (`.forgejo/workflows/advisories.yml`) — `cargo deny check advisories` against
   `Cargo.lock`, configured by `deny.toml`, on pushes to `main`, a dispatch, Mondays 15:00 UTC, and PRs
   that touch `Cargo.lock`, a manifest or its config. A workflow of its own, outside `gate`, so a newly
@@ -32,12 +33,13 @@
   and the git config the [conventions](conventions.md) depend on.
 - **Web toolchain** — `web/` is a pnpm project (`packageManager: pnpm@11.20.0` in
   `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root
-  `pkg/` and `pkg-lsp/` directories it writes to (gitignored, imported from `web/src/` as
-  `../../pkg/redextape_wasm.js` and, by the LSP worker, `../../pkg-lsp/redextape_lsp_wasm.js`) do
-  not exist — and `tsc` resolves those imports against `.d.ts` files `wasm-pack` has not produced
-  yet either. Run once, in order, before anything else in `web/` works:
+  `pkg/`, `pkg-lsp/` and `pkg-clif/` directories it writes to (gitignored, imported from `web/src/` as
+  `../../pkg/redextape_wasm.js` and, by the LSP worker, `../../pkg-lsp/redextape_lsp_wasm.js`, and by
+  `web/tests/node/clif-package.test.ts` from `pkg-clif/`) do not exist — and `tsc` resolves those
+  imports against `.d.ts` files `wasm-pack` has not produced yet either. Run once, in order, before
+  anything else in `web/` works:
 
-      cd web && pnpm install && pnpm run build:wasm && pnpm run build:lsp-wasm
+      cd web && pnpm install && pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm run build:clif-wasm
 
   Only after that will `pnpm run dev`, `pnpm run typecheck`, or `pnpm test` succeed.
 

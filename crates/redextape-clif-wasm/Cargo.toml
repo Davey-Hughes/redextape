@@ -1,0 +1,23 @@
+[package]
+name = "redextape-clif-wasm"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# `cdylib` alone, what wasm-pack links. An `rlib` would only let a native test or crate link this one, and a
+# `ClifSession` is built from a `JsValue`, which needs a JavaScript engine, so `pkg-clif/` is what is tested.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+redextape-clif = { path = "../redextape-clif" }
+# For `Listing`. `clif` alone, since the JIT's default features do not build for wasm32.
+redextape-native = { path = "../redextape-native", default-features = false, features = ["clif"] }
+redextape-wire = { path = "../redextape-wire" }
+wasm-bindgen = "0.2.130"
+serde-wasm-bindgen = "0.6.5"
+console_error_panic_hook = "0.1.7"

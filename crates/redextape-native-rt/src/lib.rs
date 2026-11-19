@@ -20,7 +20,7 @@
 // production warnings still surface from the other one.
 #![cfg_attr(test, allow(clippy::pedantic))]
 
-use redextape_core::heap::{self, Heap, HeapCapped, HeapFault, NoTags};
+use redextape_core::heap::{self, Heap, HeapCapped, HeapFault, NoTags, Tags};
 use redextape_core::tm::{Caps, RxmOutcome};
 use redextape_core::ty::Ty;
 
@@ -28,11 +28,11 @@ use redextape_core::ty::Ty;
 /// JIT-generated code holds a `*mut Runtime` for the duration of a run and calls the `rt_*` host
 /// functions below for every heap/box operation and every cap check, mirroring the rxm interpreter's
 /// machine state (`trace::RxmCursor`) one-for-one (`heap`/`steps`/`caps` are the same fields, `heap`
-/// with no tags; `depth` plays the role the cursor's `stack().len()` plays for the stack cap, without
-/// needing the actual frame data — the JIT-generated code keeps locals on the native stack instead of
-/// a `Vec<RxmFrame>`).
-pub struct Runtime {
-    heap: Heap<NoTags>,
+/// with the tags `T` records, none by default; `depth` plays the role the cursor's `stack().len()`
+/// plays for the stack cap, without needing the actual frame data — the JIT-generated code keeps
+/// locals on the native stack instead of a `Vec<RxmFrame>`).
+pub struct Runtime<T: Tags = NoTags> {
+    heap: Heap<T>,
     pub steps: u64,
     pub depth: u64,
     pub caps: Caps,
@@ -42,28 +42,44 @@ pub struct Runtime {
     /// worst-case frames fit in the run thread's reserved stack (see `redextape_native::shared::native_depth_cap`).
     /// This guarantees the depth cap always trips *before* the native stack overflows, for any
     /// program — no process abort. `Runtime::new` defaults it to `caps.stack` (the depth-only bound)
-    /// for callers with no frame-size knowledge (e.g. this module's own unit tests below).
+    /// for callers whose frames are not on the host stack.
     pub depth_cap: u64,
     pub fault: Option<String>,
     pub hit_cap: bool,
 }
 
-impl Runtime {
-    /// A runtime whose depth cap is just `caps.stack` (no frame-size awareness). Used by the
-    /// `rt_*` unit tests; the JIT driver uses `with_depth_cap` instead.
+/// The call that tripped a cap, which `Runtime::raise_cap` undoes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tripped {
+    /// `tick`, past `caps.steps`.
+    Tick,
+    /// `enter`, past `depth_cap`.
+    Enter,
+    /// `cons` or `new_box`, refused at `caps.heap`.
+    Alloc,
+}
+
+impl<T: Tags + Default> Runtime<T> {
+    /// A runtime whose depth cap is just `caps.stack`, for a caller whose frames are not on the host
+    /// stack and so need no frame-size bound; a driver of compiled code uses `with_depth_cap` instead.
     #[must_use]
-    pub fn new(caps: Caps) -> Runtime {
-        Runtime::with_depth_cap(caps, caps.stack)
+    pub fn new(caps: Caps) -> Self {
+        Self::with_depth_cap(caps, caps.stack)
     }
 
     /// A runtime whose recursion-depth limit is `depth_cap` — the frame-size-aware
     /// `min(caps.stack, safe_depth)` the JIT backend computes so `rt_enter` trips before the native
     /// stack is exhausted.
     #[must_use]
-    pub fn with_depth_cap(caps: Caps, depth_cap: u64) -> Runtime {
-        Runtime { heap: Heap::default(), steps: 0, depth: 0, caps, depth_cap, fault: None, hit_cap: false }
+    pub fn with_depth_cap(caps: Caps, depth_cap: u64) -> Self {
+        Self { heap: Heap::default(), steps: 0, depth: 0, caps, depth_cap, fault: None, hit_cap: false }
     }
+}
 
+/// The calls the `rt_*` functions make, one each, for a caller that runs a program without them.
+/// `cons`, `new_box` and `box_set` take each word with its tag; `head`, `tail` and `box_get` return
+/// the bare word, as the `rt_*` functions do, and its tag is read from `heap()`.
+impl<T: Tags> Runtime<T> {
     /// Once a fault or a cap trip has been recorded, every further faultable op is a no-op
     /// (returning `0`): the JIT-generated code branches out on `fault`/`hit_cap` after the call
     /// that set it, but may still be mid-block (e.g. an already-scheduled sibling op) before that
@@ -80,72 +96,72 @@ impl Runtime {
     }
 
     #[inline]
-    fn cons(&mut self, h: u64, t: u64) -> u64 {
+    pub fn cons(&mut self, h: (u64, T::Word), t: (u64, T::Word)) -> u64 {
         if self.stopped() {
             return 0;
         }
-        self.heap.cons(self.caps.heap, (h, ()), (t, ())).unwrap_or_else(|HeapCapped| {
+        self.heap.cons(self.caps.heap, h, t).unwrap_or_else(|HeapCapped| {
             self.hit_cap = true;
             0
         })
     }
 
     #[inline]
-    fn head(&mut self, p: u64) -> u64 {
+    pub fn head(&mut self, p: u64) -> u64 {
         if self.stopped() {
             return 0;
         }
         match self.heap.head(p) {
-            Ok((h, ())) => h,
+            Ok((h, _)) => h,
             Err(f) => self.latch(f),
         }
     }
 
     #[inline]
-    fn tail(&mut self, p: u64) -> u64 {
+    pub fn tail(&mut self, p: u64) -> u64 {
         if self.stopped() {
             return 0;
         }
         match self.heap.tail(p) {
-            Ok((t, ())) => t,
+            Ok((t, _)) => t,
             Err(f) => self.latch(f),
         }
     }
 
     #[inline]
-    fn new_box(&mut self, v: u64) -> u64 {
+    pub fn new_box(&mut self, v: (u64, T::Word)) -> u64 {
         if self.stopped() {
             return 0;
         }
-        self.heap.new_box(self.caps.heap, (v, ())).unwrap_or_else(|HeapCapped| {
+        self.heap.new_box(self.caps.heap, v).unwrap_or_else(|HeapCapped| {
             self.hit_cap = true;
             0
         })
     }
 
     #[inline]
-    fn box_get(&mut self, p: u64) -> u64 {
+    pub fn box_get(&mut self, p: u64) -> u64 {
         if self.stopped() {
             return 0;
         }
         match self.heap.box_get(p) {
-            Ok((v, ())) => v,
+            Ok((v, _)) => v,
             Err(f) => self.latch(f),
         }
     }
 
     #[inline]
-    fn box_set(&mut self, p: u64, v: u64) {
+    pub fn box_set(&mut self, p: u64, v: (u64, T::Word)) {
         if self.stopped() {
             return;
         }
-        if let Err(f) = self.heap.box_set(p, (v, ())) {
+        if let Err(f) = self.heap.box_set(p, v) {
             self.latch(f);
         }
     }
 
     #[inline]
-    fn tick(&mut self) -> u64 {
+    pub fn tick(&mut self) -> u64 {
         // If a fault (or an earlier cap) has already latched, divert immediately *without* touching
         // `hit_cap`. Otherwise a back-edge reached after a callee faulted would keep ticking `steps`
         // and eventually set `hit_cap`, and the driver (which checks `hit_cap` before `fault`) would
@@ -163,7 +179,7 @@ impl Runtime {
     }
 
     #[inline]
-    fn enter(&mut self) -> u64 {
+    pub fn enter(&mut self) -> u64 {
         // As in `tick`: once stopped, divert without setting `hit_cap`, so a `Call` reached after a
         // callee faulted cannot mask the latched `fault` as a stack-cap `HitCap`.
         if self.stopped() {
@@ -178,13 +194,37 @@ impl Runtime {
     }
 
     #[inline]
-    fn leave(&mut self) {
+    pub fn leave(&mut self) {
         self.depth = self.depth.saturating_sub(1);
     }
 
     #[inline]
-    fn faulted(&self) -> u64 {
+    #[must_use]
+    pub fn faulted(&self) -> u64 {
         u64::from(self.stopped())
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn heap(&self) -> &Heap<T> {
+        &self.heap
+    }
+
+    /// Install `caps`, raised past a cap stop, so the caller can repeat the call that tripped it. While
+    /// `hit_cap` is set, the count that call made is undone, so the repeat does not count it twice (a
+    /// refused allocation made none), and the stop is cleared. `depth_cap` becomes `caps.stack`, as
+    /// `new` sets it: a runtime from `with_depth_cap` loses its frame-size bound. A latched fault stays.
+    pub fn raise_cap(&mut self, caps: Caps, tripped: Tripped) {
+        if self.hit_cap {
+            match tripped {
+                Tripped::Tick => self.steps = self.steps.saturating_sub(1),
+                Tripped::Enter => self.depth = self.depth.saturating_sub(1),
+                Tripped::Alloc => {}
+            }
+            self.hit_cap = false;
+        }
+        self.caps = caps;
+        self.depth_cap = caps.stack;
     }
 
     /// Finish a run: pair the register-`rr` result word with the heap needed to decode it,
@@ -203,7 +243,7 @@ impl Runtime {
 /// pointer the JIT-generated code was handed for this run).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
-    unsafe { &mut *rt }.cons(h, t)
+    unsafe { &mut *rt }.cons((h, ()), (t, ()))
 }
 
 /// `rd <- head(rl)`: the cell's head field. Nil latches `HeadOfEmpty` and a pointer past the last
@@ -243,7 +283,7 @@ pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
-    unsafe { &mut *rt }.new_box(v)
+    unsafe { &mut *rt }.new_box((v, ()))
 }
 
 /// `rd <- box_get(rb)`: the box's word. Handle `0` latches `BoxGetOfNull` and a handle past the last
@@ -263,7 +303,7 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
-    unsafe { &mut *rt }.box_set(p, v);
+    unsafe { &mut *rt }.box_set(p, (v, ()));
 }
 
 /// Advance the step counter by one, mirroring the rxm interpreter's per-instruction step-cap check
@@ -492,7 +532,9 @@ pub unsafe extern "C" fn rt_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use redextape_core::heap::VecTags;
     use redextape_core::tm::DEFAULT_CAPS;
+    use redextape_core::trace::WordTag;
 
     fn rt() -> Runtime {
         Runtime::new(DEFAULT_CAPS)
@@ -620,6 +662,68 @@ mod tests {
         assert_eq!(unsafe { rt_enter(&mut r2) }, 0);
         assert_eq!(unsafe { rt_enter(&mut r2) }, 0);
         assert_eq!(unsafe { rt_enter(&mut r2) }, 1); // 3rd enter trips stack=2
+    }
+
+    #[test]
+    fn a_raised_step_cap_repeats_the_tick_that_tripped() {
+        let mut r = Runtime::<NoTags>::new(Caps { steps: 3, ..DEFAULT_CAPS });
+        for _ in 0..3 {
+            assert_eq!(r.tick(), 0);
+        }
+        assert_eq!(r.tick(), 1);
+        r.raise_cap(Caps { steps: 4, ..DEFAULT_CAPS }, Tripped::Tick);
+        assert_eq!((r.steps, r.hit_cap), (3, false));
+        assert_eq!(r.tick(), 0);
+        assert_eq!(r.steps, 4);
+        assert_eq!(r.tick(), 1);
+    }
+
+    #[test]
+    fn a_raised_stack_cap_repeats_the_enter_that_tripped() {
+        let mut r = Runtime::<NoTags>::new(Caps { stack: 2, ..DEFAULT_CAPS });
+        assert_eq!([r.enter(), r.enter(), r.enter()], [0, 0, 1]);
+        assert_eq!(r.depth, 3);
+        r.raise_cap(Caps { stack: 3, ..DEFAULT_CAPS }, Tripped::Enter);
+        assert_eq!((r.depth, r.depth_cap), (2, 3));
+        assert_eq!(r.enter(), 0);
+        assert_eq!(r.enter(), 1);
+    }
+
+    #[test]
+    fn a_raised_heap_cap_repeats_the_refused_allocation() {
+        let mut r = Runtime::<NoTags>::new(Caps { heap: 1, ..DEFAULT_CAPS });
+        assert_eq!(r.cons((7, ()), (0, ())), 1);
+        assert_eq!(r.cons((8, ()), (0, ())), 0);
+        assert!(r.hit_cap);
+        r.raise_cap(Caps { heap: 2, ..DEFAULT_CAPS }, Tripped::Alloc);
+        assert_eq!(r.heap().cells().len(), 1);
+        assert_eq!(r.cons((8, ()), (0, ())), 2);
+    }
+
+    #[test]
+    fn raising_a_cap_that_did_not_trip_undoes_nothing() {
+        let mut r = Runtime::<NoTags>::new(DEFAULT_CAPS);
+        assert_eq!([r.tick(), r.tick()], [0, 0]);
+        r.raise_cap(DEFAULT_CAPS, Tripped::Tick);
+        assert_eq!(r.steps, 2);
+
+        let mut r = Runtime::<NoTags>::new(DEFAULT_CAPS);
+        assert_eq!(r.head(0), 0);
+        r.raise_cap(DEFAULT_CAPS, Tripped::Tick);
+        assert_eq!(r.fault.as_deref(), Some("head of empty list"));
+    }
+
+    #[test]
+    fn a_tagged_heap_keeps_each_words_tag() {
+        let mut r = Runtime::<VecTags<WordTag>>::new(DEFAULT_CAPS);
+        assert_eq!(r.cons((7, WordTag::Value), (0, WordTag::List)), 1);
+        assert_eq!(r.heap().tags().cells, [(WordTag::Value, WordTag::List)]);
+        assert_eq!(r.new_box((1, WordTag::List)), 1);
+        assert_eq!(r.heap().tags().boxes, [WordTag::List]);
+        r.box_set(1, (5, WordTag::Value));
+        assert_eq!(r.heap().tags().boxes, [WordTag::Value]);
+        assert_eq!(r.head(1), 7);
+        assert_eq!(r.heap().head(1), Ok((7, WordTag::Value)));
     }
 
     #[test]

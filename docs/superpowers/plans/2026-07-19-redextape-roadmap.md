@@ -38113,3 +38113,296 @@ The node tier at `ed94dd9` passed 1612 tests in 78 files.
 | 2, 2, 2 | both legs' new cases failing under the three `workspace.ts` sabotages | `grep -c 'FAIL .*stores no key' $R/logs/22-sab-fix1-removed-final.log; grep -c 'FAIL .*through a prune' $R/logs/23-sab-fix1-in-helper-final.log; grep -c 'FAIL .*stores no key' $R/logs/26-sab-fix1-sibling-dropped-final.log` |
 | 1, 1, 2 | lines printing each quoted assertion, vitest printing an identical failure once | `grep -c 'no key is written for that id:' $R/logs/22-sab-fix1-removed-final.log; grep -c 'the open view keeps its setting:' $R/logs/23-sab-fix1-in-helper-final.log; grep -c 'the sibling stores as ever:' $R/logs/26-sab-fix1-sibling-dropped-final.log` |
 | 1, 1, 1, 1 | the browser case's quoted assertions | `grep -c 'the new program holds no link:' $R/logs/33-sab-link-not-cleared.log; grep -c 'the new program holds no focus:' $R/logs/34-sab-focus-not-cleared.log; grep -c 'the link is drawn:' $R/logs/35-sab-link-never-drawn.log; grep -c 'the focus is drawn:' $R/logs/36-sab-focus-never-drawn.log` |
+
+#### CLIF VIEW PR 1: THE PACKAGE, NO UI (2026-11-19, branch `clif-view`, `2cf0de1..fa6a220`, 18 commits, plus this entry and the commits that correct it)
+
+**Spec §7.1** (`docs/superpowers/specs/2026-11-18-clif-view-design.md`): the CLIF view's first pull request, which lands
+§5 in full with the build, CI and licence wiring, and adds no UI. The plan is
+`docs/superpowers/plans/2026-11-19-clif-view-pr1-package.md`, committed as `28f6250`, the range's first commit. Its 13
+tasks ran one subagent each, in the order 1 to 8, 10, 9, 11, 12, 13: Task 9's `ClifInput` deserialises `Ty`, whose serde
+derive is Task 10's. Task 12 measured and committed nothing. The whole-branch review's fixes are `0d2b274` to `4aaf6c2`,
+and `fa6a220`, the last code commit, corrects a doc comment after them. Task 13's comment budget had nothing to write.
+No view changes; `web/src/third-party-licences.json` gains 27 entries for the crates `pkg-clif/` bundles. The lane's
+record is `~/temp/redextape-clif-view-record/`, `$R` below. Its task briefs, reports and reviews are in `$R/sdd/`, and
+Task 12's figures in `$R/measurements.md`.
+
+##### WHAT CHANGED
+
+**Cranelift 0.137.2 (§5.1), `589fbce`.** Every `cranelift-*` requirement in `crates/redextape-native/Cargo.toml` moves
+from 0.137 to 0.137.2, the version `cranelift-interpreter` is published at. The lock moves the 16 `cranelift-*` crates,
+and `wasmtime-internal-core` and `wasmtime-internal-jit-icache-coherence` from 50.0.1 to 50.0.2. No `.clif`, `.ll` or
+`.opt.ll` snapshot changed, and the x86-64 size baseline changed only its `# cranelift:` line.
+
+**Value labels (§5.2), `669c169`.** Core's `tm::rxm` gains `reg_label` and `label_reg` beside `reg_str`: `rr` is 0,
+`a<n>` is 1 + 2n and `r<n>` is 2 + 2n. `build_clif` alone calls `collect_debug_info`, and codegen labels a value where
+`read_reg`, `write_reg` and the prologue read or define a register. A test holds that the module paths collect none.
+
+**The optimised listing without an ISA (§5.3), `c96ece8`.** `build_listing(prog, Listing)` in `redextape-native` under
+`clif`: `AsBuilt` is `build_clif` under `isa_free_config()`, and `Optimised` runs `Context::optimize`'s steps on each
+function with plain `Flags` that set only `opt_level = speed`. `target-lexicon` 0.13.6 joins under `clif` (the lock had
+0.13.5). A test holds both listings equal to the snapshot sections for all 72 corpus programs, the optimised one to
+both targets' `speed: optimised`.
+
+**One runtime (§5.4), `5be46f9`.** native-rt's `Runtime<T: Tags = NoTags>` makes its methods public. `cons`, `new_box`
+and `box_set` take `(word, tag)` pairs, the reads still return the bare word, and `heap()` gives the heap with its tags.
+`raise_cap(caps, Tripped)` undoes the tripping call's own count and clears the stop. The disassembled `rt_*` bodies in
+native-rt's staticlib, 12 symbols over 949 lines, are identical before and after.
+
+**The stepper (§5.5), `7cff098`.** A new rlib, `crates/redextape-clif`. `Stepper` runs one CLIF instruction at a time
+with `cranelift_interpreter::step::step`, keeps its own frames, and answers the 11 runtime imports through
+`Runtime<VecTags<WordTag>>`, telling them apart by `RtFn::ALL`. A run ends `Ran`, `Fault` (at the pc of the call that
+faulted), `Capped`, `Trap` or `Broken`. `tests/agreement.rs` holds its end equal to the JIT's (`compile_and_run` at O0)
+in both listings: all 72 snapshot programs at tight caps, the 67 that are not `measure-*` at default caps, and 64 of the
+native oracle's random programs. The slow tier runs the `measure-*` programs at default caps.
+
+**The frame (§5.5), `8715d8c`.** `Stepper::state` gives a `ClifState`: the frame's values with the registers their
+labels name and their tags, the call stack, and the heap's cells and boxes. The tag rule is written once, beside the
+stepper's value tracking. `RxmState::window`'s cell and box code moves into core's `heap_cells` and `heap_boxes`, which
+both legs call.
+
+**Caps and frame memory (§5.4, §5.5), `bfe305c`.** A call that would take the frames calls have pushed past `caps.mem`
+stops the run at `Capped(Mem)` before it pushes, counting `FRAME_BYTES_PER_VALUE`, 33 B, per value. A cap stop pauses
+at the call that tripped it, and `raise_caps` continues it: the continued run reaches the end, at the step, that a
+fresh run under the raised caps reaches.
+
+**Listing rows (§5.5), `2d29f04`.** `listing(funcs, names)` gives a `ClifListing` whose rows come from a `FuncWriter`
+that hands each line to Cranelift's `PlainWriter`. Each row has its kind (function, declaration, blank, block,
+instruction, alias or close), its indent, its pc in decimal and, for an instruction, its `ClifAt`. The rows joined, each
+pc put back as `@xxxx`, equal `func.display()` for every corpus program in both listings.
+
+**The `Program` crossing (§5.6), `fd06944` and `ea8ba85`.** `Ty` derives serde under core's `serde` feature, and
+`pkg/`'s session gains `clifInput()`: the program the rxm leg runs, its type and compile's caps, with numbers past 2^53
+as `BigInt`, or `null` when the rxm leg declined. `ea8ba85` writes `None` as `null`, as `redextape_wire::to_value`
+does.
+
+**The leg (§5.5), `2ea8669`.** `ClifLeg` has `RxmLeg`'s shape: `new` builds the listing and opens a cursor and a scout,
+`find_end(budget)` runs the scout in chunks, and `status`, `rewind`, `step`, `state`, `value`, `raise_cap` and
+`listing` serve the view. The end value decodes with the rxm leg's decoder, `tm::decode_rxm_ty`. `self_cell` 1.3.0
+lets the leg own the functions its steppers borrow.
+
+**The package (§6's build wiring), `f1dcecb` and `28ae00c`.** A new cdylib, `crates/redextape-clif-wasm`, exports
+`ClifSession` into `pkg-clif/`, built by `pnpm run build:clif-wasm` beside `pkg-lsp/`. The wiring: the workspace
+members, `.gitignore`, `web/package.json`'s `build`, the Dockerfile's first two stages, CI's `web` job, a wasm32 row in
+`scripts/check-all.sh`, the comment budget, `.pre-commit-config.yaml`, `docs/development.md` and `docs/architecture.md`.
+`web/scripts/licences.ts` reads `pkg-clif/` as a third build. `cranelift-assembler-x64`, `cranelift-bitset` and
+`wasmtime-internal-core` publish no licence file, so the Apache-2.0 WITH LLVM-exception text their siblings ship is
+committed once, as `web/scripts/crate-licences/wasmtime/LICENSE`, and mapped to those three.
+`web/tests/node/clif-package.test.ts` runs the real wasm32 build in node: fact's value and steps in both listings,
+fact's listings equal to its snapshot sections, `head(nil)`'s fault, a word past 2^53 crossing from `pkg/`, the two
+errors `new` throws, and the `null` input. `28ae00c` corrects that test's header.
+
+**The whole-branch review's fixes, `0d2b274` to `4aaf6c2`.** The leg's `total_steps` gives the cursor's steps once the
+cursor has ended at any end but a pause, so a worker that never sends the scout ahead still learns the run's length.
+`stored_tag` asks `Runtime::faulted` whether the run has stopped instead of restating native-rt's rule, and a const
+assert holds a frame value at 33 B on wasm32 too. `redextape-clif-wasm` builds as a cdylib alone, and the licences
+generator throws when a crate its `CRATE_LICENCES` map names ships a licence file of its own. New tests read
+`partition`'s names off the leg's listing and read the word past 2^53 back out of `state()` in node. `fa6a220` makes
+`ClifLeg::status`'s doc say what the `total_steps` field's doc says.
+
+##### DECISIONS
+
+**Q1, answered by the user on 2026-11-19: frame memory counts bytes.** The rxm cursor's `caps.mem` counts words; the
+stepper holds the bytes of its pushed frames to it.
+
+**The plan's departures from the brief** (`$R/plan-brief.md`):
+
+| The brief says | PR 1 does | Why |
+|---|---|---|
+| `raise_cap(&mut self, caps, tripped: RtFn)` | `raise_cap(&mut self, caps: Caps, tripped: Tripped)`, with native-rt's own `Tripped { Tick, Enter, Alloc }`; the stepper maps `RtFn` to it | `RtFn` lives in `redextape-native`, which depends on native-rt |
+| the methods the `rt_*` wrap become public, with tags | `cons`, `new_box` and `box_set` take `(word, tag)` pairs; `head`, `tail` and `box_get` return the bare word, and the stepper reads a read's tag from `heap()` | in the probe, reads returning pairs changed the compiled `rt_head`, `rt_tail` and `rt_box_get`; bare-word reads left all 12 `rt_*` bodies identical |
+| frame memory "32 B x num_values per frame" | 33 B per value, `size_of::<Option<DataValue>>() + size_of::<Option<WordTag>>()`; only frames a call pushed count, never main's | the stepper keeps a tag-or-unset byte per value; rxm's `caps.mem` counts saved frames, not the running one |
+| JIT agreement at default caps over every corpus program | the five `measure-*` programs at default caps run in the slow tier, the rest in the fast tier | in the probe's dev profile the default-caps tally took 58.0 s, 41.5 s of it `measure-loop1000000` |
+
+**Rulings while it ran** (`$R/progress.md`): Task 10 ran before Task 9; the licence text above for the three crates
+with none; `clif-package.test.ts` sends its word past 2^53 as `{ let mut x = 1; let x = 18446744073709551615; x + 1 }`,
+because `pkg/`'s compile aborts on the plain `18446744073709551615 + 1`; §7's Rust tests read as below; and
+`snapshots/llvm-version.txt` stays as `main` has it. The last three are under WHAT THIS DID NOT CLOSE.
+
+##### SPEED AND SIZE
+
+Task 12's figures, `$R/measurements.md`, taken at `28ae00c`, before the review's fixes, with rustc 1.100.0, wasm-pack
+0.15.0 (CI and the Dockerfile pin 0.15.1), wasm-opt 130, wasm-bindgen 0.2.130 and node v26.13.1. **The machine was never
+quiet**: the timed passes ran at a one-minute load average of 43.69 to 55.54, with other lanes' builds and tests at full
+CPU. The sizes, the step counts and the CLIF-to-rxm ratios are the firm figures. **The absolute steps per second were
+taken under that load**: a CLIF median moved by up to 1.32x between the two passes, an rxm median by up to 3.3x.
+
+**`pkg-clif/` at `28ae00c`: 1,256,487 B raw, 391,100 B gzip -9**, 2.6 times the spike's ~150 KB. By retained size, from
+twiggy's dominator tree on a named twin that is byte-identical to the shipped file without `-g` (`$R/twiggy.txt`):
+
+| Item | Retained | Share |
+|---|---:|---:|
+| `redextape_clif::leg::ClifLeg::new`, with `build_listing`, the CLIF frontend, `partition` and the listing writer inlined | 745,303 B | 59.3% |
+| within it, the e-graph optimiser, `cranelift_codegen::egraph::OptimizeCtx::insert_pure_enode`, which only the optimised listing reaches | 325,622 B | 25.9% |
+| `redextape_clif::stepper::Stepper::step`, with the interpreter's `step` inlined | 193,517 B | 15.4% |
+| the indirect-call table (`fmt` impls, the interpreter's `State`) | 99,269 B | 7.9% |
+| within `ClifLeg::new`, the verifier, `cranelift_codegen::verifier::verify_context`: plain `Flags` leave `enable_verifier` at its default, on | 64,267 B | 5.1% |
+
+The gate's `build:clif-wasm` at `4aaf6c2`, after the review's fixes, gives 1,256,751 B raw and 391,404 B gzip -9: 264 B
+and 304 B more than Task 12's figures.
+
+**`pkg/`: +7,129 B raw, +2,806 B gzip -9.** At `2cf0de1` 910,169 B raw and 321,534 B gzip; at `28ae00c` 917,298 B and
+324,340 B. Named twins of both builds account for the whole raw growth: the §5.6 export +6,518 B (the `clifInput` shim
++5,219, `Ty`'s and `Reg`'s `Serialize` +1,047, the rest +252), code inlining reshaped around it +605, data segments
++224, and Task 6's `heap_cells` and `heap_boxes` move −218. The gzip growth cannot be split by item.
+
+**`cargo tree -p redextape-wasm --target wasm32-unknown-unknown -e normal` names no `cranelift-*` crate**: 0 lines,
+where the same command for `redextape-clif-wasm` names 15.
+
+**Steps per second**, on `measure::CORPUS`'s three longest-running programs at `DEFAULT_CAPS`, construction excluded,
+the median of three runs: wasm is `findEnd(1_000_000)` in node, native the release build's `Stepper::run`. Pass 1, then
+pass 2 after the slash:
+
+| Program | Listing | Steps | Wasm, M steps/s | Native, M steps/s |
+|---|---|---:|---:|---:|
+| `loop1000000` | as built | 29,000,030 | 11.21 / 8.49 | 10.75 / 12.37 |
+| `loop1000000` | optimised | 24,000,016 | 11.12 / 11.68 | 11.84 / 11.64 |
+| `sum30000` | as built | 1,140,037 | 7.29 / 9.62 | 11.21 / 9.82 |
+| `sum30000` | optimised | 810,023 | 8.07 / 9.59 | 12.30 / 9.83 |
+| `map30000` | as built | 3,780,084 | 9.20 / 9.93 | 12.99 / 11.67 |
+| `map30000` | optimised | 2,700,051 | 10.51 / 10.53 | 11.58 / 12.88 |
+
+About 7 to 13 M steps/s, wasm and native alike within the noise. The probe timed the native stepper at about 21 M
+steps/s on `measure-loop1000000`, before Tasks 6 and 7 added tags, set tracking and frame memory; whether the load or
+that work halved it was not isolated.
+
+**Run-ahead in wasm, the CLIF leg against the rxm leg** (§5.5). The rxm leg's is `RxmLeg::run`, timed as
+`rxmScratch(session.rxmText())`; the CLIF leg's is construction plus `findEnd` to the end. Pass 1 medians, the ratios
+taken from the unrounded medians:
+
+| Program | rxm steps, end | rxm leg | CLIF as built | CLIF optimised | CLIF / rxm, as built and optimised |
+|---|---|---:|---:|---:|---:|
+| `loop1000000` | 5,000,000, steps cap | 0.033 s | 2.588 s | 2.171 s | 78x, 66x |
+| `sum30000` | 420,013, halted | 0.006 s | 0.158 s | 0.101 s | 24x, 16x |
+| `map30000` | 1,440,030, halted | 0.017 s | 0.412 s | 0.258 s | 24x, 15x |
+
+Pass 2 gives 16 to 31 times. In pass 1 the rxm cursor runs 65 to 151 M instructions/s in wasm and the CLIF stepper
+about 10 M, and a CLIF run takes 1.9 to 2.7 times the rxm leg's steps.
+
+**The frame-memory list is `measure-box30000` alone** (`FRAME_MEMORY_LIST` in
+`crates/redextape-clif/tests/common/mod.rs`). At default caps it stops at `Capped(Mem)` in both listings where the JIT
+runs it to its end, and the slow tier holds that. The program nearest the cap is `measure-map30000`, whose optimised
+frames peak at 60,392,013 B, 94% of `caps.mem`'s 64,000,000 (the plan's Q1, from the probe).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **§6 apart from its build wiring is PR 2**, with §8's checks that need it: no fetch without intent, the recording,
+  the links and the hot paths.
+- **TypeScript bindings for the CLIF types** (`ClifListing`, `ClifState`, `ClifStatus` and the rest) are not generated.
+- **Whether the CLIF leg reports its end at compile or when the recording reaches it** is now decidable from the speed:
+  its run-ahead is 15 to 78 times the rxm leg's in wasm. The leg reports its length once the cursor reaches the end, and
+  a chunked scout finds it sooner; PR 2 chooses how far the worker runs ahead.
+- **`pkg-clif/` is 391,100 B gzip (391,404 B at `4aaf6c2`) against the spike's ~150 KB.** `ClifLeg::new` retains 59%,
+  of it the e-graph optimiser's `insert_pure_enode` 26%; `Stepper::step` 15%; the verifier 5%, on under plain `Flags`.
+- **At default caps `loop1000000` ends `Unfinished` in the rxm leg but runs to its end in the CLIF leg**, whose steps
+  cap counts `rt_tick` calls as the JIT does. So the CLIF leg's run-ahead is bounded only by the tick cap: a loop of
+  this shape that reaches 5,000,000 ticks would take about 145 M CLIF steps as built, some 13 s in wasm at 11 M
+  steps/s. That is an extrapolation from this program, not a measurement.
+- **A number literal of 33,554,431 (2^25 − 1) or more aborts `pkg/`'s compile on `main`**: `33554431 + 1` throws
+  `RuntimeError: unreachable` in node. The λ backend is the likely cause, not traced. It needs a separate fix.
+- **No Rust browser-tier test.** Spec §7's "tests in Rust (native and wasm32)" is met by the wasm32 `cargo check` rows
+  and the node test, which runs the real wasm32 build.
+- **`snapshots/llvm-version.txt` records 23.1.4 while this machine has LLVM 23.1.5**, under which every `.ll` and
+  `.opt.ll` snapshot is identical. Updating it is a change for `main`.
+- **Tests call `run(u64::MAX)` in 14 places**, so a regression that never ends a run hangs them instead of failing:
+  nothing times a test out.
+- **`pkg-clif/` exports native-rt's 12 `rt_*` symbols**, harmless but unused. Gating them needs a change to native-rt's
+  build outside this PR, a follow-up feature gate.
+- **For PR 2: a build failure crosses to the page as `LowerError`'s `Debug` text**, and the Task 6 review's minor 3:
+  after a fault, `cons` and `new_box` give a 0 tagged `List` or `Box` while reads in the same state are tagged `Value`,
+  so a stopped run's state can show a list-tagged 0 (`$R/sdd/task-6-review-7cff098..8715d8c.md`).
+- **For PR 2: if the scout never runs, `rewind()` forgets the length the cursor found**: `total_steps` goes from
+  `Some(n)` back to `None`. The worker must keep it or run the scout.
+- **The `unused dependency redextape-native-rt` manifest warning** under clippy config D, `redextape-native` with no
+  default features, predates this branch.
+- **The slow tier's release build warns of an unused import** in `crates/redextape-core/src/tm/encoding/binary.rs`, a
+  file this branch does not change.
+
+##### VERIFICATION
+
+**The gate, at `4aaf6c2`.** Each step ran through `$R/gate/step.sh` in its own `systemd-run --user` unit with
+`MemoryMax=16G` and `MemorySwapMax=0`, into a log in `$R/gate/` that ends in the step's exit status.
+`$R/gate/run-gate.sh` ran them in this order, and `$R/gate/gate.status` has each one's exit status and the load around
+it: a one-minute average of 10.47 to 46.25. `fa6a220` changes one doc comment after it, and its pre-commit hook passed.
+A first run at `28ae00c`, stopped during `check-slow.sh` so that another lane could time on a quiet machine, left the
+logs named `*.earlier-*`.
+
+```
+rustup check                                          → stable 1.100.0 up to date
+scripts/install-treesitter-ci.sh .tools               → tree-sitter 0.25.10
+LLVM_SYS_231_PREFIX=/usr scripts/check-all.sh         → exit 0, "all configs green — base, LLVM and browser";
+                                                        the workspace's nextest: 2042 passed, 35 skipped
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                      → exit 0, 2042 passed, 35 skipped, lines 95.55%
+scripts/check-slow.sh                                 → exit 0, "slow tier green", 35 tests passed, among them
+                                                        the_measure_programs_end_where_the_jit_does_at_default_caps
+                                                        and continuing_from_tight_caps_reaches_the_jits_default_end
+scripts/check-<scan>.sh --self-test, then the scan, for text-bytes, citations, attributions, doc-figures, shared-docs,
+  colours, grammar-wasm and lua; node scripts/check-comments.mjs --self-test, then --base 2cf0de1
+                                                      → exit 0, all 18
+# from web/
+../scripts/check-licences.sh --self-test, then the scan
+                                                      → exit 0, both
+pnpm run build:wasm, build:lsp-wasm, build:clif-wasm and build:bindings
+                                                      → exit 0, each
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm run typecheck                                    → exit 0
+pnpm run test:coverage                                → exit 0, 316 files, 3574 tests; 97.92% statements,
+                                                        92.17% branches, 98.76% functions, 99.15% lines
+                                                        (web/vite.config.ts's floors: 95, 89, 97, 97)
+pnpm run build:app                                    → exit 0
+# from the root
+docker build -t redextape-clif-view .                 → exit 0
+docker run -d -p 8099:80 redextape-clif-view          → health "healthy"; curl http://127.0.0.1:8099/ gives 200
+docker build --target wasm -t redextape-clif-view-wasm .
+                                                      → exit 0
+docker run --rm redextape-clif-view-wasm ls /app/pkg-clif
+                                                      → lists redextape_clif_wasm_bg.wasm
+```
+
+At the set-up, `28f6250`, the workspace's nextest passed 1991 tests and skipped 33.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-clif-view-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 18 | commits in the range | `git rev-list --count 2cf0de1..fa6a220` |
+| 1 file changed, 2 insertions(+), 1 deletion(-) | what `fa6a220` changes after the gate's commit | `git diff --shortstat 4aaf6c2 fa6a220` |
+| 16; 2 | the `cranelift-*` crates and the `wasmtime-internal-*` crates `589fbce` moves in the lock | `git diff 2cf0de1 589fbce -- Cargo.lock \| rg -c '^-version = "0.137.1"'; git diff 2cf0de1 589fbce -- Cargo.lock \| rg -c '^-version = "50.0.1"'` |
+| 72; 67; 5 | snapshot corpus programs; those not `measure-*`; the `measure-*` ones | `ls crates/redextape-native/snapshots/*.clif \| wc -l; ls crates/redextape-native/snapshots/*.clif \| rg -v 'measure-' \| wc -l; ls crates/redextape-native/snapshots/measure-*.clif \| wc -l` |
+| 64 | the native oracle's random programs the agreement test draws | `rg -o 'cases: [0-9]+' crates/redextape-clif/tests/agreement.rs` |
+| 12; 949; identical | `rt_*` symbols and lines in the staticlib's disassembly before Task 4; before against after | `rg -c '^<rt_' $R/rt-before.txt; wc -l < $R/rt-before.txt; cmp $R/rt-before.txt $R/rt-after.txt && echo identical` |
+| 12; 11 | `rt_*` symbols `pkg-clif/` exports; of them the runtime imports, all but `rt_run` | `rg -c '^export const rt_' pkg-clif/redextape_clif_wasm_bg.wasm.d.ts; rg '^export const rt_' pkg-clif/redextape_clif_wasm_bg.wasm.d.ts \| rg -v rt_run \| wc -l` |
+| 33 | bytes per frame value, `FRAME_BYTES_PER_VALUE` | `rg -o 'FRAME_BYTES_PER_VALUE == [0-9]+' crates/redextape-clif/src/stepper.rs` |
+| 27; 0 | `web/src/third-party-licences.json` entries the range adds; removes | `git diff 2cf0de1 fa6a220 -- web/src/third-party-licences.json \| rg -c '^\+.*"name"'; git diff 2cf0de1 fa6a220 -- web/src/third-party-licences.json \| rg '^-.*"name"' \| wc -l` |
+| `web/src/third-party-licences.json` | the one file under `web/src/` the range changes | `git diff --name-only 2cf0de1 fa6a220 -- web/src` |
+| 1,256,487; 391,100 | `pkg-clif/`'s wasm at `28ae00c`, raw and gzip -9 (Task 12) | `rg -o '1,256,487 B raw, 391,100 B gzip -9' $R/measurements.md` |
+| 1256751; 391404 | `pkg-clif/`'s wasm as the gate built it at `4aaf6c2` | `stat -c %s pkg-clif/redextape_clif_wasm_bg.wasm; gzip -9 -c pkg-clif/redextape_clif_wasm_bg.wasm \| wc -c` |
+| 917298; 324340 | `pkg/`'s wasm as the gate built it at `4aaf6c2`, as Task 12 measured it at `28ae00c` | `stat -c %s pkg/redextape_wasm_bg.wasm; gzip -9 -c pkg/redextape_wasm_bg.wasm \| wc -c` |
+| 910169; 321534 | `pkg/`'s wasm at `2cf0de1`, built by Task 12 in the base worktree | `stat -c %s ~/temp/redextape-clif-view-base/pkg/redextape_wasm_bg.wasm; gzip -9 -c ~/temp/redextape-clif-view-base/pkg/redextape_wasm_bg.wasm \| wc -c` |
+| +6,518, +605, +224, −218; +5,219, +805, +242, +231, +21 | `pkg/`'s raw growth by cause; the export's items | `rg '^[\|] (§5.6 export\|other code\|data segments\|Task 6)' $R/measurements.md` |
+| 0; 15 | lines naming a `cranelift-*` crate in `pkg/`'s and `pkg-clif/`'s wasm32 trees | `cargo tree -p redextape-wasm --target wasm32-unknown-unknown -e normal --prefix none \| rg '^cranelift' \| wc -l; cargo tree -p redextape-clif-wasm --target wasm32-unknown-unknown -e normal --prefix none \| rg '^cranelift' \| wc -l` |
+| 745,303, 325,622, 193,517, 99,269, 64,267 B; 59.3, 25.9, 15.4, 7.9, 5.1% | the five retained sizes and their shares in the shipped file; the named twin's rows in the same file name them | `rg '(745303\|325622\|193517\|99269\|64267) ┊' $R/twiggy.txt \| head -5` |
+| the speed table | steps and M steps/s per program and listing, both passes, wasm and native | `rg '^[\|] (loop1000000\|sum30000\|map30000) [\|] (as-built\|optimised) ' $R/measurements.md` |
+| the run-ahead table | rxm steps and end, medians and ratios per program | `rg '^[\|] (loop1000000\|sum30000\|map30000) [\|] [0-9,]+ \(' $R/measurements.md` |
+| 15 to 78; 16 to 31; 65 to 151; 1.9 to 2.7 | the run-ahead ratio in pass 1 and pass 2; the rxm cursor in M instructions/s; CLIF steps over rxm steps | `rg -o '15 to 78 times\|16 to 31 times\|65 to 151 M instructions/s\|1.9 to 2.7 times' $R/measurements.md` |
+| about 145 M; some 13 s at 11 M steps/s | the extrapolated CLIF steps and wasm time for a loop of `loop1000000`'s shape that reaches 5,000,000 ticks | `rg -o 'about 145 M CLIF steps\|some 13 s at 11 M steps/s' $R/measurements.md` |
+| 1.32x; 3.3x; about 21 M | the passes' spread, CLIF and rxm; the probe's native rate | `rg -o 'up to 1.32x\|up to 3.3x\|about 21 M steps/s' $R/measurements.md` |
+| 43.69 to 55.54 | the load average over a minute around the timed passes | `rg '^[\|] [12] [\|] (native\|wasm) ' $R/measurements.md \| cut -d'\|' -f5,6` |
+| `["measure-box30000"]` | the frame-memory list | `rg 'FRAME_MEMORY_LIST:' crates/redextape-clif/tests/common/mod.rs` |
+| 60,392,013 B, 94% | `measure-map30000`'s optimised peak, of `caps.mem` | `rg -o 'peaks at [0-9,]+ B, [0-9]+%' docs/superpowers/plans/2026-11-19-clif-view-pr1-package.md` |
+| 14 | calls to `run(u64::MAX)` in the CLIF tests | `rg -o '\.run\(u64::MAX\)' crates/redextape-clif \| wc -l` |
+| 33,554,431 | the smallest literal found to abort `pkg/`'s compile | `rg -o '33,554,431 \(2\^25 - 1\) or more aborts' $R/sdd/task-11-report.md` |
+| 18 areas | Step 1's comment budget at `4aaf6c2` | `rg -o '18 areas, each within its comment budget' $R/gate/t13-comments-budget-4aaf6c2.log` |
+| 36; 0 | gate steps that exited 0; that did not | `rg -c 'EXIT 0' $R/gate/gate.status; rg 'EXIT [1-9]' $R/gate/gate.status \| wc -l` |
+| 1.100.0 | the stable toolchain `rustup check` found up to date | `rg -o 'stable-x86_64-unknown-linux-gnu - up to date: [0-9.]+' $R/gate/00-rustup-check.log` |
+| 0.25.10 | the tree-sitter `check-all.sh` used | `.tools/tree-sitter --version` |
+| 1; 2042, 35 | `check-all.sh`'s closing line; its workspace nextest, passed and skipped | `rg -c 'all configs green — base, LLVM and browser' $R/gate/01-check-all.log; rg -m1 'Summary' $R/gate/01-check-all.log` |
+| 1991, 33 | the workspace nextest at the set-up, `28f6250` | `rg 'Summary' $R/baseline.md` |
+| 2042, 35; 95.55% | llvm-cov's tests; its line coverage | `rg 'Summary\|^TOTAL' $R/gate/02-llvm-cov.log` |
+| 35; 2; 1 | slow-tier tests passed; of them the CLIF crate's; the closing line | `rg -c 'test .* \.\.\. ok$' $R/gate/03-check-slow.log; rg -c 'test (the_measure_programs_end_where_the_jit_does_at_default_caps\|continuing_from_tight_caps_reaches_the_jits_default_end) \.\.\. ok' $R/gate/03-check-slow.log; rg -c '^slow tier green' $R/gate/03-check-slow.log` |
+| 316; 3574; 97.92, 92.17, 98.76, 99.15 | coverage files and tests; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $R/gate/06-test-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| 95, 89, 97, 97 | `web/vite.config.ts`'s floors: statements, branches, functions, lines | `rg -o 'thresholds: \{[^}]+\}' web/vite.config.ts` |
+| healthy; 200; 1 | the image's health and its page; `pkg-clif/`'s wasm in the wasm stage | `rg 'health\|curl' $R/gate/07-docker-run.log; rg -c '^redextape_clif_wasm_bg.wasm$' $R/gate/07-docker-ls-pkg-clif.log` |
+| 10.47 to 46.25 | the load average over a minute through the gate | `rg -o 'load [0-9.]+' $R/gate/gate.status \| sort -k2 -n \| sed -n '1p;$p'` |
+| 1; 0 | the slow tier's `unused import` warnings; lines the range changes in the file it names | `rg -c 'unused import' $R/gate/03-check-slow.log; git diff 2cf0de1 fa6a220 -- crates/redextape-core/src/tm/encoding/binary.rs \| wc -l` |

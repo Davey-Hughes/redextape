@@ -9,6 +9,8 @@
 # `crates/redextape-lsp-wasm`. A SECOND OUT-DIR RATHER THAN A SECOND FILE IN `/pkg/`, because
 # wasm-pack owns everything it writes to an out-dir and would prune the other crate's output.
 /pkg-lsp/
+# ...and the CLIF view's, built by `pnpm run build:clif-wasm` from `crates/redextape-clif-wasm`, for the same reason.
+/pkg-clif/
 **/pkg/
 *.wasm
 # ...except the four committed grammar parsers, which the web app loads through `web-tree-sitter` and

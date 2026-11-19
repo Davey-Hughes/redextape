@@ -1,6 +1,6 @@
 //! The statuses and values `redextape-wasm` answers with beyond core's types, the helpers that build them and the
-//! one serializer they cross by, in a crate of their own so that a second wasm module shares them instead of
-//! copying them.
+//! serializer they cross by, which every serialized answer but `clifInput`'s uses (`to_value` says why), in a crate
+//! of their own so that a second wasm module shares them instead of copying them.
 
 use redextape_core::core::NodeId;
 use redextape_core::trace::RxmCap;
@@ -297,14 +297,14 @@ pub struct ValueRun {
     pub cap: u64,
 }
 
-/// THE ONE SERIALIZER, so the boundary answers `None` the same way everywhere.
+/// THE SERIALIZER EVERY SERIALIZED ANSWER BUT ONE CROSSES BY, so the boundary answers `None` the same way everywhere.
 ///
 /// `serde_wasm_bindgen`'s default renders `Option::None` as `undefined`, and §5.1's TypeScript writes
 /// every optional as `T | null` — a renderer testing `x === null` would get it wrong. Getting this
 /// right only for top-level returns (`sourceSpan`) and leaving struct FIELDS on the
 /// default would be worse than either choice alone: `lambdaStatus().run` would be `undefined` while
-/// `sourceSpan()` is `null`, so one boundary would need two rules in the renderer. One serializer,
-/// one rule.
+/// `sourceSpan()` is `null`, so one boundary would need two rules in the renderer. `clifInput`'s own
+/// serializer keeps the rule and writes 64-bit integers as `BigInt`s, since an rxm word can be 2^53 or more.
 ///
 /// # Errors
 ///

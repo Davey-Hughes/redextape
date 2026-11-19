@@ -32,7 +32,7 @@ The plan sequence, and the running log of what implementation falsified:
 
 ## Architecture
 
-Ten crates under `crates/`.
+Twelve crates under `crates/`.
 
 **`redextape-core`** — the whole language, with **no dependencies** at default features (`cargo tree
 -p redextape-core --edges normal` lists only itself; `serde` and `ts-rs` are optional dependencies,
@@ -105,9 +105,22 @@ generated copy would describe a shape this project does not own, and the web cli
 handful of messages it actually sends instead.
 
 **`redextape-wire`** is the tenth: the statuses and values `redextape-wasm` answers with beyond core's
-types, with the TypeScript generated from them, the helpers that build them and the one serializer
-they cross by, in a crate of their own so that a second wasm module shares them rather than copying
-them.
+types, with the TypeScript generated from them, the helpers that build them and the serializer
+they cross by, which every serialized answer but `clifInput`'s uses, in a crate of their own so that
+a second wasm module shares them rather than copying them. `clifInput` carries an rxm program, whose
+words can reach 2^53 and more, past what that serializer writes, so it writes 64-bit integers as
+`BigInt`s.
+
+**`redextape-clif`** is the eleventh: the CLIF view's stepper, with no `#[wasm_bindgen]` of its own. It builds a
+program's CLIF with no ISA through `redextape-native`'s `clif` feature, as built or optimised, and steps it one
+instruction at a time with Cranelift's interpreter, answering the runtime's imports with `redextape-native-rt`'s
+`Runtime`, so that a run ends where the JIT's does. It serves the listing's rows and a leg shaped like the rxm leg's:
+the end found in chunks, the status, the steps, the frame and the value.
+
+**`redextape-clif-wasm`** is the twelfth: that crate's `#[wasm_bindgen]` surface, built into `pkg-clif/` as
+`redextape-lsp-wasm` is into `pkg-lsp/`, a module of its own so that `pkg/` carries no Cranelift. Its one exported
+type, `ClifSession`, is built from what `Session::clifInput` writes and a listing's name, and answers through
+`redextape-wire`'s serializer.
 
 ### The oracle
 

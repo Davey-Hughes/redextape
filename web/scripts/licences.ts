@@ -1,7 +1,7 @@
 /**
  * THE LICENCES THE SITE SHIPS — about pages design §8. Writes `src/third-party-licences.json`, which the licences page
  * renders: redextape's own licence, then every npm package whose code or font reaches the browser, every crate
- * compiled into the two `.wasm` builds, the toolchains' runtimes compiled in beside them, and the colour schemes a
+ * compiled into the three `.wasm` builds, the toolchains' runtimes compiled in beside them, and the colour schemes a
  * built-in palette's colours are adapted from, each with the licence texts its own package carries.
  *
  *     node scripts/licences.ts            # write src/third-party-licences.json
@@ -20,14 +20,14 @@
  *   crate, which runs in the compiler and leaves nothing in the `.wasm`. Each build resolves its own features, so
  *   this is what each build compiles, not the workspace's feature union `cargo metadata` reports.
  * - The toolchains: the Rust standard library and the crates it compiles in beside it — its allocator, its hash map
- *   and its intrinsics — in both `.wasm` builds, and Emscripten's runtime, compiled into `web-tree-sitter`. No package
+ *   and its intrinsics — in each `.wasm` build, and Emscripten's runtime, compiled into `web-tree-sitter`. No package
  *   manager names them, so `TOOLCHAIN` does, and their texts are committed under `scripts/toolchain-licences/` rather
  *   than read from an installed toolchain, which would change this file with every Rust release.
  *   `licences-scan.test.ts` holds `TOOLCHAIN` to the standard library's crates a built `.wasm` names.
  *
- * Every package must carry at least one file whose name holds `licence`, `license`, `copying`, `copyright` or
- * `notice`, or this throws; a link that is not `http(s)` falls back to the registry's page. The output is sorted by
- * code unit, never by locale, so it is the same bytes on every machine.
+ * Every package must carry a file whose name holds `licence`, `license`, `copying`, `copyright` or `notice`, or this
+ * throws; a crate `CRATE_LICENCES` names has its texts committed, and throws once it carries one. A link that is not
+ * `http(s)` falls back to the registry's page. The output sorts by code unit, never locale: the same bytes anywhere.
  */
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -41,7 +41,7 @@ const REPO = join(WEB, '..')
 const OUT = join(WEB, 'src', 'third-party-licences.json')
 
 /** The crates whose `.wasm` the site serves. */
-const WASM_CRATES = ['redextape-wasm', 'redextape-lsp-wasm']
+const WASM_CRATES = ['redextape-wasm', 'redextape-lsp-wasm', 'redextape-clif-wasm']
 
 /** Where each shipped package sits on the licences page. */
 export type Group = 'code' | 'wasm' | 'toolchain' | 'font' | 'palette'
@@ -62,9 +62,9 @@ export type Package = {
  *
  * - the Rust repository's `COPYRIGHT`, `LICENSE-MIT` and `LICENSE-APACHE`, at Rust 1.100.0's release tag;
  * - `compiler-builtins`' `LICENSE.txt`, from the same tree, where the standard library builds it from (0.1.160 in
- *   that release's `library/Cargo.lock`): both builds link its `__multi3` and `memcmp`;
- * - `dlmalloc`'s and `hashbrown`'s licence files, from the crates that lockfile names (0.2.14 and 0.17.1): both
- *   builds carry their source paths, `/cargo/registry/<hash>/dlmalloc-0.2.14` and `.../hashbrown-0.17.1`;
+ *   that release's `library/Cargo.lock`): each build links its `__multi3` and `memcmp`;
+ * - `dlmalloc`'s and `hashbrown`'s licence files, from the crates that lockfile names (0.2.14 and 0.17.1): each
+ *   build carries their source paths, `/cargo/registry/<hash>/dlmalloc-0.2.14` and `.../hashbrown-0.17.1`;
  * - Emscripten's `LICENSE` at 4.0.15, the version `web-tree-sitter` 0.27.1 is built with.
  *
  * No version is shown on the page: the runtimes are whatever the toolchain in use compiles in, under the same
@@ -120,8 +120,26 @@ const COLOUR_SCHEMES: readonly { name: string; spdx: string; url: string; dir: s
 
 const LICENCE_FILE = /licen[cs]e|copying|copyright|notice/i
 
+/**
+ * The crates whose package carries no licence file, each read from its directory under `scripts/crate-licences/`;
+ * any other such crate still stops the generator. `wasmtime/LICENSE` is the `LICENSE` `cranelift-codegen` 0.137.2
+ * publishes, the Apache-2.0 WITH LLVM-exception text of the repository all three are published from.
+ */
+const CRATE_LICENCES: ReadonlyMap<string, string> = new Map([
+  ['cranelift-assembler-x64', 'wasmtime'],
+  ['cranelift-bitset', 'wasmtime'],
+  ['wasmtime-internal-core', 'wasmtime'],
+])
+
 /** Code-unit order: a locale's collation moves `aa` in Danish and `z` in Estonian, and this file must not move. */
 export const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** The licence files in `dir`, by name in code-unit order. */
+const licenceNames = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && LICENCE_FILE.test(e.name))
+    .map((e) => e.name)
+    .sort(byCodeUnit)
 
 /**
  * What of a licence file is reproduced. Vite's `LICENSE.md` goes on to carry the licences of what Vite bundles into
@@ -245,10 +263,7 @@ export function generate(): string {
     return id
   }
   const licenceFiles = (name: string, dir: string): Package['files'] => {
-    const files = readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isFile() && LICENCE_FILE.test(e.name))
-      .map((e) => e.name)
-      .sort(byCodeUnit)
+    const files = licenceNames(dir)
     if (files.length === 0) throw new Error(`${name} (${dir}) carries no licence file`)
     return files.map((file) => ({ file, text: store(excerpt(name, readFileSync(join(dir, file), 'utf8'))) }))
   }
@@ -316,6 +331,12 @@ export function generate(): string {
       if (p === undefined) throw new Error(`cargo tree names ${key}, which cargo metadata does not`)
       // `source` is null for a path dependency: this workspace's own crates, which are redextape's licence.
       if (p.source === null) return []
+      const committed = CRATE_LICENCES.get(p.name)
+      const own = dirname(p.manifest_path)
+      if (committed !== undefined && licenceNames(own).length > 0) {
+        throw new Error(`${p.name} (${own}) now carries a licence file: drop it from CRATE_LICENCES`)
+      }
+      const dir = committed === undefined ? own : join(WEB, 'scripts', 'crate-licences', committed)
       return [
         {
           name: p.name,
@@ -323,7 +344,7 @@ export function generate(): string {
           spdx: p.license ?? 'SEE LICENSE',
           group: 'wasm' as const,
           url: webUrl(p.repository ?? p.homepage, `https://crates.io/crates/${p.name}`),
-          files: licenceFiles(p.name, dirname(p.manifest_path)),
+          files: licenceFiles(p.name, dir),
         },
       ]
     })

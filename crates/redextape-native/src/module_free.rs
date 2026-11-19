@@ -1,9 +1,13 @@
 //! CLIF without a `cranelift_module::Module`, so with no ISA: the `clif` feature, which builds for
 //! wasm32. `build_clif` builds the functions `codegen::define_all` builds, numbered and imported as
 //! a `Module` numbers and imports them, which `module_free_clif_equals_the_module_paths` checks.
+//! `build_listing` builds them for the CLIF view, as built or optimised.
 
+use cranelift_codegen::control::ControlPlane;
 use cranelift_codegen::ir::{ExtFuncData, ExternalName, FuncRef, Function, UserExternalName, UserFuncName};
-use cranelift_codegen::isa::TargetFrontendConfig;
+use cranelift_codegen::isa::{CallConv, TargetFrontendConfig};
+use cranelift_codegen::settings::{self, Configurable, Flags, OptLevel};
+use cranelift_codegen::{CodegenResult, Context};
 use cranelift_frontend::FunctionBuilderContext;
 use redextape_core::core::NodeId;
 use redextape_core::tm::{LowerError, Program};
@@ -52,8 +56,13 @@ fn unsupported(what: String) -> LowerError {
     LowerError::Unsupported { node: NodeId::default(), what }
 }
 
+fn codegen_error(e: impl std::fmt::Display) -> LowerError {
+    unsupported(format!("native codegen: {e}"))
+}
+
 /// Each subroutine of `prog` as CLIF for a target with `config`, in `partition`'s order: the text
-/// `define_all` builds before it optimises, which the JIT compiles.
+/// `define_all` builds before it optimises, which the JIT compiles. Each value read from or written to a
+/// register is labelled with that register's `tm::reg_label`.
 ///
 /// # Errors
 /// `LowerError::Unsupported` when `partition` rejects `prog`, when a register index reaches
@@ -70,32 +79,190 @@ pub fn build_clif(prog: &Program, config: TargetFrontendConfig) -> Result<Vec<Fu
     for (k, sub) in subs.iter().enumerate() {
         let name = UserFuncName::user(0, index(Callee::Sub(k)));
         let mut func = Function::with_name_signature(name, word_signature(config, param_count(sub)));
-        translate_subroutine(&mut imports, &mut func, &mut fbctx, prog, sub, &subs)
-            .map_err(|e| unsupported(format!("native codegen: {}", e.0)))?;
+        // Only here: `define_all`, which the JIT and AOT backends compile through, builds with no
+        // labels, so the code it generates stays the code the snapshots hold.
+        func.collect_debug_info();
+        translate_subroutine(&mut imports, &mut func, &mut fbctx, prog, sub, &subs).map_err(|e| codegen_error(e.0))?;
         funcs.push(func);
     }
     Ok(funcs)
 }
 
+/// `x86_64-unknown-linux-gnu`'s frontend config, made without an ISA, which a wasm32 build has none of.
+#[must_use]
+pub fn isa_free_config() -> TargetFrontendConfig {
+    TargetFrontendConfig {
+        default_call_conv: CallConv::SystemV,
+        pointer_width: target_lexicon::PointerWidth::U64,
+        page_size_align_log2: 12,
+    }
+}
+
+/// Which CLIF the CLIF view lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Listing {
+    /// Each function as `build_clif` builds it, the text the JIT compiles.
+    AsBuilt,
+    /// Each function after Cranelift's optimisations at `opt_level = speed`, before it is lowered to
+    /// machine code.
+    Optimised,
+}
+
+impl Listing {
+    /// The listing `name` names, or `None`.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Listing> {
+        match name {
+            "as-built" => Some(Listing::AsBuilt),
+            "optimised" => Some(Listing::Optimised),
+            _ => None,
+        }
+    }
+
+    /// The name `parse` reads.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Listing::AsBuilt => "as-built",
+            Listing::Optimised => "optimised",
+        }
+    }
+}
+
+/// Each subroutine of `prog` as `listing` shows it, built for `isa_free_config` in `partition`'s order.
+///
+/// # Errors
+/// `build_clif`'s, and `LowerError::Unsupported` when an optimisation pass fails.
+pub fn build_listing(prog: &Program, listing: Listing) -> Result<Vec<Function>, LowerError> {
+    let funcs = build_clif(prog, isa_free_config())?;
+    if listing == Listing::AsBuilt {
+        return Ok(funcs);
+    }
+    // Only `opt_level` is set, where the JIT's flags set more: `the_isa_free_listings_equal_the_snapshot_sections`
+    // holds the output equal to the JIT's at `speed` on each snapshot target.
+    let mut builder = settings::builder();
+    builder.set("opt_level", "speed").map_err(codegen_error)?;
+    let flags = Flags::new(builder);
+    funcs.into_iter().map(|func| optimise(func, &flags).map_err(codegen_error)).collect()
+}
+
+/// `func` through the steps of `Context::optimize`, which takes an ISA, given `flags` alone. Its NaN
+/// canonicalisation is left out: it needs an ISA, and runs only under `enable_nan_canonicalization`,
+/// which neither `flags` nor the JIT's flags turn on.
+fn optimise(func: Function, flags: &Flags) -> CodegenResult<Function> {
+    let mut ctx = Context::for_function(func);
+    ctx.verify_if(flags)?;
+    ctx.compute_cfg();
+    ctx.compute_domtree();
+    ctx.eliminate_unreachable_code(flags)?;
+    ctx.remove_constant_phis(flags)?;
+    ctx.func.dfg.resolve_all_aliases();
+    if flags.opt_level() != OptLevel::None {
+        ctx.egraph_pass(flags, &mut ControlPlane::default())?;
+    }
+    Ok(ctx.func)
+}
+
 #[cfg(test)]
 mod tests {
-    use cranelift_codegen::isa::{self, CallConv};
+    use std::collections::BTreeSet;
+
+    use cranelift_codegen::ir::{Function, ValueLabelAssignments};
+    use cranelift_codegen::isa;
     use cranelift_codegen::settings;
-    use redextape_core::tm::{Instr, LowerError, Program, Reg, lower_program};
+    use redextape_core::tm::{Instr, LowerError, Program, Reg, label_reg, lower_program, reg_str};
     use redextape_core::{desugar::desugar, parser::parse};
 
-    use super::{MAX_REGISTERS, build_clif};
+    use super::{Listing, MAX_REGISTERS, build_clif, build_listing, isa_free_config};
+
+    /// How many of `func`'s defined values (each block's parameters, then its instructions' results, in
+    /// layout order) carry labels, and the registers those labels name.
+    fn labelled(func: &Function) -> (usize, BTreeSet<String>) {
+        let Some(labels) = &func.dfg.values_labels else { return (0, BTreeSet::new()) };
+        let mut values = 0;
+        let mut regs = BTreeSet::new();
+        for block in func.layout.blocks() {
+            let results = func.layout.block_insts(block).flat_map(|inst| func.dfg.inst_results(inst).iter().copied());
+            for value in func.dfg.block_params(block).iter().copied().chain(results) {
+                if let Some(ValueLabelAssignments::Starts(starts)) = labels.get(&value) {
+                    values += 1;
+                    regs.extend(starts.iter().map(|start| reg_str(label_reg(start.label.as_u32()))));
+                }
+            }
+        }
+        (values, regs)
+    }
+
+    /// Each of `funcs` by name, with `labelled`'s count and registers.
+    fn labelled_by_name(funcs: &[Function]) -> Vec<(String, usize, BTreeSet<String>)> {
+        funcs
+            .iter()
+            .map(|func| {
+                let (values, regs) = labelled(func);
+                (func.name.to_string(), values, regs)
+            })
+            .collect()
+    }
+
+    fn regs(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_string()).collect()
+    }
+
+    fn fact() -> Program {
+        let src = include_str!("../../../web/src/examples/fact.rxt");
+        lower_program(&desugar(&parse(src).0.unwrap())).unwrap()
+    }
+
+    #[test]
+    fn build_clif_labels_each_value_with_its_register() {
+        let isa = isa::lookup_by_name("x86_64-unknown-linux-gnu").unwrap();
+        let config = isa.finish(settings::Flags::new(settings::builder())).unwrap().frontend_config();
+        let funcs = build_clif(&fact(), config).unwrap();
+        assert_eq!(
+            labelled_by_name(&funcs),
+            [
+                ("u0:11".to_string(), 5, regs(&["a0", "r0", "rr"])),
+                ("u0:12".to_string(), 19, regs(&["a0", "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "rr"])),
+            ]
+        );
+    }
+
+    #[test]
+    fn labels_survive_on_the_values_the_optimiser_keeps() {
+        let funcs = build_listing(&fact(), Listing::Optimised).unwrap();
+        assert_eq!(
+            labelled_by_name(&funcs),
+            [
+                ("u0:11".to_string(), 3, regs(&["a0", "r0", "rr"])),
+                ("u0:12".to_string(), 7, regs(&["a0", "r0", "r6", "r8", "rr"])),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_listing_is_parsed_from_its_name() {
+        assert_eq!([Listing::AsBuilt.name(), Listing::Optimised.name()], ["as-built", "optimised"]);
+        for listing in [Listing::AsBuilt, Listing::Optimised] {
+            assert_eq!(Listing::parse(listing.name()), Some(listing));
+        }
+        assert_eq!(Listing::parse("optimized"), None);
+    }
+
+    #[test]
+    fn isa_free_config_matches_x86_64_linux() {
+        let isa = isa::lookup_by_name("x86_64-unknown-linux-gnu").unwrap();
+        let want = isa.finish(settings::Flags::new(settings::builder())).unwrap().frontend_config();
+        let got = isa_free_config();
+        assert_eq!(
+            (got.default_call_conv, got.pointer_width, got.page_size_align_log2),
+            (want.default_call_conv, want.pointer_width, want.page_size_align_log2)
+        );
+    }
 
     #[test]
     fn subroutines_follow_the_runtime_imports_and_import_each_other_colocated() {
-        // `PointerWidth` is `target_lexicon`'s, which cranelift-codegen does not re-export, so the
-        // config comes from an ISA and is checked to be the one wanted.
-        let isa = isa::lookup_by_name("x86_64-unknown-linux-gnu").unwrap();
-        let config = isa.finish(settings::Flags::new(settings::builder())).unwrap().frontend_config();
-        assert!(config.default_call_conv == CallConv::SystemV && config.pointer_bits() == 64);
-        assert_eq!(config.page_size_align_log2, 12);
         let prog = lower_program(&desugar(&parse("fn f(x) { x + 1 } f(2)").0.unwrap())).unwrap();
-        let funcs = build_clif(&prog, config).unwrap();
+        let funcs = build_clif(&prog, isa_free_config()).unwrap();
         let names: Vec<String> = funcs.iter().map(|f| f.name.to_string()).collect();
         assert_eq!(names, ["u0:11", "u0:12"]);
         let main = &funcs[0];

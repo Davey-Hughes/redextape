@@ -40,7 +40,7 @@ use cranelift_codegen::Context;
 use cranelift_codegen::ir::UserFuncName;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{
-    AbiParam, Block, FuncRef, Function, Inst, InstBuilder, Signature, SourceLoc, Value, types,
+    AbiParam, Block, FuncRef, Function, Inst, InstBuilder, Signature, SourceLoc, Value, ValueLabel, types,
 };
 use cranelift_codegen::isa::TargetFrontendConfig;
 #[cfg(feature = "cranelift")]
@@ -50,7 +50,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{FuncId, Linkage, Module, ModuleError};
 
 use redextape_core::core::BinOp;
-use redextape_core::tm::{Program, Reg};
+use redextape_core::tm::{Program, Reg, reg_label};
 
 #[cfg(feature = "cranelift")]
 use crate::OptLevel;
@@ -234,16 +234,28 @@ pub(crate) fn define_all(
 /// interpreter's `Vm::read` (behind `trace::RxmCursor`), whose `locals.get(n)` / `args.get(n)` fall back to
 /// `0` (and keeping this total).
 fn read_reg(b: &mut FunctionBuilder, r: Reg, locs: &[Variable], args: &[Variable], rr: Variable) -> Value {
-    match r {
-        Reg::Loc(n) => match locs.get(n as usize) {
-            Some(&v) => b.use_var(v),
-            None => b.ins().iconst(types::I64, 0),
-        },
-        Reg::Arg(n) => match args.get(n as usize) {
-            Some(&v) => b.use_var(v),
-            None => b.ins().iconst(types::I64, 0),
-        },
-        Reg::Rr => b.use_var(rr),
+    let var = match r {
+        Reg::Loc(n) => locs.get(n as usize),
+        Reg::Arg(n) => args.get(n as usize),
+        Reg::Rr => Some(&rr),
+    };
+    match var {
+        Some(&v) => {
+            let val = b.use_var(v);
+            label_value(b, val, r);
+            val
+        }
+        None => b.ins().iconst(types::I64, 0),
+    }
+}
+
+/// Label `val` as register `r`'s (`tm::reg_label`), so a reader of the CLIF can name the register a
+/// value belongs to. A no-op unless the function collects debug info, which `build_clif` alone turns
+/// on. A register with no label sets nothing: `build_clif` refuses every such register first
+/// (`reg_over_cap`).
+fn label_value(b: &mut FunctionBuilder, val: Value, r: Reg) {
+    if let Some(label) = reg_label(r) {
+        b.set_val_label(val, ValueLabel::from_u32(label));
     }
 }
 
@@ -254,14 +266,19 @@ fn write_reg(b: &mut FunctionBuilder, r: Reg, val: Value, locs: &[Variable], arg
         Reg::Loc(n) => {
             if let Some(&v) = locs.get(n as usize) {
                 b.def_var(v, val);
+                label_value(b, val, r);
             }
         }
         Reg::Arg(n) => {
             if let Some(&v) = args.get(n as usize) {
                 b.def_var(v, val);
+                label_value(b, val, r);
             }
         }
-        Reg::Rr => b.def_var(rr, val),
+        Reg::Rr => {
+            b.def_var(rr, val);
+            label_value(b, val, r);
+        }
     }
 }
 
@@ -368,18 +385,21 @@ impl<'a> ClifSink<'a> {
             let var = b.declare_var(types::I64);
             let init = if i < banks.params { params[1 + i as usize] } else { b.ins().iconst(types::I64, 0) };
             b.def_var(var, init);
+            label_value(&mut b, init, Reg::Arg(i));
             args.push(var);
         }
         let mut locs = Vec::with_capacity(banks.locals as usize);
-        for _ in 0..banks.locals {
+        for i in 0..banks.locals {
             let var = b.declare_var(types::I64);
             let zero = b.ins().iconst(types::I64, 0);
             b.def_var(var, zero);
+            label_value(&mut b, zero, Reg::Loc(i));
             locs.push(var);
         }
         let rr = b.declare_var(types::I64);
         let zero = b.ins().iconst(types::I64, 0);
         b.def_var(rr, zero);
+        label_value(&mut b, zero, Reg::Rr);
         let blocks: Vec<Block> = (0..body.len()).map(|_| b.create_block()).collect();
         let srclocs = body.iter().copied().map(srcloc).collect();
         let exit = b.create_block();

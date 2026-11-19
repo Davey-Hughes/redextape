@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 #[cfg(feature = "cranelift")]
-use cranelift_codegen::ir::{Block, ExternalName, InstructionData, SourceLoc};
+use cranelift_codegen::ir::{Block, ExternalName, Function, InstructionData, SourceLoc};
 #[cfg(feature = "cranelift")]
 use cranelift_codegen::isa::{self, OwnedTargetIsa};
 #[cfg(feature = "cranelift")]
@@ -45,7 +45,7 @@ use inkwell::context::Context;
 use inkwell::targets::{InitializationConfig, Target, TargetTriple};
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{Program, lower_program, parse_rxm};
+use redextape_core::tm::{Caps, DEFAULT_CAPS, Program, lower_program, parse_rxm};
 
 use crate::OptLevel;
 #[cfg(feature = "llvm")]
@@ -57,6 +57,9 @@ use crate::codegen::{self, Stage};
 use crate::llvm;
 #[cfg(feature = "cranelift")]
 use crate::rt_imports::RtFn;
+use crate::shared::native_depth_cap;
+#[cfg(feature = "cranelift")]
+use crate::{Listing, build_listing};
 
 #[path = "../tests/common/corpus.rs"]
 mod corpus;
@@ -190,6 +193,24 @@ fn push_section(out: &mut String, title: &str, parts: &[String]) {
             out.push('\n');
         }
     }
+}
+
+/// The text of `file`'s section titled `title`: after its header line, up to the next section's header
+/// line or the end of the file.
+#[cfg(feature = "cranelift")]
+fn section<'a>(file: &'a str, title: &str) -> Option<&'a str> {
+    let header = format!("\n;; ==== {title} ====\n");
+    let rest = &file[file.find(&header)? + header.len()..];
+    Some(rest.find("\n;; ==== ").map_or(rest, |end| &rest[..=end]))
+}
+
+/// `funcs` displayed and joined as `push_section` joins a section's parts, without its header line.
+#[cfg(feature = "cranelift")]
+fn section_text(funcs: &[Function]) -> String {
+    let parts: Vec<String> = funcs.iter().map(|func| func.display().to_string()).collect();
+    let mut out = String::new();
+    push_section(&mut out, "", &parts);
+    out.split_off(out.find('\n').unwrap() + 1)
 }
 
 /// Where `generated` first departs from `on_disk`: the line, and the section header above it.
@@ -454,6 +475,32 @@ fn module_free_clif_equals_the_module_paths() {
     );
 }
 
+/// Value labels are `build_clif`'s alone. `define_all` is the loop the JIT, the AOT backend and these
+/// snapshots compile through, so a function it builds collecting labels would be compiled with them.
+#[cfg(feature = "cranelift")]
+#[test]
+fn the_module_paths_collect_no_labels() {
+    let mut built = 0;
+    let mut labelled = Vec::new();
+    for (key, src) in corpus() {
+        let prog = program_of(&key, &src);
+        let subs = partition(&prog).unwrap();
+        let isa = fixed_isa(TARGETS[0], OptLevel::O0);
+        let mut module = ObjectModule::new(ObjectBuilder::new(isa, "redextape", default_libcall_names()).unwrap());
+        codegen::define_all(&mut module, &prog, &subs, &mut FunctionBuilderContext::new(), |stage, fid, ctx| {
+            if matches!(stage, Stage::Built) {
+                built += 1;
+                if ctx.func.dfg.values_labels.is_some() {
+                    labelled.push(format!("{key} u0:{}", fid.as_u32()));
+                }
+            }
+        })
+        .unwrap();
+    }
+    assert!(built > 0, "define_all built no function");
+    assert!(labelled.is_empty(), "{} function(s) collect labels: {labelled:?}", labelled.len());
+}
+
 /// The CLIF view links a CLIF instruction to the rxm instruction it lowers by its source location:
 /// every instruction in the block of the rxm instruction at code index `pc`, and in each block a guard
 /// there continues in, carries `pc`, and the prologue and the shared exit, which lower no one
@@ -514,6 +561,60 @@ fn clif_matches_the_snapshots() {
     let files: Vec<(String, String)> =
         corpus().iter().map(|(key, src)| (format!("{key}.clif"), clif_snapshot(key, src))).collect();
     compare_or_write(&files, |name| name.ends_with(".clif"));
+}
+
+/// The CLIF view builds its listings with no ISA, as a wasm32 build must, so each must be the text a
+/// real target gives: the as-built listing the `built` section, and the optimised listing the `speed:
+/// optimised` section of every target.
+#[cfg(feature = "cranelift")]
+#[test]
+fn the_isa_free_listings_equal_the_snapshot_sections() {
+    // In this mode `clif_matches_the_snapshots` rewrites the files while this test runs, so a file read
+    // here may be half written.
+    if writing() {
+        return;
+    }
+    let mut differing = Vec::new();
+    for (key, src) in corpus() {
+        let prog = program_of(&key, &src);
+        let path = format!("{SNAPSHOT_DIR}/{key}.clif");
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let as_built = section_text(&build_listing(&prog, Listing::AsBuilt).unwrap());
+        let optimised = section_text(&build_listing(&prog, Listing::Optimised).unwrap());
+        let wanted = std::iter::once(("built".to_string(), &as_built))
+            .chain(TARGETS.map(|target| (format!("{target} speed: optimised"), &optimised)));
+        for (title, listed) in wanted {
+            if section(&on_disk, &title) != Some(listed.as_str()) {
+                differing.push(format!("{key}.clif: {title}"));
+            }
+        }
+    }
+    assert!(
+        differing.is_empty(),
+        "{} section(s) differ from the ISA-free listing:\n  {}",
+        differing.len(),
+        differing.join("\n  ")
+    );
+}
+
+/// The CLIF stepper's runtime bounds depth by `caps.stack` alone, and its runs are compared with the JIT's,
+/// whose depth cap is `native_depth_cap`. The comparison is exact only while the two are equal, at the caps
+/// it runs at, for every program it runs.
+#[test]
+fn the_jit_depth_cap_is_the_stack_cap_on_every_corpus_program() {
+    let tight = Caps { steps: 40, stack: 6, heap: 4, mem: DEFAULT_CAPS.mem };
+    let mut lower = Vec::new();
+    for (key, src) in corpus() {
+        let prog = program_of(&key, &src);
+        let subs = partition(&prog).unwrap();
+        for caps in [DEFAULT_CAPS, tight] {
+            let depth_cap = native_depth_cap(&prog, &subs, caps);
+            if depth_cap != caps.stack {
+                lower.push(format!("{key}: {depth_cap} at stack cap {}", caps.stack));
+            }
+        }
+    }
+    assert!(lower.is_empty(), "{} depth cap(s) differ from the stack cap:\n  {}", lower.len(), lower.join("\n  "));
 }
 
 #[cfg(feature = "llvm")]

@@ -77,7 +77,9 @@ pub mod shared;
 #[cfg(feature = "cranelift")]
 pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
 #[cfg(feature = "clif")]
-pub use module_free::build_clif;
+pub use module_free::{Listing, build_clif, build_listing, isa_free_config};
+#[cfg(feature = "clif")]
+pub use rt_imports::RtFn;
 
 /// An ahead-of-time (AOT) object-emission / link failure. Defined unconditionally (not behind the
 /// `cranelift` feature) so the no-`cranelift` `emit_object` stub can name it too. `Link`/`NoLinker`/

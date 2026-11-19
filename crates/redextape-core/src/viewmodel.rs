@@ -729,7 +729,9 @@ impl RxmProgram {
 }
 
 impl RxmWord {
-    fn of(word: u64, tag: WordTag) -> RxmWord {
+    /// `word` as the views write a word, in decimal, read by `tag`.
+    #[must_use]
+    pub fn of(word: u64, tag: WordTag) -> RxmWord {
         RxmWord { word: word.to_string(), tag }
     }
 }
@@ -760,6 +762,43 @@ fn shown(len: usize, newest: usize, named: impl IntoIterator<Item = u64>) -> BTr
     let mut out: BTreeSet<usize> = (len.saturating_sub(newest)..len).collect();
     out.extend(named.into_iter().filter_map(|w| slot(w, len)));
     out
+}
+
+/// The cells a heap panel shows: the newest `newest` of `cells`, plus each cell a list word in `named`
+/// points at, each once, newest first, each word with its tag in `tags`. `RxmState::cells` says why the
+/// named cells are added. A tag `tags` lacks reads as `WordTag`'s default, as the cursor's own reads do.
+#[must_use]
+pub fn heap_cells(
+    cells: &[(u64, u64)],
+    tags: &[(WordTag, WordTag)],
+    newest: usize,
+    named: impl IntoIterator<Item = u64>,
+) -> Vec<RxmCell> {
+    // Descending, so newest first; `get` again, so a slot `shown` picked cannot index past the end.
+    shown(cells.len(), newest, named)
+        .into_iter()
+        .rev()
+        .filter_map(|i| {
+            let (head, tail) = *cells.get(i)?;
+            let (head_tag, tail_tag) = tags.get(i).copied().unwrap_or_default();
+            Some(RxmCell { cell: i + 1, head: RxmWord::of(head, head_tag), tail: RxmWord::of(tail, tail_tag) })
+        })
+        .collect()
+}
+
+/// The boxes a heap panel shows: the newest `newest` of `boxes`, plus each box a box handle in `named`
+/// names, each once, newest first, by `heap_cells`' rule.
+#[must_use]
+pub fn heap_boxes(boxes: &[u64], tags: &[WordTag], newest: usize, named: impl IntoIterator<Item = u64>) -> Vec<RxmBox> {
+    shown(boxes.len(), newest, named)
+        .into_iter()
+        .rev()
+        .filter_map(|i| {
+            let content = *boxes.get(i)?;
+            let tag = tags.get(i).copied().unwrap_or_default();
+            Some(RxmBox { handle: i + 1, content: RxmWord::of(content, tag) })
+        })
+        .collect()
 }
 
 impl RxmState {
@@ -794,27 +833,10 @@ impl RxmState {
             })
             .collect();
 
-        // Descending, so newest first; `get` again, so a slot `shown` picked cannot index past the end.
         let conses = c.heap();
-        let cells = shown(conses.len(), window.cells, named(WordTag::List))
-            .into_iter()
-            .rev()
-            .filter_map(|i| {
-                let (head, tail) = *conses.get(i)?;
-                let (head_tag, tail_tag) = c.heap_tags().get(i).copied().unwrap_or_default();
-                Some(RxmCell { cell: i + 1, head: RxmWord::of(head, head_tag), tail: RxmWord::of(tail, tail_tag) })
-            })
-            .collect();
+        let cells = heap_cells(conses, c.heap_tags(), window.cells, named(WordTag::List));
         let held = c.boxes();
-        let boxes = shown(held.len(), window.boxes, named(WordTag::Box))
-            .into_iter()
-            .rev()
-            .filter_map(|i| {
-                let content = *held.get(i)?;
-                let tag = c.box_tags().get(i).copied().unwrap_or_default();
-                Some(RxmBox { handle: i + 1, content: RxmWord::of(content, tag) })
-            })
-            .collect();
+        let boxes = heap_boxes(held, c.box_tags(), window.boxes, named(WordTag::Box));
 
         RxmState {
             step: c.steps_taken(),

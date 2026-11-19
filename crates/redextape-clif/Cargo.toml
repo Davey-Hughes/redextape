@@ -1,0 +1,27 @@
+[package]
+name = "redextape-clif"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+redextape-core = { path = "../redextape-core", features = ["serde"] }
+# `clif` alone builds CLIF with no ISA, which a wasm32 build needs; the JIT's features do not build there.
+redextape-native = { path = "../redextape-native", default-features = false, features = ["clif"] }
+redextape-native-rt = { path = "../redextape-native-rt" }
+redextape-wire = { path = "../redextape-wire" }
+cranelift-codegen = { version = "0.137.2", default-features = false }
+cranelift-interpreter = "0.137.2"
+self_cell = "1.3.0"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# The default features add the JIT, whose ends the stepper's are compared with.
+redextape-native = { path = "../redextape-native" }
+redextape-test-support = { path = "../redextape-test-support" }
+proptest = "1"

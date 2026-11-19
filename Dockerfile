@@ -8,7 +8,7 @@
 # CI builds this image on every push to `main` (see .forgejo/workflows/ci.yml's `docker` job), and
 # again every Sunday and on a manual dispatch, because nothing else rebuilds `:latest` without a merge.
 
-########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp  ###################
+########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp, /app/pkg-clif  ####
 FROM rust:slim-bookworm AS wasm
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -20,12 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 RUN wasm-pack build crates/redextape-wasm --release --target web --out-dir /app/pkg
-# **TWO ARTEFACTS, AND THIS STAGE HAS TO BUILD BOTH.** `web/src/lsp-worker.ts` imports
+# **EVERY PACKAGE BESIDE `pkg/` IS BUILT HERE TOO.** `web/src/lsp-worker.ts` imports
 # `../../pkg-lsp/redextape_lsp_wasm.js`; without this line stage 2's `build:app` fails to resolve it.
 # NOTHING IN CI CATCHES THAT — the `docker` job never runs on a PR, and `pnpm run build:app` is the
 # only place the import is resolved for the image, so the web job's own `build:lsp-wasm` step does
 # not stand in for it. Same class as the HEALTHCHECK note in stage 3.
 RUN wasm-pack build crates/redextape-lsp-wasm --release --target web --out-dir /app/pkg-lsp
+# `pkg-clif/`, the CLIF view's package, for the same reason, and before `web/` imports it: no PR runs this stage
+# to notice the line missing once it does.
+RUN wasm-pack build crates/redextape-clif-wasm --release --target web --out-dir /app/pkg-clif
 
 ########################  2. Web bundle (Vite) → /app/web/dist  ################################
 FROM node:26-slim AS web
@@ -36,9 +39,10 @@ RUN npm install -g pnpm@11.20.0
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
-# The WASM packages produced above, imported by the web app from `/app/pkg` and `/app/pkg-lsp`.
+# The WASM packages produced above, beside `/app/web` where the web app's relative imports resolve.
 COPY --from=wasm /app/pkg /app/pkg
 COPY --from=wasm /app/pkg-lsp /app/pkg-lsp
+COPY --from=wasm /app/pkg-clif /app/pkg-clif
 # **THE COMMITTED GRAMMAR `.wasm`, AND NOTHING IN CI CATCHES THEIR ABSENCE.** `web/src/colour.ts`
 # imports them as `../../grammars/<g>/<g>.wasm?url`, so `build:app` below cannot resolve them without
 # this line — and the `docker` job never runs on a PR, exactly as the note in stage 1 says of
@@ -48,8 +52,8 @@ COPY --from=wasm /app/pkg-lsp /app/pkg-lsp
 COPY grammars/ /app/grammars/
 ARG COMMIT_HASH
 ENV COMMIT_HASH=$COMMIT_HASH
-# `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced both
-# /app/pkg and /app/pkg-lsp.
+# `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced
+# /app/pkg, /app/pkg-lsp and /app/pkg-clif.
 RUN pnpm run build:app
 
 ########################  3. Runtime (static nginx)  ##########################################

@@ -187,6 +187,8 @@ LEGS=(
   "base|test|-p redextape-native --no-default-features --features clif"
   "base|wasm|-p redextape-native --lib --no-default-features --features clif"
   "base|wasm|-p redextape-native-rt --lib"
+  "base|wasm|-p redextape-clif --lib"
+  "base|wasm|-p redextape-clif-wasm --lib"
   "llvm|probe|"
   "llvm|clippy|-p redextape-native --features llvm --all-targets"
   "llvm|test|-p redextape-native --features llvm"

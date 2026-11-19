@@ -3,6 +3,7 @@
 //! user.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Ty {
     Nat,
     Bool,
@@ -234,6 +235,18 @@ mod tests {
             Ty::Fun(vec![Ty::Var(0), Ty::Bool], Box::new(list(Ty::Nat))),
         ] {
             assert!(!is_decodable(&ty), "expected undecodable: {ty:?}");
+        }
+    }
+
+    /// A type crosses to the CLIF package as data, since the end value is decoded by type: each variant comes
+    /// back as it went, `Var`'s number and `Fun`'s parameters and result included.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_type_round_trips_through_serde() {
+        let fun = Ty::Fun(vec![Ty::List(Box::new(Ty::Nat)), Ty::Bool], Box::new(Ty::Var(3)));
+        for ty in [fun, Ty::Unit] {
+            let json = serde_json::to_string(&ty).expect("a type serialises");
+            assert_eq!(serde_json::from_str::<Ty>(&json).expect("and deserialises"), ty);
         }
     }
 }
