@@ -38031,3 +38031,85 @@ tests, at 97.87%, 92.03%, 98.61% and 99.11%.
 | exit 0; 315; 3554; 97.92, 92.15, 98.76, 99.15 | this head's re-run through the gate's script | `bash $R/verify-t20/sum.sh $R/gate/t20-coverage-gate.log` |
 | 2 | tests in the file that could not load | `grep -cE '^ *it(\.each)?\(' web/tests/browser/stored-panels-restore.test.ts` |
 | 45.79, 51.60 | the load average over 1 and 5 minutes just after the first run | `uptime`, read by hand then; no log keeps it |
+
+#### A VIEW WHOSE ID IS `__proto__` STORES NO DISPLAY SETTING AGAIN, AND THREE BEHAVIOURS #187 MOVED HAVE TESTS (2026-11-19, branch `ir-panes-minors`, `ed94dd9..bf8a532`, 2 commits, plus this entry and the commits that correct it)
+
+The second whole-branch review of #187 left two Minor findings that did not hold up its merge, M1 and M2 in
+`~/temp/redextape-ir-panes/.superpowers/sdd/2026-11-18-ir-views-pr4-panes-layout-links/final-review-2.md`. This branch
+closes both. The lane's record is `~/temp/redextape-ir-panes-minors-record/`, `$R` below.
+
+##### WHAT CHANGED
+
+**`08cfb91`, M1.** At `6b77731`, `serializeWorkspace` built each display field by assignment, so an entry for a view whose
+id is `__proto__` set the object's prototype and wrote no key. #187 builds the fields with `Object.fromEntries`, which
+writes an own key. `serializeWorkspace` in `web/src/workspace.ts` now leaves that id out of `display` and `tmDisplay`, and
+every other id stores as it did. The check is there and not in `keptLegDisplays`, because `withLegDisplaysKept` shares that
+helper and both prunes in memory, on a close and on a normalise, kept such an entry at `6b77731`. New cases, one a leg,
+hold `withLegDisplaysKept` to that.
+
+**Parsing did not change.** `parseWorkspace` read 7 stored shapes with an own `__proto__` key alike at `6b77731` and at
+`ed94dd9`. With a leaf of that id and a valid entry, in either field, it accepts the workspace, the entry becomes the
+parsed object's prototype and not an entry of it, and writing the workspace again stores no key. With no leaf of that
+id, or with a malformed entry, it refuses the workspace.
+
+**`bf8a532`, M2.** `web/tests/node/rxm-view.test.ts` pins that a frame whose callee is unknown reads `?`, for a return pc
+that follows no call and for one past the listing. `web/tests/browser/rxm-pane.test.ts` holds a link and a running focus,
+asserts that the rows draw both, sets a new program and asserts that the rows draw neither.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The §7.2 timing from #187 stays inconclusive.** This branch measured no timing, so that entry's verdict stands.
+- **A view whose id is `__proto__` keeps no display setting across a reload,** as at `6b77731`. This branch restores that
+  result and does not make such a setting persist.
+- **Not run on this branch:** the rest of the browser tier, Firefox beyond `rxm-pane.test.ts`, coverage,
+  `scripts/check-all.sh`, `scripts/check-slow.sh`, the app build and the Docker image. The sabotages of the browser
+  case ran in Chromium.
+
+##### VERIFICATION
+
+**The gates at each commit**, run from `web/`. The two browser rows run `tests/browser/rxm-pane.test.ts`.
+
+| Gate | `08cfb91` | `bf8a532` |
+|---|---|---|
+| `pnpm exec biome ci --error-on-warnings` | no fixes applied | no fixes applied |
+| `pnpm exec tsc --noEmit` | no output | no output |
+| `pnpm exec vitest run --project node` | 78 files, 1616 tests passed | 78 files, 1617 tests passed |
+| `--project browser` | 28 passed | 29 passed |
+| `--project firefox --project firefox-capture` | 28 passed | 29 passed |
+
+The node tier at `ed94dd9` passed 1612 tests in 78 files.
+
+**The sabotages.** Each saved the file to `$R/sab/`, restored it from there and checked it with `cmp`.
+
+| Sabotage | What failed | Tests failed | Log in `$R/logs/` |
+|---|---|---|---|
+| the `__proto__` check removed | both legs' new case, at "no key is written for that id" | 2 | `22-sab-fix1-removed-final.log` |
+| the check moved into `keptLegDisplays` | both legs' prune case, at "the open view keeps its setting" | 2 | `23-sab-fix1-in-helper-final.log` |
+| the sibling `lambda-0` left out too | both legs' new case, at "the sibling stores as ever", and 5 older cases | 7 | `26-sab-fix1-sibling-dropped-final.log` |
+| `rxmStack`'s `?` replaced by an empty string | the new node case | 1 | `32-sab-callee-mark.log` |
+| `setSource` keeps the link marks | the new browser case, at "the new program holds no link" | 1 | `33-sab-link-not-cleared.log` |
+| `setSource` keeps the focus marks | the new browser case, at "the new program holds no focus" | 1 | `34-sab-focus-not-cleared.log` |
+| the rows never draw `is-linked` | the new browser case, at "the link is drawn", and 2 older cases | 3 | `35-sab-link-never-drawn.log` |
+| the rows never draw `is-focus` | the new browser case, at "the focus is drawn", and 1 older case | 2 | `36-sab-focus-never-drawn.log` |
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-ir-panes-minors-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 2 | commits in the range | `git rev-list --count ed94dd9..bf8a532` |
+| 2 | the prunes at `6b77731` that keep an own key in `display`, on a close and on a normalise | `git show 6b77731:web/src/main.ts \| grep -cE 'without\(ws\.display\)\|Object\.fromEntries\(Object\.entries\(ws\.display\)'` |
+| 7; 7 | stored shapes probed; those read alike at both commits | `grep -c '"same": ' $R/scratch/probe/out.json; grep -c '"same": true' $R/scratch/probe/out.json` |
+| 4; 10 | readings, one per shape per commit: accepted; refused | `grep -c '"refused": false' $R/scratch/probe/out.json; grep -c '"refused": true' $R/scratch/probe/out.json` |
+| 78, 1612 | the node tier at `ed94dd9` | `grep -aE 'Test Files  \|Tests  ' $R/logs/02-setup-node.log` |
+| 78, 1616 | the node tier at `08cfb91` | `grep -aE 'Test Files  \|Tests  ' $R/logs/24-c1-final-node.log` |
+| 78, 1617 | the node tier at `bf8a532` | `grep -aE 'Test Files  \|Tests  ' $R/logs/40-c2-node.log` |
+| 28, 28 | `rxm-pane.test.ts` at `08cfb91`, Chromium and Firefox | `grep -ah 'Tests  ' $R/logs/24-c1-final-chromium.log $R/logs/24-c1-final-firefox.log` |
+| 29, 29 | `rxm-pane.test.ts` at `bf8a532`, Chromium and Firefox | `grep -ah 'Tests  ' $R/logs/40-c2-chromium.log $R/logs/40-c2-firefox.log` |
+| 1, 1 | biome's "no fixes applied", one line a commit | `grep -c 'No fixes applied' $R/logs/24-c1-final-biome.log $R/logs/40-c2-biome.log` |
+| 0, 0 | bytes `tsc` printed at each commit | `cat $R/logs/24-c1-final-tsc.log \| wc -c; cat $R/logs/40-c2-tsc.log \| wc -c` |
+| 2, 2, 7 | tests failed under the three `workspace.ts` sabotages | `grep -ah 'Tests  ' $R/logs/22-sab-fix1-removed-final.log $R/logs/23-sab-fix1-in-helper-final.log $R/logs/26-sab-fix1-sibling-dropped-final.log` |
+| 1, 1, 1, 3, 2 | tests failed under the five M2 sabotages | `grep -ah 'Tests  ' $R/logs/32-sab-callee-mark.log $R/logs/33-sab-link-not-cleared.log $R/logs/34-sab-focus-not-cleared.log $R/logs/35-sab-link-never-drawn.log $R/logs/36-sab-focus-never-drawn.log` |
+| 2, 2, 2 | both legs' new cases failing under the three `workspace.ts` sabotages | `grep -c 'FAIL .*stores no key' $R/logs/22-sab-fix1-removed-final.log; grep -c 'FAIL .*through a prune' $R/logs/23-sab-fix1-in-helper-final.log; grep -c 'FAIL .*stores no key' $R/logs/26-sab-fix1-sibling-dropped-final.log` |
+| 1, 1, 2 | lines printing each quoted assertion, vitest printing an identical failure once | `grep -c 'no key is written for that id:' $R/logs/22-sab-fix1-removed-final.log; grep -c 'the open view keeps its setting:' $R/logs/23-sab-fix1-in-helper-final.log; grep -c 'the sibling stores as ever:' $R/logs/26-sab-fix1-sibling-dropped-final.log` |
+| 1, 1, 1, 1 | the browser case's quoted assertions | `grep -c 'the new program holds no link:' $R/logs/33-sab-link-not-cleared.log; grep -c 'the new program holds no focus:' $R/logs/34-sab-focus-not-cleared.log; grep -c 'the link is drawn:' $R/logs/35-sab-link-never-drawn.log; grep -c 'the focus is drawn:' $R/logs/36-sab-focus-never-drawn.log` |

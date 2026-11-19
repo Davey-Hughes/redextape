@@ -217,6 +217,19 @@ describe('the rxm listing', () => {
     expect(rowOfPc(host, 350)).toBeUndefined()
   })
 
+  it('draws neither the link nor the running focus of the program before', () => {
+    const { host, pane } = mount(LONG)
+    pane.setLink([1], false)
+    pane.setFocus([2])
+    pane.render(frameOf({ pc: 0, next: 0 }), CONTROLS)
+    expect(rowOfPc(host, 1)?.classList.contains('is-linked'), 'the link is drawn').toBe(true)
+    expect(rowOfPc(host, 2)?.classList.contains('is-focus'), 'the focus is drawn').toBe(true)
+    pane.setProgram({ listing: ['li\tr0, #7', 'li\tr0, #8', 'li\tr0, #9', 'halt'], labels: [] })
+    pane.render(frameOf({ pc: 0, next: 0 }), CONTROLS)
+    expect(rowOfPc(host, 1)?.classList.contains('is-linked'), 'the new program holds no link').toBe(false)
+    expect(rowOfPc(host, 2)?.classList.contains('is-focus'), 'the new program holds no focus').toBe(false)
+  })
+
   it('clears on a program that is not there', () => {
     const { host, pane } = mount(FACT3)
     pane.setProgram(null)

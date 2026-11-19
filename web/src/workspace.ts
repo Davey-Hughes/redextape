@@ -288,7 +288,8 @@ export function serializeWorkspace(ws: Workspace): string {
     focused: onScreen.has(ws.focused) ? ws.focused : defaultFocus(ws.tree),
     panels,
     inspector: ws.inspector,
-    ...keptLegDisplays(ws, (leaf) => live.has(leaf)),
+    // `parseDisplays` assigns each entry to a plain object, so a `__proto__` key would read back as its prototype.
+    ...keptLegDisplays(ws, (leaf) => leaf !== '__proto__' && live.has(leaf)),
     ...(Object.keys(panelSizes).length === 0 ? {} : { panelSizes }),
     ...(Object.keys(ws.arrangements).length === 0 ? {} : { arrangements: ws.arrangements }),
   })

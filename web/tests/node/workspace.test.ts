@@ -358,6 +358,38 @@ describe('every entry of LEG_DISPLAY', () => {
     expect(legDisplayOf(kept, leg, 'tm-0')).toEqual(fallback)
     expect(legDisplayOf(ws, leg, 'pane-9'), 'the workspace it was given is left as it was').toEqual(fallback)
   })
+
+  /** A view whose id is `__proto__` beside `lambda-0`, both live and both holding `leg`'s setting. */
+  const protoViewWorkspace = (leg: DisplayLeg) => {
+    const { fallback } = LEG_DISPLAY[leg]
+    const tree: LayoutNode = {
+      kind: 'split',
+      dir: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { kind: 'leaf', id: '__proto__', pane: 'lambda' },
+        { kind: 'leaf', id: 'lambda-0', pane: 'lambda' },
+      ],
+    }
+    const ws = { ...fourViewWorkspace(), tree }
+    return withLegDisplay(withLegDisplay(ws, leg, '__proto__', fallback), leg, 'lambda-0', fallback)
+  }
+
+  it.each(legs)('stores no key for a live %s view whose id is __proto__, and its sibling’s setting', (leg) => {
+    const { field, fallback } = LEG_DISPLAY[leg]
+    const ws = protoViewWorkspace(leg)
+    expect(Object.hasOwn(ws[field], '__proto__'), 'the view holds a setting to leave out').toBe(true)
+    const stored = JSON.parse(serializeWorkspace(ws))[field]
+    expect(Object.hasOwn(stored, '__proto__'), 'no key is written for that id').toBe(false)
+    expect(stored, 'the sibling stores as ever').toEqual({ 'lambda-0': fallback })
+  })
+
+  it.each(legs)('keeps the %s setting of a view whose id is __proto__ through a prune, which stores nothing', (leg) => {
+    const { field, fallback } = LEG_DISPLAY[leg]
+    const kept = withLegDisplaysKept(protoViewWorkspace(leg), () => true)
+    expect(Object.hasOwn(kept[field], '__proto__'), 'the open view keeps its setting').toBe(true)
+    expect(legDisplayOf(kept, leg, '__proto__')).toEqual(fallback)
+  })
 })
 
 describe('withPanel', () => {

@@ -205,6 +205,12 @@ describe('what the panels are handed', () => {
     ])
   })
 
+  it('reads ? for a frame whose return pc follows no call, or lies past the listing', () => {
+    const frameAt = (ret_pc: number) => ({ ret_pc, saved: [], saved_len: 0 })
+    const stack = rxmStack(frameOf({ depth: 3, frames: [14, 1, FACT3.listing.length + 5].map(frameAt) }), FACT3)
+    expect(stack.frames.map((f) => f.callee)).toEqual(['fact.0', '?', '?'])
+  })
+
   it('counts older cells and boxes, boxes in the plural only past one', () => {
     const cells = [{ cell: 9, head: valueWord('1'), tail: listWord('8') }]
     const boxes = [{ handle: 2, content: valueWord('7') }]
