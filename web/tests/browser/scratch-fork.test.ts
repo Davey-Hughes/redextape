@@ -122,7 +122,7 @@ function sourceSession(pool: SessionPool, seen: RunReply[]): SessionEntry {
     detached: false,
     client,
     legs,
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   }
 }

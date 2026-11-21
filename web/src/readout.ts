@@ -1,7 +1,7 @@
 import { showWorkerError } from './banner'
 import { counted, n } from './format'
 import { LEG_NAME, LEGS } from './legs'
-import type { Leg, RecordEnd, ResultLegs } from './protocol'
+import type { CopyLeg as CopyableLeg, Leg, RecordEnd, ResultLegs } from './protocol'
 import { endedLine, noSessionRows, type Row, resultRows, valueLine } from './results'
 import type { SessionEntry } from './sessions'
 import type { Diagnostic } from './types'
@@ -44,6 +44,8 @@ export type RecordingLeg = {
   readonly hist: { readonly newestStep: number }
   readonly done: RecordEnd | null
   readonly pending?: number
+  /** The CLIF leg's hold, whose link step the step line still says (`ClifHold.linkStep`). */
+  readonly clifHold?: { readonly linkStep?: number }
 }
 
 /**
@@ -64,6 +66,7 @@ const HISTORY_FULL_ROW: Readonly<Record<Leg, boolean>> = {
   lambda: false,
   rxm: true,
   tm: true,
+  clif: true,
 }
 
 /**
@@ -110,7 +113,7 @@ function programResultRows(r: Extract<ProgramResult, { kind: 'result' }>, record
   const full = new Map<string, string>()
   for (const l of LEGS) {
     const leg = recording[l]
-    if (HISTORY_FULL_ROW[l] && leg.done === 'budget' && leg.pending === undefined)
+    if (HISTORY_FULL_ROW[l] && leg.done === 'budget' && (leg.pending ?? leg.clifHold?.linkStep) === undefined)
       full.set(LEG_NAME[l], `${STOPPED.budget} at ${n(leg.hist.newestStep)}`)
   }
   return rows.flatMap((row) => {
@@ -140,9 +143,10 @@ export function programSegments(r: ProgramResult | null, recording: ProgramRecor
     const width = name === 'TM' && tmWidth !== null ? [`width ${n(tmWidth)}${r.pinned ? ` ${PINNED}` : ''}`] : []
     return [value === undefined ? name : `${name} ${value}`, ...rest.map((row) => row.value), ...width].join(' · ')
   }
-  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM — named as `LEG_NAME` names them, which is what `results.ts`'s
-  // rows are labelled with.
-  return LEGS.map((l) => leg(LEG_NAME[l]))
+  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM, CLIF — named as `LEG_NAME` names them, which is what
+  // `results.ts`'s rows are labelled with. **A LEG WITH NO ROWS HAS NO SEGMENT**: CLIF has none while no stepper is
+  // built (`clifResultRows`), and its bare name would say nothing.
+  return LEGS.filter((l) => rows.some((row) => row.leg === LEG_NAME[l])).map((l) => leg(LEG_NAME[l]))
 }
 
 const STOPPED: Readonly<Record<RecordEnd, string>> = {
@@ -193,7 +197,7 @@ function stopped(leg: CopyLeg): string[] {
  * Each leg's facts about an available copy, after its name, one per element: how far its recording has got, in its
  * leg's unit, and why it stopped, then what its reading adds.
  */
-const COPY_FACTS: { readonly [K in Leg]: (reading: CopyReadings[K], leg: CopyLeg) => string[] } = {
+const COPY_FACTS: { readonly [K in CopyableLeg]: (reading: CopyReadings[K], leg: CopyLeg) => string[] } = {
   lambda: (_reading, leg) => [counted(leg.newestStep, 'reduction'), ...stopped(leg)],
   // Its value came with its build (spec amendment 26) and reads as its view's value line reads.
   rxm: (reading, leg) => [
@@ -212,7 +216,7 @@ const COPY_FACTS: { readonly [K in Leg]: (reading: CopyReadings[K], leg: CopyLeg
 }
 
 /** A copy's facts after its name: its leg's reason while the leg is not available, else `COPY_FACTS`' for its leg. */
-function copyFacts<K extends Leg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string[] {
+function copyFacts<K extends CopyableLeg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string[] {
   return leg.status.available ? COPY_FACTS[kind](readings[kind], leg) : [leg.status.reason]
 }
 
@@ -224,7 +228,7 @@ function copyFacts<K extends Leg>(kind: K, readings: Pick<CopyReadings, K>, leg:
  * line back on its own ` · ` — is wrong: a TM copy's reduced-file sentence CONTAINS a ` · `
  * (`reduced: <stages> · <n> steps`), so the round trip cuts it in half. One list, two renderings.
  */
-export function copyParts<K extends Leg>(
+export function copyParts<K extends CopyableLeg>(
   kind: K,
   name: string,
   readings: Pick<CopyReadings, K>,
@@ -233,7 +237,7 @@ export function copyParts<K extends Leg>(
   return [name, ...copyFacts(kind, readings, leg)]
 }
 
-export function copySegments<K extends Leg>(
+export function copySegments<K extends CopyableLeg>(
   kind: K,
   name: string,
   readings: Pick<CopyReadings, K>,
@@ -251,7 +255,7 @@ export function copySegments<K extends Leg>(
  * yet` — "nothing has come back" — which is not true of a copy that has run to `value: 6`. What such a copy holds is
  * its run, and its readout already says what became of it.
  */
-export function copyRow<K extends Leg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string {
+export function copyRow<K extends CopyableLeg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string {
   return copyFacts(kind, readings, leg).join(' · ')
 }
 

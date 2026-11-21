@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { LEGS } from '../../src/legs'
-import type { FramesReply, Leg, LegFrame, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
+import { COPY_LEGS } from '../../src/legs'
+import type { CopyLeg, FramesReply, Leg, LegFrame, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
 import type { LambdaState } from '../../src/types'
 import { until } from './until'
 
-/** The copy build reply of each leg. */
-const COPY_BUILT: { readonly [K in Leg]: RunReply['kind'] } = {
+/** The copy build reply of each leg a copy can hold. */
+const COPY_BUILT: { readonly [K in CopyLeg]: RunReply['kind'] } = {
   lambda: 'scratch-compiled',
   rxm: 'rxm-scratch-compiled',
   tm: 'tm-scratch-compiled',
@@ -15,7 +15,7 @@ const COPY_BUILT: { readonly [K in Leg]: RunReply['kind'] } = {
  * The step-0 frame of `leg` that the build reply among `replies` carried, as a list of none or one: a session's
  * `compiled`, or `leg`'s copy's `*-scratch-compiled`.
  */
-function builtFirst<K extends Leg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
+function builtFirst<K extends CopyLeg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
   const built = replies.find((r) => r.kind === 'compiled' || r.kind === COPY_BUILT[leg])
   if (built === undefined) return []
   const first =
@@ -24,7 +24,7 @@ function builtFirst<K extends Leg>(replies: readonly RunReply[], leg: K): LegFra
 }
 
 /** Every frame of `leg` a build's replies carried: its step 0 on its build reply, then its chunks'. */
-function builtFrames<K extends Leg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
+function builtFrames<K extends CopyLeg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
   const chunked = replies.flatMap((r) => (r.kind === 'frames' && r.leg === leg ? (r.frames as LegFrame[K][]) : []))
   return [...builtFirst(replies, leg), ...chunked]
 }
@@ -66,7 +66,12 @@ function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunRepl
   return askUntil(req, (r) => r.kind === 'result' || r.kind === 'no-session', timeoutMs)
 }
 
-const run = (src: string, gen = 1, encoding = 'unary'): RunRequest => ({ kind: 'run', gen, src, encoding })
+/**
+ * A reply's generation; `null` for a `clif-load`, which speaks of the package the worker holds rather than of a run.
+ */
+const genOf = (r: RunReply): number | null => ('gen' in r ? r.gen : null)
+
+const run = (src: string, gen = 1, encoding = 'unary'): RunRequest => ({ kind: 'run', gen, src, encoding, clif: null })
 
 describe('session-worker', () => {
   it('drives the λ leg to a normal form and decodes the λ and TM legs', async () => {
@@ -132,14 +137,20 @@ describe('session-worker', () => {
     worker.terminate()
     // Every reply carries `gen`, not only the last one — checking only `replies.at(-1)` would let a
     // mutant that hardcodes the generation in one reply kind survive.
-    expect(replies.every((r) => r.gen === 7)).toBe(true)
+    expect(replies.every((r) => genOf(r) === 7)).toBe(true)
   })
 
   // `compile` throws by design for a name `EncodingKind::parse` rejects (`redextape-wasm`'s own
   // `compile` doc) — the reachable trigger for the whole class of thrown-session-call defects this
   // variant exists to catch.
   it('reports a thrown session call instead of going silent', async () => {
-    const { replies, worker } = await askAll({ kind: 'run', gen: 1, src: 'let x = 40; x + 2', encoding: 'nonsense' })
+    const { replies, worker } = await askAll({
+      kind: 'run',
+      gen: 1,
+      src: 'let x = 40; x + 2',
+      encoding: 'nonsense',
+      clif: null,
+    })
     worker.terminate()
     const err = replies.find((r) => r.kind === 'worker-error')
     expect(err).toBeDefined()
@@ -264,8 +275,8 @@ describe('session-worker recording', () => {
     const done = new Promise<void>((resolve) => {
       worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
         seen.push(e.data)
-        if (e.data.gen === 1 && e.data.kind === 'frames' && e.data.leg === 'lambda') resolveGen1Recording()
-        if (e.data.gen === 2 && (e.data.kind === 'result' || e.data.kind === 'no-session')) resolve()
+        if (genOf(e.data) === 1 && e.data.kind === 'frames' && e.data.leg === 'lambda') resolveGen1Recording()
+        if (genOf(e.data) === 2 && (e.data.kind === 'result' || e.data.kind === 'no-session')) resolve()
       })
     })
     worker.postMessage({
@@ -277,23 +288,24 @@ describe('session-worker recording', () => {
       // a race against this test's own scheduling overhead; seven windows make it reliable.
       src: 'fn sum(n) { if n == 0 { 0 } else { n + sum(n - 1) } } sum(20)',
       encoding: 'unary',
+      clif: null,
     })
     await gen1Recording
-    worker.postMessage({ kind: 'run', gen: 2, src: 'let x = 40; x + 2', encoding: 'unary' })
+    worker.postMessage({ kind: 'run', gen: 2, src: 'let x = 40; x + 2', encoding: 'unary', clif: null })
     await done
     worker.terminate()
     // Generation 2 completed, so nothing from generation 1 may arrive after it — a stale reply here
     // would mean a superseded loop kept touching a session that had been freed.
-    const lastGen2 = seen.findIndex((r) => r.gen === 2 && (r.kind === 'result' || r.kind === 'no-session'))
-    expect(seen.slice(lastGen2).every((r) => r.gen === 2)).toBe(true)
-    expect(seen.some((r) => r.gen === 2 && r.kind === 'result')).toBe(true)
+    const lastGen2 = seen.findIndex((r) => genOf(r) === 2 && (r.kind === 'result' || r.kind === 'no-session'))
+    expect(seen.slice(lastGen2).every((r) => genOf(r) === 2)).toBe(true)
+    expect(seen.some((r) => genOf(r) === 2 && r.kind === 'result')).toBe(true)
     // Generation 2 must have actually RECORDED, not merely replied. Without this the test passes
     // when gen 2's record loop is suppressed by gen 1's stale flag and `result` reports the
     // unstepped initial term as the answer.
     const gen2Frames = seen.flatMap((r) => (r.kind === 'frames' && r.leg === 'lambda' && r.gen === 2 ? r.frames : []))
     expect(gen2Frames.length).toBeGreaterThan(1)
     expect(gen2Frames.at(-1)?.step).toBeGreaterThan(0)
-    const gen2Result = seen.find((r) => r.gen === 2 && r.kind === 'result')
+    const gen2Result = seen.find((r) => genOf(r) === 2 && r.kind === 'result')
     expect(gen2Result?.kind === 'result' && gen2Result.legs.lambda.status.run).toBe('Ended')
   })
 
@@ -462,7 +474,11 @@ const stopped = (replies: readonly RunReply[], leg: Leg, epoch: number): boolean
  * STEP-0 FRAME ITS BUILD REPLY CARRIED**, a session's `compiled` or a copy's `*-scratch-compiled`, its chunks recording
  * on from step 1; a rewind's chunks carry their step 0 themselves.
  */
-const fill = (replies: readonly RunReply[], leg: Leg, epoch: number): { frames: unknown[]; done: RecordEnd | null } => {
+const fill = (
+  replies: readonly RunReply[],
+  leg: CopyLeg,
+  epoch: number,
+): { frames: unknown[]; done: RecordEnd | null } => {
   const all = chunks(replies, leg, epoch)
   const end = all.findIndex((c) => c.done !== null)
   const taken = end === -1 ? all : all.slice(0, end + 1)
@@ -481,11 +497,12 @@ describe('session-worker rewind', () => {
     try {
       w.post(run('let x = 40; x + 2'))
       await w.settle(() => w.results().length === 1, 'the run’s result')
-      for (const leg of LEGS) {
+      // THE LEGS A RUN RECORDS: CLIF records only while a CLIF view is shown, and no view is shown here.
+      for (const leg of COPY_LEGS) {
         w.post({ kind: 'rewind', gen: 1, leg, epoch: 1 })
         await w.settle(() => stopped(w.replies, leg, 1), `the ${leg} leg’s rewound fill to stop`)
       }
-      for (const leg of LEGS) {
+      for (const leg of COPY_LEGS) {
         const first = fill(w.replies, leg, 0)
         expect(first.frames.length, `the ${leg} leg’s first fill`).toBeGreaterThan(1)
         expect(fill(w.replies, leg, 1), `the ${leg} leg’s rewound fill`).toEqual(first)
@@ -509,7 +526,7 @@ describe('session-worker rewind', () => {
     // THE WHOLE TERM, NOT A CUT ONE: a frame's text is cut at `FRAME_BYTES`, and a cut text is no λ text to fork.
     const [tmSrc, rxmSrc] = [compiled.programs.tm?.text ?? null, compiled.programs.rxm?.text ?? null]
     expect([step0.cut, tmSrc === null, rxmSrc === null]).toEqual([null, false, false])
-    const builds: [Leg, RunRequest][] = [
+    const builds: [CopyLeg, RunRequest][] = [
       ['lambda', { kind: 'scratch', gen: 1, leg: 'lambda', src: step0.text, step: 0 }],
       ['tm', { kind: 'scratch', gen: 1, leg: 'tm', src: tmSrc ?? '', step: 0 }],
       ['rxm', { kind: 'scratch', gen: 1, leg: 'rxm', src: rxmSrc ?? '', step: 0 }],
@@ -772,7 +789,7 @@ describe('session-worker rewind', () => {
           w.post({ kind: 'extend', gen: 2, leg: 'lambda', epoch: 0 })
         }
       })
-      const of = (gen: number, replies: readonly RunReply[] = w.replies) => replies.filter((r) => r.gen === gen)
+      const of = (gen: number, replies: readonly RunReply[] = w.replies) => replies.filter((r) => genOf(r) === gen)
       const firstResult = (gen: number) => w.results().find((r) => r.gen === gen)
       const at = (r: RunReply | undefined) => w.replies.indexOf(r as RunReply)
       w.post(run(LONG_SRC))

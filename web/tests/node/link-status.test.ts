@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { type DetachedPanes, type LambdaLinkState, type LinkStatus, linkStatus } from '../../src/link-status'
 
-/** The `linked` arm, from whether the construct emits on TM and on rxm and whether each leg's focus is on it. */
+/**
+ * The `linked` arm, from whether the construct emits on TM and on rxm and whether each leg's focus is on it; the CLIF
+ * leg's answers are `clif`'s, by default rows marked and the focus elsewhere.
+ */
 function pinned({
   tm,
   instrs,
   focus,
   rxmFocus,
+  clif = { emits: true, here: false },
   ...rest
 }: {
   tm: boolean
@@ -14,9 +18,14 @@ function pinned({
   lambda: LambdaLinkState
   focus: boolean
   rxmFocus: boolean
+  clif?: { emits: boolean; here: boolean }
   detached?: DetachedPanes
 }): LinkStatus {
-  return { state: 'linked', legs: { rxm: { emits: instrs, here: rxmFocus }, tm: { emits: tm, here: focus } }, ...rest }
+  return {
+    state: 'linked',
+    legs: { rxm: { emits: instrs, here: rxmFocus }, tm: { emits: tm, here: focus }, clif },
+    ...rest,
+  }
 }
 
 describe('linkStatus', () => {
@@ -82,6 +91,33 @@ describe('linkStatus', () => {
     )
   })
 
+  // AN OPTIMISER'S MERGE LEAVES SOME RXM INSTRUCTIONS NO CLIF ROW, which is expected (CLIF view design §4), so the CLIF
+  // leg is named in no absence clause.
+  it('names no CLIF rows a construct marks none of', () => {
+    const none = { emits: false, here: false }
+    expect(
+      linkStatus(pinned({ tm: false, instrs: true, lambda: 'shown', focus: false, rxmFocus: false, clif: none })),
+    ).toBe('this construct emits no machine states')
+    expect(
+      linkStatus(pinned({ tm: true, instrs: true, lambda: 'shown', focus: false, rxmFocus: false, clif: none })),
+    ).toBe('')
+  })
+
+  it('reports the CLIF run reaching the pin after the rxm run and the machine', () => {
+    expect(
+      linkStatus(
+        pinned({
+          tm: true,
+          instrs: true,
+          lambda: 'shown',
+          focus: true,
+          rxmFocus: true,
+          clif: { emits: true, here: true },
+        }),
+      ),
+    ).toBe('the rxm run is here right now · the machine is here right now · the CLIF run is here right now')
+  })
+
   // PLAN 7 PART 5 SPEC AMENDMENT 11: an rxm instruction `defunc` minted links to nothing, and the line says so,
   // where a click that cleared the pin with no word would read as a click that missed.
   it('says an instruction with no owner has no source construct', () => {
@@ -113,7 +149,7 @@ describe('linkStatus', () => {
 /** A leg's entry in `detached`: how many views it has, and the title of each one showing a copy. */
 const views = (count: number, ...copies: string[]) => ({ views: count, copies })
 /** Every leg with one view, on the program. */
-const ON_PROGRAM = { lambda: views(1), rxm: views(1), tm: views(1) }
+const ON_PROGRAM = { lambda: views(1), rxm: views(1), tm: views(1), clif: views(1) }
 
 /**
  * The 5d-i design §4.5's first surface: the line that already narrates the correspondence states which
@@ -174,7 +210,12 @@ describe('linkStatus · detachment', () => {
     expect(
       linkStatus({
         state: 'none',
-        detached: { lambda: views(1, 'λ · copy 8'), rxm: views(2, 'rxm · copy 10'), tm: views(1, 'TM · copy 7') },
+        detached: {
+          ...ON_PROGRAM,
+          lambda: views(1, 'λ · copy 8'),
+          rxm: views(2, 'rxm · copy 10'),
+          tm: views(1, 'TM · copy 7'),
+        },
       }),
     ).toBe('λ, rxm · copy 10 and TM views show copies — not linked to the program')
   })

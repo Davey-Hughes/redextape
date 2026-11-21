@@ -105,7 +105,9 @@ async function sharedCopies(): Promise<string | null> {
 /** Each case's start: Explorer and all four views, put back and then asserted, with the λ view on the program. */
 function start(): void {
   if (preset() !== 'Explorer') clickWorkspaceItem('[data-preset="explorer"]')
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="false"]')) b.click()
+  // EVERY TOGGLE BUT CLIF'S PRESSED, AND CLIF'S NOT, as `view-keys.test.ts`'s `start` has it.
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button'))
+    if ((b.getAttribute('aria-pressed') === 'true') === (b.dataset.shows === 'clif')) b.click()
   expect(preset(), 'precondition: Explorer').toBe('Explorer')
   expect(mounted(), 'precondition: all four views').toEqual(FOUR)
   expect(titleText('lambda-0'), 'precondition: the λ view shows the program').toBe('λ · program')

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import { History } from '../../src/history'
 import type { Leg, RecordEnd, RunReply } from '../../src/protocol'
-import type { LegState } from '../../src/sessions'
+import { type LegState, rewindLeg } from '../../src/sessions'
 import {
   LinkPositions,
   MAX_LINK_CONTINUES,
@@ -37,7 +37,7 @@ beforeEach(() => {
     epoch: 0,
     gen: 0,
   })
-  legs = { lambda: leg(), rxm: leg(), tm: leg() }
+  legs = { lambda: leg(), rxm: leg(), tm: leg(), clif: leg() }
   awaiting = false
   extend = vi.fn()
   short = vi.fn()
@@ -54,6 +54,7 @@ const compiled = (declined: readonly Leg[] = [], gen = GEN): RunReply =>
       lambda: { available: !declined.includes('lambda'), reason: '' },
       rxm: { available: !declined.includes('rxm'), reason: '' },
       tm: { available: !declined.includes('tm'), reason: '' },
+      clif: { available: !declined.includes('clif'), reason: '' },
     },
   }) as unknown as RunReply
 
@@ -145,8 +146,12 @@ describe('LinkPositions', () => {
     expect(extend).toHaveBeenCalledTimes(1)
   })
 
-  it('continues one leg at a time, λ then rxm then TM', () => {
-    positions.hold(GEN, { lambda: 7, rxm: 7, tm: 7 })
+  /**
+   * **THE CLIF PASS RECORDS AFTER THE RUN'S `result` AND POSTS ONE OF ITS OWN**, so a CLIF position, with no frames at
+   * the run's `result`, is continued at the CLIF pass's: its frames alone continue nothing.
+   */
+  it('continues one leg at a time, λ then rxm then TM then CLIF', () => {
+    positions.hold(GEN, { lambda: 7, rxm: 7, tm: 7, clif: 7 })
     positions.onReply(compiled())
     record('lambda', 0, 4, 'budget')
     record('rxm', 0, 4, 'budget')
@@ -159,6 +164,57 @@ describe('LinkPositions', () => {
     record('rxm', 5, 9, 'budget')
     result()
     expect(extend.mock.calls).toEqual([['lambda'], ['rxm'], ['tm']])
+    record('tm', 5, 9, 'capped')
+    result()
+    expect(extend.mock.calls, 'before the CLIF pass records').toEqual([['lambda'], ['rxm'], ['tm']])
+    record('clif', 0, 4, 'budget')
+    expect(extend.mock.calls, "before the CLIF pass's result").toEqual([['lambda'], ['rxm'], ['tm']])
+    result()
+    expect(extend.mock.calls).toEqual([['lambda'], ['rxm'], ['tm'], ['clif']])
+    record('clif', 5, 9, 'budget')
+    expect(legs.clif.hist.currentStep).toBe(7)
+  })
+
+  /**
+   * **THE CLIF PASS'S `result` FOLLOWS THE RUN'S AT ONCE** when its leg ends in its first chunk, before the frames of
+   * the continue the run's `result` asked for: one continue is posted, and counted, for the two.
+   */
+  it("posts and counts one continue for the run's result and the CLIF pass's back to back", () => {
+    positions.hold(GEN, { tm: 1000 })
+    positions.onReply(compiled())
+    record('tm', 0, 4, 'budget')
+    result()
+    record('clif', 0, 2, 'ended')
+    result()
+    expect(extend.mock.calls).toEqual([['tm']])
+    for (let n = 1; n <= MAX_LINK_CONTINUES; n++) {
+      record('tm', 5 * n, 5 * n + 4, 'budget')
+      result()
+    }
+    expect(extend).toHaveBeenCalledTimes(MAX_LINK_CONTINUES)
+    expect(short).toHaveBeenCalledWith([
+      { leg: 'tm', wanted: 1000, shown: 5 * MAX_LINK_CONTINUES + 4, why: 'continues' },
+    ])
+  })
+
+  /**
+   * **↺ ON THE LEG A CONTINUE RECORDS** rewinds it: the worker stops that continue and posts its `result` before the
+   * rewound fill's frames, and the rewind posts none, so the next leg is asked once the rewound fill stops.
+   */
+  it('asks the next leg once a continue rewound under it stops, though its result came first', () => {
+    positions.hold(GEN, { lambda: 1000, tm: 1000 })
+    positions.onReply(compiled())
+    record('lambda', 0, 4, 'budget')
+    record('tm', 0, 4, 'budget')
+    result()
+    expect(extend.mock.calls, 'precondition: λ continues').toEqual([['lambda']])
+    delete legs.lambda.pending
+    rewindLeg(legs.lambda)
+    record('lambda', 0, 2, null)
+    result()
+    expect(extend.mock.calls, 'while the rewound fill records').toEqual([['lambda']])
+    record('lambda', 3, 4, 'budget')
+    expect(extend.mock.calls).toEqual([['lambda'], ['tm']])
   })
 
   it(`stops a leg at its furthest step after ${MAX_LINK_CONTINUES} continues, says so, and asks the next leg`, () => {
@@ -219,6 +275,25 @@ describe('LinkPositions', () => {
     expect([legs.lambda.pending, legs.rxm.pending]).toEqual([undefined, undefined])
     positions.onReply(compiled([], GEN + 1))
     expect(legs.tm.pending).toBe(2)
+  })
+
+  it("forgets one leg's held position, which the link's compile then gives no leg, and keeps the others", () => {
+    positions.hold(GEN, { lambda: 3, clif: 2 })
+    positions.forget('clif')
+    expect(positions.pendingFor(GEN)).toEqual({ lambda: 3 })
+    positions.onReply(compiled())
+    expect(legs.clif.pending).toBeUndefined()
+    expect(legs.lambda.pending).toBe(3)
+  })
+
+  it("forgets one leg's pending position and keeps the others", () => {
+    positions.hold(GEN, { lambda: 3, clif: 2 })
+    positions.onReply(compiled())
+    expect(legs.clif.pending, 'precondition: the position is pending on its leg').toBe(2)
+    positions.forget('clif')
+    expect(legs.clif.pending).toBeUndefined()
+    expect(legs.lambda.pending).toBe(3)
+    expect(positions.pendingFor(GEN)).toEqual({ lambda: 3 })
   })
 
   /**

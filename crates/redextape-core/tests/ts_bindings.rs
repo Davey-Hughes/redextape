@@ -74,9 +74,9 @@ fn generated() -> Vec<(&'static str, String)> {
 /// would generate `field: number` — no `bigint`, so this gate passes, and the `| null` that `None`
 /// puts on the wire is gone. None of this crate's fields are `Option<u64>` today; `redextape-wire`'s
 /// `TmStatus::total_steps` and `RxmStatus::total_steps` are. `no_override_misstates_a_field_s_nullability`
-/// below catches that class in this crate, and its twin in `redextape-wire`'s `ts_bindings.rs` catches it
-/// there. Naming the hole here is the point: a gate that implied it covered the whole override class
-/// would tell the next reader not to check.
+/// below catches that class in this crate, and its twins in `redextape-wire`'s and `redextape-clif`'s
+/// `ts_bindings.rs` catch it there. Naming the hole here is the point: a gate that implied it covered
+/// the whole override class would tell the next reader not to check.
 ///
 /// THE SCAN SKIPS JSDOC. `export_to_string` reproduces Rust doc comments verbatim, so a doc comment
 /// that merely discusses `bigint` in prose would otherwise fail this test for a documentation reason
@@ -129,7 +129,7 @@ fn the_gate_covers_every_exported_type() {
 /// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
 /// `assert_overrides_match_field_nullability`'s own doc for why it parses with `syn`, the rule over the
 /// keys that say anything about null, and what it names as outside its reach rather than closed.
-/// One implementation with two callers is deliberate: a second copy drifts the moment one is widened and
+/// One implementation with a caller per crate is deliberate: a second copy drifts the moment one is widened and
 /// the other is not.
 #[test]
 fn no_override_misstates_a_field_s_nullability() {

@@ -1801,3 +1801,38 @@ export async function pickInViewMenu(pane: HTMLElement, cls: string): Promise<vo
 }
 
 export { until }
+
+/**
+ * Read `read()` in every frame until `stop`. **IN A `ResizeObserver`'S CALLBACK**, which runs after every
+ * `requestAnimationFrame` callback of the frame and its layout, and before its paint: a frame's own callback runs
+ * before the page's draws for that frame, so it would read what the frame before painted, and miss a state the page
+ * drew in one frame and replaced before the next. A box whose width flips each frame makes the observer call back.
+ */
+export function everyFrame<T>(read: () => T): { readonly seen: T[]; readonly ticks: () => number; stop(): void } {
+  const seen: T[] = []
+  const flip = document.createElement('div')
+  flip.style.cssText = 'position: fixed; left: 0; top: 0; height: 1px; width: 1px; pointer-events: none'
+  document.body.append(flip)
+  let ticks = 0
+  let on = true
+  const observer = new ResizeObserver(() => {
+    if (on) seen.push(read())
+  })
+  observer.observe(flip)
+  const tick = () => {
+    if (!on) return
+    ticks += 1
+    flip.style.width = `${1 + (ticks % 2)}px`
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  return {
+    seen,
+    ticks: () => ticks,
+    stop: () => {
+      on = false
+      observer.disconnect()
+      flip.remove()
+    },
+  }
+}

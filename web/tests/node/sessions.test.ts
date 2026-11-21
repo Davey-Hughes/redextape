@@ -7,9 +7,17 @@ import type { Leg } from '../../src/protocol'
 import { BufferCapReached, MAX_WARM_BUFFERS, type ScratchBuffers } from '../../src/scratch'
 import { SessionClient, type SessionId } from '../../src/session-client'
 import type { Binding, LegState, PaneOption, PaneView, SessionEntry } from '../../src/sessions'
-import { freshLeg, legControlState, PaneSlot, resetLegs, rewindLeg, SessionRegistry } from '../../src/sessions'
+import {
+  freshLeg,
+  holdClifLeg,
+  legControlState,
+  PaneSlot,
+  resetLegs,
+  rewindLeg,
+  SessionRegistry,
+} from '../../src/sessions'
 import { createTransport } from '../../src/transport'
-import type { LambdaState, RxmState, TmProgram, TmState } from '../../src/types'
+import type { ClifState, LambdaState, RxmState, TmProgram, TmState } from '../../src/types'
 import { legState } from './leg-fixture'
 import { frameOf } from './rxm-fixtures'
 import { fakeClient, fakePort, lambdaFrame, noSessionReply, paint } from './session-fixtures'
@@ -67,7 +75,7 @@ function entry(
     detached: opts.detached ?? false,
     client: fakeClient(),
     legs,
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   }
 }
@@ -940,6 +948,58 @@ describe('rewindLeg', () => {
     const c = legControlState(reg, source, tm)
     expect({ recording: c.recording, stepText: c.stepText }).toEqual({ recording: true, stepText: 'step 0 of 0…' })
     expect(legControlState(reg, copy, reg.legOf(copy)).stepText).toBe('not run')
+  })
+})
+
+/**
+ * **A HELD EMPTY RING READS AS IT READ WHEN THE FIRST HOLD BEGAN**, through a hold begun during it, until the listing
+ * chosen replaces the line with its first frames: a ring a rewind emptied records from step 0, a recompile claimed
+ * meanwhile included, when the leg's frames are no longer the client's generation; a ring a compile emptied is not
+ * run, though each hold raises its epoch.
+ */
+describe('holdClifLeg', () => {
+  const setup = () => {
+    const port = fakePort()
+    const client = new SessionClient(port, () => undefined)
+    const clif = legState<ClifState>(true, 1_000_000)
+    const reg = new SessionRegistry()
+    reg.add({ ...entry('source'), client, legs: { clif } })
+    const line = () => legControlState(reg, { session: 'source', leg: 'clif' }, clif).stepText
+    /** Claim a run and answer it, as its first reply does, which ends the client's wait. */
+    const answered = () => {
+      const gen = client.supersede()
+      port.deliver({ kind: 'frames', leg: 'clif', gen, epoch: 0, frames: [], done: null })
+      return gen
+    }
+    return { client, clif, line, answered }
+  }
+
+  it('keeps a ring a rewind emptied recording from step 0', () => {
+    const { client, clif, line, answered } = setup()
+    clif.gen = answered()
+    rewindLeg(clif)
+    expect(line(), 'precondition: the rewound ring reads as recording from step 0').toBe('step 0 of 0…')
+
+    holdClifLeg(clif, undefined)
+    expect(line(), 'held').toBe('step 0 of 0…')
+    holdClifLeg(clif, undefined)
+    expect(line(), 'held again').toBe('step 0 of 0…')
+    client.supersede()
+    expect(line(), 'a recompile claimed during the hold').toBe('step 0 of 0 — recompiling')
+  })
+
+  it('keeps a ring a compile emptied not run', () => {
+    const { clif, line, answered } = setup()
+    // THE RING HELD THE RUN BEFORE'S FRAMES, and the compile's run has answered with none of its own yet.
+    clif.gen = answered()
+    answered()
+    resetLegs({ clif }, { clif: { available: true, reason: '' } })
+    expect(line(), 'precondition: the emptied ring reads not run').toBe('not run')
+
+    holdClifLeg(clif, undefined)
+    expect(line(), 'held').toBe('not run')
+    holdClifLeg(clif, undefined)
+    expect(line(), 'held again').toBe('not run')
   })
 })
 

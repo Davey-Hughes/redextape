@@ -16,8 +16,8 @@
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
 // count to `f64` to print a ratio is not a defect. `ts_derive_scan` has an inline `#[cfg(test)]`
 // module, whose tests drive the override rule from source fixtures rather than from the filesystem
-// — which is what lets the rule be checked here while its WIRING is checked by the two crates' gate
-// binaries that call it.
+// — which is what lets the rule be checked here while its WIRING is checked by the gate binaries
+// that call it.
 //
 // THE ATTRIBUTE BELOW IS INERT. `ts_derive_scan.rs` carries its own module-level
 // `#![allow(..., clippy::pedantic)]`, which covers the nested test module it holds, and that
@@ -27,7 +27,7 @@
 #![cfg_attr(test, allow(clippy::pedantic))]
 
 //! `ts_derive_scan` (below) is the second thing this crate holds for the same structural reason as
-//! the first: two crates need one definition and neither can own it. It needs no `proptest` and is
+//! the first: several crates need one definition and none can own it. It needs no `proptest` and is
 //! not behind that feature, so a consumer that opts out of `proptest` still gets it.
 //!
 //! **IT IS NOT FREE.** The nullability rule parses Rust instead of scanning it, which puts `syn`

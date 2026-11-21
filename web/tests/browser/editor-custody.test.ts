@@ -57,7 +57,7 @@ function lambdaSession(id: SessionId): SessionEntry {
     detached: true,
     client: fakeClient(),
     legs: { lambda: leg },
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   }
 }

@@ -23,15 +23,19 @@ pub struct ClifInput {
 }
 
 /// How the leg stands, as `RxmStatus` says it for the rxm leg.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifStatus {
     /// The cursor's: `Running` while it can step, `Capped` at a pause, and `Ended` for any other end.
     pub run: RunStatus,
     /// The cap the cursor paused at, set exactly when `run` is `Capped`.
     pub cap: Option<RxmCap>,
-    /// The whole run's steps: the scout's once `ClifLeg::find_end` has found its end, else the cursor's once
-    /// it has ended at any end but a pause, and `None` before either. For a run that pauses at a cap it is
-    /// where the scout paused, or the cursor's steps once a raised cap has carried the cursor further.
+    /// The whole run's steps: known once `ClifLeg::find_end` has found its end, or once the cursor has stopped
+    /// under the input's caps, at an end or a pause, and kept past a rewind; else the cursor's once a raised
+    /// cap has carried it to an end; and `None` before any of these. For a run that pauses at a cap it is
+    /// where the pause is, or the cursor's steps once a raised cap has carried the cursor further. `number`,
+    /// not `bigint`, for the reason `redextape_wire::TmStatus::total_steps` records.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub total_steps: Option<u64>,
 }
 
@@ -42,6 +46,10 @@ pub struct ClifLeg {
     ty: Ty,
     /// The input's caps, which a rewind opens the cursor under, whatever a raise has made the cursor's.
     caps: Caps,
+    /// Whether a raise has lifted the cursor's caps since it last stood at step 0 under the input's: where it
+    /// then stops need not be where the run under the input's caps stops, so `step` does not hand it to the
+    /// scout.
+    raised: bool,
 }
 
 self_cell::self_cell!(
@@ -61,7 +69,8 @@ struct Steppers<'f> {
 }
 
 /// A run ahead of the cursor that learns how the run ends, a budget at a time, so that no single call
-/// steps the whole program; once it has ended only its end and its steps are kept.
+/// steps the whole program; once it has ended only its end and its steps are kept. A cursor that stops
+/// under the input's caps before the scout has ended ends it with its own end, which is the same run's.
 enum Scout<'f> {
     Running(Box<Stepper<'f>>),
     Ended { end: ClifEnd, steps: u64 },
@@ -82,7 +91,7 @@ impl ClifLeg {
             cursor: Stepper::new(funcs, caps),
             scout: Scout::Running(Box::new(Stepper::new(funcs, caps))),
         });
-        Ok(ClifLeg { runs, listing: rows, ty: input.ty, caps })
+        Ok(ClifLeg { runs, listing: rows, ty: input.ty, caps, raised: false })
     }
 
     /// The rows of the leg's functions.
@@ -106,8 +115,7 @@ impl ClifLeg {
         })
     }
 
-    /// How the cursor stands, and how long the whole run is: known once the scout has found its end, or once
-    /// the cursor has ended at any end but a pause.
+    /// How the cursor stands, and how long the whole run is, as `ClifStatus::total_steps` says when it is known.
     #[must_use]
     pub fn status(&self) -> ClifStatus {
         let runs = self.runs.borrow_dependent();
@@ -118,10 +126,12 @@ impl ClifLeg {
                 (RunStatus::Ended, None)
             }
         };
-        // A raised cap can carry the cursor past where the scout paused, and the run is then as long as the
-        // cursor has gone, as `RxmLeg::status` reckons it. A cursor that has ended before the scout has gone
-        // the whole run, so a worker that never sends the scout ahead still learns the length; a pause is
-        // not an end, since a raise can carry the cursor on.
+        // `step` hands the scout the stop of a cursor that ran under the input's caps, a pause included,
+        // since it is just what a scout run to the same cap would report: so a worker that never sends the
+        // scout ahead still learns the length, and a rewind keeps it. A raised cap can carry the cursor past
+        // where the run paused, and the run is then as long as the cursor has gone, as `RxmLeg::status`
+        // reckons it. A scout still running means the cursor has not stopped under the input's caps, so
+        // only a raised cursor's end gives a length; its pause does not, since a raise can carry it on.
         let total_steps = match &runs.scout {
             Scout::Running(_) => matches!(run, RunStatus::Ended).then(|| runs.cursor.steps_taken()),
             Scout::Ended { end: ClifEnd::Capped(_), steps } => Some((*steps).max(runs.cursor.steps_taken())),
@@ -130,15 +140,30 @@ impl ClifLeg {
         ClifStatus { run, cap, total_steps }
     }
 
-    /// Back to step 0 under the input's caps.
+    /// Back to step 0 under the input's caps, keeping the end the cursor found under them, which `step` gave
+    /// the scout.
     pub fn rewind(&mut self) {
         let caps = self.caps;
         self.runs.with_dependent_mut(|funcs, runs| runs.cursor = Stepper::new(funcs, caps));
+        self.raised = false;
     }
 
-    /// Steps the cursor one instruction; `false` once it has ended or paused.
+    /// Steps the cursor one instruction; `false` once it has ended or paused. A cursor that stops unraised
+    /// has run under the input's caps, so its end becomes the scout's if the scout has not found one, and a
+    /// rewind does not lose it; a raised cursor's end is left out, since it need not be where the run under
+    /// the input's caps ends.
     pub fn step(&mut self) -> bool {
-        self.runs.with_dependent_mut(|_, runs| runs.cursor.step())
+        let raised = self.raised;
+        self.runs.with_dependent_mut(|_, runs| {
+            let stepped = runs.cursor.step();
+            if !raised
+                && matches!(runs.scout, Scout::Running(_))
+                && let Some(end) = runs.cursor.status().cloned()
+            {
+                runs.scout = Scout::Ended { end, steps: runs.cursor.steps_taken() };
+            }
+            stepped
+        })
     }
 
     /// The cursor's frame cut to `window`.
@@ -169,13 +194,26 @@ impl ClifLeg {
     /// `Stepper::raise_caps` continues any pause, and a stack, heap or memory pause would only stop again
     /// at the same call, so it is left as it stands, as `RxmCursor::raise_cap` leaves it.
     pub fn raise_cap(&mut self, extra_steps: u64) {
-        self.runs.with_dependent_mut(|_, runs| {
+        let raised = self.runs.with_dependent_mut(|_, runs| {
             let cursor = &mut runs.cursor;
-            if matches!(cursor.status(), None | Some(ClifEnd::Capped(RxmCap::Steps))) {
+            let raises = matches!(cursor.status(), None | Some(ClifEnd::Capped(RxmCap::Steps)));
+            if raises {
                 let mut caps = cursor.runtime().caps;
                 caps.steps = caps.steps.saturating_add(extra_steps);
                 cursor.raise_caps(caps);
             }
+            raises
         });
+        self.raised |= raised;
+    }
+}
+
+/// Why `ClifLeg::new` refused a program, as a sentence a page can show: `Unsupported`'s own words, and for
+/// `TooDeep` the guard it passed, since its node means nothing to a reader of the CLIF.
+#[must_use]
+pub fn decline_reason(e: &LowerError) -> String {
+    match e {
+        LowerError::Unsupported { what, .. } => what.clone(),
+        LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
     }
 }

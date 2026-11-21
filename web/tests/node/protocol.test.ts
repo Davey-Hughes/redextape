@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { LEGS, mapLegs } from '../../src/legs'
 import {
+  CLIF_ABSENT,
+  clifCompileStatus,
+  clifFrameBytes,
   endOf,
   FRAME_OVERHEAD_BYTES,
   forkable,
@@ -8,6 +11,7 @@ import {
   keepDecided,
   keepInFlight,
   type LambdaLeg,
+  LEG_FRAME_BYTES,
   type Leg,
   lambdaFrameBytes,
   MAX_FORK_RULES,
@@ -23,7 +27,7 @@ import {
   type TmLeg,
   tmFrameBytes,
 } from '../../src/protocol'
-import type { Classified, Decoded, LambdaState, TmProgram, TmState } from '../../src/types'
+import type { Classified, ClifState, Decoded, LambdaState, RxmStatus, TmProgram, TmState } from '../../src/types'
 import { frameOf } from './rxm-fixtures'
 import { spanBytes } from './span-bytes'
 
@@ -205,6 +209,114 @@ describe('rxmFrameBytes', () => {
   })
 })
 
+/**
+ * Two frames as `ClifSession.state` returned them under `CLIF_WINDOW`, both of programs as built. The first is
+ * `let xs = cons(1, cons(2, nil)); let mut v = 2; let get = |x| v + x; get(head(xs))` at step 64: three values, two
+ * call-stack entries, four cells and a box. The second is `fact.rxt` at step 95: seventeen values, four entries and
+ * no heap, so a charge that drops the call stack is told apart from one that drops the heap.
+ */
+const CELLS_AND_BOX: ClifState = {
+  step: 64,
+  at: { function: 1, inst: 0 },
+  next: { function: 1, inst: 0 },
+  pc: null,
+  values: [
+    { value: 0, word: { word: '0', tag: 'Value' }, regs: [] },
+    { value: 1, word: { word: '4', tag: 'List' }, regs: ['a0'] },
+    { value: 2, word: { word: '1', tag: 'Value' }, regs: ['a1'] },
+  ],
+  values_len: 3,
+  depth: 2,
+  frames: [
+    { function: 1, inst: 0 },
+    { function: 0, inst: 63 },
+  ],
+  heap_len: 4,
+  cells: [
+    { cell: 4, head: { word: '0', tag: 'Value' }, tail: { word: '3', tag: 'List' } },
+    { cell: 3, head: { word: '1', tag: 'Box' }, tail: { word: '0', tag: 'Value' } },
+    { cell: 2, head: { word: '1', tag: 'Value' }, tail: { word: '1', tag: 'List' } },
+    { cell: 1, head: { word: '2', tag: 'Value' }, tail: { word: '0', tag: 'Value' } },
+  ],
+  box_len: 1,
+  boxes: [{ handle: 1, content: { word: '2', tag: 'Value' } }],
+}
+const DEEP: ClifState = {
+  step: 95,
+  at: { function: 1, inst: 27 },
+  next: { function: 1, inst: 27 },
+  pc: 11,
+  values: [
+    { value: 0, word: { word: '0', tag: 'Value' }, regs: [] },
+    { value: 1, word: { word: '2', tag: 'Value' }, regs: ['a0'] },
+    { value: 2, word: { word: '0', tag: 'Value' }, regs: ['r0'] },
+    { value: 3, word: { word: '0', tag: 'Value' }, regs: ['r1'] },
+    { value: 4, word: { word: '0', tag: 'Value' }, regs: ['r2'] },
+    { value: 5, word: { word: '0', tag: 'Value' }, regs: ['r3'] },
+    { value: 6, word: { word: '0', tag: 'Value' }, regs: ['r4'] },
+    { value: 7, word: { word: '0', tag: 'Value' }, regs: ['r5'] },
+    { value: 8, word: { word: '0', tag: 'Value' }, regs: ['r6'] },
+    { value: 9, word: { word: '0', tag: 'Value' }, regs: ['r7'] },
+    { value: 10, word: { word: '0', tag: 'Value' }, regs: ['r8'] },
+    { value: 11, word: { word: '0', tag: 'Value' }, regs: ['rr'] },
+    { value: 14, word: { word: '0', tag: 'Value' }, regs: ['r3'] },
+    { value: 17, word: { word: '0', tag: 'Value' }, regs: [] },
+    { value: 18, word: { word: '0', tag: 'Value' }, regs: ['r1'] },
+    { value: 23, word: { word: '1', tag: 'Value' }, regs: ['r8'] },
+    { value: 26, word: { word: '1', tag: 'Value' }, regs: [] },
+  ],
+  values_len: 17,
+  depth: 4,
+  frames: [
+    { function: 1, inst: 27 },
+    { function: 1, inst: 32 },
+    { function: 1, inst: 32 },
+    { function: 0, inst: 10 },
+  ],
+  heap_len: 0,
+  cells: [],
+  box_len: 0,
+  boxes: [],
+}
+
+describe('clifFrameBytes', () => {
+  it('is the charge LEG_FRAME_BYTES gives a CLIF frame', () => {
+    expect(LEG_FRAME_BYTES.clif).toBe(clifFrameBytes)
+  })
+
+  it('charges each value’s word and register names, each call-stack entry, both halves of each cell and each box’s content', () => {
+    // 3 values, 2 register names, 2 entries, 4 cells' 8 halves and 1 box: 16 words, at CLIF_WORD_BYTES 60, beside
+    // FRAME_OVERHEAD_BYTES 64 and CLIF_FRAME_BYTES 236.
+    expect(clifFrameBytes(CELLS_AND_BOX)).toBe(1260)
+  })
+
+  it('charges a deep frame’s call stack with no heap', () => {
+    // 17 values, 14 register names and 4 entries: 35 words, at CLIF_WORD_BYTES 60, beside the 300 bytes above.
+    expect(clifFrameBytes(DEEP)).toBe(2400)
+  })
+})
+
+describe('clifCompileStatus', () => {
+  const AVAILABLE: RxmStatus = { available: true, reason: '', run: 'Ended', cap: null, total_steps: 4 }
+  // The rxm leg's TooDeep sentence (`session.rs`).
+  const REASON = 'the program nests deeper than the rxm lowering guard allows'
+  const DECLINED: RxmStatus = { available: false, reason: REASON, run: null, cap: null, total_steps: null }
+  const NOTHING_RUN = { run: null, cap: null, total_steps: null }
+
+  it('is available, with nothing run, when the rxm leg is and a CLIF view is shown', () => {
+    expect(clifCompileStatus(AVAILABLE, 'as-built')).toEqual({ available: true, reason: '', ...NOTHING_RUN })
+  })
+
+  it('is unavailable, with no reason, when no CLIF view is shown', () => {
+    expect(clifCompileStatus(AVAILABLE, null)).toEqual({ available: false, reason: '', ...NOTHING_RUN })
+  })
+
+  it("is unavailable with the rxm leg's reason when the rxm leg declined", () => {
+    expect(clifCompileStatus(DECLINED, 'as-built')).toEqual({ available: false, reason: REASON, ...NOTHING_RUN })
+    expect(clifCompileStatus(DECLINED, null)).toEqual({ available: false, reason: REASON, ...NOTHING_RUN })
+  })
+})
+
 describe('rxmRecordEnd', () => {
   it('ends a halt or a fault, and names each full cap, and calls only the step cap capped', () => {
     expect(rxmRecordEnd({ run: 'Ended', cap: null })).toBe('ended')
@@ -252,7 +364,7 @@ const tmLeg = (value: Decoded | null): TmLeg => ({
   value,
 })
 const TWO: Decoded = { Value: { text: '2' } }
-const legs = (l: LambdaLeg, r: RxmLeg, t: TmLeg): ResultLegs => ({ lambda: l, rxm: r, tm: t })
+const legs = (l: LambdaLeg, r: RxmLeg, t: TmLeg): ResultLegs => ({ lambda: l, rxm: r, tm: t, clif: CLIF_ABSENT })
 
 describe('mapLegs', () => {
   it('builds one entry per leg, in `LEGS` order, calling `value` once for each', () => {
@@ -309,17 +421,17 @@ describe('keepDecided', () => {
  * across the rewind (spec §5.2).
  */
 describe('keepInFlight', () => {
-  const none = { lambda: false, rxm: false, tm: false }
-  const all = { lambda: true, rxm: true, tm: true }
+  const none = { lambda: false, rxm: false, tm: false, clif: false }
+  const all = { lambda: true, rxm: true, tm: true, clif: true }
 
   it('reads a leg with no part held as it stands, recording or not', () => {
     const next = legs(lambda('Unfinished', 5), rxm('Unfinished'), tmLeg('Unfinished'))
-    expect(keepInFlight({ lambda: null, rxm: null, tm: null }, next, all)).toEqual(next)
+    expect(keepInFlight({ lambda: null, rxm: null, tm: null, clif: null }, next, all)).toEqual(next)
   })
 
   it('keeps a part held for one leg alone while it records, as a rewind before the first result holds one', () => {
     const next = legs(lambda('Unfinished', 256), rxm(TWO), tmLeg('Unfinished'))
-    const held: HeldLegs = { lambda: lambda('Unfinished', 1846), rxm: null, tm: null }
+    const held: HeldLegs = { lambda: lambda('Unfinished', 1846), rxm: null, tm: null, clif: null }
     expect(keepInFlight(held, next, all)).toEqual(legs(lambda('Unfinished', 1846), rxm(TWO), tmLeg('Unfinished')))
     expect(keepInFlight(held, next, none)).toEqual(next)
   })
@@ -327,7 +439,7 @@ describe('keepInFlight', () => {
   it('keeps the posted part of each leg still recording, whatever either value is, and takes the rest new', () => {
     const prev = legs(lambda('Unfinished', 900), rxm('Unfinished'), tmLeg('Unfinished'))
     const next = legs(lambda('Unfinished', 256), rxm(TWO), tmLeg(TWO))
-    expect(keepInFlight(prev, next, { lambda: true, rxm: true, tm: false })).toEqual(
+    expect(keepInFlight(prev, next, { lambda: true, rxm: true, tm: false, clif: false })).toEqual(
       legs(lambda('Unfinished', 900), rxm('Unfinished'), tmLeg(TWO)),
     )
     expect(keepInFlight(prev, next, none)).toEqual(next)

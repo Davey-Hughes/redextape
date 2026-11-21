@@ -17,8 +17,8 @@ import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
  *
  * **NOT HELD: THE REST OF THE HEADER, WHICH `main.ts` FILLS LATE.** The `encoding` select has no options until the wasm
  * lists them, and `#appearance` no label, so `share`, `about` and `settings` move when those arrive. In Terminal at
- * 1280 px the filled header keeps to one row because `style.css` halves Terminal's column gap up to 85rem
- * (`terminal-header-gap.test.ts` holds the gap).
+ * 1280 px the filled header keeps to one row because `style.css` narrows Terminal's column gap over 30rem up to
+ * 85rem (`terminal-header-gap.test.ts` holds the gap, `clif-header.test.ts` the row).
  *
  * **IN A WINDOW 40rem WIDE OR NARROWER THE GROUP IS NOT DRAWN, BEFORE THE APP IS UP AS AFTER.** `main.ts` hides it
  * there with an attribute, which is not set until it runs; `style.css` has a media rule for the paint before that,
@@ -102,8 +102,10 @@ describe('the views toggles, in the page’s markup before the app is up', () =>
 describe('the views toggles, once the app is up', () => {
   it.each(STYLE_IDS)('are where the markup had them and as wide, in %s', async (style) => {
     await page.viewport(1280, 896)
-    // ALL FOUR VIEWS (`setup.ts` stores that workspace), so every toggle is pressed where none was.
-    expect(pressed(), 'precondition: the app pressed the toggles of the views it shows').toEqual(HEADER_ORDER)
+    // ALL FOUR VIEWS (`setup.ts` stores that workspace), so every toggle but CLIF's is pressed where none was.
+    expect(pressed(), 'precondition: the app pressed the toggles of the views it shows').toEqual(
+      HEADER_ORDER.filter((kind) => kind !== 'clif'),
+    )
     await chooseStyle(style)
     await document.fonts.ready
     await frames()

@@ -12,6 +12,7 @@ use redextape_core::viewmodel::{RxmBox, RxmCell, RxmWord, heap_boxes, heap_cells
 use crate::stepper::{Activation, ClifEnd, Stepper, pc_of};
 
 /// An instruction of the run's functions.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifAt {
     /// The function's index among the run's functions.
@@ -21,6 +22,7 @@ pub struct ClifAt {
 }
 
 /// How much of the run a `ClifState` carries: at most this many of each list.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
 pub struct ClifWindow {
     pub values: usize,
@@ -30,6 +32,7 @@ pub struct ClifWindow {
 }
 
 /// One set value of the running frame.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifValue {
     /// The value's number, `v4`'s 4.
@@ -41,9 +44,12 @@ pub struct ClifValue {
 }
 
 /// One step of a CLIF run, cut to a `ClifWindow`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifState {
-    /// Instructions completed, `Stepper::steps_taken`.
+    /// Instructions completed, `Stepper::steps_taken`. `number`, not `bigint`, for the reason
+    /// `redextape_wire::TmStatus::total_steps` records.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub step: u64,
     /// `Stepper::at`.
     pub at: ClifAt,

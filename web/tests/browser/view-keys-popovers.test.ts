@@ -45,7 +45,9 @@ async function press(button: HTMLElement): Promise<HTMLElement> {
 
 async function start(): Promise<void> {
   for (const p of document.querySelectorAll<HTMLElement>(':popover-open')) p.hidePopover()
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="false"]')) b.click()
+  // EVERY TOGGLE BUT CLIF'S PRESSED, AND CLIF'S NOT, as `view-keys.test.ts`'s `start` has it.
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button'))
+    if ((b.getAttribute('aria-pressed') === 'true') === (b.dataset.shows === 'clif')) b.click()
   view.focus()
   await until(() => view.hasFocus, 'the source editor to take the focus')
   errors.length = 0
@@ -199,7 +201,8 @@ describe('view keys under an open popover', () => {
 
     /**
      * NO VIEW KEY IN THIS ONE. A popover stays open while `Shift+Tab` walks out of it, so the source toggle can be
-     * pressed with `+ view` open: back from the menu's first item to `+ view`, then the TM, λ, rxm and source toggles.
+     * pressed with `+ view` open: back from the menu's first item to `+ view`, then the five toggles from CLIF's to
+     * the source's.
      */
     it('takes source out of + view, still open, when the source toggle is pressed from the keyboard', async () => {
       await start()
@@ -207,7 +210,7 @@ describe('view keys under an open popover', () => {
       const menu = await press(document.querySelector('#new-view') as HTMLElement)
       expect(sourceItem(menu), 'precondition: + view offers source').not.toBeNull()
       const others = menu.querySelectorAll('button').length - 1
-      for (let i = 0; i < 5; i++) await userEvent.keyboard('{Shift>}{Tab}{/Shift}')
+      for (let i = 0; i < 6; i++) await userEvent.keyboard('{Shift>}{Tab}{/Shift}')
       expect(document.activeElement, 'precondition: Shift+Tab reached the source toggle').toBe(toggle('source'))
       expect(open(), 'precondition: + view is still open').toEqual([menu.id])
       await userEvent.keyboard('{Enter}')

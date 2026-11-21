@@ -7,7 +7,7 @@ mod listing;
 mod state;
 mod stepper;
 
-pub use leg::{ClifInput, ClifLeg, ClifStatus};
+pub use leg::{ClifInput, ClifLeg, ClifStatus, decline_reason};
 pub use listing::{ClifFunction, ClifListing, ClifRow, ClifRowKind, listing};
 pub use state::{ClifAt, ClifState, ClifValue, ClifWindow};
 pub use stepper::{ClifEnd, FRAME_BYTES_PER_VALUE, Stepper};

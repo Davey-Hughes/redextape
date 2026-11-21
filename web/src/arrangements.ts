@@ -87,10 +87,13 @@ export function enter(
 /**
  * The stops the cycle keys walk, in order: the source beside each other kind in turn, in the header's order, then all
  * four (spec §7.4). Each stop is a combination, so its kinds are in `KIND_ORDER`, where the source comes first too.
+ *
+ * **NO STOP HOLDS CLIF.** A cycle key rearranges the views on screen, and the CLIF view's package is fetched only when
+ * a user asks for that view, so CLIF is shown by its own toggle and key alone.
  */
 export const CYCLE: readonly Combination[] = [
-  ...HEADER_ORDER.filter((k) => k !== 'source').map((k): Combination => ['source', k]),
-  KIND_ORDER,
+  ...HEADER_ORDER.filter((k) => k !== 'source' && k !== 'clif').map((k): Combination => ['source', k]),
+  KIND_ORDER.filter((k) => k !== 'clif'),
 ]
 
 /**

@@ -81,8 +81,8 @@ export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'r
 export type LanguageId = (typeof LANGUAGE_IDS)[number]
 
 /**
- * The language each kind of view's editor holds. An rxm view's is an rxm copy's, which takes `redextape_rxm` from here
- * (Plan 7 part 5 spec §5.5, §7).
+ * The language each kind of view's editor holds, or `null` for a kind whose view holds none: a CLIF view offers no copy
+ * to edit. An rxm view's is an rxm copy's, which takes `redextape_rxm` from here (Plan 7 part 5 spec §5.5, §7).
  *
  * **KEYED BY `PaneKind`.** A union spelled out here would be a second copy of `PaneKind` that nothing held to the
  * first, so a new pane kind would leave this map without it and `transport.ts`'s lookups by leg reading `undefined`
@@ -91,11 +91,12 @@ export type LanguageId = (typeof LANGUAGE_IDS)[number]
  * `legs.ts`'s `LEG_NAME` gives. Those neighbours are looked up by exactly the keys they have; this one is looked up
  * by `Leg`.
  */
-export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId>> = {
+export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId | null>> = {
   source: 'redextape',
   lambda: 'redextape_lambda',
   rxm: 'redextape_rxm',
   tm: 'redextape_tm',
+  clif: null,
 }
 
 /**

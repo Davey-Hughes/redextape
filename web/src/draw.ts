@@ -67,7 +67,7 @@ export function createDraw(deps: {
   links: LinkWiring
   /** The λ trees the views draw — asked here for each connected view's displayed step (spec §4). */
   trees: LambdaTrees
-  /** Views a compile reached while they were off the page (`replies.ts`); each is seeded when next shown. */
+  /** Views to seed from their session (`replies.ts`'s `UnseenViews`); each is seeded when next drawn on the page. */
   unseen: UnseenViews
   /** What seeds a view in `unseen` when it is shown — `pane-host.ts`'s, so every route tells a view the same. */
   seedPane: PaneHost['seedPane']
@@ -160,7 +160,7 @@ export function createDraw(deps: {
       readonly slot: { readonly binding: { readonly session: SessionId } }
     }): boolean => arranged(e.id) && onProgram(e)
     const lam = panes.active('lambda', watched)?.slot.resolve(sessions)
-    // EACH LINKED LEG'S OWN RUNNING FOCUS — its frame's `source_node`, NOT `lam.hist.current?.owner` below.
+    // EACH LINKED LEG'S OWN RUNNING FOCUS — its `LINKED` entry's `focusNode`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2). Each pane reports what ITS OWN leg
     // is doing right now — the two clocks never synchronize (§0), so feeding the δ-table from the λ
     // leg's owner would show it whatever the OTHER model was doing, not its own. `sourceNodeOwner` wraps
@@ -180,15 +180,19 @@ export function createDraw(deps: {
     //
     // A leg's focus marks the rows of its views of the program and feeds the status line's coincidence; the source
     // editor's focus mark stays λ's, as Plan 5c's dual-focus design settled.
-    const running: Record<LinkedLeg, { focus: Focus | null; link: Link | null }> = perLinkedLeg((leg) => {
-      const active = panes.active(leg, watched)?.slot.resolve(sessions)
-      const focus =
-        linkWiring.linkable && linkWiring.index !== null && active !== undefined
-          ? runningFocus(linkWiring.index, sourceNodeOwner(active.hist.current?.source_node ?? null))
-          : null
-      const link = focus !== null && linkWiring.index !== null ? linkWiring.index.linkFor(focus.node) : null
-      return { focus, link }
-    })
+    const running: Record<LinkedLeg, { focus: Focus | null; link: Link | null }> = perLinkedLeg(
+      <K extends LinkedLeg>(leg: K) => {
+        const active = panes.active(leg, watched)?.slot.resolve(sessions)
+        const index = linkWiring.index
+        const frame = active?.hist.current
+        const focus =
+          linkWiring.linkable && index !== null && active !== undefined
+            ? runningFocus(index, sourceNodeOwner(frame === undefined ? null : LINKED[leg].focusNode(frame, index)))
+            : null
+        const link = focus !== null && index !== null ? index.linkFor(focus.node) : null
+        return { focus, link }
+      },
+    )
 
     // THE SPLIT MENU'S TWO SHARED INPUTS, RESOLVED ONCE PER FRAME RATHER THAN ONCE PER PANE. Both answers
     // are app-wide — every pane may be pointed at the same set of pairs, and "is there a source leaf" is
@@ -214,8 +218,9 @@ export function createDraw(deps: {
       // own methods; `null` on a leg no link reaches keeps every read below honest about which leg it is on.
       const boundLeg = p.slot.binding.leg
       const machine = isLinkedLeg(boundLeg) ? LINKED[boundLeg].pane(p) : null
-      // A VIEW THAT MISSED WHAT ITS SESSION WAS TOLD, by being off the page when it came, is seeded from what the
-      // session kept: because it is in `unseen`, whatever its leg, so `SEED` reaches every leg with a program here.
+      // A VIEW THAT MISSED WHAT ITS SESSION WAS TOLD, off the page when it came or a CLIF view when a listing landed,
+      // is seeded from what the session kept: because it is in `unseen`, whatever its leg, so `SEED` reaches every leg
+      // with a program here.
       const seeded = unseen.has(p.pane)
       if (seeded) {
         seedPane(p, p.slot.binding.session)
@@ -225,18 +230,18 @@ export function createDraw(deps: {
       // **A MACHINE VIEW SHOWING A COPY MARKS NOTHING OF THE PROGRAM'S** — neither its running focus here nor its pin
       // below. Both resolve to the PROGRAM's state and instruction indices, and a copy numbers its rows by itself, so
       // an index read there names whatever the copy has at it (spec amendment 32, in the inbound direction): the λ
-      // loop's guard below, "A COPY IS NOT LINKED", for the machine views. Asked only of a TM or rxm view.
+      // loop's guard below, "A COPY IS NOT LINKED", for the machine views. Asked only of a TM, rxm or CLIF view.
       const unlinked = machine !== null && sessions.entryOf(p.slot.binding.session).detached
       if (machine !== null && isLinkedLeg(boundLeg)) {
         const focusLink = running[boundLeg].link
-        machine.setFocus(unlinked || focusLink === null ? [] : LINKED[boundLeg].rows(focusLink))
+        machine.setFocus(unlinked || focusLink === null ? [] : LINKED[boundLeg].rows(focusLink, null))
       }
       p.slot.render(sessions, p.pane, leg)
       // **THE SEED DROPPED THE PIN AND ITS SCROLL, AND BOTH ARE GIVEN BACK AFTER THE VIEW'S RENDER.** The view missed
-      // the compile, so its seed's `setProgram` dropped the pin it held and any link row still waiting in its grid —
-      // rightly, since it had turned `link-wiring.ts`'s fan-out into rows of the content it held before the seed. The
-      // pin is resolved here against `linkWiring.index`, the index this frame's pin is current against, so a view
-      // shown frames later still gets the right rows.
+      // the compile or the listing, so its seed's `setProgram` dropped the pin it held and any link row still waiting
+      // in its grid — rightly, since it had turned `link-wiring.ts`'s fan-out into rows of the content it held before
+      // the seed. The pin is resolved here against `linkWiring.index`, the index this frame's pin is current against,
+      // so a view shown frames later still gets the right rows.
       //
       // `scrollTo` IS THE FAN-OUT'S, `origin` AGAINST THIS VIEW'S LEG: a pin made in the source or in another leg's
       // view scrolls the view to it, held until the run moves, as it does a view that saw the compile and is shown
@@ -254,7 +259,7 @@ export function createDraw(deps: {
           : null
       if (seeded && machine !== null && isLinkedLeg(boundLeg)) {
         machine.setLink(
-          seededPin === null ? [] : LINKED[boundLeg].rows(seededPin),
+          seededPin === null ? [] : LINKED[boundLeg].rows(seededPin, linkWiring.link),
           linkWiring.link !== null && linkWiring.link.origin !== boundLeg,
         )
       }
@@ -411,10 +416,12 @@ export function createDraw(deps: {
       const kind = entry.slot.binding.leg
       const copyLeg = copyLegOf(leg)
       const readings: CopyReadings = sessions.entryOf(session).readings
-      readout.show(null, {
-        segments: () => copySegments(kind, name, readings, copyLeg),
-        rows: () => copyRows(copyParts(kind, name, readings, copyLeg)),
-      })
+      // NEVER A CLIF VIEW: a CLIF view offers no copy, so one is always on the program, the branch above.
+      if (kind !== 'clif')
+        readout.show(null, {
+          segments: () => copySegments(kind, name, readings, copyLeg),
+          rows: () => copyRows(copyParts(kind, name, readings, copyLeg)),
+        })
     }
 
     // THE BAR (spec §8), AFTER THE READOUT AND AFTER EVERY PANE. It resolves its own target through the

@@ -63,15 +63,15 @@
 # nothing, so "cargo exited 0" was never evidence that generation happened, only that nothing failed —
 # the checks below are literal file-existence tests, not a trust in the exit code.
 #
-# THE CHECK IS PER LEG, NOT ONE COMBINED CHECK OVER A SHARED SCRATCH DIRECTORY. With both `redextape-core`
-# and `redextape-wire` writing files, either leg's output alone satisfies a combined check, so a regression
-# that made ONE leg's filter match nothing — a removed derive, a `ts`-feature regression on that crate, a
-# `ts-rs` upgrade that renames the `export_bindings_*` test prefix — would ride in on the OTHER leg's files,
-# exit 0, and destroy the last-good `web/bindings` at swap: the single outcome this whole script exists to
-# prevent. So each leg writes into its own subdirectory of the scratch directory (`$TMP_DIR/core`,
-# `$TMP_DIR/wire`) instead of into the scratch directory directly, each subdirectory is checked non-empty
-# independently, and only once BOTH have proven non-empty are they merged into the flat tree that gets
-# swapped in. Neither subdirectory needs its own lock or trap entry: both live under the already
+# THE CHECK IS PER LEG, NOT ONE COMBINED CHECK OVER A SHARED SCRATCH DIRECTORY. With `redextape-core`,
+# `redextape-wire` and `redextape-clif` each writing files, any one leg's output satisfies a combined check, so
+# a regression that made ONE leg's filter match nothing — a removed derive, a `ts`-feature regression on that
+# crate, a `ts-rs` upgrade that renames the `export_bindings_*` test prefix — would ride in on the OTHER legs'
+# files, exit 0, and destroy the last-good `web/bindings` at swap: the single outcome this whole script exists
+# to prevent. So each leg writes into its own subdirectory of the scratch directory (`$TMP_DIR/core`,
+# `$TMP_DIR/wire`, `$TMP_DIR/clif`) instead of into the scratch directory directly, each subdirectory is
+# checked non-empty independently, and only once EVERY one has proven non-empty are they merged into the flat
+# tree that gets swapped in. No subdirectory needs its own lock or trap entry: each lives under the already
 # unique-per-process `$TMP_DIR`, so `rm -rf "${TMP_DIR:?}"` in cleanup already removes them.
 #
 # EVERY `rm -rf` BELOW USES A LITERAL PATH OR A VARIABLE WRITTEN `"${VAR:?}"` — the colon form is what
@@ -96,11 +96,12 @@ OLD_DIR="${TMP_DIR}.old"   # never pre-created — appending to a unique name ke
 
 # Each cargo leg below writes into its own subdirectory of TMP_DIR rather than into TMP_DIR itself — see the
 # header comment for why a single check over one shared directory cannot tell "a leg produced nothing" from
-# "the other leg produced something". Both names are derived from the already per-process TMP_DIR, so they
-# carry the same collision-freedom without needing their own lock or trap entry.
+# "another leg produced something". Each name is derived from the already per-process TMP_DIR, so it
+# carries the same collision-freedom without needing its own lock or trap entry.
 CORE_DIR="$TMP_DIR/core"
 WIRE_DIR="$TMP_DIR/wire"
-mkdir -p "$CORE_DIR" "$WIRE_DIR"
+CLIF_DIR="$TMP_DIR/clif"
+mkdir -p "$CORE_DIR" "$WIRE_DIR" "$CLIF_DIR"
 
 LOCK_HELD=0
 
@@ -171,9 +172,12 @@ env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
   TS_RS_EXPORT_DIR="$CORE_DIR" cargo test -p redextape-core --features ts export_bindings
 env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
   TS_RS_EXPORT_DIR="$WIRE_DIR" cargo test -p redextape-wire --features ts export_bindings
+# `--lib`: the crate's integration tests export nothing, and building them would only add to the wait.
+env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
+  TS_RS_EXPORT_DIR="$CLIF_DIR" cargo test -p redextape-clif --features ts --lib export_bindings
 
-# Checked independently, one leg at a time: an empty CORE_DIR must fail loudly even when WIRE_DIR is full,
-# and vice versa — see the header comment for why a single combined check cannot catch that.
+# Checked independently, one leg at a time: an empty leg directory must fail loudly even when the others are
+# full — see the header comment for why a single combined check cannot catch that.
 check_leg_produced_files() {
   local dir="$1" crate="$2"
   if [ -z "$(find "$dir" -maxdepth 1 -name '*.ts' -print -quit)" ]; then
@@ -186,35 +190,37 @@ check_leg_produced_files() {
 }
 check_leg_produced_files "$CORE_DIR" "redextape-core"
 check_leg_produced_files "$WIRE_DIR" "redextape-wire"
+check_leg_produced_files "$CLIF_DIR" "redextape-clif"
 
-# A type of the same name exported from BOTH crates — say a `Span` added to redextape-wire carrying the
+# A type of the same name exported from TWO crates — say a `Span` added to redextape-wire carrying the
 # canonical derive — lands on the same basename in each leg's own directory, and the plain `mv` below would
 # merge them onto one file, silently keeping whichever it happens to write last. NO COVERAGE GATE SEES THIS:
 # each crate's `the_gate_covers_every_exported_type` (in its own `tests/ts_bindings.rs`) compares only that
-# crate's derive sites against its own `generated()` list, so a same-named type declared in the OTHER crate
-# never enters the comparison — both gates pass, and the wrong file ships to every TypeScript consumer.
-# Checked here, before the merge and before anything under $BINDINGS_DIR is touched, so a collision refuses
-# loudly instead of being resolved by mv's last-write-wins.
+# crate's derive sites against its own `generated()` list, so a same-named type declared in ANOTHER crate
+# never enters the comparison — every gate passes, and the wrong file ships to every TypeScript consumer.
+# Checked here over every pair of legs, before the merge and before anything under $BINDINGS_DIR is touched,
+# so a collision refuses loudly instead of being resolved by mv's last-write-wins.
 #
-# A BASENAME BOTH LEGS WROTE WITH THE SAME BYTES IS NOT A COLLISION, and it is dropped from the wire leg. ts-rs
-# exports a type's dependencies with it, so a redextape-wire type that names a redextape-core type — the rxm leg's
-# `RxmStatus` and its `cap: RxmCap` — writes that core type's file into the wire leg too. Both files come from the
-# one Rust declaration, so they agree to the byte, and keeping either is keeping both. Two DIFFERENT types of one
-# name print different declarations and still refuse below.
+# A BASENAME TWO LEGS WROTE WITH THE SAME BYTES IS NOT A COLLISION, and it is dropped from the later leg. ts-rs
+# exports a type's dependencies with it, so a type that names another crate's type writes that type's file into
+# its own leg too: wire's `RxmStatus` and its `cap: RxmCap`, clif's `ClifValue` and its `word: RxmWord`. Both
+# files come from the one Rust declaration, so they agree to the byte, and keeping either is keeping both. Two
+# DIFFERENT types of one name print different declarations and still refuse below.
 check_no_leg_collisions() {
+  local earlier_dir="$1" earlier_crate="$2" later_dir="$3" later_crate="$4"
   local name collisions=""
-  for path in "$CORE_DIR"/*.ts; do
+  for path in "$earlier_dir"/*.ts; do
     name="$(basename "$path")"
-    if [ -e "$WIRE_DIR/$name" ]; then
-      if cmp -s "$path" "$WIRE_DIR/$name"; then
-        rm -f "${WIRE_DIR:?}/$name"
+    if [ -e "$later_dir/$name" ]; then
+      if cmp -s "$path" "$later_dir/$name"; then
+        rm -f "${later_dir:?}/$name"
       else
         collisions="$collisions $name"
       fi
     fi
   done
   if [ -n "$collisions" ]; then
-    echo "build-web-bindings.sh: redextape-core and redextape-wire both generated:$collisions —" \
+    echo "build-web-bindings.sh: $earlier_crate and $later_crate both generated:$collisions —" \
       "refusing to touch $BINDINGS_DIR. A type of that name is exported from both crates, so 'mv'" \
       "would silently keep whichever leg it wrote last, and neither crate's coverage gate can see" \
       "it — each only compares its own crate's derive sites against its own generated() list. Rename" \
@@ -222,14 +228,17 @@ check_no_leg_collisions() {
     exit 1
   fi
 }
-check_no_leg_collisions
+# Each pair drops from its later leg only, so a file the core/wire pair dropped from wire is still compared
+# with clif's by the core/clif pair.
+check_no_leg_collisions "$CORE_DIR" "redextape-core" "$WIRE_DIR" "redextape-wire"
+check_no_leg_collisions "$CORE_DIR" "redextape-core" "$CLIF_DIR" "redextape-clif"
+check_no_leg_collisions "$WIRE_DIR" "redextape-wire" "$CLIF_DIR" "redextape-clif"
 
-# Both legs proved non-empty independently, and neither collides with the other: merge them into
-# TMP_DIR itself so the tree that gets swapped in below keeps the same flat layout web/bindings has.
-# mv's directory-destination form takes any number of sources, so a third leg added later is one more
-# argument here, not a new check shape.
-mv "$CORE_DIR"/*.ts "$WIRE_DIR"/*.ts "$TMP_DIR/"
-rm -rf "${CORE_DIR:?}" "${WIRE_DIR:?}"
+# Every leg proved non-empty independently, and no two collide: merge them into TMP_DIR itself so the
+# tree that gets swapped in below keeps the same flat layout web/bindings has. mv's directory-destination
+# form takes any number of sources, so each leg is one more argument here, not a new check shape.
+mv "$CORE_DIR"/*.ts "$WIRE_DIR"/*.ts "$CLIF_DIR"/*.ts "$TMP_DIR/"
+rm -rf "${CORE_DIR:?}" "${WIRE_DIR:?}" "${CLIF_DIR:?}"
 
 # Generation succeeded and produced files: web/bindings.tmp.* is a complete, good tree. Everything past
 # this point that touches the SHARED name web/bindings runs under the lock.

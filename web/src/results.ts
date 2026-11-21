@@ -1,5 +1,5 @@
 import { counted, n } from './format'
-import { LEGS } from './legs'
+import { LEG_NAME, LEGS } from './legs'
 import type { LambdaLeg, Leg, LegResult, ResultLegs, RxmLeg, TmLeg } from './protocol'
 import type { Decoded, Diagnostic, RunStatus, RxmCap, ValueReading } from './types'
 import { decodedText } from './types'
@@ -93,7 +93,9 @@ const FULL: Readonly<Record<Exclude<RxmCap, 'Steps'>, string>> = {
 }
 
 /**
- * The rxm leg's rows (Plan 7 part 5 spec §5.5): its steps as instructions, and its value.
+ * A machine leg's rows (Plan 7 part 5 spec §5.5), under `leg`, the name the readout groups each leg's rows by: its
+ * steps as instructions, and its value. The rxm leg's and the CLIF leg's, which count the same instructions to the same
+ * ends.
  *
  * **`total_steps` IS THE RUN'S END WHEN ONE EXISTS**, `compile`'s or a continued cursor's, so it is a length once a
  * run finished and how far the run has gone otherwise — `tmRows`' distinction, read the same way, off
@@ -102,15 +104,15 @@ const FULL: Readonly<Record<Exclude<RxmCap, 'Steps'>, string>> = {
  * **A CAP IS NAMED ONLY WHEN THE RECORDED RUN HAS REACHED IT.** `cap` is the recording cursor's, and a recording that
  * stopped on its history budget first has none; "at a cap" is then all that is known, as for TM.
  */
-function rxmRows(a: RxmLeg): Row[] {
-  if (!a.status.available) return [{ leg: 'rxm', label: 'declined', value: a.status.reason }]
+function machineRows(leg: string, a: RxmLeg): Row[] {
+  if (!a.status.available) return [{ leg, label: 'declined', value: a.status.reason }]
   const rows: Row[] = []
   if (a.status.total_steps !== null) {
     const steps = counted(a.status.total_steps, 'instruction')
     const finished = a.value !== null && a.value !== 'Unfinished'
     const cap = a.status.run === 'Capped' ? a.status.cap : null
     rows.push({
-      leg: 'rxm',
+      leg,
       label: 'steps',
       value: finished
         ? steps
@@ -119,11 +121,30 @@ function rxmRows(a: RxmLeg): Row[] {
           : `stopped after ${steps} — ${FULL[cap]}`,
     })
   }
-  if (a.value) rows.push({ leg: 'rxm', label: 'value', value: decodedText(a.value) })
+  if (a.value) rows.push({ leg, label: 'value', value: decodedText(a.value) })
   return rows
 }
 
-const ROWS: { readonly [K in Leg]: (part: LegResult[K]) => Row[] } = { lambda: lambdaRows, rxm: rxmRows, tm: tmRows }
+/** The rxm leg's rows. */
+function rxmRows(a: RxmLeg): Row[] {
+  return machineRows(LEG_NAME.rxm, a)
+}
+
+/**
+ * The CLIF leg's rows: the rxm leg's, under CLIF's name. **NONE WHILE NO CLIF STEPPER IS BUILT** (`CLIF_ABSENT`), not a
+ * *declined* row: a leg not built has not been refused, and a CLIF build that fails says why in the CLIF view, which is
+ * the one place a reader asked for it.
+ */
+export function clifResultRows(a: RxmLeg): Row[] {
+  return a.status.available ? machineRows(LEG_NAME.clif, a) : []
+}
+
+const ROWS: { readonly [K in Leg]: (part: LegResult[K]) => Row[] } = {
+  lambda: lambdaRows,
+  rxm: rxmRows,
+  tm: tmRows,
+  clif: clifResultRows,
+}
 
 /** Every leg's rows, in `LEGS`' order. */
 export function resultRows(legs: ResultLegs): Row[] {

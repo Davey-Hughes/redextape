@@ -471,8 +471,8 @@ describe('every control in Explorer, in a window wide enough for the views toggl
 
   // DISABLED BY `aria-disabled` (`app-header.ts`'s `viewToggles`), so the walk holds it to taking the focus too.
   it('walks them with one view left, where the last toggle is disabled and still named', () => {
-    for (const b of toggles().slice(1)) b.click()
-    expect(toggles().map((b) => b.getAttribute('aria-disabled'))).toEqual(['true', null, null, null])
+    for (const b of toggles().slice(1)) if (b.getAttribute('aria-pressed') === 'true') b.click()
+    expect(toggles().map((b) => b.getAttribute('aria-disabled'))).toEqual(['true', null, null, null, null])
     const walked = check('wide: one view')
     expect(walked).toContain(toggles()[0])
     expect(nameOf(toggles()[0] as HTMLButtonElement)).toBe('source')

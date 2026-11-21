@@ -129,6 +129,7 @@ describe('a link pasted into a page that started on binary, whose encoding this 
       text: LINKED,
       encoding: 'unary',
       width: null,
+      listing: 'as-built',
     })
     let refused = 0
     const setItem = localStorage.setItem
@@ -146,6 +147,7 @@ describe('a link pasted into a page that started on binary, whose encoding this 
         text: LINKED,
         encoding: 'unary',
         width: null,
+        listing: 'as-built',
       })
       from = runs.length
       location.hash = await encodeLink({ ...LINK, program: OTHER })

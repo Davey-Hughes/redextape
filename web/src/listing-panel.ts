@@ -14,6 +14,7 @@ export class ListingPanel {
   #grid: VirtualGrid
   #cellClass: string
   #fillInstr: (pc: number, cell: HTMLElement) => void
+  #fillLabel: ((name: string, cell: HTMLElement) => void) | undefined
   #source: { readonly listing: readonly string[]; readonly labels: Labels } | null = null
   #rows: readonly ListingRow[] = []
   /** Each instruction's row in `#rows`, so following and the marks find an instruction's row in one lookup. */
@@ -36,11 +37,14 @@ export class ListingPanel {
     readonly cellClass: string
     readonly idPrefix: string
     fillInstr(pc: number, cell: HTMLElement): void
+    /** What a label's row says; absent, `name:`, as the rxm view's labels read. */
+    fillLabel?(name: string, cell: HTMLElement): void
     activate(pc: number): void
     onToggle(open: boolean): void
   }) {
     this.#cellClass = o.cellClass
     this.#fillInstr = (pc, cell) => o.fillInstr(pc, cell)
+    this.#fillLabel = o.fillLabel?.bind(o)
     const { panel, grid } = followedGridPanel({
       name: o.name,
       label: o.label,
@@ -106,9 +110,9 @@ export class ListingPanel {
   }
 
   /**
-   * The listing's rows for one draw: a label row names its label; an instruction row is `fillInstr`'s. The
-   * instruction about to run is `.is-next` and says "runs next" in words, as generated content — the not-colour cue
-   * the TM view's "fires next" has (spec §6.2) — and it is the row following keeps in view.
+   * The listing's rows for one draw: a label row is `fillLabel`'s, or names its label; an instruction row is
+   * `fillInstr`'s. The instruction about to run is `.is-next` and says "runs next" in words, as generated content —
+   * the not-colour cue the TM view's "fires next" has (spec §6.2) — and it is the row following keeps in view.
    */
   #listingRows(): GridRows {
     if (this.#source === null) return { count: null, follow: null, frame: null, fill: () => {} }
@@ -126,7 +130,8 @@ export class ListingPanel {
         cell.className = this.#cellClass
         if (row.kind === 'label') {
           el.classList.add('is-label')
-          cell.textContent = `${row.name}:`
+          if (this.#fillLabel === undefined) cell.textContent = `${row.name}:`
+          else this.#fillLabel(row.name, cell)
           return
         }
         this.#fillInstr(row.pc, cell)

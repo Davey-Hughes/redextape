@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { LambdaLeg, RxmLeg, TmLeg } from '../../src/protocol'
-import { noSessionRows, resultRows, valueLine } from '../../src/results'
+import { CLIF_ABSENT, type LambdaLeg, type RxmLeg, type TmLeg } from '../../src/protocol'
+import { clifResultRows, noSessionRows, resultRows, valueLine } from '../../src/results'
 import type { Diagnostic } from '../../src/types'
 import { rxmSnapshot } from './rxm-fixtures'
 import { lambdaFrame } from './session-fixtures'
@@ -25,7 +25,7 @@ const find = (rows: ReturnType<typeof resultRows>, leg: string, label: string) =
   rows.find((r) => r.leg === leg && r.label === label)
 
 describe('resultRows — the happy path', () => {
-  const rows = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk })
+  const rows = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT })
 
   it('shows the λ normal form, step count and value', () => {
     expect(find(rows, 'λ', 'normal form')?.value).toBe('λf. λx. f (f x)')
@@ -42,7 +42,12 @@ describe('resultRows — the happy path', () => {
 
 describe('resultRows — a cut names its cause', () => {
   it('shows the text AND says it was cut, rather than choosing one', () => {
-    const rows = resultRows({ lambda: { ...lambdaOk, state: { ...okState, cut: 'Bytes' } }, rxm: rxmOk, tm: tmOk })
+    const rows = resultRows({
+      lambda: { ...lambdaOk, state: { ...okState, cut: 'Bytes' } },
+      rxm: rxmOk,
+      tm: tmOk,
+      clif: CLIF_ABSENT,
+    })
     const row = find(rows, 'λ', 'normal form')
     expect(row?.value).toBe('λf. λx. f (f x)')
     expect(row?.note).toBe('… truncated at 64 KiB')
@@ -52,33 +57,42 @@ describe('resultRows — a cut names its cause', () => {
   // unwinds, so the text can be well-formed λ that reparses into a DIFFERENT, shorter term. Saying
   // "truncated at 64 KiB" about a 6 KB term would be false twice over.
   it('names depth separately, because that text is not a prefix', () => {
-    const rows = resultRows({ lambda: { ...lambdaOk, state: { ...okState, cut: 'Depth' } }, rxm: rxmOk, tm: tmOk })
+    const rows = resultRows({
+      lambda: { ...lambdaOk, state: { ...okState, cut: 'Depth' } },
+      rxm: rxmOk,
+      tm: tmOk,
+      clif: CLIF_ABSENT,
+    })
     expect(find(rows, 'λ', 'normal form')?.note).toBe('… too deep to show in full')
   })
 
   it('says nothing when the walk ran to completion', () => {
-    expect(find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk }), 'λ', 'normal form')?.note).toBeUndefined()
+    expect(
+      find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'normal form')?.note,
+    ).toBeUndefined()
   })
 })
 
 describe('resultRows — total_steps is read against tmValue, not against run', () => {
   // The pair `browser.rs` pins: a finished run reports run: "Running" because the CURSOR has not moved.
   it('calls it a length when a final configuration exists', () => {
-    expect(find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk }), 'TM', 'steps')?.value).toBe('2,870 transitions')
+    expect(find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'TM', 'steps')?.value).toBe(
+      '2,870 transitions',
+    )
   })
 
   it('calls it a cap when tmValue is Unfinished, even though run is identical', () => {
     const capped: TmLeg = { status: { ...tmOk.status }, value: 'Unfinished' }
-    expect(find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: capped }), 'TM', 'steps')?.value).toBe(
-      'stopped after 2,870 transitions at a cap',
-    )
+    expect(
+      find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: capped, clif: CLIF_ABSENT }), 'TM', 'steps')?.value,
+    ).toBe('stopped after 2,870 transitions at a cap')
   })
 
   it('does not name which cap it hit', () => {
     const capped: TmLeg = { status: { ...tmOk.status }, value: 'Unfinished' }
-    expect(find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: capped }), 'TM', 'steps')?.value).not.toContain(
-      'step cap',
-    )
+    expect(
+      find(resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: capped, clif: CLIF_ABSENT }), 'TM', 'steps')?.value,
+    ).not.toContain('step cap')
   })
 })
 
@@ -95,7 +109,7 @@ describe('resultRows — refusals', () => {
       value: null,
       declinedSpan: { start: 44, end: 45 },
     }
-    const rows = resultRows({ lambda: declined, rxm: rxmOk, tm: tmOk })
+    const rows = resultRows({ lambda: declined, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT })
     expect(find(rows, 'λ', 'declined')?.value).toBe('a closure assigns a variable captured from an outer scope')
     expect(find(rows, 'λ', 'normal form')).toBeUndefined()
     // The TM leg still answers — a declined backend is not a failed compile.
@@ -113,7 +127,9 @@ describe('resultRows — refusals', () => {
       },
       value: null,
     }
-    const rows = resultRows({ lambda: lambdaOk, rxm: declined, tm: tmOk }).filter((r) => r.leg === 'rxm')
+    const rows = resultRows({ lambda: lambdaOk, rxm: declined, tm: tmOk, clif: CLIF_ABSENT }).filter(
+      (r) => r.leg === 'rxm',
+    )
     expect(rows).toEqual([
       { leg: 'rxm', label: 'declined', value: 'the program nests deeper than the rxm lowering allows' },
     ])
@@ -130,7 +146,7 @@ describe('resultRows — refusals', () => {
       },
       value: null,
     }
-    const rows = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: declined })
+    const rows = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: declined, clif: CLIF_ABSENT })
     expect(find(rows, 'TM', 'declined')?.value).toBe('the machine this program needs is too large to build')
     expect(find(rows, 'TM', 'width')).toBeUndefined()
   })
@@ -138,24 +154,26 @@ describe('resultRows — refusals', () => {
   // Capped and DepthRefused are worded differently because raising the cap helps only one of them.
   it('distinguishes a spent budget from a depth refusal', () => {
     const capped: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Capped' }, value: 'Unfinished' }
-    expect(find(resultRows({ lambda: capped, rxm: rxmOk, tm: tmOk }), 'λ', 'run')?.value).toBe('spent its step budget')
+    expect(find(resultRows({ lambda: capped, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'run')?.value).toBe(
+      'spent its step budget',
+    )
 
     const deep: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'DepthRefused' }, value: 'Unfinished' }
-    expect(find(resultRows({ lambda: deep, rxm: rxmOk, tm: tmOk }), 'λ', 'run')?.value).toBe(
+    expect(find(resultRows({ lambda: deep, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'run')?.value).toBe(
       'the term is deeper than the reducer allows',
     )
   })
 
   it('reports a fault as a fault rather than as an empty value', () => {
     const faulted: LambdaLeg = { ...lambdaOk, value: { Fault: { message: 'budget exhausted' } } }
-    expect(find(resultRows({ lambda: faulted, rxm: rxmOk, tm: tmOk }), 'λ', 'value')?.value).toBe(
+    expect(find(resultRows({ lambda: faulted, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'value')?.value).toBe(
       'fault: budget exhausted',
     )
   })
 
   it('reports an undecodable normal form as an answer', () => {
     const undec: LambdaLeg = { ...lambdaOk, value: 'Undecodable' }
-    expect(find(resultRows({ lambda: undec, rxm: rxmOk, tm: tmOk }), 'λ', 'value')?.value).toBe(
+    expect(find(resultRows({ lambda: undec, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'value')?.value).toBe(
       'no encoding for this type',
     )
   })
@@ -168,15 +186,19 @@ describe('resultRows — a run stopped by the recording budget, not by ending', 
   const running: LambdaLeg = { ...lambdaOk, status: { ...lambdaOk.status, run: 'Running' } }
 
   it('does not call the term a normal form', () => {
-    expect(find(resultRows({ lambda: running, rxm: rxmOk, tm: tmOk }), 'λ', 'normal form')).toBeUndefined()
+    expect(
+      find(resultRows({ lambda: running, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'normal form'),
+    ).toBeUndefined()
   })
 
   it('labels it "term so far" instead, still showing the text', () => {
-    expect(find(resultRows({ lambda: running, rxm: rxmOk, tm: tmOk }), 'λ', 'term so far')?.value).toBe(okState.text)
+    expect(
+      find(resultRows({ lambda: running, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'term so far')?.value,
+    ).toBe(okState.text)
   })
 
   it('explains that recording stopped, not that the run ended', () => {
-    const note = find(resultRows({ lambda: running, rxm: rxmOk, tm: tmOk }), 'λ', 'run')?.value
+    const note = find(resultRows({ lambda: running, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }), 'λ', 'run')?.value
     expect(note).toBeTruthy()
     expect(note).not.toMatch(/\bended\b/i)
     expect(note).toContain('recording stopped')
@@ -232,6 +254,7 @@ describe('resultRows — a step count of one is singular, on every leg', () => {
       lambda: { ...lambdaOk, state: { ...okState, step: 1 } },
       rxm: { ...rxmOk, status: { ...rxmOk.status, total_steps: 1 } },
       tm: { ...tmOk, status: { ...tmOk.status, total_steps: 1 } },
+      clif: CLIF_ABSENT,
     })
     expect([
       find(rows, 'λ', 'steps')?.value,
@@ -245,6 +268,7 @@ describe('resultRows — a step count of one is singular, on every leg', () => {
       lambda: lambdaOk,
       rxm: { status: { ...rxmOk.status, total_steps: 1 }, value: 'Unfinished' },
       tm: { status: { ...tmOk.status, total_steps: 1 }, value: 'Unfinished' },
+      clif: CLIF_ABSENT,
     })
     expect([find(rows, 'rxm', 'steps')?.value, find(rows, 'TM', 'steps')?.value]).toEqual([
       'stopped after 1 instruction at a cap',
@@ -258,10 +282,11 @@ describe('resultRows — the rxm leg', () => {
     status: { ...rxmOk.status, ...over },
     value,
   })
-  const steps = (a: RxmLeg) => find(resultRows({ lambda: lambdaOk, rxm: a, tm: tmOk }), 'rxm', 'steps')?.value
+  const steps = (a: RxmLeg) =>
+    find(resultRows({ lambda: lambdaOk, rxm: a, tm: tmOk, clif: CLIF_ABSENT }), 'rxm', 'steps')?.value
 
   it('counts a finished run in instructions and shows its value', () => {
-    const rows = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk })
+    const rows = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT })
     expect(find(rows, 'rxm', 'steps')?.value).toBe('55 instructions')
     expect(find(rows, 'rxm', 'value')?.value).toBe('42')
   })
@@ -279,13 +304,34 @@ describe('resultRows — the rxm leg', () => {
   it('counts a faulted run as an end, and its value says what faulted where', () => {
     const faulted = rxm({ run: 'Ended', total_steps: 12 }, { Fault: { message: 'head of empty list at pc5' } })
     expect(steps(faulted)).toBe('12 instructions')
-    expect(find(resultRows({ lambda: lambdaOk, rxm: faulted, tm: tmOk }), 'rxm', 'value')?.value).toBe(
-      'fault: head of empty list at pc5',
-    )
+    expect(
+      find(resultRows({ lambda: lambdaOk, rxm: faulted, tm: tmOk, clif: CLIF_ABSENT }), 'rxm', 'value')?.value,
+    ).toBe('fault: head of empty list at pc5')
   })
 
   it('lists the legs in order, λ then rxm then TM', () => {
-    const legs = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk }).map((r) => r.leg)
+    const legs = resultRows({ lambda: lambdaOk, rxm: rxmOk, tm: tmOk, clif: CLIF_ABSENT }).map((r) => r.leg)
     expect([...new Set(legs)]).toEqual(['λ', 'rxm', 'TM'])
+  })
+})
+
+describe('clifResultRows', () => {
+  it('has no rows while no CLIF stepper is built, not even a declined one', () => {
+    expect(clifResultRows(CLIF_ABSENT)).toEqual([])
+  })
+
+  it('gives the rows the rxm leg would give, under the CLIF leg’s name', () => {
+    const part: RxmLeg = {
+      status: { available: true, reason: '', run: 'Ended', cap: null, total_steps: 189 },
+      value: { Value: { text: '24' } },
+    }
+    const asRxm = resultRows({ lambda: lambdaOk, rxm: part, tm: tmOk, clif: CLIF_ABSENT }).filter(
+      (r) => r.leg === 'rxm',
+    )
+    expect(clifResultRows(part)).toEqual(asRxm.map((r) => ({ ...r, leg: 'CLIF' })))
+    expect(clifResultRows(part)).toEqual([
+      { leg: 'CLIF', label: 'steps', value: '189 instructions' },
+      { leg: 'CLIF', label: 'value', value: '24' },
+    ])
   })
 })

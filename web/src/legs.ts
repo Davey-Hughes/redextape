@@ -1,4 +1,4 @@
-import type { Leg } from './protocol'
+import type { CopyLeg, Leg } from './protocol'
 
 /**
  * THE LEG VOCABULARY — each leg's name as a user reads it, the order the app lists legs in, a table with an
@@ -30,7 +30,7 @@ import type { Leg } from './protocol'
  * the literal type it keeps has no key for the new leg, so one missing entry would be reported once per site
  * that only reads it.
  */
-export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', rxm: 'rxm', tm: 'TM' }
+export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', rxm: 'rxm', tm: 'TM', clif: 'CLIF' }
 
 /**
  * Every leg, in the order the app lists them — the title-selector's groups (`SessionRegistry.pairs`) and the
@@ -48,6 +48,12 @@ export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', rxm: 'rxm
  * first session in the registry happens to have.
  */
 export const LEGS: readonly Leg[] = Object.keys(LEG_NAME) as Leg[]
+
+/**
+ * `LEGS` without CLIF, in `LEGS`' order: the legs a compile records at once and a copy can hold (`protocol.ts`'s
+ * `CopyLeg`). **CLIF IS LAST IN `LEGS`**, so a walk over these is a walk over `LEGS` that stops before it.
+ */
+export const COPY_LEGS: readonly CopyLeg[] = LEGS.filter((leg): leg is CopyLeg => leg !== 'clif')
 
 /**
  * A table with one entry per leg, each entry `value(leg)`.

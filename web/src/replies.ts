@@ -1,4 +1,5 @@
 import type { EditorView } from '@codemirror/view'
+import type { ClifPane } from './clif-pane'
 import type { EditablePane } from './editor-custody'
 import { setDecline, setLink } from './highlight'
 import type { LambdaTrees } from './lambda-trees'
@@ -8,6 +9,7 @@ import type { LinkWiring } from './link-wiring'
 import type { Notice } from './notice'
 import type { PaneCollection } from './panes'
 import {
+  type ClifCompiled,
   type FramesReply,
   keepDecidedPart,
   LEG_FRAME_BYTES,
@@ -28,9 +30,9 @@ import type { TmPane } from './tm-pane'
 import { tellTmProgram } from './tm-seed'
 
 /**
- * Views a compile reached while they were off the page: `storeAndSetProgram` adds each, and `draw()` seeds and
- * removes it when it is next shown. Over every program leg's views, so a view is put in without a cast and seeded
- * because it is in the set, whatever its leg.
+ * Views `draw()` seeds from their session, and removes, when it next draws them on the page: those a compile reached
+ * while they were off the page, which `storeAndSetProgram` adds, and every CLIF view when a CLIF listing lands. Over
+ * every program leg's views, so a view is put in without a cast and seeded because it is in the set, whatever its leg.
  */
 export type UnseenViews = WeakSet<PaneView<LegFrame[keyof LegProgram]>>
 
@@ -75,8 +77,8 @@ export function createReplies(deps: {
   links: LinkWiring
   trees: LambdaTrees
   /**
-   * `UnseenViews`' set. Optional: a caller that never hides a view (every direct test of this module) needs none,
-   * and gets a set nothing reads.
+   * `UnseenViews`' set. Optional: a caller that never hides a view and has none a `clif-listing` could leave unseen
+   * (every direct test of this module) needs none, and gets a set nothing reads.
    */
   unseen?: UnseenViews
   draw: () => void
@@ -122,6 +124,13 @@ export function createReplies(deps: {
   notify: (text: string) => Notice
   /** Store the program's result, or its failure, for the readout (`readout.ts`'s `ProgramResult`). */
   setProgram: (r: ProgramResult) => void
+  /**
+   * The page's CLIF state beside the program's legs: `loaded` takes where the `pkg-clif` load stands from each
+   * `clif-load`, and `settled` tells the page's `ClifSync` (`clif-sync.ts`) that the program's run has answered, so
+   * that a `clif` request may go. `absent` says the leg has no stepper, so that the result the page stored loses its
+   * CLIF part. Optional, for `unseen`'s reason: a caller that shows no CLIF view needs none of them.
+   */
+  clif?: { loaded(state: 'loading' | 'ready' | 'failed'): void; settled(): void; absent(): void }
 }): {
   onReply(session: SessionId, reply: RunReply): void
   onScratchReply(session: SessionId, reply: RunReply): void
@@ -141,6 +150,7 @@ export function createReplies(deps: {
     onBuffersPersist,
     notify,
     setProgram,
+    clif,
   } = deps
 
   /**
@@ -168,7 +178,7 @@ export function createReplies(deps: {
    * FAN-OUT ARE ONE CALL** because `draw()` seeds a view shown later from the entry, so an entry written apart from
    * the fan-out could seed it with a program the views on the page were never told. **`tell` IS ALL A VIEW ON THE
    * PAGE HEARS, ITS PROGRAM INCLUDED**, in this one pass over the views rather than a second: this call tells no view
-   * `compiled`, so each caller's `tell` must push it.
+   * `compiled`, so each caller's `tell` pushes it, or adds the view to `unseen` for `draw()`'s seed to push.
    */
   const storeAndSetProgram = <K extends keyof LegProgram>(
     session: SessionId,
@@ -213,6 +223,8 @@ export function createReplies(deps: {
         tm.setForkAvailable(compiled?.text ?? null, rules, compiled?.tmResultDecodable ?? true)
       }
     },
+    // `null` FROM A COMPILE, WHICH CARRIES NO CLIF: a `clif-listing` leaves its views to `draw()`'s seed.
+    clif: (_session, compiled) => (pane) => (pane as ClifPane).setProgram(compiled),
   }
 
   /** Store `session`'s `leg` program and tell its views on the page, as `TELL` says: a compile's, or `null`. */
@@ -305,12 +317,48 @@ export function createReplies(deps: {
   const pushFrames = <K extends Leg>(session: SessionId, reply: FramesReply<K>): void => {
     const leg = sessions.legOf({ session, leg: reply.leg })
     if (reply.epoch !== leg.epoch) return
+    if (leg.clifHold !== undefined && !takeHeld(session, reply.gen, reply.epoch)) return
     leg.gen = reply.gen
     const bytes = LEG_FRAME_BYTES[reply.leg]
     for (const f of reply.frames) leg.hist.push(f, bytes(f))
     leg.done = reply.done
     if (reply.done === null) scheduleDraw()
     else flushDraw()
+  }
+
+  /**
+   * `compiled` as `session`'s CLIF program, which sets the leg's status, as `compiled` sets every leg's: a run that
+   * carried no listing left the leg unavailable, which would hold every step control of a view shown since off, and a
+   * program with no CLIF gives the leg its reason. **EVERY CLIF VIEW IS LEFT TO `draw()`'S SEED, NOT TOLD HERE**: a
+   * listing lands without a compile, so a pin can stand when it does, and the seed gives the pin back after the view's
+   * render, as for a view shown after compiles it missed. Told here, the view's `setProgram` would drop the pin's marks
+   * with nothing to restore them.
+   */
+  const showClif = (session: SessionId, compiled: ClifCompiled): void => {
+    sessions.legOf({ session, leg: 'clif' }).status =
+      'listing' in compiled ? { available: true, reason: '' } : { available: false, reason: compiled.error }
+    storeAndSetProgram(session, 'clif', compiled, (pane) => unseen.add(pane))
+  }
+
+  /**
+   * The first chunk of epoch `epoch` on `session`'s held CLIF leg (`ClifHold`): the ring is emptied of the recording
+   * it replaces and the listing that came for the epoch shown, **IN THE TASK THAT PUSHES THE CHUNK**, so the next draw
+   * goes from the old listing's frames to the new one's step 0 at once. Says whether the chunk may be pushed.
+   *
+   * **WITH NO LISTING FOR ITS GENERATION AND EPOCH, THE CHUNK IS DROPPED AND THE HOLD STAYS.** The worker posts the
+   * listing before it records, so this is a page out of step with it; pushed, the frames would be drawn under the rows
+   * of the listing the hold keeps, which they were not recorded against. Held, the view shows that listing as it was,
+   * frames and all, until a reset, a hide or another request ends the hold.
+   */
+  const takeHeld = (session: SessionId, gen: number, epoch: number): boolean => {
+    const leg = sessions.legOf({ session, leg: 'clif' })
+    const landing = leg.clifHold?.landing
+    if (landing === undefined || landing.gen !== gen || landing.epoch !== epoch) return false
+    leg.hist.clear()
+    leg.done = null
+    delete leg.clifHold
+    showClif(session, landing.compiled)
+    return true
   }
 
   /** `leg`'s step-0 frame from a build reply into its emptied ring, sized as `pushFrames` sizes a chunk's. */
@@ -354,6 +402,9 @@ export function createReplies(deps: {
         view().dispatch({ effects: [setDecline.of(null), setLink.of(null)] })
         // `draw()` calls `drawLink()` itself, after its render loop and before its readout pass.
         draw()
+        // THE RUN HAS ANSWERED, so the sync may post again. With no session the worker drops a `clif` request, and the
+        // next run carries the listing.
+        clif?.settled()
         return
       case 'compiled':
         resetLegs(legs, reply.statuses)
@@ -373,6 +424,9 @@ export function createReplies(deps: {
         // frame.
         view().dispatch({ effects: [setDecline.of(reply.declinedSpan), setLink.of(null)] })
         draw()
+        // AFTER THE RESET, which put the CLIF leg's epoch back to 0: a request posted now raises it from there, and the
+        // worker has taken this run's session, so it hears the request rather than dropping it.
+        clif?.settled()
         return
       // RESOLVED THROUGH `legOf`, NOT READ OFF `legs` DIRECTLY, because a session's legs are optional
       // (§4.1: a `LambdaScratch` has one leg) and a reply naming a leg its session does not have
@@ -382,11 +436,18 @@ export function createReplies(deps: {
       case 'frames':
         pushFrames(session, reply)
         return
-      case 'result':
+      case 'result': {
         results.dataset.state = 'idle'
-        setProgram({ kind: 'result', gen: reply.gen, legs: reply.legs, pinned: reply.pinned })
+        // **DURING A CLIF HOLD, A RESULT OF THE HOLD'S GENERATION KEEPS THE CLIF PART THE PAGE HELD**
+        // (`ClifHold.part`): one of another request, a TM `[continue]`'s, carries no CLIF part once the worker has
+        // dropped the stepper the hold replaces, and the readout would lose its CLIF rows and move every view before
+        // the CLIF view changed.
+        const part = sessions.legOf({ session, leg: 'clif' }).clifHold?.part
+        const kept = part !== undefined && part.gen === reply.gen ? { ...reply.legs, clif: part.clif } : reply.legs
+        setProgram({ kind: 'result', gen: reply.gen, legs: kept, pinned: reply.pinned })
         draw()
         return
+      }
       case 'worker-error':
         // See `main.ts`'s constructor-time `worker.addEventListener('error', ...)` for the sibling
         // failure this answers: that one is a module that never loaded, this one is a session call
@@ -423,6 +484,38 @@ export function createReplies(deps: {
       case 'rxm-scratch-compiled':
       case 'rxm-value':
         return
+      // **IDEMPOTENT**: every CLIF pass says the load again, so two passes that overlap say `ready` twice.
+      case 'clif-load':
+        clif?.loaded(reply.state)
+        draw()
+        return
+      // ANOTHER GENERATION'S NEVER GETS HERE (`SessionClient` drops it). ONE OF ANOTHER EPOCH IS DROPPED: it answers a
+      // request a newer one replaced, and the page emptied the leg, or held it, for the newer one as it posted it.
+      case 'clif-listing': {
+        const leg = sessions.legOf({ session, leg: 'clif' })
+        if (reply.epoch !== leg.epoch) return
+        const compiled: ClifCompiled =
+          reply.listing === null ? { error: reply.error ?? '' } : { listing: reply.listing }
+        // **A LISTING FOR A HELD RING WAITS FOR ITS FIRST FRAMES** (`ClifHold.landing`), and the ring keeps the frames
+        // of the listing it replaces on the page until they come. A reason has no frames to wait for, and empties the
+        // ring.
+        if (reply.listing !== null && leg.clifHold !== undefined) {
+          leg.clifHold.landing = { gen: reply.gen, epoch: reply.epoch, compiled }
+          return
+        }
+        if (leg.clifHold !== undefined) {
+          leg.hist.clear()
+          leg.done = null
+          delete leg.clifHold
+        }
+        showClif(session, compiled)
+        // **A LEG TOLD WHY IT HAS NO LISTING HAS NO STEPPER**, and a stepper dropped for what it threw as a
+        // `[continue]` or a rewind began is followed by no `result` to say so: the readout would keep its rows beside
+        // the view's reason.
+        if (reply.listing === null) clif?.absent()
+        draw()
+        return
+      }
       default:
         unhandled(reply)
     }
@@ -752,11 +845,14 @@ export function createReplies(deps: {
         notify(`${scratchpad.nameOf(session) ?? 'a copy'} stopped — ${reply.message}`)
         draw()
         return
-      // TWO KINDS A COPY'S WORKER NEVER SENDS, WRITTEN OUT for the reason `onReply`'s are: `onRun` posts both and
-      // `onExtend` posts `result`, each only for the program's session. A copy has neither the `SourceMap` nor the
-      // `ty` `compiled` and `result` carry.
+      // FOUR KINDS A COPY'S WORKER NEVER SENDS, WRITTEN OUT for the reason `onReply`'s are: `onRun` posts the first two
+      // and `onExtend` posts `result`, each only for the program's session. A copy has neither the `SourceMap` nor the
+      // `ty` `compiled` and `result` carry. `clif-load` and `clif-listing` answer the program's CLIF requests, and a
+      // copy is built by a `scratch` request, which asks for none.
       case 'compiled':
       case 'result':
+      case 'clif-load':
+      case 'clif-listing':
         return
       default:
         unhandled(reply)

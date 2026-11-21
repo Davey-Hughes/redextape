@@ -22,6 +22,8 @@ export type ValuesView = {
     readonly text: string
     readonly changed: boolean
     readonly unwritten: boolean
+    /** The rxm registers a CLIF value stands for, from its value labels; an rxm register's row has none. */
+    readonly regs?: readonly string[]
     /** What the row's marks mean, in words: its `aria-description`, so no mark is colour alone. */
     readonly says: readonly string[]
   }[]
@@ -45,7 +47,8 @@ export type HeapView = {
 /**
  * The registers (spec §6.3): each name and word, the register the last step wrote marked *changed*, and each local
  * the current call has not written dimmed and marked `·`, with a legend saying what that means. Every mark also says
- * itself in an `aria-description`, so none is colour alone.
+ * itself in an `aria-description`, so none is colour alone. A CLIF value's row names the rxm registers it stands for
+ * after its word, in a `span.value-regs`.
  */
 export function valuesPanel(o: MachinePanelOptions): MachinePanel<ValuesView> {
   const body = document.createElement('div')
@@ -73,6 +76,12 @@ export function valuesPanel(o: MachinePanelOptions): MachinePanel<ValuesView> {
         name.textContent = r.unwritten ? `· ${r.name}` : r.name
         const value = document.createElement('dd')
         value.textContent = r.text
+        if (r.regs !== undefined && r.regs.length > 0) {
+          const regs = document.createElement('span')
+          regs.className = 'value-regs'
+          regs.textContent = r.regs.join(', ')
+          value.append(' ', regs)
+        }
         if (r.changed) item.classList.add('is-changed')
         if (r.unwritten) item.classList.add('is-unwritten')
         if (r.says.length > 0) value.setAttribute('aria-description', r.says.join('; '))

@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
+import type { InstrLeg } from '../../src/link'
 import { createLinkWiring, type LinkWiring } from '../../src/link-wiring'
 import type { PaneCollection } from '../../src/panes'
 import type { SessionRegistry } from '../../src/sessions'
@@ -42,25 +43,28 @@ function wiring(views: Record<string, unknown[]> = {}, steps?: string[]) {
    * is given.
    */
   const line = () => {
-    links.drawLink(null, { rxm: false, tm: false }, 'absent')
+    links.drawLink(null, { rxm: false, tm: false, clif: false }, 'absent')
     return status.textContent
   }
   return { links, line }
 }
 
 describe('linkInstr', () => {
-  it('linkInstr pins the node and the pc, and counts one gesture', () => {
-    const { links } = wiring()
-    const before = links.gestures
-    links.linkInstr(OWNED_PC)
-    expect(links.link).toStrictEqual({ node: NODE, origin: 'rxm', pc: OWNED_PC })
-    expect(links.gestures).toBe(before + 1)
-  })
+  it.each<InstrLeg>(['rxm', 'clif'])(
+    'linkInstr pins the node, the pc and its origin, %s, and counts one gesture',
+    (origin) => {
+      const { links } = wiring()
+      const before = links.gestures
+      links.linkInstr(OWNED_PC, origin)
+      expect(links.link).toStrictEqual({ node: NODE, origin, pc: OWNED_PC })
+      expect(links.gestures).toBe(before + 1)
+    },
+  )
 
   it('a minted pc pins nothing, counts one gesture and says so until unpin', () => {
     const { links, line } = wiring()
     const before = links.gestures
-    links.linkInstr(MINTED_PC)
+    links.linkInstr(MINTED_PC, 'rxm')
     expect(links.link).toBeNull()
     expect(links.gestures).toBe(before + 1)
     expect(line()).toBe(OWNERLESS)
@@ -68,11 +72,22 @@ describe('linkInstr', () => {
     expect(line()).toBe('')
   })
 
+  it('a row lowered from no instruction clears the pin, says nothing and counts one gesture', () => {
+    const { links, line } = wiring()
+    links.linkInstr(OWNED_PC, 'rxm')
+    expect(links.link).toStrictEqual({ node: NODE, origin: 'rxm', pc: OWNED_PC })
+    const before = links.gestures
+    links.linkInstr(null, 'rxm')
+    expect(links.link).toBeNull()
+    expect(line()).toBe('')
+    expect(links.gestures).toBe(before + 1)
+  })
+
   it('does nothing while linking is off, after an edit', () => {
     const { links } = wiring()
     links.clearLink()
     const before = links.gestures
-    links.linkInstr(OWNED_PC)
+    links.linkInstr(OWNED_PC, 'rxm')
     expect(links.link).toBeNull()
     expect(links.gestures).toBe(before)
   })
@@ -125,7 +140,7 @@ describe('the fan-out', () => {
     { origin: 'source', click: (links) => links.setLinkTo(NODE, 'source'), rxm: true, tm: true },
     { origin: 'lambda', click: (links) => links.setLinkTo(NODE, 'lambda'), rxm: true, tm: true },
     { origin: 'tm', click: (links) => links.setLinkTo(NODE, 'tm'), rxm: true, tm: false },
-    { origin: 'rxm', click: (links) => links.linkInstr(OWNED_PC), rxm: false, tm: true },
+    { origin: 'rxm', click: (links) => links.linkInstr(OWNED_PC, 'rxm'), rxm: false, tm: true },
   ])('gives each view its leg’s rows and scrolls it unless the click came from its leg: $origin', (c) => {
     const { links, taken } = wiringOverViews()
     c.click(links)
@@ -134,6 +149,17 @@ describe('the fan-out', () => {
       'rxm copy': [[[], c.rxm]],
       tm: [[STATES, c.tm]],
       'tm copy': [[[], c.tm]],
+    })
+  })
+
+  it('gives the rxm views a CLIF row’s pc alone and the TM views its construct’s states, scrolling both', () => {
+    const { links, taken } = wiringOverViews()
+    links.linkInstr(OWNED_PC, 'clif')
+    expect(taken()).toStrictEqual({
+      rxm: [[[OWNED_PC], true]],
+      'rxm copy': [[[], true]],
+      tm: [[STATES, true]],
+      'tm copy': [[[], true]],
     })
   })
 

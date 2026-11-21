@@ -49,7 +49,7 @@ describe('SessionPool', () => {
     const source = pool.bind('source', () => {})
     pool.bind('lambda-scratch', () => {})
     source.request(source.supersede(), 'let x = 1; x', 'unary')
-    expect(ports[0]?.sent).toEqual([{ kind: 'run', gen: 1, src: 'let x = 1; x', encoding: 'unary' }])
+    expect(ports[0]?.sent).toEqual([{ kind: 'run', gen: 1, src: 'let x = 1; x', encoding: 'unary', clif: null }])
     expect(ports[1]?.sent).toEqual([])
   })
 
@@ -81,8 +81,8 @@ describe('SessionPool', () => {
     expect(scratch.supersede()).toBe(1)
     source.request(1, 'a', 'unary')
     scratch.request(1, 'b', 'unary')
-    expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'a', encoding: 'unary' })
-    expect(ports[1]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'b', encoding: 'unary' })
+    expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'a', encoding: 'unary', clif: null })
+    expect(ports[1]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'b', encoding: 'unary', clif: null })
   })
 
   // 5d-iii design §4.1: the step the pane was showing rides the wire beside the seed text, so
@@ -138,7 +138,7 @@ describe('SessionPool', () => {
     // Still usable, not merely still listed: a surviving entry whose port stopped accepting posts
     // would satisfy every assertion above.
     source.request(source.supersede(), 'still here', 'unary')
-    expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'still here', encoding: 'unary' })
+    expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'still here', encoding: 'unary', clif: null })
   })
 
   // See `unbind`'s doc for why this is idempotent where `bind` throws.
@@ -173,7 +173,7 @@ describe('SessionPool', () => {
     expect(second).not.toBe(first)
     expect(second.supersede()).toBe(1)
     second.request(1, 'b', 'unary')
-    expect(ports[1]?.sent).toEqual([{ kind: 'run', gen: 1, src: 'b', encoding: 'unary' }])
+    expect(ports[1]?.sent).toEqual([{ kind: 'run', gen: 1, src: 'b', encoding: 'unary', clif: null }])
     // The dead port heard nothing after it was terminated.
     expect(ports[0]?.sent.length).toBe(1)
   })

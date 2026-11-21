@@ -1,5 +1,5 @@
-import { LEG_NAME, LEGS } from './legs'
-import type { Leg } from './protocol'
+import { COPY_LEGS, LEG_NAME } from './legs'
+import type { CopyLeg } from './protocol'
 import type { SessionId } from './session-client'
 
 /**
@@ -65,7 +65,7 @@ export type BufferRow = {
    */
   readonly warm: boolean
   /** The copy's leg, which its name is said with. */
-  readonly leg: Leg
+  readonly leg: CopyLeg
 }
 
 /**
@@ -234,7 +234,7 @@ const bufferRow = (
 }
 
 /** Which legs the menu offers a blank copy on: rxm and TM (spec §7), whose copy's text is the whole program. */
-const BLANK_COPY: Readonly<Record<Leg, boolean>> = { lambda: false, rxm: true, tm: true }
+const BLANK_COPY: Readonly<Record<CopyLeg, boolean>> = { lambda: false, rxm: true, tm: true }
 
 /**
  * The header bar's buffer list — the only surface that can reach a buffer no pane is showing.
@@ -299,7 +299,7 @@ export function bufferList(
   rows: () => readonly BufferRow[],
   onRetire: (id: SessionId) => void,
   onTemperature: (id: SessionId, warm: boolean) => void,
-  onNew: (leg: Leg) => void,
+  onNew: (leg: CopyLeg) => void,
 ): { update(count: number): void } {
   const id = `buffer-list-${listSeq++}`
   const menu = document.createElement('div')
@@ -340,9 +340,10 @@ export function bufferList(
     retire: HTMLButtonElement
     temperature: HTMLButtonElement
   }[] => {
-    // ONE PER LEG A BLANK COPY CAN BE MADE ON, IN `LEGS`' ORDER — rxm and TM, whose text is a whole program or machine.
-    // A blank λ copy would be a term with nothing in it, and a λ copy is always made from a step of the program.
-    const news = LEGS.filter((leg) => BLANK_COPY[leg]).map((leg) => {
+    // ONE PER LEG A BLANK COPY CAN BE MADE ON, IN `COPY_LEGS`' ORDER — rxm and TM, whose text is a whole program or
+    // machine. A blank λ copy would be a term with nothing in it, and a λ copy is always made from a step of the
+    // program.
+    const news = COPY_LEGS.filter((leg) => BLANK_COPY[leg]).map((leg) => {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = `buffer-new new-${leg}`

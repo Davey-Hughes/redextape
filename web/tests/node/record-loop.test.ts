@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LEGS } from '../../src/legs'
 import {
+  type CopyLeg,
   endOf,
   type FirstFrames,
   type FramesReply,
@@ -17,6 +18,7 @@ import {
   type RecordLeg,
   type RecordWorker,
   recordBuild,
+  recordFresh,
   recordLeg,
   resetRecording,
   rewindAndRecord,
@@ -90,10 +92,10 @@ function harness(first: Live, allowance = Number.POSITIVE_INFINITY): Harness {
   const waiting: (() => void)[] = []
   let gated = false
   const worker: RecordWorker = {
-    recording: { lambda: false, rxm: false, tm: false },
-    recorded: { lambda: 0, rxm: 0, tm: 0 },
-    allowance: { lambda: allowance, rxm: allowance, tm: allowance },
-    epoch: { lambda: 0, rxm: 0, tm: 0 },
+    recording: { lambda: false, rxm: false, tm: false, clif: false },
+    recorded: { lambda: 0, rxm: 0, tm: 0, clif: 0 },
+    allowance: { lambda: allowance, rxm: allowance, tm: allowance, clif: allowance },
+    epoch: { lambda: 0, rxm: 0, tm: 0, clif: 0 },
     owns: (gen) => live.current.gen === gen,
     post: (reply) => {
       if (reply.kind !== 'frames' || reply.leg !== 'rxm') throw new Error(`the rxm leg posted a ${reply.kind}`)
@@ -148,7 +150,7 @@ describe('resetRecording', () => {
 
     resetRecording(h.worker)
 
-    const each = <T>(value: T) => ({ lambda: value, rxm: value, tm: value })
+    const each = <T>(value: T) => ({ lambda: value, rxm: value, tm: value, clif: value })
     const { recorded, allowance, recording, epoch } = h.worker
     expect({ recorded, allowance, recording, epoch }).toEqual({
       recorded: each(0),
@@ -329,6 +331,34 @@ describe('recordLeg', () => {
   })
 })
 
+describe('recordFresh', () => {
+  it("steps nothing and posts nothing for an epoch below the leg's", async () => {
+    const h = harness(live(1, cursor(5)))
+    h.worker.epoch.rxm = 2
+    await recordFresh(fakeLeg(h.live), h.worker, 1, 1)
+    expect(h.events).toEqual([])
+    expect(h.live.current.cursor.stepCalls).toBe(0)
+  })
+
+  it("at the leg's epoch, starts the books afresh and records from step 0", async () => {
+    const h = harness(live(1, cursor(RECORD_CHUNK + 5)), 25)
+    h.worker.epoch.rxm = 2
+    // A stepper just built, where a dropped one had spent its allowance.
+    h.worker.recorded.rxm = 30
+    h.worker.allowance.rxm = 25
+    h.gate()
+    const fresh = recordFresh(fakeLeg(h.live), h.worker, 1, 2)
+    expect(h.worker.recorded.rxm).toBe(FRAME_BYTES * (RECORD_CHUNK + 1))
+    expect(h.worker.allowance.rxm).toBe(HISTORY_BYTES)
+    expect(h.posts[0]?.epoch).toBe(2)
+    expect(h.posts[0]?.frames[0]?.step).toBe(0)
+    expect(stepsOf(h.posts)).toEqual(Array.from({ length: RECORD_CHUNK + 1 }, (_, i) => i))
+    h.release()
+    await fresh
+    expect(h.posts.map((p) => p.done)).toEqual([null, 'ended'])
+  })
+})
+
 /** How many more steps a raised cap lets the fake's cursor run. */
 const RAISE = 3
 
@@ -432,13 +462,13 @@ describe('recordBuild', () => {
     },
   })
 
-  const build = async (legs: { [K in Leg]: RecordLeg<K, Cursor> }) => {
+  const build = async (legs: { [K in CopyLeg]: RecordLeg<K, Cursor> }) => {
     const events: string[] = []
     const worker: RecordWorker = {
-      recording: { lambda: false, rxm: false, tm: false },
-      recorded: { lambda: 0, rxm: 0, tm: 0 },
-      allowance: { lambda: HISTORY_BYTES, rxm: HISTORY_BYTES, tm: HISTORY_BYTES },
-      epoch: { lambda: 0, rxm: 0, tm: 0 },
+      recording: { lambda: false, rxm: false, tm: false, clif: false },
+      recorded: { lambda: 0, rxm: 0, tm: 0, clif: 0 },
+      allowance: { lambda: HISTORY_BYTES, rxm: HISTORY_BYTES, tm: HISTORY_BYTES, clif: HISTORY_BYTES },
+      epoch: { lambda: 0, rxm: 0, tm: 0, clif: 0 },
       owns: (gen) => gen === 1,
       post: (reply: RunReply) => {
         if (reply.kind !== 'frames') throw new Error(`the build posted a ${reply.kind}`)
@@ -461,14 +491,15 @@ describe('recordBuild', () => {
       tm: legOf('tm', cursor(RECORD_CHUNK + 1)),
     })
     expect(events).toEqual([
-      'compiled lambda 0, rxm 0, tm 0',
+      // CLIF'S STEP 0 IS NONE: its stepper is built after this reply, and the build records it not at all.
+      'compiled lambda 0, rxm 0, tm 0, clif -',
       'lambda 1..3 ended',
       'rxm 1..2 ended',
       `tm 1..${RECORD_CHUNK} null`,
       `tm ${RECORD_CHUNK + 1}..${RECORD_CHUNK + 1} ended`,
     ])
     // Step 0 is counted against each leg's allowance as a chunk's frames are.
-    expect(recorded).toEqual({ lambda: 40, rxm: 30, tm: (RECORD_CHUNK + 2) * FRAME_BYTES })
+    expect(recorded).toEqual({ lambda: 40, rxm: 30, tm: (RECORD_CHUNK + 2) * FRAME_BYTES, clif: 0 })
   })
 
   it('announces none for a leg that did not compile and records none of it, and a leg over at step 0 posts its end alone', async () => {
@@ -477,6 +508,6 @@ describe('recordBuild', () => {
       rxm: legOf('rxm', cursor(5), false),
       tm: legOf('tm', cursor(1)),
     })
-    expect(events).toEqual(['compiled lambda 0, rxm -, tm 0', 'lambda - ended', 'tm 1..1 ended'])
+    expect(events).toEqual(['compiled lambda 0, rxm -, tm 0, clif -', 'lambda - ended', 'tm 1..1 ended'])
   })
 })

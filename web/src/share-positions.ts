@@ -43,7 +43,7 @@ const listed = (items: readonly string[]): string =>
  * What the open's notice says about the legs stopped short of the link's steps — spec §5.4's note of 2026-10-01: each
  * leg, why it stopped, and the step it shows. **ONE LEG IN THE WORDS IT HAD BEFORE THE NOTE**; several stopped for the
  * same reason in one clause, naming the leg of each step shown; and a clause for each reason, the one with the first
- * leg first. The legs go λ, rxm, TM, whatever order they stopped in.
+ * leg first. The legs go λ, rxm, TM, CLIF, whatever order they stopped in.
  */
 export function shortNotice(shorts: readonly Short[]): string {
   const clauses: Short[][] = []
@@ -86,6 +86,10 @@ export class LinkPositions {
   #continues: Record<Leg, number> = perLeg(() => 0)
   /** The legs stopped short of their link's steps in this open, which its one notice names together. */
   #shorts: Short[] = []
+  /** The leg whose continue records, from its `extend` until its frames say how it stopped, else `null` (`#result`). */
+  #continuing: Leg | null = null
+  /** Whether a `result` came while `#continuing` was set, which its stopping frames then answer (`#result`). */
+  #resultHeld = false
 
   constructor(deps: PositionsDeps) {
     this.#deps = deps
@@ -102,12 +106,26 @@ export class LinkPositions {
     this.#held = positions
   }
 
+  /**
+   * Drop `leg`'s position, held or pending, and keep the other legs': for a choice that replaces `leg`'s run alone,
+   * which no recompile's reply follows to drop them all. **HELD TOO**: left held, the link's `compiled` would give the
+   * leg a step of the run the choice replaced.
+   */
+  forget(leg: Leg): void {
+    const held = { ...this.#held }
+    delete held[leg]
+    this.#held = held
+    delete this.#deps.legOf(leg).pending
+  }
+
   /** Drop every position, held or pending: a recompile's, or a compile that answered with no run. */
   #drop(): void {
     this.#gen = null
     this.#held = {}
     this.#continues = perLeg(() => 0)
     this.#shorts = []
+    this.#continuing = null
+    this.#resultHeld = false
     for (const leg of LEGS) delete this.#deps.legOf(leg).pending
   }
 
@@ -132,10 +150,11 @@ export class LinkPositions {
    *
    * **A REPLY OF ANOTHER GENERATION ENDS THE LINK'S POSITIONS**: the program session answers only its current
    * generation, so it is a recompile's, and a recompile drops them (spec §5.4). Until it answers, the step line says the
-   * leg is recompiling in place of where it was going.
+   * leg is recompiling in place of where it was going. **A `clif-load` IS NO GENERATION'S**: it says whether the worker
+   * holds the CLIF package, so it ends nothing.
    */
   onReply(reply: RunReply): void {
-    if (this.#gen === null || reply.kind === 'lambda-tree') return
+    if (this.#gen === null || reply.kind === 'lambda-tree' || reply.kind === 'clif-load') return
     if (reply.gen !== this.#gen) {
       this.#drop()
       return
@@ -151,9 +170,19 @@ export class LinkPositions {
         }
         this.#held = {}
         return
-      case 'frames':
+      case 'frames': {
+        const stopped = reply.leg === this.#continuing && reply.done !== null
+        if (stopped) this.#continuing = null
         this.#frames(reply.leg)
+        // **A `result` HEARD WHILE ONE RECORDED IS ANSWERED HERE**: `↺` on the continued leg stops the continue, whose
+        // `result` then comes before the rewound fill's frames, and a rewind posts none of its own, so a `result`
+        // dropped would leave every later leg's position pending.
+        if (stopped && this.#resultHeld) {
+          this.#resultHeld = false
+          this.#result()
+        }
         return
+      }
       case 'result':
         this.#result()
         return
@@ -195,18 +224,28 @@ export class LinkPositions {
   }
 
   /**
-   * A run's or a continue's `result`. **NOT BEFORE IT, AND ONE LEG AT A TIME, λ THEN rxm THEN TM**: a continue posted
-   * while the run still records a later leg would interleave the two recordings, and post its `result` before the run's
-   * (spec §5.4). The first leg in order still short of its position continues, up to `MAX_LINK_CONTINUES` times; past
-   * that it stops at its furthest step, and the next leg is asked.
+   * A run's, a continue's or the CLIF pass's `result`. **NOT BEFORE THE RUN'S**: a continue posted while the run still
+   * records a later leg would interleave the two recordings, and post its `result` before the run's (spec §5.4). The
+   * CLIF pass starts only at that `result`, so a continue it asks for records beside the CLIF pass.
+   *
+   * **AND ONE CONTINUE AT A TIME, λ THEN rxm THEN TM THEN CLIF: NONE WHILE ONE RECORDS**, from its `extend` until its
+   * frames say how it stopped. The CLIF pass posts a `result` of its own, which can come before that continue's frames
+   * or while it records; a second `extend` then would record beside the first, or be refused by the worker for a leg
+   * already recording and still count against `MAX_LINK_CONTINUES`. The first leg in order still short of its position
+   * continues, up to `MAX_LINK_CONTINUES` times; past that it stops at its furthest step, and the next leg is asked.
    */
   #result(): void {
+    if (this.#continuing !== null) {
+      this.#resultHeld = true
+      return
+    }
     for (const leg of LEGS) {
       const state = this.#deps.legOf(leg)
       const wanted = state.pending
       if (wanted === undefined || !canRecordFurther(state.done, this.#deps.awaitingRun())) continue
       if (this.#continues[leg] < MAX_LINK_CONTINUES) {
         this.#continues[leg] += 1
+        this.#continuing = leg
         this.#deps.extend(leg)
         return
       }

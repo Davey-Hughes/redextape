@@ -2,8 +2,9 @@
 //
 // THE GENERATED SHAPES ARE RE-EXPORTED, from `../bindings/`, which `pnpm run build:bindings` writes
 // from each type's Rust declaration; the directory is gitignored, so there is no committed copy to go
-// stale. `crates/redextape-wasm/tests/browser.rs` is what measures each generated shape against a real
-// browser and pins it — not this file, which declares none of them.
+// stale. `crates/redextape-wasm/tests/browser.rs` is what measures each of `pkg/`'s generated shapes
+// against a real browser and pins it — not this file, which declares none of them. The CLIF shapes,
+// which cross `pkg-clif/`'s boundary instead, are not among them.
 //
 // TWO FACTS ABOUT HOW THE BOUNDARY ENCODES THINGS LIVE HERE, because they are facts about the
 // boundary as a whole rather than about any one type, and moving them into one generated type's Rust
@@ -30,6 +31,15 @@ import type { Span } from '../bindings/Span'
 import type { TokenClass } from '../bindings/TokenClass'
 import type { ValueRun } from '../bindings/ValueRun'
 
+export type { ClifAt } from '../bindings/ClifAt'
+export type { ClifFunction } from '../bindings/ClifFunction'
+export type { ClifListing } from '../bindings/ClifListing'
+export type { ClifRow } from '../bindings/ClifRow'
+export type { ClifRowKind } from '../bindings/ClifRowKind'
+export type { ClifState } from '../bindings/ClifState'
+export type { ClifStatus } from '../bindings/ClifStatus'
+export type { ClifValue } from '../bindings/ClifValue'
+export type { ClifWindow } from '../bindings/ClifWindow'
 export type { Cut } from '../bindings/Cut'
 export type { Diagnostic } from '../bindings/Diagnostic'
 export type { LambdaState } from '../bindings/LambdaState'

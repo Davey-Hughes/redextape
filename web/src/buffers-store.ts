@@ -1,6 +1,6 @@
-import { LEGS } from './legs'
+import { COPY_LEGS } from './legs'
 import type { LeafId } from './panes'
-import type { Leg } from './protocol'
+import type { CopyLeg } from './protocol'
 import type { SessionId } from './session-client'
 
 /**
@@ -46,7 +46,7 @@ export type PersistedBuffer = {
   label: string
   text: string
   collapsed: boolean
-  leg: Leg
+  leg: CopyLeg
 }
 
 /**
@@ -100,9 +100,9 @@ function validBuffer(node: unknown, ids: Set<string>): node is PersistedBuffer {
   if (typeof n.label !== 'string' || n.label.length === 0) return false
   if (typeof n.text !== 'string') return false
   if (typeof n.collapsed !== 'boolean') return false
-  // ANY LEG A COPY CAN BE MADE ON, READ OFF `LEGS` rather than written out: a list here would refuse the next leg's
-  // copies, and with them every copy in the store, with nothing to say why.
-  if (!LEGS.some((leg) => leg === n.leg)) return false
+  // ANY LEG A COPY CAN BE MADE ON, READ OFF `COPY_LEGS` rather than written out: a list here would refuse the next
+  // leg's copies, and with them every copy in the store, with nothing to say why. A CLIF copy is none the app makes.
+  if (!COPY_LEGS.some((leg) => leg === n.leg)) return false
   if (ids.has(n.id)) return false
   ids.add(n.id)
   return true

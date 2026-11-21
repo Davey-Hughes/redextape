@@ -92,8 +92,8 @@ describe('the focus ring of a views toggle', () => {
     async (style) => {
       await chooseStyle(style)
       await document.fonts.ready
-      // ALL FOUR PRESSED, THEN THE SOURCE AND rxm ALONE: a pressed toggle beside pressed ones, and each unpressed one
-      // beside a pressed one, the source on λ's left and rxm on TM's right.
+      // EVERY TOGGLE BUT CLIF'S PRESSED, THEN THE SOURCE AND rxm ALONE: a pressed toggle beside pressed ones, and each
+      // unpressed one beside a pressed one, the source on λ's left and rxm on TM's right and CLIF's left.
       for (const shown of [
         ['source', 'lambda', 'tm', 'rxm'],
         ['source', 'rxm'],

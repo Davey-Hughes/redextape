@@ -1,7 +1,7 @@
 import type { PersistedBuffers } from './buffers-store'
 import { LEG_NAME } from './legs'
 import type { LeafId } from './panes'
-import type { Leg, LegFrame, RunReply } from './protocol'
+import type { CopyLeg, Leg, LegFrame, RunReply } from './protocol'
 import type { SessionId, SessionPool } from './session-client'
 import { freshLeg, type LegState, resetLegs, type SessionLegs, type SessionRegistry } from './sessions'
 import type { Diagnostic } from './types'
@@ -40,14 +40,14 @@ export type BufferInfo = {
   readonly id: SessionId
   readonly label: string
   readonly warm: boolean
-  readonly leg: Leg
+  readonly leg: CopyLeg
 }
 
 /** What undoing a delete needs to put a copy back: its id, name, leg, text and collapse flag. */
 export type BufferRecord = {
   readonly id: SessionId
   readonly label: string
-  readonly leg: Leg
+  readonly leg: CopyLeg
   readonly text: string
   readonly collapsed: boolean
 }
@@ -72,7 +72,7 @@ type BufferState = {
    * binding must agree with — `SessionRegistry.legOf` throws on a binding naming a leg its session
    * lacks, and this is the field that decides which leg the session was built with.
    */
-  readonly leg: Leg
+  readonly leg: CopyLeg
   text: string
   collapsed: boolean
   warm: boolean
@@ -411,7 +411,7 @@ export class ScratchBuffers {
    * also what makes the record non-empty for every fork that DOES build, in the round trip before the arm
    * replaces it.
    */
-  fork(slot: Detachable, src: string, step: number, leg: Leg): SessionId {
+  fork(slot: Detachable, src: string, step: number, leg: CopyLeg): SessionId {
     // `'cannot make a copy — '` — THIS IS THE ONE CALLER OF `#refuseAtCap` FOR WHICH THAT IS TRUE. See
     // `#refuseAtCap`'s own doc for why the prefix is a call-site argument rather than baked into the
     // shared message.
@@ -430,7 +430,7 @@ export class ScratchBuffers {
    * NO PREFIX ON THE REFUSAL — this is not a fork, so `#refuseAtCap`'s call-site prefix argument puts
    * it in the same class as `warm`.
    */
-  forkBlank(leg: Leg): SessionId {
+  forkBlank(leg: CopyLeg): SessionId {
     if (this.warmCount() >= MAX_WARM_BUFFERS) this.#refuseAtCap('')
     return this.#mint('', 0, leg, null)
   }
@@ -442,7 +442,7 @@ export class ScratchBuffers {
    * `forkBlank` nothing at all. `slot?.rebind(id)` below is the whole of that fork — a `null` here is
    * `forkBlank`'s own claim that no pane is owed a move.
    */
-  #mint(src: string, step: number, leg: Leg, slot: Detachable | null): SessionId {
+  #mint(src: string, step: number, leg: CopyLeg, slot: Detachable | null): SessionId {
     this.#minted += 1
     const id: SessionId = `scratch-${this.#minted}`
     // `copy N` — THE LEG IS SAID WHEREVER THE LABEL IS SHOWN (`nameOf`, `view-header.ts`'s `pairLabel`),
@@ -704,7 +704,7 @@ export class ScratchBuffers {
       // or rxm copy's build reply carries its own leg's program, and `replies.ts`'s `onScratchReply` stores it
       // here with the copy's status and value reading once that reply arrives. None has either at the moment
       // this entry is created.
-      programs: { rxm: null, tm: null },
+      programs: { rxm: null, tm: null, clif: null },
       readings: { rxm: null, tm: null },
     })
     state.warm = true

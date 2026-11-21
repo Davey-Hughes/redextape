@@ -179,11 +179,15 @@ export type Focus = { node: number; claim: 'exact' | 'within' }
  *
  * `origin` IS THE SOURCE VIEW OR A LEG, AND IS TYPED FROM `Leg` RATHER THAN SPELLED OUT, so a new leg can pin
  * without this union being found and widened by hand — and `link-wiring.ts`'s `setLinkTo` takes `Pin['origin']`
- * less `'rxm'` rather than spelling it a second time, so an rxm pin cannot be made without its `pc`.
+ * less `InstrLeg` rather than spelling it a second time, so a pin from an instruction leg cannot be made without its
+ * `pc`.
  *
- * `pc` IS THE INSTRUCTION A CLICK ON AN RXM ROW NAMED. `pinAtInstr` is the only code that writes it.
+ * `pc` IS THE INSTRUCTION A CLICK ON AN INSTRUCTION LEG'S ROW NAMED. `pinAtInstr` is the only code that writes it.
  */
 export type Pin = { node: number; origin: 'source' | Leg; pc?: number }
+
+/** The legs whose rows are rxm instructions or name one, so whose pins carry its pc. */
+export type InstrLeg = Extract<Leg, 'rxm' | 'clif'>
 
 /**
  * The pin a click on instruction `pc` makes, or `null` for an instruction with no owner: one `defunc` minted, or a
@@ -226,14 +230,14 @@ export function runningFocus(index: LinkIndex | null, owner: Owner): Focus | nul
 }
 
 /**
- * `TmState.source_node` as an `Owner`, for feeding `runningFocus` — always `Exact`, never `Within`.
+ * A machine leg's construct as an `Owner`, for feeding `runningFocus` — always `Exact`, never `Within`: a TM frame's
+ * `source_node`, or the construct a CLIF frame's rxm instruction was emitted for (`linked-legs.ts`'s `focusNode`).
  *
- * THE TM LEG HAS NO `Within` CONCEPT. `Owner`'s three states describe what the λ leg's descent
- * inherits — "the deepest tagged node passed so far" (design §3.4) — and `source_node` is not that
- * kind of answer at all: it is `SourceMap::tm_owner`'s already-resolved fact about the state this exact
- * configuration is in, computed once at lowering rather than accumulated over a walk. A TM state either
- * was emitted for a construct or it was not; there is no "somewhere inside it" for a machine state to
- * report, so the ambiguity `Within` exists to carry never arises on this leg.
+ * NEITHER LEG HAS A `Within` CONCEPT. `Owner`'s three states describe what the λ leg's descent inherits — "the deepest
+ * tagged node passed so far" (design §3.4) — and these are not that kind of answer at all: each is a fact the lowering
+ * resolved once about the state or instruction the run is at, not one accumulated over a walk. A TM state or an
+ * instruction either was emitted for a construct or it was not; there is no "somewhere inside it" for a machine to
+ * report, so the ambiguity `Within` exists to carry never arises.
  */
 export function sourceNodeOwner(sourceNode: number | null): Owner {
   return sourceNode === null ? 'None' : { Exact: sourceNode }

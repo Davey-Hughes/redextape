@@ -33,6 +33,8 @@ import { fourViews, fourViewWorkspace } from '../browser/harness'
 /** All four views, two rows of two — the tree these cases are written against; `defaultLayout()` is two views. */
 const FOUR = fourViews()
 const SPLIT = splitLeaf(FOUR, 'lambda-0', 'row', 'pane-1', 'tm')
+/** The four views and a CLIF view beside the rxm view. */
+const WITH_CLIF = splitLeaf(FOUR, 'rxm-0', 'row', 'clif-0', 'clif')
 
 describe('presetOf', () => {
   it('names the three presets and calls the other five combinations custom', () => {
@@ -97,6 +99,7 @@ describe('parseWorkspace', () => {
       inspector: false,
       display: { 'pane-1': { layout: 'outline' as const, vars: 'debruijn' as const, map: 'minimap' as const } },
       tmDisplay: { 'tm-0': { level: 'local' as const, edges: 'chips' as const } },
+      clifDisplay: {},
       arrangements: { 'source+tm': defaultLayout('tall') },
     }
     const raw = serializeWorkspace(ws)
@@ -215,6 +218,17 @@ describe('parseWorkspace', () => {
     }
   })
 
+  // **AND FOR A CLIF VIEW'S.**
+  it('defaults a missing CLIF display to none stored, and refuses a malformed one', () => {
+    const base = { version: 2, tree: WITH_CLIF, switches: PRESETS.explorer, speed: 8, focused: 'clif-0', panels: {} }
+    expect(parseWorkspace(JSON.stringify(base))?.clifDisplay).toEqual({})
+    const good = { 'clif-0': { layout: 'exact' } }
+    expect(parseWorkspace(JSON.stringify({ ...base, clifDisplay: good }))?.clifDisplay).toEqual(good)
+    for (const bad of [{ 'clif-0': { layout: 'wide' } }, { 'clif-0': {} }, { 'nowhere-9': { layout: 'exact' } }, []]) {
+      expect(parseWorkspace(JSON.stringify({ ...base, clifDisplay: bad })), JSON.stringify(bad)).toBeNull()
+    }
+  })
+
   // **AND FOR A VIEW'S SHARES** (the view layouts spec §11.4): absent in every workspace stored before a boundary
   // could be dragged, and held to `parsePanels`' rules where present. A share is a finite number above 0.
   it('defaults missing panel sizes to none stored, and refuses a malformed one', () => {
@@ -309,6 +323,20 @@ describe('serializeWorkspace', () => {
     const written = JSON.parse(serializeWorkspace(ws))
     expect(written.display).toEqual(display)
     expect(written.tmDisplay).toEqual(tmDisplay)
+  })
+})
+
+describe('a CLIF display', () => {
+  it('is written for a view in the tree and read back, and dropped for one that has left it', () => {
+    const exact = { layout: 'exact' as const }
+    const ws = { ...defaultWorkspace('wide'), tree: WITH_CLIF, focused: 'clif-0', clifDisplay: { 'clif-0': exact } }
+    expect(JSON.parse(serializeWorkspace(ws)).clifDisplay).toEqual({ 'clif-0': exact })
+    expect(parseWorkspace(serializeWorkspace(ws))?.clifDisplay).toEqual({ 'clif-0': exact })
+    const gone = { ...ws, clifDisplay: { 'pane-9': exact } }
+    expect(JSON.parse(serializeWorkspace(gone)).clifDisplay).toEqual({})
+    expect(legDisplayOf(withLegDisplay(ws, 'clif', 'clif-0', { layout: 'compact' }), 'clif', 'clif-0')).toEqual({
+      layout: 'compact',
+    })
   })
 })
 

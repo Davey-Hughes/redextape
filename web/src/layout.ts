@@ -62,7 +62,7 @@ export const SOURCE_LEAF: LeafId = 'source'
 
 /**
  * The kinds, in the order a combination's key spells them and a default arrangement places them: source, λ, rxm, TM
- * (the view layouts spec §4.1) — the order the views have on the page.
+ * (the view layouts spec §4.1), then CLIF — the order the views have on the page.
  *
  * **KEYED BY `PaneKind` AND THEN LISTED**: a kind left out is a type error here, and the keys are the list.
  *
@@ -74,12 +74,13 @@ export const KIND_ORDER: readonly PaneKind[] = Object.keys({
   lambda: 0,
   rxm: 0,
   tm: 0,
+  clif: 0,
 } satisfies Record<PaneKind, 0>) as PaneKind[]
 
 /**
- * The kinds in the order the header's `views` toggles have them: source, λ, TM, rxm (the user's decision). The toggle
- * keys `1` to `N`, the cycle and the sentence the live region reads follow it, so what is said and pressed runs left
- * to right across the header.
+ * The kinds in the order the header's `views` toggles have them: source, λ, TM, rxm (the user's decision), then CLIF.
+ * The toggle keys `1` to `N`, the cycle and the sentence the live region reads follow it, so what is said and pressed
+ * runs left to right across the header.
  *
  * **KEYED BY `PaneKind` AND THEN LISTED, AS `KIND_ORDER` IS**: a kind left out is a type error here, and the keys are
  * the list. Only the order is this list's own, and `tests/node/arrangements.test.ts` asserts it.
@@ -89,6 +90,7 @@ export const HEADER_ORDER: readonly PaneKind[] = Object.keys({
   lambda: 0,
   tm: 0,
   rxm: 0,
+  clif: 0,
 } satisfies Record<PaneKind, 0>) as PaneKind[]
 
 /**
@@ -99,7 +101,13 @@ export const HEADER_ORDER: readonly PaneKind[] = Object.keys({
  * **THE TOGGLES' LABELS ARE THESE WORDS**, written into the page as it is built (`view-toggle-markup.ts`). The help
  * page's list of the layouts the cycle keys step through reads nothing, so `tests/node/pages.test.ts` holds it to them.
  */
-export const KIND_WORD: Readonly<Record<PaneKind, string>> = { source: 'source', lambda: 'λ', rxm: 'rxm', tm: 'TM' }
+export const KIND_WORD: Readonly<Record<PaneKind, string>> = {
+  source: 'source',
+  lambda: 'λ',
+  rxm: 'rxm',
+  tm: 'TM',
+  clif: 'CLIF',
+}
 
 /** Whether the views area is wider than it is tall (`wide`) or taller than it is wide (`tall`) — spec §4.4. */
 export type Shape = 'wide' | 'tall'
@@ -110,6 +118,7 @@ const DEFAULT_LEAF: Readonly<Record<PaneKind, LeafId>> = {
   lambda: 'lambda-0',
   rxm: 'rxm-0',
   tm: 'tm-0',
+  clif: 'clif-0',
 }
 
 /**

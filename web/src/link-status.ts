@@ -243,7 +243,11 @@ export function linkStatus(s: LinkStatus): string {
     // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the rxm lowering bills nothing to —
     // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
     // one fact twice on the constructs that are most often clicked.
-    const nouns = LINKED_LEGS.filter((leg) => !off[leg] && !s.legs[leg].emits).map((leg) => LINKED[leg].emits)
+    // A LEG WHOSE `emits` IS `null` IS NAMED IN NO ABSENCE CLAUSE: `LINKED`'s CLIF entry says why.
+    const nouns = LINKED_LEGS.flatMap((leg) => {
+      const noun = LINKED[leg].emits
+      return noun !== null && !off[leg] && !s.legs[leg].emits ? [noun] : []
+    })
     if (nouns.length > 0) parts.push(`this construct emits no ${nouns.join(' or ')}`)
     if (!off.lambda) {
       const lambda = LAMBDA_TEXT[s.lambda]

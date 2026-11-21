@@ -3,10 +3,17 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { EXAMPLE_ENCODING, EXAMPLES } from '../../src/examples'
 import { LambdaTrees } from '../../src/lambda-trees'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { LEGS } from '../../src/legs'
+import { COPY_LEGS, LEGS } from '../../src/legs'
 import type { LinkWiring } from '../../src/link-wiring'
 import { PaneCollection } from '../../src/panes'
-import { HISTORY_BYTES, type Leg, type RecordEnd, type RunReply, type RunRequest } from '../../src/protocol'
+import {
+  type CopyLeg,
+  HISTORY_BYTES,
+  type Leg,
+  type RecordEnd,
+  type RunReply,
+  type RunRequest,
+} from '../../src/protocol'
 import type { ProgramResult } from '../../src/readout'
 import { createReplies } from '../../src/replies'
 import type { ScratchBuffers } from '../../src/scratch'
@@ -113,8 +120,11 @@ type Heard = {
 
 /** What one leg of a case sends and how it stops, pinned, so that a drift on either side of a comparison fails there. */
 type LegPin = { readonly frames: number; readonly replies: number; readonly done: RecordEnd }
-/** fact-12's three legs, as (a) records them, as (h) replays them, and as the TM copy (g) records its TM leg. */
-const FACT_12_LEGS: Readonly<Record<Leg, LegPin>> = {
+/**
+ * fact-12's three legs, as (a) records them, as (h) replays them, and as the TM copy (g) records its TM leg: the legs a
+ * compile records at once, since CLIF records only while a CLIF view is shown.
+ */
+const FACT_12_LEGS: Readonly<Record<CopyLeg, LegPin>> = {
   lambda: { frames: 1_407, replies: 6, done: 'budget' },
   rxm: { frames: 182, replies: 1, done: 'ended' },
   tm: { frames: 75_851, replies: 297, done: 'budget' },
@@ -213,7 +223,7 @@ function record(name: string, request: RunRequest, last: Leg | 'result', kept?: 
       const what = e instanceof ErrorEvent && e.message !== '' ? e.message : 'the worker did not load'
       end(() => reject(new Error(`${name}: ${what}`)))
     })
-    worker.postMessage({ kind: 'run', gen: 1, src: '40 + 2', encoding: EXAMPLE_ENCODING })
+    worker.postMessage({ kind: 'run', gen: 1, src: '40 + 2', encoding: EXAMPLE_ENCODING, clif: null })
   })
 }
 
@@ -278,7 +288,13 @@ async function measure(c: Case): Promise<void> {
   console.error(`\n${rows.join('\n')}\n`)
 }
 
-const run = (src: string) => async (): Promise<RunRequest> => ({ kind: 'run', gen: 2, src, encoding: EXAMPLE_ENCODING })
+const run = (src: string) => async (): Promise<RunRequest> => ({
+  kind: 'run',
+  gen: 2,
+  src,
+  encoding: EXAMPLE_ENCODING,
+  clif: null,
+})
 const rxmCopy = (src: string) => async (): Promise<RunRequest> => ({
   kind: 'scratch',
   gen: 2,
@@ -369,7 +385,7 @@ function replay(capture: readonly RunReply[]): number {
       rxm: legState<RxmState>(false, HISTORY_BYTES),
       tm: legState<TmState>(false, HISTORY_BYTES),
     },
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   }
   const sessions = new SessionRegistry()
@@ -401,7 +417,7 @@ function replay(capture: readonly RunReply[]): number {
   const t0 = performance.now()
   for (const r of capture) onReply(SOURCE, r)
   const t = performance.now() - t0
-  for (const leg of LEGS) {
+  for (const leg of COPY_LEGS) {
     const l = entry.legs[leg]
     expect({ frames: l?.hist.length, done: l?.done }, `(h): ${leg}'s ring`).toEqual({
       frames: FACT_12_LEGS[leg].frames,
@@ -426,7 +442,7 @@ describe("the app's reply handling", () => {
       const id = "(h) fact-12's replies"
       const capture: RunReply[] = []
       const heard = await record(`${id}: the capture`, await run(FACT_12)(), 'result', capture)
-      for (const leg of LEGS) expect(heardOf(heard, leg), `${id}: ${leg}`).toEqual(FACT_12_LEGS[leg])
+      for (const leg of COPY_LEGS) expect(heardOf(heard, leg), `${id}: ${leg}`).toEqual(FACT_12_LEGS[leg])
       const kinds: Record<string, number> = {}
       for (const r of capture) {
         const kind = r.kind === 'frames' ? `${r.leg} frames` : r.kind
@@ -449,7 +465,7 @@ describe("the app's reply handling", () => {
         timed(`${id} replay ms`, samples),
         fixed(`${id} replays a sample`, REPLAYS),
         fixed(`${id} replies`, capture.length),
-        ...LEGS.map((leg) => fixed(`${id} ${leg} frames`, FACT_12_LEGS[leg].frames)),
+        ...COPY_LEGS.map((leg) => fixed(`${id} ${leg} frames`, FACT_12_LEGS[leg].frames)),
       ]
       console.error(`\n${rows.join('\n')}\n`)
     },
@@ -468,7 +484,7 @@ const stepOf = (line: string): number => countOf(/^step ([\d,]+) of /.exec(line)
 /** A view's newest step and its walk's K, pinned: K is the newest step, at most `K_CAP`. */
 type WalkPin = { readonly newest: number; readonly k: number }
 /** Each view's walk over fact-12, the same for the view's copy, whose program is the view's. */
-const WALKS: Readonly<Record<Leg, WalkPin>> = {
+const WALKS: Readonly<Record<CopyLeg, WalkPin>> = {
   lambda: { newest: 1_406, k: 300 },
   tm: { newest: 75_850, k: 300 },
   rxm: { newest: 181, k: 181 },

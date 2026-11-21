@@ -255,6 +255,12 @@ export type ViewMenu = {
   setClaim(available: boolean): void
   /** Whether `format` applies: this view has an editor holding a document the server serves. */
   setFormattable(available: boolean): void
+  /**
+   * Add a display setting that is on or off at the menu's end, built as "expand all" is, and mount `⋯` if it was not.
+   * For a setting the view can read only once its own constructor has run: a `MachineViewChrome` view's, whose menu
+   * the chrome builds before the view's fields exist.
+   */
+  addCheck(className: string, label: string, check: DisplayCheck): void
 }
 
 /** One group of mutually exclusive settings in a view's `⋯` menu — `layout: code | outline`. */
@@ -285,9 +291,12 @@ export type DisplayGroup = {
 export type DisplayMenu = {
   readonly groups: readonly DisplayGroup[]
   /** Whether every subterm but a chip is open (`Folds.expandAll`), and setting it. "reset folds" turns it off. */
-  readonly expandAll: { readonly on: () => boolean; readonly set: (on: boolean) => void }
+  readonly expandAll: DisplayCheck
   readonly reset: () => void
 }
+
+/** A display setting that is on or off, and setting it: "expand all", a CLIF view's "compact". */
+export type DisplayCheck = { readonly on: () => boolean; readonly set: (on: boolean) => void }
 
 /**
  * One setting's choices as a radio group: a `radiogroup` named by the setting, a `radio` per choice, and
@@ -412,6 +421,27 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
     b.setAttribute('aria-label', `${label} ${hint}`)
   }
   return b
+}
+
+/**
+ * `check` as a menu item, a `checkbox` (`DisplayMenu`'s doc has why not a `menuitemcheckbox`), and what puts its
+ * check in step with `check.on()`. **A SETTING, NOT AN ACTION**: it leaves the menu open as a display choice does, its
+ * check saying it is in force.
+ */
+function checkItem(
+  className: string,
+  label: string,
+  check: DisplayCheck,
+): { readonly el: HTMLButtonElement; readonly sync: () => void } {
+  const el = item(className, label)
+  el.setAttribute('role', 'checkbox')
+  const sync = (): void => el.setAttribute('aria-checked', String(check.on()))
+  sync()
+  el.addEventListener('click', () => {
+    check.set(!check.on())
+    sync()
+  })
+  return { el, sync }
 }
 
 /**
@@ -572,17 +602,9 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
       syncs.push(group.sync)
       displayItems.push(group.el)
     }
-    const expand = item('expand-all', 'expand all')
-    expand.setAttribute('role', 'checkbox')
-    const syncExpand = (): void => expand.setAttribute('aria-checked', String(display.expandAll.on()))
-    syncExpand()
-    // A SETTING, NOT AN ACTION: it leaves the menu open as a display choice does, its check saying it is in force.
-    expand.addEventListener('click', () => {
-      display.expandAll.set(!display.expandAll.on())
-      syncExpand()
-    })
-    syncs.push(syncExpand)
-    displayItems.push(expand)
+    const expand = checkItem('expand-all', 'expand all', display.expandAll)
+    syncs.push(expand.sync)
+    displayItems.push(expand.el)
     const reset = item('reset-folds', 'reset folds')
     reset.addEventListener('click', () => {
       shut()
@@ -701,6 +723,12 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     setFormattable(next: boolean): void {
       if (next === formattable) return
       formattable = next
+      sync()
+    },
+    addCheck(className: string, label: string, check: DisplayCheck): void {
+      const added = checkItem(className, label, check)
+      syncs.push(added.sync)
+      displayItems.push(added.el)
       sync()
     },
   }

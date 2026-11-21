@@ -122,10 +122,10 @@ in the session worker, its module loaded by `import()`; the one-occupant rule is
 ```
 CLIF  [as built | optimised]                     ⋯  ✕
  step 412 / 3,180                      ⏮  ◀  ▶  ⏭
- u0:11
- @0000   v4 = iconst.i64 100
- @0001   v5 = iconst.i64 100
-▶@0002   v8, v9 = umul_overflow.i64 v4, v5
+       u0:11
+ pc0       v4 = iconst.i64 100
+ pc1       v5 = iconst.i64 100
+▶pc2       v8, v9 = umul_overflow.i64 v4, v5
  values             call stack      heap
  v4 = 100   a0      u0:11 main      …
  v5 = 100   r1
@@ -137,7 +137,11 @@ CLIF  [as built | optimised]                     ⋯  ✕
 - **Listing.** Every function of the program, in `build_clif`'s order, each line as Cranelift prints it in
   `func.display()`, except that the srcloc Cranelift prints as `@001a` (hex) moves to the row's pc column in the rxm
   view's decimal form, so a CLIF row and its rxm instruction show the same number. Function headers and block headers
-  are label rows.
+  are label rows. By default each function is laid out as Cranelift prints a function with no source locations (its
+  header, block headers and brace in one column, the rest four to the right), right of a gutter that holds the pc
+  column, while *compact*, a checkbox in the view's `⋯` menu, is checked, as it is by default; unchecking it shows
+  Cranelift's own columns instead. The choice is each view's, stored with the workspace as a λ view's display settings
+  are; it moves a row's text and never changes it.
 - **The switch.** *as built* and *optimised* on each CLIF view's bar. Its labelling says that optimised is Cranelift's
   actual output for O1 and up, the same for every target, and that as built is redextape's lowering before
   Cranelift's passes. Changing it re-records the CLIF leg alone from step 0.

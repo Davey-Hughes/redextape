@@ -29,8 +29,8 @@ describe('the app header', () => {
     document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
     document.querySelector<HTMLButtonElement>('#new-view')?.click()
     const items = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')]
-    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'rxm · program', 'TM · program'])
-    // BY ITS LABEL, NOT ITS INDEX: the rxm pair sits between the other two, so `items[1]` adds an rxm view.
+    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'rxm · program', 'TM · program', 'CLIF · program'])
+    // BY ITS LABEL, NOT ITS INDEX: the rxm pair sits second, so `items[1]` adds an rxm view.
     items.find((b) => b.textContent === 'TM · program')?.click()
     await until(() => mainLeafIds().length === 5, 'a fifth view')
     expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'rxm-0', 'tm-0'])

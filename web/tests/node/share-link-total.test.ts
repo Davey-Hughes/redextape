@@ -43,6 +43,7 @@ describe('a link whose reading throws', () => {
       program: 'let x = 40; x + 2',
       encoding: 'binary',
       width: null,
+      listing: 'as-built',
     })
     expect(vi.mocked(parseWorkspace).mock.results.at(-1)?.type).toBe('throw')
   })

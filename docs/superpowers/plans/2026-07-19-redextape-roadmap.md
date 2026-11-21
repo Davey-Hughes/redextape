@@ -38406,3 +38406,622 @@ At the set-up, `28f6250`, the workspace's nextest passed 1991 tests and skipped 
 | healthy; 200; 1 | the image's health and its page; `pkg-clif/`'s wasm in the wasm stage | `rg 'health\|curl' $R/gate/07-docker-run.log; rg -c '^redextape_clif_wasm_bg.wasm$' $R/gate/07-docker-ls-pkg-clif.log` |
 | 10.47 to 46.25 | the load average over a minute through the gate | `rg -o 'load [0-9.]+' $R/gate/gate.status \| sort -k2 -n \| sed -n '1p;$p'` |
 | 1; 0 | the slow tier's `unused import` warnings; lines the range changes in the file it names | `rg -c 'unused import' $R/gate/03-check-slow.log; git diff 2cf0de1 fa6a220 -- crates/redextape-core/src/tm/encoding/binary.rs \| wc -l` |
+
+#### CLIF VIEW PR 2: THE VIEW (2026-11-19 and 20, branch `clif-view-2`, `41d01d7..6c5c677`, 36 commits, plus this entry, `32660f1`, and `48e1b5f`, which corrects it; then `48e1b5f..92eef7f`, 5 commits that fix two bugs it listed as open, and `eaab70c`, which brings this entry up to them; then `eaab70c..45ce3d7`, 6 commits that close two more items it listed as open and wrap the branch's long lines, and `eae68ac`, which brings this entry up to them; then `bf49448`, which records the hot-path A/B; then `bf49448..ddfe7de`, 13 commits that keep a CLIF view still through a listing switch and lay its listing out compactly by default, and `7d82d8e`, which brings this entry up to them; then `d996676`, which names the layout's checkbox *compact*, `ca15ddd`, which rewords the design's sentence on it, and the commit that brings this entry up to them)
+
+**Spec §7's second pull request** (`docs/superpowers/specs/2026-11-18-clif-view-design.md`): §4's view and §6's page and
+worker, with §8's checks, the browser tests and a Firefox run, on PR 1's package. The plan is
+`docs/superpowers/plans/2026-11-19-clif-view-pr2-view.md`, committed as `b2e269a`, the range's first commit. Its 14
+tasks ran in order, a subagent each, with a fresh implementer finishing Tasks 4 and 5; Task 13 measured and committed
+nothing. The whole-branch review ran after Task 12 (`$R/sdd/final-review.md`), and its fix wave is `48e8e60` to
+`0c4caf4`, 11 commits. Task 14's comment pass, `6c5c677`, ends the range; its comment budget had nothing to write. Two
+bugs this entry first listed as open were fixed after it, in `a4b983a` to `92eef7f`, two more of its open items were
+closed in `c35917e` to `45ce3d7`, and a listing switch that keeps the view still and a compact listing layout came in
+`6e5f0a3` to `ddfe7de`, and `d996676`, the last code commit, names the layout's checkbox *compact*. `pkg/` does not
+change. The lane's record is `~/temp/redextape-clif-view-record/pr2/`, `$R` below. Its task briefs, reports and reviews
+are in `$R/sdd/`, the controller's ledger and rulings in `$R/progress.md`, and Task 13's figures in
+`$R/measurements.md`.
+
+**Two of #189's open items are closed by this PR**: a build failure no longer crosses to the page as `LowerError`'s
+`Debug` text, and `rewind()` keeps the length the cursor found (Task 2, `2731575`). Two more are answered: the CLIF
+types reach TypeScript (Task 3), and the leg reports its end when the recording reaches it (W6 below). PR 1's review
+minor 3 stays open (WHAT THIS DID NOT CLOSE).
+
+##### WHAT CHANGED
+
+**Links take their origin and their pin (Task 1), `4849f83`.** A click on an rxm row or a TM state links through the leg
+table, records the origin it is given, and each leg's rows receive the pin. Nothing a user sees changes; Task 11's CLIF
+links build on it.
+
+**The leg keeps its length and says why it cannot build (Task 2), `2731575` and `31681fc`.** `ClifLeg` hands an unraised
+cursor's end to a scout that has not ended, with one `raised: bool`, so `status()` and `value()` keep the run's length
+and value across `rewind()`, and a pause under the input's caps gives its length too:
+`crates/redextape-clif/tests/leg.rs` reads `Some(1205)` there. `ClifSession`'s constructor throws `decline_reason`'s
+sentence for a program the CLIF build cannot lower: `Unsupported`'s own words, or for `TooDeep` the rxm leg's sentence.
+`31681fc` makes `ClifLeg::status`'s doc defer to `ClifStatus::total_steps`.
+
+**The CLIF types in TypeScript (Task 3), `f88d1f4` and `e92f4f1`.** `crates/redextape-clif/tests/ts_bindings.rs`
+generates the CLIF types into `web/bindings/` as core's and wire's do, and `scripts/build-web-bindings.sh` checks each
+of the three crates' output on its own. `web/tests/node/bindings-contract.test.ts` pins the six nullable sites, so a
+dropped `| null` reddens `tsc`.
+
+**The toggle, the key and the help (Task 4), `987f744`, `25f2c2e` and `e301060`.** The header gains a fifth `views`
+toggle, CLIF, after rxm and off by default, and the key `5`. `KIND_GLOSS.clif` and `web/help.html` name five views, the
+switch and the CLIF step cap (**DRAFT** copy). A CLIF view says it is loading. The layout cycle, the default grid and
+stored workspaces stay as they were. So that the header keeps one row at 1280 px wherever four toggles kept it, the
+toggles keep their padding and the gaps narrow: `.bar`'s column gap is 0.8125rem, Terminal's 0.3125rem over 30rem up to
+85rem and Paper's 0.5625rem over 30rem, and the spacer before the run gives one gap back.
+
+**The worker records the CLIF leg (Task 5), `86d7288`.** For a run that shows a CLIF view, the session worker loads
+`pkg-clif/`, builds a stepper once the other legs have posted their result, records it under the CLIF leg's own epoch,
+posts a second `result` when its first fill stops, and drops it with the session. Nothing waits on it. A CLIF frame is
+charged `FRAME_OVERHEAD_BYTES` plus `CLIF_WORD_BYTES`, 60 B, a word, counting each value, each register entry, each
+call-stack entry, both halves of each heap cell and each box's content; the fix wave adds a fixed part.
+
+**Rebuild, drop and load on intent (Task 6), `4776da7` and `48508b0`.** A `clif` request rebuilds the stepper for
+another listing or a newly shown view, or drops it for a hidden one, under a new epoch; a `clif-load` request loads the
+package without recording. A rebuild's result carries the new listing's part, never the old listing's end, and a rebuild
+stops the recording in flight.
+
+**The page's side (Task 7), `56f751c` and `d2b0152`.** `ClifSync` (`web/src/clif-sync.ts`) tells the worker whether a
+CLIF view is shown and which listing it wants, and a hidden CLIF view's history is dropped. The page fetches `pkg-clif/`
+on intent, when the pointer rests on the CLIF toggle or the toggle takes focus (`web/src/clif-intent.ts`), and a run
+fetches it only when a CLIF view is shown. A CLIF view shown after its program's run steps it.
+
+**The view (Tasks 8 and 9), `30f7b92`, `289e7ad` and `a6638b8`.** Pure, node-tested builders in `web/src/clif-view.ts`
+give the rows, values, call stack, heap and notices, and `web/src/clif-pane.ts` draws them. The view lists every
+function in order, the rows as Cranelift prints them with a decimal pc column and the headers as label rows, and steps
+the run with its values (number, tag, register), call stack (name, label, row) and heap. It says when it is loading,
+could not load (with Retry), or has no CLIF to show.
+
+**The listing switch (Task 10), `92ff6a0` and `1fbd381`.** Each CLIF view's bar has *as built* and *optimised*. A choice
+re-records the CLIF leg alone, is stored with the program, and is carried by a share link, which writes `listing` only
+when it is optimised. As a width chosen does, a listing chosen ends a picked example's notice and withdraws a link's
+undo.
+
+**Links both ways (Task 11), `21f5d9c` and `161d422`.** A CLIF row links its rxm instruction and its source construct, a
+construct or an rxm instruction marks its CLIF rows, and the CLIF run's focus is marked and named. A pin standing when a
+CLIF listing lands is marked in the view, seeded as a view shown after compiles it missed is.
+
+**Share links and workspaces (Task 12), `29679e3`, `a9bb016` and `505d8ca`.** Tests hold that share links and stored
+workspaces carry a CLIF view and its position, and that a CLIF position past its first fill, alone in its link, lands at
+the CLIF pass's result. `505d8ca` makes a link's continues go one at a time, none posted while another records, so the
+CLIF pass's result neither starts a second continue nor counts one.
+
+**The whole-branch review's fix wave, `48e8e60` to `0c4caf4`.** A CLIF view says nothing of a load while its leg cannot
+run, and the page says *loading* only while a load is in flight: the worker posts `clif-load` `loading` as a load that
+must fetch starts, and the page sets it itself only on intent (`0c4caf4`, which replaces `48e8e60`'s first attempt at
+the load state). Hiding a CLIF view or switching its listing drops the CLIF part from the readout until the new
+stepper's result (`952ac35`). A listing chosen drops a link's pending CLIF position (`d69d6e3`). A link's later
+positions still continue after ↺ on the leg a continue records (`18f445d`). A notice floats in the header's run only
+where it leaves the header's gap after the control before the run (`b3f147a`). A CLIF stepper that throws while it
+records is dropped and the view says why, so the other legs keep their run (`7d03e02`). A CLIF frame's charge gains
+`CLIF_FRAME_BYTES`, 236 B, so a program of few values a frame stays within its budget too (`3b87629`). `3284094` and
+`b394a50` tighten tests, and `e55b874` corrects comments the branch had made false.
+
+**Task 14's comment pass, `6c5c677`.** `notice-float.test.ts`'s comment on the resting sentence's `hide` sits above its
+case again, and the ten fix-wave comment lines over 120 columns are wrapped.
+
+**The two bug fixes, `a4b983a` to `92eef7f`.** Both were made after this entry's first version, which listed them in
+WHAT THIS DID NOT CLOSE. A load the CLIF toggle asks for after one that failed asks for the listing as Retry does, so a
+CLIF view shown lists the program, where it said *Loading CLIF…* with the load in and no Retry left (`a4b983a`): from
+`failed`, `askClifLoad` posts the load and then calls Retry's `ClifSync.retry`, which posts the `clif` request again
+while a CLIF view is shown and no run is awaited. `clif-app-failed-intent.test.ts`, a browser file of one case, holds
+it; with that call taken out, the case timed out waiting for the loading notice to end. A listing chosen in a CLIF view
+drops the link's CLIF position while the link's compile still holds it, as it drops one pending on the leg, so the view
+opens on step 0 of the listing chosen and the other legs keep their positions (`f6de75f`): `LinkPositions.forget` drops
+one leg's held and pending position, and `chooseClifListing` calls it where `d69d6e3` deleted the pending one. A browser
+case in `share-open-clif.test.ts`, which chooses *as built* before the link's run is posted, and two node cases in
+`share-positions.test.ts` hold it. With the call put back to `d69d6e3`'s delete, or with `forget` leaving the held
+position, the browser case read the link's step on the as-built run; with `forget` dropping every leg's held position,
+it timed out waiting for the rxm view's step; and with `forget` leaving the held position or the pending one, the node
+case of that half failed. `63a83dd` wraps that fix's comments. `c8cdb69` and `92eef7f` change tests only: the browser
+case of the listing asserts that its hold kept the compile's debounce and has a timeout of its own, and the case of the
+load asserts that the page posts the load before the request. Each assertion failed under its sabotage: a hold that
+keeps no timer, and the two posts swapped. `$R/sabotage.md` records each sabotage, and `$R/sdd/bugfix-report.md` the
+failing and passing runs.
+
+**The follow-ups, `c35917e` to `45ce3d7`.** They close the two items from the fix wave's re-review that this entry
+listed in WHAT THIS DID NOT CLOSE, and answer their own reviews (`$R/sdd/followup-review-eaab70c..c950ed1.md` and the
+two `followup-rereview-*.md`). `record-loop.ts`'s docs give the recording flag's rule where they listed what clears it
+and left out a `clif` request: whatever replaces a loop's generation or epoch to start a loop of its own clears the flag
+first (`c35917e`, comments only). A CLIF stepper that throws from `listing()`, `status()` or `value()` is dropped and
+the CLIF view says why, as one that throws while it records is, and the result is still posted, with no CLIF part
+(`c950ed1`). The browser cases of `clif-worker.test.ts`'s `a CLIF stepper that throws` hold each of these guards and
+`7d03e02`'s at its three call sites, each case with the real stepper made to throw from one call through a test-only
+`stubRequest` seam in `web/vite.config.ts`. Each sabotage fired: a guard taken out gave a `worker-error`, a result read
+while a loop was in flight kept the dropped stepper's last CLIF part, and with the drop taken out a later extend stepped
+the stepper again. The stub is dropped after each case, so a case that fails early leaves none to answer a later load,
+and two cases are named for a throw that comes before any recording:
+`says why when its status throws as an extend asks where the run stopped, before it records` and
+`says why when its rewind throws, before the fill is recorded again` (`1c07842`). Once a `clif-listing` says the CLIF
+leg has no listing, the readout drops its CLIF rows, so a stepper dropped as a continue or a rewind begins, which no
+result follows, leaves none beside the view's reason (`1517a04`). A node case in `replies.test.ts` and
+`clif-app-threw.test.ts`, a browser file of one case that presses the CLIF view's continue on a stepper made to throw,
+hold it: with the `clif-listing` arm's call taken out both failed, and with `absent` wired to a no-op the browser case
+did. That case checks that no result follows the throw only after a round trip through the session worker posted once
+the throw's listing was heard, so a result posted with the listing cannot land after the check; with the worker made to
+post a result after the throw, it failed at that check (`02cd44c`). Every line the branch adds under `web/` is at most
+120 columns but for four, comments and strings wrapped with their words unchanged (`45ce3d7`); WHAT THIS DID NOT CLOSE
+names the four. `$R/sabotage.md` records each sabotage, and `$R/sdd/followup-report.md` the failing and passing runs.
+
+**The listing switch keeps the view still, `6e5f0a3`, `17343e4`, `dfb973f`, `42f2f8c` and `ddfe7de`.** A listing chosen
+in a CLIF view emptied the CLIF leg's frames and listing at the press (`$R/sdd/flash-report.md`, every frame sampled
+through a real press). For 1 to 5 frames the view kept the old rows with no instruction marked next, its values, call
+stack and heap panels empty and its step line at *step 0 of 0…*; in most switches the new listing then drew for a frame
+with no frames under it, unmarked and scrolled to its top; and the readout dropped its CLIF rows until the new run's
+result, which for a long program moved every view for the whole new recording. Now the listing in force stays, its rows,
+scroll, marks, panels and step line, a link's step included, until the new listing's first frames come, and the view
+then changes in one frame, to the new listing at step 0. The readout keeps its CLIF rows, which `952ac35` dropped at the
+press, until the new run's result (`6e5f0a3`). While the view is held, ▶ at the end of the history and keep recording
+ask the worker for nothing, and ↺ goes to the start of what is kept and asks for no rewind (`17343e4`); a result with no
+CLIF part keeps the readout's CLIF rows (`dfb973f`); and a choice made just after ↺ emptied the history keeps the line
+saying the leg records from step 0 (`42f2f8c`). A listing chosen still drops a link's CLIF position, as `f6de75f` made
+it. `clif-switch-frames.test.ts` reads every frame from a real press to the swap and holds each frame before it to every
+fact: the rows, scroll, marks, panels, the whole step line and where the view stands. `clif-switch-hold.test.ts` holds
+the requests the hold refuses, the readout through a result of another request, and a link made during the hold, which
+carries no CLIF step. Node cases in `replies.test.ts`, `sessions.test.ts` and `readout.test.ts` hold the page's side of
+the hold, and `ddfe7de` builds those of `holdClifLeg` from runs a client claimed and answered. Each sabotage that took a
+part of the fix out fired (`$R/sabotage.md`, *Listing switch flash* and *Flash fix round* r1 and r2).
+
+**A compact listing by default, `5f2f0df`, `5bbeede`, `ba8c558`, `7eff7e0`, `30cdba2`, `a86733f`, `531f31e` and
+`6e2f665`.** Cranelift indents a function's instructions to column 36 when it has source locations and to 4 when it has
+none (`decorate_block`, `src/write.rs:260` in cranelift-codegen 0.137.2), and every function of the programs tried has
+them (WHAT THIS DID NOT CLOSE), so the view, which shows a pc column where Cranelift prints a srcloc, left a wide blank
+before every instruction. A CLIF view now lays each function out in Cranelift's columns for a function without source
+locations, right of a gutter that holds the pc column, while the *compact* checkbox in its ⋯ menu is checked, as it is
+by default, and in Cranelift's own columns when it is unchecked (`5f2f0df`, `d996676`). The choice is each view's,
+stored with the workspace in a `clifDisplay` field as a λ view's display settings are; a workspace or share link without
+the field reads as none stored, so its CLIF views lay out compactly. A toggle moves each row's text without changing it,
+and draws in one frame at the scroll the listing has. Unchecked, every instruction's text starts in Cranelift's column
+whatever its pc label's width, where a label of pc1000 or more pushed it a column right (`7eff7e0`); checked, a blank
+line between functions has no lead, so a selection copies no spaces where Cranelift prints none (`30cdba2`).
+`clif-view.test.ts` holds both layouts' columns on fact and on a program with pcs past 1,000, `clif-layout.test.ts` the
+pane's columns, the checkbox and a toggle read in every frame, `clif-layout-stored.test.ts` the stored choice in the
+app, and `workspace.test.ts` its parse and write; `5bbeede` and `ba8c558` add the checkbox's checked weight and the
+press's own redraw to the cases. Each layout sabotage fired but one, a draw deferred within its own frame, which painted
+nothing; deferred a frame further, it fired. `531f31e` and `6e2f665` bring the design's §4 and §10 up to the layout, and
+`a86733f` brings the layout's added lines within 120 columns. `d996676` names the checkbox *compact* and checks it for
+the compact layout, where it was *exact Cranelift layout* and checked for Cranelift's own; what a view stores, `layout`
+`'compact'` or `'exact'`, does not change, and a view never pressed still stores nothing. `ca15ddd` rewords §4's
+sentence on the checkbox.
+
+##### DECISIONS
+
+**The plan's Decisions for the user are not answered yet.** Each row is the decision this branch takes, awaiting the
+user's review:
+
+| | Taken, awaiting the user's review | If overturned |
+|---|---|---|
+| W1 | A CLIF view is shown when `combinationOf(tree).includes('clif')`: an unselected Stage tab counts, a pane parked by another arrangement does not | Only `clifWanted` and its test change |
+| W3 | CLIF neither waits for nor builds hidden-recording PR B's `head.shown` | PR 2 waits for PR B |
+| W6 | No run-ahead: the CLIF leg's end is reported when the recording reaches it, and `findEnd` is never called, so the readout shows CLIF's steps only once its run has ended | A chunked `findEnd` pass after the fill |
+| G2 | The layout cycle stays three pairs, then all four; CLIF is filtered out of it | `CYCLE` gains source beside CLIF and all five; the help and tests follow |
+| D1 | **DRAFT** copy: `KIND_GLOSS.clif` and the help's sentences; the switch's labels and titles are the brief's | Copy edits only |
+| D2 | A CLIF build failure shows in the CLIF view only, not in the readout, which has CLIF rows only while a stepper runs | The readout prints a *declined* row as rxm's does |
+
+Also for the user's review: the header's narrower gaps (Task 4); every view's title menu listing *CLIF · program* (Task
+4); Task 9's styling (label rows dimmed, function and block headers bold, the notice in the UI font); and the hot-path
+measurement below.
+
+**The plan's departures from the brief** (`$R/plan-brief-pr2.md`):
+
+| The brief says | PR 2 does | Why |
+|---|---|---|
+| G9: the help says "all five", and `pages.test.ts`'s `countWord` gains five | The cycle sentence keeps "all four"; `pages.test.ts` reads the last stop off `CYCLE` | G2 keeps CLIF out of the cycle, so its last stop has four kinds |
+| W4: CLIF records after `postResult` | Kept, and the CLIF pass posts a second `result` when its first fill stops | The readout's CLIF rows and a link's continue are driven by `result`; nothing waits on it |
+| G5: Retry posts `clif-load`, then the `clif` request | Retry posts the `clif` request alone | Its CLIF pass loads, and a failed load forgets its promise, so a `clif-load` first would fetch twice |
+| W12: `TooDeep` reads the native CLI's or `redextape-native`'s sentence | The rxm leg's sentence, `rxm_decline_reason`'s, from `decline_reason` | Neither prints one: the CLI prints `LowerError`'s `Debug` |
+| W7: `ClifLeg` keeps the total of an end reached without a raise | An unraised cursor hands its end to a scout that has not ended; one `raised: bool` | `status()` and `value()` already read a scout's end, so both survive `rewind()` |
+| Order (2): the Rust and the generated types in one task | Task 2 (the leg), Task 3 (the types) | A reviewer can reject the bindings script's change alone |
+| G8 in task (1) | `LinkedLeg` leaves out `clif` from Task 4 until Task 11 adds `LINKED.clif` | `LINKED` is mapped over `LinkedLeg`, so the leg cannot join without its entry |
+
+**The controller's rulings while it ran** (`$R/progress.md`) that change what a user sees or what the plan said:
+
+| Ruling | Effect |
+|---|---|
+| Pre-flight, F1 to F15 (`$R/preflight.md`) | Carried into their tasks before they ran: among them the paused leg's `Some(1205)` (F1); `compile.ts` telling `ClifSync` a run is pending at schedule, so key `5` inside the debounce posts no doomed request (F8); the CLIF pass awaiting its generation's run result (F9); one browser test file for each fetch case that needs a fresh worker (F10); and this entry's range ending at the last code commit (F15) |
+| Task 4: the header fit | The fifth toggle stays in the header and the fit comes from spacing alone, never words, icons, order or a hidden control; the toggles keep their padding, and Paper has a gap of its own |
+| Task 4: title menus | Every view's title menu lists *CLIF · program*, as a new kind is listed wherever kinds are |
+| Task 5: W11, revised | A CLIF frame's charge counts its words at `CLIF_WORD_BYTES`, the smallest multiple of 4 at which the `clif frame cost` browser case passes on `map30000` with 5% margin, in place of the plan's charge |
+| Task 6: the rebuild case | Its last assertion runs on a loop program, since with fact it could not fail |
+| Task 7: a view shown after the run | Made available in Task 7 rather than Task 9, so its controls are not left disabled |
+| Task 8: the values panel | It draws no *changed* mark (the brief's `changed: false`); the false comment went, the behaviour stays |
+| Task 11: a pin when a listing lands | Marked in the CLIF view, by the rule for a view shown later; the seed's scroll to the pin's rows did not hold after a switch before `6e5f0a3` (WHAT THIS DID NOT CLOSE) |
+| Task 12: one continue at a time | A link posts no further continue until the leg it last continued sends its next frames, so a link with two positions lands a little later; a fifth browser case holds a CLIF-only position |
+| Whole-branch review, I1 | A CLIF view whose program has no compiled session shows no loading notice, and the load state is never *loading* without a load in flight, where the plan's notice said *loading* for anything else |
+| Whole-branch review, I2 | A CLIF-only fixed part, `CLIF_FRAME_BYTES`, measured on a small-frame program as well as `map30000` |
+| Whole-branch review, I3 | The hot paths, unmeasured at Task 13, are measured in a quiet window before merge, at `eae68ac` (SPEED AND SIZE) |
+
+##### SPEED AND SIZE
+
+**Task 13 (`$R/measurements.md`), base `41d01d7` against `a9bb016`**, rustc 1.100.0, wasm-pack 0.15.0, wasm-opt 130:
+
+| File | Base | `a9bb016` | Change |
+|---|---:|---:|---:|
+| `pkg/redextape_wasm_bg.wasm`, bytes | 917,298 | 917,298 | 0 |
+| `pkg/redextape_wasm_bg.wasm`, gzip -9 | 324,340 | 324,340 | 0 |
+| `pkg-clif/redextape_clif_wasm_bg.wasm`, bytes | 1,256,768 | 1,258,041 | +1,273 |
+| `pkg-clif/redextape_clif_wasm_bg.wasm`, gzip -9 | 391,364 | 391,239 | −125 |
+
+`pkg/` is byte-identical, its JS glue and `.d.ts` files too (`diff -r`), as the anti-goal requires. The gate's builds at
+`6c5c677` give the same four figures: its `pkg-clif/` wasm has the SHA-256 Task 13 measured at its head, and its `pkg/`
+wasm is byte-identical to the base's.
+
+**The hot paths, head `eae68ac` against base `41d01d7`: 0 of 37 figures flagged** (`$R/measurements.md`, Step 3). One
+round of 8 ABBA pairs and a warm-up a side, 18 runs of `web/tests/browser/record-cost.test.ts` in Playwright's Chromium;
+each run times compile, the λ, rxm and TM legs' recording, the app's reply handling and stepping in the mounted app, 37
+timings, and pins 54 fixed counts. By #160's rule a figure flags when head's median of its 8 runs is above base's by
+more than base's spread, the largest run less the smallest. Over the 37 figures head's median against base's is 1.000 at
+the median and 0.987 to 1.009 at the extremes, and the 54 fixed counts are equal in all 18 runs. The plan's load rule
+held: 20 one-minute load readings, none above 4, the highest 3.90. Pairs 2 and 6, the two whose runs both kept every 1-s
+vmstat line at us+sy ≤ 20 and r ≤ 8, flag five figures at 1.009 to 1.014. That view is shown, not the verdict: with two
+runs a side, base's spread is the gap between two runs, 0.1 ms for `sum_to(2750)`'s `result` of 603.75 ms, one of the
+five. No repeat round was run: the round is clean under #160's rule, with the load rule held at every reading. The
+harness cannot time the CLIF leg's own recording, since the base has none and the head's runs show no CLIF view (`clif:
+null`), or native compile time, for which no round is prepared; outside `tests/`, the branch changes only
+`redextape-clif`, `redextape-clif-wasm` and `redextape-test-support`, a dev-dependency. The harness now lives in the
+lane record, `$R/ab/`; its `README.md` gives the commands, what a run measures and the gates. Task 13's own attempt, at
+`a9bb016`, ran no round: every one-minute load reading from 05:19 to 05:21 UTC was 28.10 to 30.58, from work outside
+this lane.
+
+**The CLIF frame charge (I2, `$R/sdd/fix-wave-report.md`)**, Chromium's retained heap per frame against the mean charge,
+the mean of three rounds. Before `CLIF_FRAME_BYTES`, at 64 B a frame and 60 B a word, `arithmetic`, the example of
+fewest words a frame, kept 975.3 B a frame against a charge of 791.5 B. With `CLIF_FRAME_BYTES` at 236 B: `map30000`
+15,618 frames, a charge of 2,148.5 B against 1,815.0 B kept (18.4% margin); `arithmetic` 20,000 frames, 1,027.5 B
+against 975.3 B (5.35%). `map30000`'s first fill went from 17,545 frames to 15,618.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The CLIF leg's own recording is not timed** (I3): the hot-path A/B's base has no CLIF leg and its head's runs show
+  no CLIF view, so recording with one shown is compared with nothing (SPEED AND SIZE).
+- **Hidden-recording PR B's `head.shown` overlaps `run.clif` and the `clif` request** (W3): PR B, unbuilt, plans a
+  `head.shown` flag, while a run's `clif` and the `clif` request already tell the worker whether a CLIF view is shown.
+  CLIF neither waits for it nor builds it; PR B is to fold the two in.
+- **The scout is built and never driven** (W6): `findEnd` is never called, so the CLIF leg's length is known only once
+  the recording reaches its end.
+- **PR 1's review minor 3**: after a fault, `cons` and `new_box` give a 0 tagged `List` or `Box` while reads in the same
+  state are tagged `Value`, so a stopped run's state can show a list- or box-tagged 0.
+- **The cycle sentence says *all four* beside five views** (G2): CLIF is out of the layout cycle, so its last stop has
+  four kinds.
+- **`build:bindings` now compiles `redextape-clif`'s dev-dependencies** in CI's `web` job (`redextape-native`'s
+  Cranelift JIT, no LLVM): a CI time cost to watch on the first CI run; a feature-gated dev-dependency is the fix if it
+  bites.
+- **N3: no case reaches a CLIF `[continue]` at a steps cap.** The CLIF steps cap is 5,000,000 loop ticks, which no
+  example reaches; Rust's `tests/leg.rs` covers `raise_cap`, not the worker's entry or the page's continue.
+- **N5: the CLIF step bar uses two words for the same wait.** A shown CLIF leg with no frames reads *not run* after a
+  run that carried a listing, and *step 0 of 0…* when the view was shown after the run.
+- **The CLIF charge is proven on per-program means only.** A linear fit of the two programs puts a frame's fixed part at
+  about 430 B and a word at about 45 B, against a charge of 300 B and 60 B a word, so a frame of 2 to 4 values may be
+  charged less than it keeps. Programs that fill the ring average 30.8 to 102.5 words a frame.
+- **47 deferred minors the whole-branch review marked CAN WAIT**, listed in `$R/sdd/final-review.md`.
+- **No case holds a pin's scroll through a listing switch**: `clif-link.test.ts` holds that a standing pin is marked
+  after the switch, not where the view stands. By reading, the pin's rows no longer scroll off after a switch: the new
+  listing lands with its first frames, so the seed's scroll to the pin is held against step 0 until the run moves, where
+  the first frames used to release it. A compile's CLIF listing still lands a message before its frames, so a pin made
+  before it lands can lose its scroll to step 0 when they come.
+- **The CLIF values panel draws no *changed* mark**, though every CLIF step defines a value and loops set them again;
+  the rxm view marks the register the last step wrote.
+- **No browser case chooses a listing after a link's run is posted and before its `compiled`**:
+  `share-open-clif.test.ts`'s case chooses before the run is posted, holding the compile's debounce open. The node cases
+  hold `forget` for a held position and for a pending one.
+- **The case of a load asked for after a failed one drives the pointer's rest, not focus**: the toggle taking focus
+  calls the same `askClifLoad`, and no case fails a load and then focuses the toggle.
+- **A Firefox flake in `clif-worker.test.ts`'s `drops the stepper for a request with no listing`**:
+  `expected 2 to be less than or equal to 1`, in 2 of 5 runs of the file with the follow-ups' worker, and in 1 of 6 runs
+  of its describe with `session-worker.ts` as it was at `eaab70c` against none of 6 with the follow-ups' worker, so it
+  predates them. The case allows one CLIF chunk in flight when its `clif` request lands, and two were. No Chromium run
+  in `$R/logs/` or `$R/gate/` has shown it, and Firefox is not in CI.
+- **A stepper that throws reads as a program the CLIF view declines**: the view gives *No CLIF for this program:* and
+  what the stepper threw (*the stepper threw* in `clif-app-threw.test.ts`), since the page shows every `null` listing's
+  error that way. Whether a throw should read differently is copy for the user to judge.
+- **A stepper throw that crosses a rewind leaves the CLIF view waiting with no reason**, and the readout keeping its
+  CLIF rows (`$R/sdd/followup-rereview-r1-c950ed1..1517a04.md`, Out-of-Scope Observations): if the stepper throws in a
+  loop chunk after the page has raised the leg's epoch and posted a rewind, the page drops the error listing as stale,
+  and the worker then takes the rewind, finds no stepper and sends nothing. It needs a throw no known input produces.
+- **Four added lines stay over 120 columns**: doc lines in `app-header.ts` and `share-link.ts`, whose wrap would grow a
+  block already over the comment check's cap of 8 lines, and two `it()` names, in `linked-legs.test.ts` and
+  `protocol.test.ts`, that biome keeps on their call's line.
+- **A listing chosen while a link's program compiles still shows that compile's own frame**: the CLIF view goes from the
+  old program's rows to *Loading CLIF…* with its line at *not run*, as every compile with a CLIF view draws until its
+  CLIF listing comes, and then to the listing chosen in one frame. Keeping the old program's rows through the compile
+  would show them beside the new program's other views (`$R/sdd/flash-report.md`, fix round r1).
+- **A CLIF view's step line re-wraps in a narrow view as its text changes**, in any recording, not only a switch's:
+  *step 0 of 256…* takes one line where a link's step or *— history is full* takes two, and the listing grows and
+  shrinks with it, 279 to 247 px over one recording in a probe (`$R/sdd/flash-report.md`). The TM view's open
+  header-wrap item is the same class.
+- **No test holds the compact layout's per-function indent**: compact reads each function's instruction indent from its
+  first instruction, and every function the cases list is at 36, so a constant 36 would pass them. Every function of
+  every real program tried has source locations: `$R/scratch/probe-bare.mjs`, run at `ddfe7de`, read 48 functions over
+  the 26 listings of 13 programs, each with its instructions at 36 and one or more carrying a pc
+  (`$R/logs/final4-indent-probe.log`).
+- **After a switch the readout's CLIF rows lag the view**: they show the run of the listing left until the new run's
+  `result`, a frame after the swap for fact and the whole new recording for a long program (`$R/sdd/flash-report.md`).
+  Keeping them is what keeps the views still; a reason in place of a listing takes them at once.
+- **The Firefox tier fails at the base and at the head**: 25 files fail in both, among them `share-open-deep.test.ts`,
+  which fails to load with "too much recursion" (VERIFICATION). `toggles CLIF on 5`, new in `view-keys.test.ts`, fails
+  in Firefox at the caret assertion its siblings fail at on `main`.
+- **No NEEDS_CONTEXT is left open**: Task 5's, the CLIF frame charge, was ruled (W11 revised) and closed.
+
+##### VERIFICATION
+
+**The gate, at `6c5c677`.** Each step ran through `$R/gate/step.sh` in its own `systemd-run --user --scope` with
+`MemoryMax=16G` and `MemorySwapMax=0`, into a log in `$R/gate/` that starts with `uptime` and ends in the step's exit
+status; each browser step waited for port 63315 first. `$R/gate/run-gate.sh` ran them in this order, and
+`$R/gate/gate.status` has each one's exit status and the load around it: a one-minute average of 7.26 to 24.81. The
+first run stopped during `check-slow.sh` when its agent did, leaving `03-check-slow.earlier-013135.log`;
+`$R/gate/run-gate-rest.sh` ran that step again and the ones after it.
+
+```
+rustup check                                          → stable 1.100.0 up to date
+.tools/tree-sitter --version                          → tree-sitter 0.25.10
+LLVM_SYS_231_PREFIX=/usr scripts/check-all.sh         → exit 0, "all configs green — base, LLVM and browser";
+                                                        the workspace's nextest: 2046 passed, 35 skipped
+cargo llvm-cov nextest --workspace --fail-under-lines 90
+                                                      → exit 0, 2046 passed, 35 skipped, lines 95.55%
+scripts/check-slow.sh                                 → exit 0, "slow tier green", 35 tests passed
+scripts/check-<scan>.sh --self-test, then the scan, for text-bytes, citations, attributions, doc-figures, shared-docs,
+  colours, grammar-wasm and lua; node scripts/check-comments.mjs --self-test, then --base 41d01d7
+                                                      → exit 0, all 18
+# from web/
+../scripts/check-licences.sh --self-test, then the scan
+                                                      → exit 0, both
+pnpm run build:wasm, build:lsp-wasm, build:clif-wasm and build:bindings
+                                                      → exit 0, each
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm run typecheck                                    → exit 0
+pnpm run test:coverage                                → exit 0, 332 files, 3741 tests; 97.81% statements,
+                                                        92.15% branches, 98.28% functions, 99.06% lines
+                                                        (web/vite.config.ts's floors: 95, 89, 97, 97)
+pnpm run build:app                                    → exit 0
+VITEST_MAX_WORKERS=2 pnpm run test:browser            → exit 0, 250 files, 2026 tests
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm run test:firefox
+                                                      → exit 1: 25 of 251 files failed, 90 of 2027 tests;
+                                                        1908 passed, 29 skipped
+```
+
+**Every Firefox failure's file fails at the base too.** The 25 files ran again at `41d01d7`, in the base worktree
+`~/temp/redextape-clif-view2-base` with its own target directory (`$R/gate/10-base-firefox-failed.log`): all 25 failed,
+85 tests. `share-open-deep.test.ts` fails to load in both, with "InternalError: too much recursion". The rest fail on
+sub-pixel geometry (a box 64.85 px tall where a test expects 63.875), on a caret back at 0 after a view key or a drag,
+and on scroll holds that time out. By test, six failed at the head and passed in that base run; each was run again at
+both (`$R/gate/11-*` to `13-*`):
+
+- `toggles CLIF on 5`, new in this branch, fails at its last assertion, the caret's `expected +0 to be 14`, after its
+  CLIF assertions pass. `toggles the four kinds on 1 to 4` fails the same way at the base in all three of its runs.
+- `acts once with Ctrl held through a held ]` failed in both re-runs of its file at the head and in none of the base's
+  three runs of it; run alone three times at each, it failed twice at each, at the same caret assertion.
+- `ends on a key it does not know` failed in the full run alone: it passed in two runs of its file and three alone at
+  the head, and in all six at the base. Its failure is the caret family's: the key typed at 0 rather than at the caret.
+- `stays armed through Control pressed alone`, `stays armed while the prefix is held` and `view-keys-focus.test.ts`'s
+  `leaves the caret in the source editor, and the key chooses the tabs` failed at the base in a re-run of their file.
+
+**The base's builds for that run**, `build:lsp-wasm` and `build:bindings` (`$R/gate/09-base-*.log`), exited 0.
+
+**The two bug fixes' checks, at `92eef7f`** (`$R/sdd/bugfix-final-checks.md`, logs in `$R/logs/final2-*.log`), each
+browser run after a wait for port 63315:
+
+```
+# from web/
+pnpm run typecheck                                    → exit 0
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm exec vitest run --project node                   → exit 0, 82 files, 1717 tests
+VITEST_MAX_WORKERS=2 pnpm run test:browser            → exit 0, 251 files, 2028 tests
+pnpm run test:coverage                                → exit 1: 1 of 333 files failed, step-bar.test.ts, whose suite
+                                                        did not load ("Failed to fetch dynamically imported module");
+                                                        3737 tests passed, 8 skipped, and no coverage table
+step-bar.test.ts alone, under coverage                → exit 0, 8 tests passed
+pnpm run test:coverage, a second time                 → exit 0, 333 files, 3745 tests; 97.82% statements,
+                                                        92.15% branches, 98.28% functions, 99.06% lines
+# from the root
+node scripts/check-comments.mjs --base 41d01d7        → exit 0
+```
+
+**Not run again for these commits**: `check-all.sh` and llvm-cov, `check-slow.sh`, the scans other than the comment
+check, the licences check, the wasm and app builds, and the Firefox tier. The five commits change `web/src/main.ts`,
+`web/src/share-positions.ts` and three test files, and no Rust; the gate above stands at `6c5c677`.
+
+**The follow-ups' checks, at `45ce3d7`** (`$R/sdd/followup-final-checks.md`, logs in `$R/logs/final3-*.log`), each
+browser run after a wait for port 63315:
+
+```
+# from web/
+pnpm run typecheck                                    → exit 0
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm exec vitest run --project node                   → exit 0, 82 files, 1718 tests
+VITEST_MAX_WORKERS=2 pnpm run test:browser            → exit 1: 1 of 252 files failed, tm-pointer.test.ts, whose
+                                                        suite did not load ("Failed to fetch dynamically imported
+                                                        module"); 2031 tests passed, 5 skipped
+tm-pointer.test.ts alone, --project browser           → exit 0, 5 tests passed
+pnpm run test:coverage                                → exit 0, 334 files, 3754 tests; 97.83% statements,
+                                                        92.17% branches, 98.28% functions, 99.07% lines
+# from the root
+node scripts/check-comments.mjs --base 41d01d7        → exit 0
+```
+
+**There is no clean full Chromium run at `45ce3d7`.** In the run above, `tm-pointer.test.ts`'s 5 tests were skipped, not
+failed, since its suite never loaded; run alone straight after, it passed. The coverage run at the same head runs the
+browser files as well as the node ones: its log carries the browser client's console lines, and its 334 files, all
+passed, are the node run's 82 and the Chromium run's 252 together.
+
+**Not run again for the follow-ups**: the Rust gate (`check-all.sh` and llvm-cov), `check-slow.sh`, the scans' full gate
+(all but the comment check), the licences check, the wasm and app builds, and the Firefox tier. No Rust changed: the six
+commits change 14 files under `web/src/`, 18 under `web/tests/` and `web/vite.config.ts`. Firefox ran only
+`clif-worker.test.ts` and `clif-app-threw.test.ts`, during the follow-ups (the flake in WHAT THIS DID NOT CLOSE). The
+gate above stands at `6c5c677`.
+
+**The listing switch's and layout's checks, at `ddfe7de`** (`$R/sdd/view-changes-final-checks.md`, logs in
+`$R/logs/final4-*.log`), each browser run after a wait for port 63315:
+
+```
+# from web/
+pnpm run typecheck                                    → exit 0
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm exec vitest run --project node                   → exit 0, 82 files, 1737 tests
+VITEST_MAX_WORKERS=2 pnpm run test:browser            → exit 0, 256 files, 2055 tests
+pnpm run test:coverage                                → exit 0, 338 files, 3792 tests; 97.81% statements,
+                                                        92.2% branches, 98.3% functions, 99.04% lines
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox, the four new browser files
+                                                      → exit 0, 4 files, 19 tests
+# from the root
+node scripts/check-comments.mjs --base 41d01d7        → exit 0
+```
+
+**Each passed on its first run**, so no file was run again, and no suite failed to load. The four new browser files are
+`clif-switch-frames.test.ts`, `clif-switch-hold.test.ts`, `clif-layout.test.ts` and `clif-layout-stored.test.ts`. The
+coverage run's 338 files are the node run's 82 and the Chromium run's 256 together. The indent probe's run at the same
+head exited 0 (WHAT THIS DID NOT CLOSE).
+
+**Not run again for the listing switch and layout**: the Rust gate (`check-all.sh` and llvm-cov), `check-slow.sh`, the
+scans' full gate (all but the comment check), the licences check, the wasm and app builds, and the Firefox tier beyond
+the four new files. No Rust changed: the 13 commits change 13 files under `web/src/`, 14 under `web/tests/` and the CLIF
+view design. The gate above stands at `6c5c677`.
+
+**The compact checkbox's checks, at `d996676`** (`$R/sdd/compact-final-checks.md`, logs in `$R/logs/final5-*.log`), each
+browser run after a wait for port 63315:
+
+```
+# from web/
+pnpm run typecheck                                    → exit 0
+pnpm exec biome ci --error-on-warnings                → exit 0
+pnpm exec vitest run --project node                   → exit 0, 82 files, 1737 tests
+VITEST_MAX_WORKERS=2 pnpm run test:browser            → exit 0, 256 files, 2055 tests
+pnpm run test:coverage                                → hung; stopped, exit 143
+pnpm run test:coverage, again                         → exit 0, 338 files, 3792 tests; 97.81% statements,
+                                                        92.2% branches, 98.3% functions, 99.04% lines
+VITEST_MAX_WORKERS=2 pnpm exec vitest run --project browser tests/browser/about-menu.test.ts
+                                                      → exit 0, 1 file, 8 tests
+REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox, the four new browser files
+                                                      → exit 0, 4 files, 19 tests
+# from the root
+node scripts/check-comments.mjs --base 41d01d7        → exit 0
+```
+
+**The first coverage run hung.** Its last output was `about-menu.test.ts (8 tests | 8 skipped)`; after that it printed
+nothing for 14 minutes, its processes used no CPU over a 45-second sample, and it was stopped (exit 143). The cause is
+unknown: port 63315 was free when it started, and no line of it reads `Failed to fetch dynamically imported module` or
+`Cannot connect to the server`. `about-menu.test.ts` then passed alone, 8 tests, and a second full run passed with the
+figures above, the same as at `ddfe7de`. Every other check passed on its first run.
+
+**Not run again for the checkbox**: the Rust gate (`check-all.sh` and llvm-cov), `check-slow.sh`, the scans' full gate
+(all but the comment check), the licences check, the wasm and app builds, the indent probe, and the Firefox tier beyond
+the four new files. No Rust changed: `d996676` changes 3 files under `web/src/`, 2 under `web/tests/` and the CLIF view
+design, and `ca15ddd` the design alone. The gate above stands at `6c5c677`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-clif-view-record/pr2` and `B=~/temp/redextape-clif-view2-base`. Each was run again at `ddfe7de` and
+printed the value its row gives. At `d996676` every row this update adds or changes was run, and so was each row that
+reads a file changed since: `.bar`'s column gaps, in `style.css`, and the four that read `$R/progress.md` or
+`$R/sabotage.md`; each printed the value its row gives.
+
+| Value | What | Produced by |
+|---|---|---|
+| 36 | commits in the range | `git rev-list --count 41d01d7..6c5c677` |
+| 11 | the fix wave's commits | `git rev-list --count 505d8ca..0c4caf4` |
+| 14 | the plan's tasks | `rg -c '^### Task [0-9]+:' docs/superpowers/plans/2026-11-19-clif-view-pr2-view.md` |
+| 7 | the plan's departures from the brief | `sed -n '/^## Departures/,/^## Decisions/p' docs/superpowers/plans/2026-11-19-clif-view-pr2-view.md \| rg -c '^[\|] [^-B]'` |
+| 6 | the plan's Decisions for the user | `sed -n '/^## Decisions/,/^## Verified/p' docs/superpowers/plans/2026-11-19-clif-view-pr2-view.md \| rg -c '^[\|] [WGD][0-9]'` |
+| 15 | pre-flight findings ruled | `rg -c '^- F[0-9]+ ' $R/progress.md` |
+| 1205 | the paused leg's length in `tests/leg.rs` | `rg -o 'total_steps, Some\(1205\)' crates/redextape-clif/tests/leg.rs \| sort -u` |
+| six | the CLIF bindings' nullable sites pinned | `git log -1 --format=%s e92f4f1` |
+| 0.8125rem; 0.3125rem; 0.5625rem | the header's column gaps: `.bar`'s, Terminal's, Paper's | `rg -o -- '--bar-column-gap: [0-9.]+rem' web/src/style.css` |
+| 64; 60; 236 | `FRAME_OVERHEAD_BYTES`, `CLIF_WORD_BYTES`, `CLIF_FRAME_BYTES` | `rg '^export const (FRAME_OVERHEAD_BYTES\|CLIF_WORD_BYTES\|CLIF_FRAME_BYTES) =' web/src/protocol.ts` |
+| 10; 0 | added lines over 120 columns in the fix wave; in the fix wave and `6c5c677` together | `git diff -U0 505d8ca 0c4caf4 \| rg '^\+[^+]' \| awk 'length($0) > 121' \| wc -l; git diff -U0 505d8ca 6c5c677 \| rg '^\+[^+]' \| awk 'length($0) > 121' \| wc -l` |
+| 47 | deferred minors marked CAN WAIT | `rg -c '\*\*CAN WAIT\*\*' $R/sdd/final-review.md` |
+| the size table | Task 13's sizes at the base and `a9bb016` | `rg '^[\|] .pkg' $R/measurements.md` |
+| 1258041; 391239; 917298; 324340 | `pkg-clif/`'s and `pkg/`'s wasm as the gate built them at `6c5c677`, raw and gzip -9 | `for f in pkg-clif/redextape_clif_wasm_bg.wasm pkg/redextape_wasm_bg.wasm; do stat -c %s $f; gzip -9 -c $f \| wc -c; done` |
+| `99717b25…` | the gate's `pkg-clif/` wasm, the SHA-256 Task 13 measured at its head | `sha256sum pkg-clif/redextape_clif_wasm_bg.wasm; rg -c 99717b25242307123e9b402c571ed7734a134c6c1e894e61ffdfe0c14f71c277 $R/measurements.md` |
+| identical | the gate's `pkg/` wasm against the base's | `cmp pkg/redextape_wasm_bg.wasm $B/pkg/redextape_wasm_bg.wasm && echo identical` |
+| 28.10 to 30.58 | the one-minute load through Task 13's Step 3 | `rg '^[\|] 05:' $R/measurements.md \| cut -d'\|' -f3 \| sort -n \| sed -n '1p;$p'` |
+| 975.3, 791.5; 15,618, 2,148.5, 1,815.0, 18.4%; 20,000, 1,027.5, 975.3, 5.35%; 17,545 | the I2 measurements | `rg -o 'arithmetic [\|] 20,000 [\|] 791.5 [\|] 975.3\|map30000 15,618 frames, mean charge 2148.5, retained 1815.0 \(18.4% margin\)\|arithmetic 20,000 frames, charge 1027.5, retained 975.3 \(5.35% margin\)\|17,545 to 15,618' $R/sdd/fix-wave-report.md` |
+| about 430 B, about 45 B | the linear fit of a frame's fixed part and word | `rg -o 'fixed part at about 430 B and a word at about 45 B' $R/sdd/fix-wave-report.md` |
+| 30.8 to 102.5 | words a frame in programs that fill the ring | `rg -o 'average 30.8-102.5 words a frame' $R/progress.md` |
+| 5,000,000 | the CLIF steps cap in loop ticks | `rg -o 'the CLIF steps cap is 5,000,000 loop ticks' $R/progress.md` |
+| 33; 1 | gate steps that exited 0; that did not, the Firefox tier | `rg -c 'EXIT 0' $R/gate/gate.status; rg 'EXIT [1-9]' $R/gate/gate.status` |
+| 7.26 to 24.81 | the one-minute load through the gate | `rg -o 'load [0-9.]+' $R/gate/gate.status \| sort -k2 -n \| sed -n '1p;$p'` |
+| 1.100.0 | the stable toolchain `rustup check` found up to date | `rg -o 'stable-x86_64-unknown-linux-gnu - up to date: [0-9.]+' $R/gate/00-rustup-check.log` |
+| 0.25.10 | the tree-sitter `check-all.sh` used | `rg -m1 -o 'tree-sitter [0-9.]+' $R/gate/01-check-all.log` |
+| 1; 2046, 35 | `check-all.sh`'s closing line; its workspace nextest, passed and skipped | `rg -c 'all configs green — base, LLVM and browser' $R/gate/01-check-all.log; rg -m1 'Summary' $R/gate/01-check-all.log` |
+| 2046, 35; 95.55% | llvm-cov's tests; its line coverage | `rg 'Summary\|^TOTAL' $R/gate/02-llvm-cov.log` |
+| 35; 1 | slow-tier tests passed; the closing line | `rg -c 'test .* \.\.\. ok$' $R/gate/03-check-slow.log; rg -c '^slow tier green' $R/gate/03-check-slow.log` |
+| 18 | scan and self-test steps, all exit 0 | `rg -c '^EXIT_STATUS=0$' $R/gate/04-*.log \| wc -l` |
+| 332; 3741; 97.81, 92.15, 98.28, 99.06 | coverage files and tests; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $R/gate/06-test-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| 95, 89, 97, 97 | `web/vite.config.ts`'s floors: statements, branches, functions, lines | `rg -o 'thresholds: \{[^}]+\}' web/vite.config.ts` |
+| 250; 2026 | the Chromium tier's files and tests | `sed 's/\x1b\[[0-9;]*m//g' $R/gate/07-test-browser.log \| rg 'Test Files\|      Tests'` |
+| 25 of 251; 90 of 2027, 1908, 29 | the Firefox tier's failed files; its tests failed, passed and skipped | `sed 's/\x1b\[[0-9;]*m//g' $R/gate/08-test-firefox.log \| rg 'Test Files\|      Tests'` |
+| 25; 85 | the same files at the base: failed; tests failed | `sed 's/\x1b\[[0-9;]*m//g' $R/gate/10-base-firefox-failed.log \| rg 'Test Files\|      Tests'` |
+| 1, 1 | "too much recursion" at the head and at the base | `rg -c 'too much recursion' $R/gate/08-test-firefox.log $R/gate/10-base-firefox-failed.log` |
+| six | tests failing at the head that passed in the base's run of their files | `diff <(sed 's/\x1b\[[0-9;]*m//g' $R/gate/08-test-firefox.log \| rg '^ FAIL ' \| sed -E 's/^ FAIL +[\|][^\|]+[\|] +//' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $R/gate/10-base-firefox-failed.log \| rg '^ FAIL ' \| sed -E 's/^ FAIL +[\|][^\|]+[\|] +//' \| sort -u) \| rg -c '^<'` |
+| 3; the caret | `toggles the four kinds on 1 to 4`'s failures in the base's three runs of its file; the assertion `toggles CLIF on 5` fails at | `cat $R/gate/10-base-firefox-failed.log $R/gate/11-base-*.log \| sed 's/\x1b\[[0-9;]*m//g' \| grep -c 'FAIL .*toggles the four kinds on 1 to 4'; sed 's/\x1b\[[0-9;]*m//g' $R/gate/08-test-firefox.log \| grep -A12 'FAIL .*toggles CLIF on 5' \| grep -m1 AssertionError` |
+| 2; 0 | `acts once with Ctrl held through a held ]`'s failures in its file's re-runs at the head; at the base, with the base's first run | `cat $R/gate/11-head-*.log \| sed 's/\x1b\[[0-9;]*m//g' \| grep -c 'FAIL .*acts once with Ctrl held'; cat $R/gate/10-base-firefox-failed.log $R/gate/11-base-*.log \| sed 's/\x1b\[[0-9;]*m//g' \| grep -c 'FAIL .*acts once with Ctrl held'` |
+| 2 of 3, at each | the same case alone: the runs that failed | `rg -c 'Tests  1 failed' $R/gate/12-head-*.log $R/gate/12-base-*.log` |
+| 1; 0; 0 | `ends on a key it does not know`'s failures in the full run; in the head's re-runs of its file; in the base's runs of it | `sed 's/\x1b\[[0-9;]*m//g' $R/gate/08-test-firefox.log \| grep -c 'FAIL .*ends on a key it does not know'; cat $R/gate/11-head-*.log \| sed 's/\x1b\[[0-9;]*m//g' \| grep -c 'FAIL .*ends on a key it does not know'; cat $R/gate/10-base-firefox-failed.log $R/gate/11-base-*.log \| sed 's/\x1b\[[0-9;]*m//g' \| grep -c 'FAIL .*ends on a key it does not know'` |
+| 3 of 3, at each | the same case alone: the runs that passed | `rg -c 'Tests  1 passed' $R/gate/13-head-*.log $R/gate/13-base-*.log` |
+| 5 | the other three cases' failures in the base's two re-runs of their files | `cat $R/gate/11-base-*.log \| sed 's/\x1b\[[0-9;]*m//g' \| grep -c -E 'FAIL .*(stays armed through Control pressed alone\|stays armed while the prefix is held\|leaves the caret in the source editor, and the key chooses the tabs)'` |
+| 5 | the bug fixes' commits | `git rev-list --count 48e1b5f..92eef7f` |
+| 2; 3 | the files they change under `web/src/`; under `web/tests/` | `git diff --name-only 48e1b5f..92eef7f \| rg -c '^web/src/'; git diff --name-only 48e1b5f..92eef7f \| rg -c '^web/tests/'` |
+| 1 | cases in `clif-app-failed-intent.test.ts` | `rg -c '^it\(' web/tests/browser/clif-app-failed-intent.test.ts` |
+| 82; 1717 | the node tier's files and tests at `92eef7f` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final2-node.log \| rg 'Test Files\|      Tests'` |
+| 251; 2028 | the Chromium tier's files and tests at `92eef7f` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final2-browser.log \| rg 'Test Files\|      Tests'` |
+| 1 of 333; 3737, 8; `step-bar.test.ts` | the first coverage run at `92eef7f`: files failed; tests passed and skipped; the suite that did not load | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final2-coverage.log \| rg 'Test Files\|      Tests\|FAIL\|Failed to fetch'` |
+| 8 | `step-bar.test.ts`'s tests, passed alone under coverage | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final2-coverage-rerun-step-bar.log \| rg 'Test Files\|      Tests'` |
+| 333; 3745; 97.82, 92.15, 98.28, 99.06 | the second coverage run at `92eef7f`: files and tests; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final2-coverage-2.log \| rg 'Test Files\|      Tests\|All files'` |
+| 0, but the first coverage run's 1 | the exit statuses of the checks at `92eef7f`, in the order above | `tail -qn1 $R/logs/final2-{tsc,lint,node,browser,coverage,coverage-rerun-step-bar,coverage-2,comments}.log` |
+| 6 | the follow-ups' commits | `git rev-list --count eaab70c..45ce3d7` |
+| 14; 18; `web/vite.config.ts`; 0 | the files they change under `web/src/`; under `web/tests/`; elsewhere; in Rust | `git diff --name-only eaab70c..45ce3d7 \| rg -c '^web/src/'; git diff --name-only eaab70c..45ce3d7 \| rg -c '^web/tests/'; git diff --name-only eaab70c..45ce3d7 \| rg -v '^web/(src\|tests)/'; git diff --name-only eaab70c..45ce3d7 \| grep -c '\.rs$'` |
+| three | `7d03e02`'s call sites of its guard | `git show 7d03e02 \| rg -c '^\+.*await clifRecorded\('` |
+| 4; `app-header.ts`, `share-link.ts`, `linked-legs.test.ts`, `protocol.test.ts` | lines the branch adds under `web/` over 120 columns at `45ce3d7`, one file each | `git diff -U0 41d01d7..45ce3d7 -- web/ \| rg '^(\+\+\+ \|\+[^+])' \| awk '/^\+\+\+ /{f=$2; next} length($0) > 121 {print f}'` |
+| 8 | the comment check's cap on a block's counted lines | `rg -o 'BLOCK_CAP = [0-9]+' scripts/check-comments.mjs` |
+| 1 | cases in `clif-app-threw.test.ts` | `rg -c '^it\(' web/tests/browser/clif-app-threw.test.ts` |
+| 2 | `1c07842`'s two case names, as quoted | `rg -c -F -e 'says why when its status throws as an extend asks where the run stopped, before it records' -e 'says why when its rewind throws, before the fill is recorded again' web/tests/browser/clif-worker.test.ts` |
+| 2 of 5 | the Firefox flake's failures in the runs of `clif-worker.test.ts` with the follow-ups' worker | `grep -c 'expected 2 to be less than or equal to 1' $R/logs/followup-firefox-clif-worker.log $R/logs/followup-r1-firefox{,-worker-1,-worker-2,-both-2}.log` |
+| 1 of 6; none of 6 | the same in its describe's runs with `session-worker.ts` as at `eaab70c`; with the follow-ups' worker | `grep -l 'expected 2 to be less than or equal to 1' $R/logs/followup-r1-firefox-drop-base-*.log \| wc -l; ls $R/logs/followup-r1-firefox-drop-base-*.log \| wc -l; grep -l 'expected 2 to be less than or equal to 1' $R/logs/followup-r1-firefox-drop-head-*.log \| wc -l; ls $R/logs/followup-r1-firefox-drop-head-*.log \| wc -l` |
+| Firefox logs only | the runs in `$R/logs/` and `$R/gate/` that show the flake | `grep -rl 'expected 2 to be less than or equal to 1' $R/logs $R/gate` |
+| *the stepper threw* | what the test's stepper throws | `rg -o "THROWN = '[^']+'" web/tests/browser/clif-fixture.ts` |
+| 82; 1718 | the node tier's files and tests at `45ce3d7` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final3-node.log \| rg 'Test Files\|      Tests'` |
+| 1 of 252; 2031, 5; `tm-pointer.test.ts` | the Chromium tier at `45ce3d7`: files failed; tests passed and skipped; the suite that did not load | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final3-browser.log \| rg 'Test Files\|      Tests\|FAIL\|Failed to fetch'` |
+| 5 | `tm-pointer.test.ts`'s tests, passed alone | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final3-browser-rerun-tm-pointer.log \| rg 'Test Files\|      Tests'` |
+| 334; 3754; 97.83, 92.17, 98.28, 99.07 | the coverage run at `45ce3d7`: files and tests; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final3-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| the browser client's console lines | in the coverage run's log at `45ce3d7` | `rg -c -F -e '[vite] (client) [console.error]' $R/logs/final3-coverage.log` |
+| 0, but the Chromium run's 1 | the exit statuses of the checks at `45ce3d7`, in the order above | `tail -qn1 $R/logs/final3-{tsc,lint,node,browser,browser-rerun-tm-pointer,coverage,comments}.log` |
+| `41d01d7`; `eae68ac` | the hot-path A/B's base and head | `awk '/^side/{print $2, substr($4, 1, 7)}' $R/ab/rounds/r1/meta.txt` |
+| 8; 1; 18; 37; 54 | the A/B's ABBA pairs; warm-ups a side; runs; timings and fixed counts a run | `rg '^pairs ' $R/ab/logs/r1-cmp.log` |
+| 0 of 37; 1.000; 0.987 to 1.009 | figures flagged over the 8 pairs; head's median against base's, the median and range over the 37 | `rg -m1 '^FLAGGED' $R/ab/logs/r1-cmp.log` |
+| 18; 54 | runs of both sides; fixed counts equal over them | `rg '^FIXED' $R/ab/logs/r1-cmp.log` |
+| 20; 3.90 | the round's one-minute load readings; the highest | `rg 'one-minute load readings' $R/ab/logs/r1-cmp.log` |
+| 20; 8 | the vmstat limits a clean run keeps: us+sy; r | `rg -o 'us\+sy <= 20 and r <= 8' $R/ab/cmp.py` |
+| 2, 6; 5 of 37 | the pairs whose two runs were both clean; the figures they flag | `rg '^clean pairs\|^FLAGGED \(clean' $R/ab/logs/r1-cmp.log` |
+| 4, 1 | those five at 1.009; at 1.014 | `rg -o '[0-9.]+  FLAG' $R/ab/logs/r1-cmp.log \| sort \| uniq -c` |
+| 603.750, 0.100 | `sum_to(2750)`'s `result` over pairs 2 and 6: base's median and spread | `sed -n '/^===== clean pairs/,/^FLAGGED/p' $R/ab/logs/r1-cmp.log \| rg 'sum_to\(2750\) result'` |
+| `redextape-clif`, `redextape-clif-wasm`, `redextape-test-support` | the crates the branch changes outside `tests/` | `git diff --name-only 41d01d7 eae68ac -- crates \| rg -v '/tests/' \| cut -d/ -f2 \| sort -u` |
+| `[dev-dependencies]` | where every crate that names `redextape-test-support` lists it | `awk '/^\[/{s=$0} /^redextape-test-support =/{print s}' crates/*/Cargo.toml \| sort -u` |
+| 13 | the listing switch's and layout's commits | `git rev-list --count bf49448..ddfe7de` |
+| 13; 14; the CLIF view design; 0 | the files they change under `web/src/`; under `web/tests/`; elsewhere; in Rust | `git diff --name-only bf49448..ddfe7de \| rg -c '^web/src/'; git diff --name-only bf49448..ddfe7de \| rg -c '^web/tests/'; git diff --name-only bf49448..ddfe7de \| rg -v '^web/(src\|tests)/'; git diff --name-only bf49448..ddfe7de \| grep -c '\.rs$'` |
+| 1 to 5 | the frames a switch showed the old rows with the rest emptied, before `6e5f0a3` | `rg -o 'everything else emptied\*\*, 1-5 frames' $R/sdd/flash-report.md` |
+| `952ac35` | the commit that dropped the readout's CLIF rows at a switch | `git log -1 --format=%s 952ac35` |
+| 36; 4; `src/write.rs:260` | Cranelift's instruction indent with source locations; without; the line that sets it | `rg -n -A4 'Indent all instructions if any srclocs' ~/.local/share/cargo/registry/src/*/cranelift-codegen-0.137.2/src/write.rs` |
+| *compact* | the checkbox's label | `rg -o "addCheck\('clif-compact', 'compact'" web/src/clif-pane.ts` |
+| checked | the checkbox on the compact layout | `rg -o "on: \(\) => this.#layout === 'compact'" web/src/clif-pane.ts` |
+| none stored | what a workspace without `clifDisplay` reads as | `rg -c -F 'parseWorkspace(JSON.stringify(base))?.clifDisplay).toEqual({})' web/tests/node/workspace.test.ts` |
+| pc1000 | the first label that pushed an instruction's text a column right in Cranelift's own columns | `git log -1 --format=%s 7eff7e0` |
+| past 1,000 | the pcs of `clif-view.test.ts`'s long program | `rg -o 'pcs to 1602' $R/sdd/layout-report.md` |
+| one | layout sabotages that did not fire | `awk '/^## CLIF listing layout/{f=1;next} /^## /{f=0} f && /^[\|] layout-/' $R/sabotage.md \| rg -c 'did not fire'` |
+| 279 to 247 px | the listing over one recording as its step line re-wraps | `rg -o '279 → 247 px' $R/sdd/flash-report.md` |
+| 48; 26; 13; 36; 0 | the indent probe's functions; listings; programs; the instruction indent of each function; functions with no instruction carrying a pc | `rg -o 'inst=\[[0-9, ]+\]' $R/logs/final4-indent-probe.log \| sort \| uniq -c; rg -c ' (as-built\|optimised) ' $R/logs/final4-indent-probe.log; rg ' (as-built\|optimised) ' $R/logs/final4-indent-probe.log \| cut -d' ' -f1 \| sort -u \| wc -l; rg -o 'nopc=[0-9]+/[0-9]+' $R/logs/final4-indent-probe.log \| awk -F'[=/]' '$2 >= $3' \| wc -l` |
+| a frame | how long after the swap the readout's CLIF rows change for fact | `rg -o 'changes one frame after the view' $R/sdd/flash-report.md` |
+| 82; 1737 | the node tier's files and tests at `ddfe7de` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final4-node.log \| rg 'Test Files\|      Tests'` |
+| 256; 2055 | the Chromium tier's files and tests at `ddfe7de` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final4-browser.log \| rg 'Test Files\|      Tests'` |
+| 338; 3792; 97.81, 92.2, 98.3, 99.04 | the coverage run at `ddfe7de`: files and tests; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final4-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| 4; 19 | the Firefox run's files and tests at `ddfe7de` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final4-firefox.log \| rg 'Test Files\|      Tests'` |
+| 0 | the exit statuses of the checks at `ddfe7de`, in the order above, and of the indent probe | `tail -qn1 $R/logs/final4-{tsc,lint,node,browser,coverage,firefox,comments,indent-probe}.log` |
+| 3; 2; the CLIF view design; 0 | the files `d996676` changes under `web/src/`; under `web/tests/`; elsewhere; in Rust | `git diff --name-only 7d82d8e..d996676 \| rg -c '^web/src/'; git diff --name-only 7d82d8e..d996676 \| rg -c '^web/tests/'; git diff --name-only 7d82d8e..d996676 \| rg -v '^web/(src\|tests)/'; git diff --name-only 7d82d8e..d996676 \| grep -c '\.rs$'` |
+| nothing | what a CLIF view never pressed stores | `rg -o 'a view on the default reports nothing' web/tests/browser/clif-layout.test.ts` |
+| 82; 1737 | the node tier's files and tests at `d996676` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-node.log \| rg 'Test Files\|      Tests'` |
+| 256; 2055 | the Chromium tier's files and tests at `d996676` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-browser.log \| rg 'Test Files\|      Tests'` |
+| 338; 3792; 97.81, 92.2, 98.3, 99.04 | the second coverage run at `d996676`: files and tests; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-coverage-2.log \| rg 'Test Files\|      Tests\|All files'` |
+| 1; 8 | `about-menu.test.ts` alone at `d996676`: files and tests | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-coverage-hang-about-menu.log \| rg 'Test Files\|      Tests'` |
+| 4; 19 | the Firefox run's files and tests at `d996676` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-firefox.log \| rg 'Test Files\|      Tests'` |
+| 0; 143 | the exit statuses of the checks at `d996676`, in the order above, the first coverage run left out; the first coverage run's | `tail -qn1 $R/logs/final5-{tsc,lint,node,browser,coverage-2,coverage-hang-about-menu,firefox,comments}.log; tail -n1 $R/logs/final5-coverage.log` |
+| `about-menu.test.ts`, 8 tests, 8 skipped; 14 minutes | the first coverage run's last output; the time from its last stamped line, 10:33:31 PM, to its stop, 22:47:54, the log's last write | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-coverage.log \| rg -o 'about-menu\.test\.ts \(8 tests . 8 skipped\)'; rg -o '^[0-9:]+ PM' $R/logs/final5-coverage.log \| tail -n1; stat -c %y $R/logs/final5-coverage.log` |
+| no CPU over a 45-second sample; free | the first coverage run's processes; port 63315 when it started | `rg -o 'used 0 CPU over a 45 s sample' $R/sdd/compact-final-checks.md; rg -o 'wait before each browser run took 0 s' $R/sdd/compact-final-checks.md` |
+| no line | `Failed to fetch dynamically imported module` or `Cannot connect to the server` in the first coverage run | `rg -c 'Failed to fetch\|Cannot connect' $R/logs/final5-coverage.log` prints nothing |

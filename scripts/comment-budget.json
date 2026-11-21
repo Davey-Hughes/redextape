@@ -1,7 +1,7 @@
 {
   "crates/redextape-cli": 0.2894,
-  "crates/redextape-clif": 0.1581,
-  "crates/redextape-clif-wasm": 0.3431,
+  "crates/redextape-clif": 0.1668,
+  "crates/redextape-clif-wasm": 0.3495,
   "crates/redextape-core": 0.3078,
   "crates/redextape-grammar-check": 0.4312,
   "crates/redextape-lsp": 0.3079,
@@ -11,7 +11,7 @@
   "crates/redextape-test-support": 0.2982,
   "crates/redextape-wasm": 0.3749,
   "crates/redextape-wire": 0.6328,
-  "web/src": 0.4694,
+  "web/src": 0.4696,
   "web/tests": 0.2641,
   "web/scripts": 0.2131,
   "scripts": 0.3200,

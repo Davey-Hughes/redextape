@@ -1,6 +1,10 @@
 import { mapLegs } from './legs'
 import type { LinkIndexWire } from './link'
 import type {
+  ClifListing,
+  ClifState,
+  ClifStatus,
+  ClifWindow,
   Decoded,
   Diagnostic,
   LambdaState,
@@ -57,6 +61,13 @@ export const TM_RADIUS = 40
  * `rxmFrameBytes`'s to charge.
  */
 export const RXM_WINDOW: RxmWindow = { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 }
+
+/**
+ * How much of a CLIF run one frame carries: the running frame's first 64 values, the top 8 call-stack entries, and the
+ * newest 16 cells and 16 boxes, plus each one a value points at. **`RXM_WINDOW`'S NUMBERS**, for its reason: the CLIF
+ * view shows the machine the rxm view shows, lowered, so the two windows cut a run at the same depth.
+ */
+export const CLIF_WINDOW: ClifWindow = { values: 64, frames: 8, cells: 16, boxes: 16 }
 
 /**
  * The ring's cap, PER LEG. ~3,200 λ frames at ~10 KB, or ~58,000 TM frames at ~550 B.
@@ -241,7 +252,31 @@ export const EXTEND_CELLS = 100_000
  */
 export const VALUE_CHUNK = 500_000
 
-export type Leg = 'lambda' | 'rxm' | 'tm'
+export type Leg = 'lambda' | 'rxm' | 'tm' | 'clif'
+
+/**
+ * Every leg but CLIF: the legs a compile records at once and a copy can hold. CLIF records only while shown.
+ *
+ * **A NARROWING, NOT AN ENTRY THAT REFUSES**: a table only a copy reads (`BUILD`, `COPY_FACTS`, `BLANK_COPY`) is keyed
+ * by this, so a CLIF copy is a type error where one would be built, rather than an entry no route reaches.
+ */
+export type CopyLeg = Exclude<Leg, 'clif'>
+
+/** A CLIF listing, by the name `ClifSession`'s constructor takes. */
+export type Listing = 'as-built' | 'optimised'
+
+/**
+ * `v` as a listing, or `null` for anything else: how a stored or linked listing is read, so that only a name
+ * `ClifSession`'s constructor takes reaches it.
+ */
+export const knownListing = (v: unknown): Listing | null => (v === 'as-built' || v === 'optimised' ? v : null)
+
+/**
+ * Where the page's `pkg-clif` load stands: not asked for, asked for and not yet answered, in, or failed. **THE
+ * PAGE'S, NOT A GENERATION'S**, as the `clif-load` reply that settles it is: the worker keeps the package for every
+ * run.
+ */
+export type ClifLoad = 'idle' | 'loading' | 'ready' | 'failed'
 
 /**
  * The frame type each leg records, keyed by the same `Leg` the protocol already speaks.
@@ -251,7 +286,7 @@ export type Leg = 'lambda' | 'rxm' | 'tm'
  * `LegState<TmState>` with no narrowing at either call site — the property `Binding`'s own doc
  * is about. Two named resolvers would be the duplication 5d-i design §3.1 refused one layer down.
  */
-export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState }
+export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState; clif: ClifState }
 
 /**
  * Why recording stopped. FOUR OUTCOMES, NOT THREE, and conflating any two of them is the trap
@@ -375,6 +410,22 @@ export function rxmRecordEnd(status: Pick<RxmStatus, 'run' | 'cap'>): RecordEnd 
 export const RXM_WORD_BYTES = 52
 
 /**
+ * What one word of a CLIF frame is charged. **A CLIF WORD COSTS MORE THAN AN RXM WORD**: each value is an object
+ * holding a word object and an array of register names, and every frame carries its own call stack.
+ * `frame-cost.test.ts`'s `clif frame cost` cases hold it with `CLIF_FRAME_BYTES`: they fail if a frame ever keeps more
+ * than its charge, the direction that lets the ring keep more than `HISTORY_BYTES`.
+ */
+export const CLIF_WORD_BYTES = 60
+
+/**
+ * What a CLIF frame is charged beside its words and `FRAME_OVERHEAD_BYTES`. **THE PART OF A CLIF FRAME THAT DOES NOT
+ * GROW WITH ITS WORDS** (its fields, its arrays, its `at` and `next`) outweighs what a word charge covers on a frame
+ * of few values. The smallest multiple of 4 that, with `CLIF_WORD_BYTES`, leaves the `clif frame cost` cases a margin
+ * on a program of few words a frame as well as on one of many.
+ */
+export const CLIF_FRAME_BYTES = 236
+
+/**
  * An rxm frame's size in bytes. **WORDS DOMINATE** — `rr`, the windowed locals and arguments, each shown frame's
  * saved locals, both halves of each cell and each box's content — and a written bit is charged a byte.
  */
@@ -385,6 +436,18 @@ export function rxmFrameBytes(f: RxmState): number {
 }
 
 /**
+ * A CLIF frame's size in bytes: `CLIF_WORD_BYTES` a word, for each value's word, each of its register names, each
+ * call-stack entry, both halves of each cell and each box's content. **EACH REGISTER NAME AND EACH CALL-STACK ENTRY IS
+ * CHARGED AS A WORD**: left out, a frame of many named values or a deep run would be undercharged, which lets the ring
+ * keep more than `HISTORY_BYTES`.
+ */
+export function clifFrameBytes(f: ClifState): number {
+  let words = f.values.length + f.frames.length + 2 * f.cells.length + f.boxes.length
+  for (const value of f.values) words += value.regs.length
+  return FRAME_OVERHEAD_BYTES + CLIF_FRAME_BYTES + words * CLIF_WORD_BYTES
+}
+
+/**
  * Each leg's charge for a frame, keyed as `LegFrame` is: what the worker spends against a leg's allowance and the page
  * charges its ring, through one entry, so that the two sides cannot charge a leg's frame differently.
  */
@@ -392,6 +455,7 @@ export const LEG_FRAME_BYTES: { readonly [K in Leg]: (frame: LegFrame[K]) => num
   lambda: lambdaFrameBytes,
   rxm: rxmFrameBytes,
   tm: tmFrameBytes,
+  clif: clifFrameBytes,
 }
 
 /**
@@ -465,7 +529,11 @@ export type RunRequest =
    * uses, one of wasm's `fieldWidths()`. Absent, wasm fits the width itself (auto), so an auto request is the same
    * message whether or not its sender knows about widths.
    */
-  | { kind: 'run'; gen: number; src: string; encoding: string; width?: number }
+  /**
+   * `clif` is the listing a CLIF view shows, `null` when none is shown: the worker builds and records a CLIF stepper
+   * only for a run that carries one, once the other legs have posted their `result`, so a compile never waits on it.
+   */
+  | { kind: 'run'; gen: number; src: string; encoding: string; width?: number; clif: Listing | null }
   /**
    * Build a copy of `leg` from that leg's TEXT and record it: a λ fork (5d-i design §4.3), a TM copy (5d-iv design
    * §4.4) or an rxm copy (Plan 7 part 5 spec §7). A `ScratchBuffers` buffer sends the leg it was minted on.
@@ -475,7 +543,7 @@ export type RunRequest =
    * program, run from its first configuration, so a TM or rxm copy has no step to replay to. **NO `encoding`**: a λ
    * copy has no `ty` to decode against (5d-i decision 2), and a TM or rxm copy decodes by its own header.
    */
-  | { kind: 'scratch'; gen: number; leg: Leg; src: string; step: number }
+  | { kind: 'scratch'; gen: number; leg: CopyLeg; src: string; step: number }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes. `epoch` is the leg's, as `rewind`'s doc says.
@@ -483,7 +551,7 @@ export type RunRequest =
   | { kind: 'extend'; gen: number; leg: Leg; epoch: number }
   /**
    * Take one leg back to step 0 and record its first fill again (hidden-recording spec §5.4), under `epoch`, the
-   * leg's count of rewinds, which the page raised as it posted this.
+   * leg's count of rewinds and, for the CLIF leg, of `clif` requests, which the page raised as it posted this.
    *
    * **AN EPOCH PER LEG, BESIDE THE GENERATION.** Every frames reply carries the epoch it was recorded under, and each
    * side drops the other's messages of an older epoch for that leg alone: frames a rewind replaced, an `extend` asked
@@ -495,6 +563,19 @@ export type RunRequest =
    * supersedes nothing, and the worker drops a request whose generation is no longer live.
    */
   | { kind: 'lambda-tree'; gen: number; step: number; budget: number }
+  /**
+   * Load `pkg-clif` and record nothing: the page's intent to show a CLIF view, so that the package is in before the
+   * view asks for a stepper. `gen` is the page's current generation, which only the listener's `catch` reads: the
+   * load answers `clif-load`, which carries none, and a failed load is said there, never as a `worker-error`.
+   */
+  | { kind: 'clif-load'; gen: number }
+  /**
+   * Build generation `gen`'s CLIF stepper again for `listing` and record it from step 0 under `epoch`, or, with
+   * `listing` `null`, drop it: a CLIF view shown after the run, the last one hidden, or the listing switched, none of
+   * which recompiles. **`epoch` IS THE CLIF LEG'S, AS `rewind`'s IS**, raised by the page as it posts this, so the
+   * stepper's frames of an older request are told apart, and a request of an epoch no newer than the leg's is ignored.
+   */
+  | { kind: 'clif'; gen: number; epoch: number; listing: Listing | null }
 
 /**
  * `declinedSpan` IS RESOLVED IN THE WORKER, not on the main thread, because `sourceSpan` is a
@@ -510,8 +591,32 @@ export type LambdaLeg = {
 export type TmLeg = { status: TmStatus; value: Decoded | null }
 /** The rxm leg's answer after recording: its status and its value — `null` for an absent leg, as TM's. */
 export type RxmLeg = { status: RxmStatus; value: Decoded | null }
-/** Each leg's part of a `result`, keyed as `LegFrame` is. */
-export type LegResult = { lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg }
+/**
+ * The CLIF part of a `result` while no stepper is built: unavailable, no reason, nothing run. **NO REASON**, since a
+ * leg not built has not been refused, and the readout gives such a leg no rows (`results.ts`'s `clifResultRows`).
+ */
+export const CLIF_ABSENT: RxmLeg = {
+  status: { available: false, reason: '', run: null, cap: null, total_steps: null },
+  value: null,
+}
+/**
+ * The CLIF status `compiled` carries: available when the rxm leg is and a CLIF view is shown; rxm's reason otherwise.
+ * **NOTHING RUN YET**, since the CLIF stepper is built after the reply, from the session `compiled` announces.
+ */
+export function clifCompileStatus(rxm: RxmStatus, listing: Listing | null): RxmStatus {
+  return { available: rxm.available && listing !== null, reason: rxm.reason, run: null, cap: null, total_steps: null }
+}
+
+/** A built stepper's part of a `result`: its status with `available: true`, and its value. */
+export function clifPart(status: ClifStatus, value: Decoded): RxmLeg {
+  return { status: { available: true, reason: '', ...status }, value }
+}
+
+/**
+ * Each leg's part of a `result`, keyed as `LegFrame` is. **CLIF'S IS THE RXM LEG'S SHAPE**: a `ClifStatus` is an
+ * `RxmStatus` without `available` and `reason`, which the worker adds, so the readout words both alike.
+ */
+export type LegResult = { lambda: LambdaLeg; rxm: RxmLeg; tm: TmLeg; clif: RxmLeg }
 /** Every leg's part of a `result`: what the reply carries as `legs`. */
 export type ResultLegs = { [K in Leg]: LegResult[K] }
 
@@ -578,6 +683,8 @@ export type LegStatus = {
   /** Unavailable only when the program does not lower, including where TM declines it (spec §5.2). */
   rxm: RxmStatus
   tm: TmStatus
+  /** `clifCompileStatus`'s: whether the run asked for a CLIF stepper the rxm leg can feed. */
+  clif: RxmStatus
 }
 
 /**
@@ -586,7 +693,13 @@ export type LegStatus = {
  * by `Leg` with a `lambda: never`, so a leg that comes to compile one is added here, and the worker's post fails `tsc`
  * until it sends it.
  */
-export type LegProgram = { rxm: RxmCompiled; tm: TmCompiled }
+export type LegProgram = { rxm: RxmCompiled; tm: TmCompiled; clif: ClifCompiled }
+
+/**
+ * What a CLIF view is handed: the listing, or why there is none. `null` while it is being built. **NO TEXT**, unlike
+ * `RxmCompiled` and `TmCompiled`: a CLIF view offers no copy, so it has nothing to seed one from.
+ */
+export type ClifCompiled = { readonly listing: ClifListing } | { readonly error: string }
 
 /**
  * A session's machine in the form a TM view is handed one: `compiled`'s `programs.tm`, which the session keeps as
@@ -813,6 +926,20 @@ export type RunReply =
    * result on screen can be the previous compile's while a newly chosen width compiles.
    */
   | { kind: 'result'; gen: number; legs: ResultLegs; pinned: boolean }
+  /**
+   * Where `pkg-clif`'s load stands, posted each time a load is asked for: `loading` as one that must fetch starts, so
+   * the page says it is loading only while a load is under way, then `ready` or `failed`. **NO GENERATION**: the worker
+   * loads the package once and keeps it for every run after, so its state is not a generation's. **A FAILURE IS NOT A
+   * `worker-error`**, which drops the session: the other legs go on, and the next ask loads again.
+   */
+  | { kind: 'clif-load'; state: 'loading' | 'ready' | 'failed'; error?: string }
+  /**
+   * The CLIF stepper's listing for generation `gen` at the CLIF leg's `epoch`, posted before its frames; or, with
+   * `listing` `null`, why the leg has none: the rxm leg's refusal, the build's sentence, or what a stepper threw, which
+   * can follow its listing and its frames and leaves the leg with no stepper. Not a `worker-error`, for `clif-load`'s
+   * reason.
+   */
+  | { kind: 'clif-listing'; gen: number; epoch: number; listing: ClifListing | null; error: string | null }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**

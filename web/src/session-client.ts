@@ -1,4 +1,4 @@
-import type { Leg, RunReply, RunRequest } from './protocol'
+import type { CopyLeg, Leg, Listing, RunReply, RunRequest } from './protocol'
 
 /**
  * What the client needs from a `Worker`, and nothing more.
@@ -21,6 +21,12 @@ export class SessionClient {
     this.#port = port
     this.#onSupersede = onSupersede
     port.addEventListener('message', (e) => {
+      // A `clif-load` HAS NO GENERATION TO MATCH: it says whether the worker holds `pkg-clif`, which outlives every
+      // run. NOR IS IT A RUN'S ANSWER, so it ends no wait for one.
+      if (e.data.kind === 'clif-load') {
+        onReply(e.data)
+        return
+      }
       // THE SECOND OF TWO GUARDS AGAINST THE SAME HAZARD, and both are needed. The worker abandons
       // superseded work at a chunk boundary so it does not compute results nobody wants; this drops
       // a reply that was already in flight when the next request was posted, which the worker's own
@@ -88,11 +94,11 @@ export class SessionClient {
    * applies, and a future caller that posts without `schedule`'s clearTimeout discipline should not get
    * to skip the generation check because one call site makes it redundant.
    */
-  request(gen: number, src: string, encoding: string, width: number | null = null): void {
+  request(gen: number, src: string, encoding: string, width: number | null = null, clif: Listing | null = null): void {
     if (gen !== this.#gen) return
     // A `null` WIDTH IS AUTO, POSTED AS NO `width` KEY, NOT `width: undefined`: an auto request carries none.
     this.#port.postMessage(
-      width === null ? { kind: 'run', gen, src, encoding } : { kind: 'run', gen, src, encoding, width },
+      width === null ? { kind: 'run', gen, src, encoding, clif } : { kind: 'run', gen, src, encoding, width, clif },
     )
   }
 
@@ -106,7 +112,7 @@ export class SessionClient {
    * would move the choice of message to every call site. IT DOES NOT CLAIM A GENERATION EITHER: a copy is seeded by a
    * caller who has just superseded what the session was doing, and `supersede`'s doc keeps the claim at that site.
    */
-  scratch(gen: number, leg: Leg, src: string, step: number): void {
+  scratch(gen: number, leg: CopyLeg, src: string, step: number): void {
     if (gen !== this.#gen) return
     this.#port.postMessage({ kind: 'scratch', gen, leg, src, step })
   }
@@ -128,6 +134,24 @@ export class SessionClient {
   rewind(leg: Leg, epoch: number): void {
     if (this.#gen === 0) return
     this.#port.postMessage({ kind: 'rewind', gen: this.#gen, leg, epoch })
+  }
+
+  /**
+   * Ask the worker to load `pkg-clif` and record nothing: the page's intent to show a CLIF view. Not a supersede, for
+   * `extend`'s reason, and answered by a `clif-load` whatever generation is live.
+   */
+  clifLoad(): void {
+    this.#port.postMessage({ kind: 'clif-load', gen: this.#gen })
+  }
+
+  /**
+   * Ask the worker to build the live generation's CLIF stepper for `listing` and record it from step 0 under `epoch`,
+   * the CLIF leg's raised one, or with `listing` `null` to drop it. Not a supersede, for `rewind`'s reason, and
+   * never before the first build.
+   */
+  clif(listing: Listing | null, epoch: number): void {
+    if (this.#gen === 0) return
+    this.#port.postMessage({ kind: 'clif', gen: this.#gen, epoch, listing })
   }
   /** This client's generation — the one a `lambda-tree` request must carry to be answered. */
   get gen(): number {

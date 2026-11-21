@@ -1,7 +1,8 @@
 /**
  * The worker's record loop, written once for every leg: step a leg's cursor, post its frames a chunk at a time, and
  * stop at the leg's end, at its allowance, when a newer request replaces what it was stepping, or when a rewind takes
- * its leg back to step 0. `[continue]` records through it by `extendLeg`, and ↺ by `rewindAndRecord`.
+ * its leg back to step 0. `[continue]` records through it by `extendLeg`, ↺ by `rewindAndRecord`, and a CLIF stepper
+ * just built by `recordFresh`.
  *
  * **HERE AND NOT IN `session-worker.ts`, WHERE THE APP CALLS IT**, for the reason `rxmRecordEnd` gives
  * (`protocol.ts`): the coverage gate cannot see the worker (its own module doc: v8 coverage does not attach to a
@@ -13,8 +14,8 @@
  * handle are type parameters, so each leg's pieces are checked against its own wasm type and its own `LegFrame`, and
  * nothing is cast back out of a union of frames. The legs are built in the worker, beside the wasm types they call.
  */
-import { LEGS, mapLegs, perLeg } from './legs'
-import type { FirstFrames, FramesReply, Leg, LegFrame, RecordEnd, RunReply } from './protocol'
+import { COPY_LEGS, LEGS, perLeg } from './legs'
+import type { CopyLeg, FirstFrames, FramesReply, Leg, LegFrame, RecordEnd, RunReply } from './protocol'
 import { HISTORY_BYTES, RECORD_CHUNK } from './protocol'
 
 /**
@@ -57,21 +58,26 @@ export type RecordLeg<K extends Leg, H> = {
 /**
  * What the loop needs of the worker: its books, whether a generation still owns what is live, and its two effects.
  *
- * **THE BOOKS ARE THE WORKER'S OWN RECORDS, PASSED BY REFERENCE**, since the worker also writes them: a build resets
- * all four per leg (`resetRecording` below) and `[continue]` raises an allowance before it records further;
- * `rewindAndRecord` below raises a leg's epoch and resets the other three for it.
+ * **THE BOOKS ARE THE WORKER'S OWN RECORDS, PASSED BY REFERENCE**, since the worker writes them too, between this
+ * module's calls and while a loop waits at a yield: a copy taken at a call would not show that loop the allowance
+ * `[continue]` raised, or the epoch a request moved under it.
  */
 export type RecordWorker = {
   /**
-   * One loop per leg at a time: set by the loop that records the leg and cleared by it, or by a build or a rewind,
-   * which hand the leg to a loop of their own.
+   * One loop per leg at a time: set by the loop that records the leg, which clears it as it stops only while the
+   * generation and the leg's epoch are still the ones it began under (`recordLeg`'s doc). **WHATEVER REPLACES EITHER
+   * TO START A LOOP OF ITS OWN CLEARS THE FLAG FIRST**: the loop it cut off will not, and a flag left set would turn
+   * the new loop away.
    */
   readonly recording: Record<Leg, boolean>
   /** Bytes recorded per leg. */
   readonly recorded: Record<Leg, number>
   /** The bytes each leg may record before it stops at `budget`. */
   readonly allowance: Record<Leg, number>
-  /** Each leg's epoch, raised by a rewind: a loop whose leg's epoch has moved is stepping a cursor rewound under it. */
+  /**
+   * Each leg's epoch, raised by a rewind or, for the CLIF leg, a `clif` request: a loop whose leg's epoch has moved is
+   * stepping a cursor rewound or replaced under it.
+   */
   readonly epoch: Record<Leg, number>
   /** Whether generation `gen` still owns what is live, whatever kind it is. */
   owns(gen: number): boolean
@@ -99,7 +105,8 @@ export function resetRecording(worker: RecordWorker): void {
 }
 
 /**
- * Step-and-record one leg until it finishes, its allowance runs out, or a build or a rewind replaces what it steps.
+ * Step-and-record one leg until it finishes, its allowance runs out, or the leg is no longer its own: its generation
+ * holds no handle for the leg, or the leg's epoch has moved.
  *
  * **RETURNS WHETHER IT RAN.** `false` is a call turned away at the door, before it set the leg's flag: a stale
  * generation, a live handle without this leg, a leg that did not compile, or a loop for this leg already in flight —
@@ -111,11 +118,10 @@ export function resetRecording(worker: RecordWorker): void {
  * the cursor stays on the last frame recorded and `[continue]` resumes from exactly there; the recorded bytes can pass
  * the allowance by at most the last frame's.
  *
- * **ONLY THE CALL THAT STILL OWNS THIS GENERATION AND THIS EPOCH MAY CLEAR THE FLAG IT SET.** A loop that wakes after
- * being superseded or rewound returns at the chunk check with a newer generation live or its leg's epoch raised, and
- * that build or rewind has reset the flag and its own loop may have set it again; clearing unconditionally would
- * reopen the race the flag exists to close. The two checks ask what the chunk check asks, so such a loop touches
- * nothing on its way out.
+ * **ONLY THE CALL THAT STILL OWNS THIS GENERATION AND THIS EPOCH MAY CLEAR THE FLAG IT SET.** A loop that wakes with a
+ * newer generation live or its leg's epoch raised returns at the chunk check, and whatever replaced either has reset
+ * the flag, and its own loop may have set it again; clearing unconditionally would reopen the race the flag exists to
+ * close. The two checks ask what the chunk check asks, so such a loop touches nothing on its way out.
  */
 export async function recordLeg<K extends Leg, H>(
   leg: RecordLeg<K, H>,
@@ -143,7 +149,7 @@ export async function recordLeg<K extends Leg, H>(
     }
 
     for (;;) {
-      // Deliberate silence: superseded or rewound mid-loop. The caller who wanted these frames is gone.
+      // Deliberate silence: the leg was taken from this loop mid-way. The caller who wanted these frames is gone.
       const s = leg.handle(gen)
       if (s === null || worker.epoch[leg.leg] !== epoch) return true
       let done: RecordEnd | null = null
@@ -174,19 +180,27 @@ export async function recordLeg<K extends Leg, H>(
 
 /**
  * A build's recording: every leg's step-0 frame handed to `announce`, which posts them with `compiled`, then each leg
- * recorded on from step 1, in `LEGS`' order. **`announce` RUNS BEFORE ANY LEG STEPS**, so that the page has every
+ * recorded on from step 1, in `COPY_LEGS`' order. **`announce` RUNS BEFORE ANY LEG STEPS**, so that the page has every
  * view's step 0 in the reply that tells it of the new program, and a leg whose recording waits behind another's is not
  * left empty meanwhile. Each step-0 frame is counted against its leg's allowance as a chunk's frames are.
+ *
+ * **THE LEGS A BUILD RECORDS AT ONCE, AND NOT CLIF**, which records only while a CLIF view is shown: `legs` is keyed by
+ * `CopyLeg`, so a CLIF entry cannot reach this, and CLIF's step 0 is `null`, since its stepper is built after this
+ * reply.
  */
-export async function recordBuild<H extends { [K in Leg]: unknown }>(
-  legs: { readonly [K in Leg]: RecordLeg<K, H[K]> },
+export async function recordBuild<H extends { [K in CopyLeg]: unknown }>(
+  legs: { readonly [K in CopyLeg]: RecordLeg<K, H[K]> },
   worker: RecordWorker,
   gen: number,
   announce: (first: FirstFrames) => void,
 ): Promise<void> {
-  announce(mapLegs<FirstFrames>((leg) => firstFrame(legs[leg], worker, gen)))
-  const record = <K extends Leg>(leg: K) => recordLeg(legs[leg], worker, gen, false)
-  for (const leg of LEGS) await record(leg)
+  // `mapLegs`' CAST, OVER `COPY_LEGS`: each entry is `firstFrame`'s for its own leg.
+  const first = Object.fromEntries(COPY_LEGS.map((leg) => [leg, firstFrame(legs[leg], worker, gen)])) as {
+    [K in CopyLeg]: FirstFrames[K]
+  }
+  announce({ ...first, clif: null })
+  const record = <K extends CopyLeg>(leg: K) => recordLeg(legs[leg], worker, gen, false)
+  for (const leg of COPY_LEGS) await record(leg)
 }
 
 /**
@@ -245,6 +259,25 @@ export async function rewindAndRecord<K extends Leg, H>(
   worker.recording[leg.leg] = false
   hold()
   leg.rewind(held)
+  worker.recorded[leg.leg] = 0
+  worker.allowance[leg.leg] = HISTORY_BYTES
+  await recordLeg(leg, worker, gen, true)
+}
+
+/**
+ * A leg whose handle was just built, recorded from step 0 under `epoch`; returns at once unless `epoch` is the leg's.
+ *
+ * **THE BOOKS START AFRESH**, as a rewind's do: the bytes a dropped handle recorded under an older epoch are not this
+ * one's to spend. **AN EPOCH THAT IS NOT THE LEG'S IS ONE A NEWER REQUEST HAS TAKEN** while the handle was being
+ * built, and that request records the leg itself, so recording here as well would put two loops on one leg.
+ */
+export async function recordFresh<K extends Leg, H>(
+  leg: RecordLeg<K, H>,
+  worker: RecordWorker,
+  gen: number,
+  epoch: number,
+): Promise<void> {
+  if (epoch !== worker.epoch[leg.leg]) return
   worker.recorded[leg.leg] = 0
   worker.allowance[leg.leg] = HISTORY_BYTES
   await recordLeg(leg, worker, gen, true)

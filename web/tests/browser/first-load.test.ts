@@ -51,6 +51,7 @@ describe('a first visit', () => {
       text: FIRST_LOAD.text,
       encoding: 'binary',
       width: null,
+      listing: 'as-built',
     })
   })
 })

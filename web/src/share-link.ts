@@ -1,14 +1,14 @@
 import { listedWidth } from './field-width'
 import { LEGS } from './legs'
-import type { Leg } from './protocol'
+import { knownListing, type Leg, type Listing } from './protocol'
 import { parseWorkspace, serializeWorkspace, type Workspace } from './workspace'
 
 /**
- * SHARE LINKS — Plan 7 part 6a spec §5.1 and §5.3: the program, its encoding and width, the workspace and where each
- * leg stands, carried in the page's fragment, so a link is never sent to a server. Section citations here are the Plan
- * 7 part 6a spec's unless they name another.
+ * SHARE LINKS — Plan 7 part 6a spec §5.1 and §5.3: the program, its encoding, width and listing, the workspace and
+ * where each leg stands, carried in the page's fragment, so a link is never sent to a server. Section citations here
+ * are the Plan 7 part 6a spec's unless they name another.
  *
- *     #s= base64url, unpadded (deflate-raw (UTF-8 (JSON { version: 1, program, encoding, width?, workspace, positions })))
+ *     #s= base64url, unpadded (deflate-raw (UTF-8 (JSON { version: 1, program, encoding, width?, listing?, workspace, positions })))
  *
  * **`workspace` IS `serializeWorkspace`'s STRING, NOT ITS OBJECT**, so a link's workspace reaches `parseWorkspace`
  * exactly as a stored one does, and is held to the same checks. The object would save 26 to 30 characters a link and
@@ -24,7 +24,7 @@ export const LINK_PREFIX = '#s='
 /**
  * The payload's version. A link of any other opens the program alone (spec §5.3). **`width` NEEDS NO BUMP**, for
  * `PROGRAM_VERSION`'s reason: an auto link carries no `width`, and a bump would open every version-1 link as its
- * program alone.
+ * program alone. **NOR DOES `listing`**: a link as built carries none.
  */
 export const LINK_VERSION = 1
 
@@ -52,13 +52,15 @@ const INFLATE_PIECE = 1024
 export type Positions = { readonly [L in Leg]?: number }
 
 /**
- * What `encodeLink` writes: the program, its encoding and width, the workspace as `serializeWorkspace` wrote it, and
- * positions. A `width` left out is auto, as `null` is, and neither writes one.
+ * What `encodeLink` writes: the program, its encoding, width and listing, the workspace as `serializeWorkspace` wrote
+ * it, and positions. A `width` left out is auto, as `null` is, and neither writes one. **A `listing` IS GIVEN ONLY
+ * WHEN OPTIMISED**: left out, it is as built.
  */
 export type SharePayload = {
   readonly program: string
   readonly encoding: string
   readonly width?: number | null | undefined
+  readonly listing?: 'optimised'
   readonly workspace: string
   readonly positions: Positions
 }
@@ -66,7 +68,7 @@ export type SharePayload = {
 /**
  * What a link opens (spec §5.3): the whole of it; the program alone, under its encoding where that is one of this
  * build's (`null` where it is not); or nothing, where no program can be read from it. Either of the first two carries
- * its width, `null` for auto.
+ * its width, `null` for auto, and its listing.
  */
 export type OpenedLink =
   | {
@@ -74,6 +76,7 @@ export type OpenedLink =
       readonly program: string
       readonly encoding: string
       readonly width: number | null
+      readonly listing: Listing
       readonly workspace: Workspace
       readonly positions: Positions
     }
@@ -82,6 +85,7 @@ export type OpenedLink =
       readonly program: string
       readonly encoding: string | null
       readonly width: number | null
+      readonly listing: Listing
     }
   | { readonly kind: 'unreadable' }
 
@@ -159,6 +163,7 @@ async function inflate(bytes: Uint8Array): Promise<Uint8Array | null> {
  * The fragment carrying `payload`: `#s=` and the payload, deflated and in base64url. **A `width` ONLY WHEN PINNED**
  * (the TM width design, decisions 14 and 16): a link without one means auto, so an auto link has no `width` and reads
  * the same to every build at this version. It is carried because a TM position is a step of one run, and the program at another width is another run.
+ * **A `listing` ONLY WHEN OPTIMISED**, for the same reasons: a CLIF position is a step of the run of one listing.
  */
 export async function encodeLink(payload: SharePayload): Promise<string> {
   const json = JSON.stringify({
@@ -166,6 +171,7 @@ export async function encodeLink(payload: SharePayload): Promise<string> {
     program: payload.program,
     encoding: payload.encoding,
     ...(typeof payload.width === 'number' ? { width: payload.width } : {}),
+    ...(payload.listing === undefined ? {} : { listing: payload.listing }),
     workspace: payload.workspace,
     positions: payload.positions,
   })
@@ -256,14 +262,29 @@ async function readLink(
   // it would drop its workspace for a field that only says how its TM runs. ITS TM POSITION IS DROPPED: it is a step
   // of the run at the width the link names, and the auto run here is another run.
   const width = listedWidth(e.width, widths)
+  // A LISTING IT DOES NOT KNOW READS AS BUILT, AND DEMOTES NOTHING, for the width's reason. ITS CLIF POSITION IS
+  // DROPPED: it is a step of the run of the listing the link names, and the run as built here is another run.
+  const known = knownListing(e.listing)
+  const listing = known ?? 'as-built'
   const workspace = typeof e.workspace === 'string' ? readWorkspace(e.workspace) : null
   const positions = parsePositions(e.positions)
   if (e.version !== LINK_VERSION || encoding === null || workspace === null || positions === null) {
-    return { kind: 'program', program: e.program, encoding, width }
+    return { kind: 'program', program: e.program, encoding, width, listing }
   }
-  if (e.width === undefined || width !== null) {
-    return { kind: 'whole', program: e.program, encoding, width, workspace, positions }
+  const ranAtAnotherWidth = e.width !== undefined && width === null
+  const ranInAnotherListing = e.listing !== undefined && known === null
+  const { tm, clif, ...rest } = positions
+  return {
+    kind: 'whole',
+    program: e.program,
+    encoding,
+    width,
+    listing,
+    workspace,
+    positions: {
+      ...rest,
+      ...(tm === undefined || ranAtAnotherWidth ? {} : { tm }),
+      ...(clif === undefined || ranInAnotherListing ? {} : { clif }),
+    },
   }
-  const { tm: _ranAtAnotherWidth, ...rest } = positions
-  return { kind: 'whole', program: e.program, encoding, width, workspace, positions: rest }
 }

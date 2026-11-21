@@ -106,7 +106,9 @@ export function floatInRun(line: HTMLElement, run: HTMLElement): void {
     if (decide || words !== decidedFor) {
       decidedFor = words
       // EITHER PLACE LEAVES THE NOTICE AT LEAST THE RUN'S WIDTH, so its width as drawn now answers whether it fits.
-      atEnd = line.getBoundingClientRect().width > r.width
+      // **LESS THE GAP THE RUN GIVES BACK** (`style.css`'s `.bar-spacer`): its box starts at the control before it, and
+      // a notice as wide as the box would sit flush against that control.
+      atEnd = line.getBoundingClientRect().width > r.width + Number.parseFloat(getComputedStyle(run).marginInlineStart)
     }
     const headerEnd =
       header.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(header).paddingInlineEnd)

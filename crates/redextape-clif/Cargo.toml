@@ -19,6 +19,14 @@ cranelift-codegen = { version = "0.137.2", default-features = false }
 cranelift-interpreter = "0.137.2"
 self_cell = "1.3.0"
 serde = { version = "1", features = ["derive"] }
+# Optional and default-off, as in `redextape-wire`: `wasm-pack` never enables it.
+ts-rs = { version = "12", optional = true }
+
+[features]
+# Forwards to core's and wire's because the generated files import theirs: `ClifValue::word` is
+# core's `RxmWord` and `ClifStatus::run` wire's `RunStatus`, and without their `TS` impls this
+# crate's derives do not compile.
+ts = ["dep:ts-rs", "redextape-core/ts", "redextape-wire/ts"]
 
 [dev-dependencies]
 # The default features add the JIT, whose ends the stepper's are compared with.

@@ -1,6 +1,7 @@
 /**
- * THE PROGRAM, KEPT ACROSS RELOADS — Plan 7 part 6a spec §4.3: the source editor's text, and the encoding and width it
- * compiles under, stored as the workspace and the copies are, under a key of their own.
+ * THE PROGRAM, KEPT ACROSS RELOADS — Plan 7 part 6a spec §4.3: the source editor's text, the encoding and width it
+ * compiles under, and the listing its CLIF views show, stored as the workspace and the copies are, under a key of their
+ * own.
  *
  * **VERSIONED AND VALIDATED AS THE OTHER STORES ARE, AND A REFUSAL IS SILENT.** `parseProgram` answers `null` for
  * anything it will not take, and `null` reads exactly as a first visit does: the app opens on the first-load example.
@@ -13,6 +14,7 @@
  */
 
 import { listedWidth } from './field-width'
+import { knownListing, type Listing } from './protocol'
 
 /** The `localStorage` key, namespaced for the reason `buffers-store.ts`'s `BUFFERS_STORAGE_KEY` gives. */
 export const PROGRAM_STORAGE_KEY = 'redextape.program'
@@ -22,19 +24,40 @@ export const PROGRAM_STORAGE_KEY = 'redextape.program'
  *
  * **`width` NEEDS NO BUMP** (the TM width design, decision 14): it is written only when pinned, and a payload without
  * it means auto, so an auto program's payload has no `width` and every version-1 payload reads as the program it
- * stored. A bump would send every version-1 program back to the first-load example.
+ * stored. A bump would send every version-1 program back to the first-load example. **NOR DOES `listing`**, for the
+ * same reason: it is written only when optimised, and a payload without it is as built.
  */
 export const PROGRAM_VERSION = 1
 
-/** What survives a reload of the program: its text, the encoding it compiles under, and its width, `null` for auto. */
-export type StoredProgram = { readonly text: string; readonly encoding: string; readonly width: number | null }
+/**
+ * What survives a reload of the program: its text, the encoding it compiles under, its width, `null` for auto, and
+ * the listing its CLIF views show.
+ */
+export type StoredProgram = {
+  readonly text: string
+  readonly encoding: string
+  readonly width: number | null
+  readonly listing: Listing
+}
 
-/** `program` as stored. A `width` left out is auto, as `null` is, and neither writes one. */
+/**
+ * `program` as stored. A `width` left out is auto, as `null` is, and neither writes one; a `listing` left out is
+ * as built, and as built writes none.
+ */
 export function serializeProgram(
-  program: Omit<StoredProgram, 'width'> & { readonly width?: number | null | undefined },
+  program: Omit<StoredProgram, 'width' | 'listing'> & {
+    readonly width?: number | null | undefined
+    readonly listing?: Listing | undefined
+  },
 ): string {
-  const { text, encoding, width } = program
-  return JSON.stringify({ version: PROGRAM_VERSION, text, encoding, ...(typeof width === 'number' ? { width } : {}) })
+  const { text, encoding, width, listing } = program
+  return JSON.stringify({
+    version: PROGRAM_VERSION,
+    text,
+    encoding,
+    ...(typeof width === 'number' ? { width } : {}),
+    ...(listing === 'optimised' ? { listing } : {}),
+  })
 }
 
 /**
@@ -42,7 +65,8 @@ export function serializeProgram(
  * string, or an `encoding` that is not one of `encodings`.
  *
  * **A `width` THAT IS NOT ONE OF `widths` READS AS AUTO, AND REFUSES NOTHING** (decision 15): refusing the program
- * would lose its text over a field that only says how its TM runs.
+ * would lose its text over a field that only says how its TM runs. **A `listing` IT DOES NOT KNOW READS AS BUILT**, for
+ * the same reason: it only says which listing the program's CLIF views show.
  */
 export function parseProgram(
   raw: string | null,
@@ -61,5 +85,10 @@ export function parseProgram(
   if (stored.version !== PROGRAM_VERSION) return null
   if (typeof stored.text !== 'string') return null
   if (typeof stored.encoding !== 'string' || !encodings.includes(stored.encoding)) return null
-  return { text: stored.text, encoding: stored.encoding, width: listedWidth(stored.width, widths) }
+  return {
+    text: stored.text,
+    encoding: stored.encoding,
+    width: listedWidth(stored.width, widths),
+    listing: knownListing(stored.listing) ?? 'as-built',
+  }
 }

@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { setLink } from './highlight'
 import { perLeg } from './legs'
-import { type Link, type LinkIndex, type Pin, pinAtInstr } from './link'
+import { type InstrLeg, type Link, type LinkIndex, type Pin, pinAtInstr } from './link'
 import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
 import { LINKED, LINKED_LEGS, type LinkedLeg, perLinkedLeg } from './linked-legs'
 import type { LeafId, PaneCollection } from './panes'
@@ -72,9 +72,12 @@ export type LinkWiring = {
    */
   get gestures(): number
   drawLink(l: Link | null, here: Readonly<Record<LinkedLeg, boolean>>, lambda: LambdaLinkState): void
-  setLinkTo(node: number | null, origin: Exclude<Pin['origin'], 'rxm'>): void
-  /** Link the construct that owns instruction `pc`, or say on the status line that none does. */
-  linkInstr(pc: number): void
+  setLinkTo(node: number | null, origin: Exclude<Pin['origin'], InstrLeg>): void
+  /**
+   * Link the construct that owns instruction `pc`, or say on the status line that none does. `null`: a row lowered
+   * from no rxm instruction, which clears the pin and explains nothing.
+   */
+  linkInstr(pc: number | null, origin: InstrLeg): void
   linkAtSourceOffset(byteOffset: number): void
   /**
    * Per leg, how many views it has and the title of each one showing a copy — what the status line's detachment clause
@@ -191,7 +194,7 @@ export function createLinkWiring(deps: {
     }
     linkStatusHost.textContent = linkStatus({
       state: 'linked',
-      legs: perLinkedLeg((leg) => ({ emits: LINKED[leg].rows(l).length > 0, here: here[leg] })),
+      legs: perLinkedLeg((leg) => ({ emits: LINKED[leg].rows(l, link).length > 0, here: here[leg] })),
       lambda,
       detached,
     })
@@ -199,7 +202,7 @@ export function createLinkWiring(deps: {
 
   /**
    * Take a gesture's resolved pin: count the gesture, write the pin and whether its click found no owner, and paint
-   * every view: the source editor's mark, and each λ, rxm and TM view's.
+   * every view: the source editor's mark, and each λ, rxm, TM and CLIF view's.
    *
    * `origin` DRIVES SCROLLING ONLY. A scroll-into-view triggered by the pane the user is already
    * looking at moves the thing under their cursor, so the table scrolls for a source click and not
@@ -212,7 +215,7 @@ export function createLinkWiring(deps: {
     paint(origin)
   }
 
-  const setLinkTo = (node: number | null, origin: Exclude<Pin['origin'], 'rxm'>) => {
+  const setLinkTo = (node: number | null, origin: Exclude<Pin['origin'], InstrLeg>) => {
     commitLink(node === null ? null : { node, origin }, origin, false)
   }
 
@@ -248,7 +251,7 @@ export function createLinkWiring(deps: {
       const { rows, pane } = LINKED[leg]
       const scrollTo = from !== null && from !== leg
       for (const p of panes.of(leg)) {
-        const marked = l === null || sessions.entryOf(p.slot.binding.session).detached ? [] : rows(l)
+        const marked = l === null || sessions.entryOf(p.slot.binding.session).detached ? [] : rows(l, link)
         pane(p).setLink(marked, scrollTo)
       }
     }
@@ -304,13 +307,21 @@ export function createLinkWiring(deps: {
     setLinkTo(index.nodeAtSource(byteOffset), 'source')
   }
 
-  /** Link the construct that owns an rxm instruction, or clear and say why if none does. */
-  const linkInstr = (pc: number) => {
+  /**
+   * Link the construct that owns an rxm instruction, or clear and say why if none does; for a row lowered from no
+   * instruction, clear and say nothing.
+   */
+  const linkInstr = (pc: number | null, origin: InstrLeg) => {
     if (!linkable || index === null) return
-    const pin = pinAtInstr(index, pc, 'rxm')
+    // A ROW WITH NO INSTRUCTION HAS NO OWNER TO MISS: the ownerless sentence names an instruction, and there is none.
+    if (pc === null) {
+      commitLink(null, origin, false)
+      return
+    }
+    const pin = pinAtInstr(index, pc, origin)
     // AN RXM INSTRUCTION THAT RESOLVED TO NO CONSTRUCT IS THE ONE CLICK THE LINE EXPLAINS (Plan 7 part 5 spec
     // amendment 11); any other gesture, a resolved rxm click included, replaces that explanation.
-    commitLink(pin, 'rxm', pin === null)
+    commitLink(pin, origin, pin === null)
   }
 
   return {

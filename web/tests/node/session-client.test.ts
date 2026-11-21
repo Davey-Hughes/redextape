@@ -33,6 +33,24 @@ const TREE: LambdaTreeWire = {
 }
 
 describe('SessionClient', () => {
+  it('hands on a CLIF load whatever the generation, and it does not end the wait for a run', () => {
+    // What Chromium's worker reported for a load whose module request was aborted, the checkout's own path cut.
+    const error =
+      'TypeError: Failed to fetch dynamically imported module: ' +
+      'http://localhost:63315/@fs/…/pkg-clif/redextape_clif_wasm.js'
+    const { port, deliver } = fakePort()
+    const heard: RunReply[] = []
+    const c = new SessionClient(port, (r) => heard.push(r))
+    deliver({ kind: 'clif-load', state: 'ready' })
+    c.supersede()
+    deliver({ kind: 'clif-load', state: 'failed', error })
+    expect(heard).toEqual([
+      { kind: 'clif-load', state: 'ready' },
+      { kind: 'clif-load', state: 'failed', error },
+    ])
+    expect(c.awaitingRun).toBe(true)
+  })
+
   it('a tree reply does not end the wait for a run', () => {
     const { port, deliver } = fakePort()
     const c = new SessionClient(port, () => {})
@@ -74,7 +92,7 @@ describe('SessionClient', () => {
     c.request(c.supersede(), 'a', 'unary')
     c.request(c.supersede(), 'b', 'unary')
     expect(sent.map((m) => m.gen)).toEqual([1, 2])
-    expect(sent[1]).toEqual({ kind: 'run', gen: 2, src: 'b', encoding: 'unary' })
+    expect(sent[1]).toEqual({ kind: 'run', gen: 2, src: 'b', encoding: 'unary', clif: null })
   })
 
   /**
@@ -88,9 +106,9 @@ describe('SessionClient', () => {
     c.request(c.supersede(), 'b', 'binary', null)
     c.request(c.supersede(), 'c', 'binary')
     expect(sent).toStrictEqual([
-      { kind: 'run', gen: 1, src: 'a', encoding: 'binary', width: 8 },
-      { kind: 'run', gen: 2, src: 'b', encoding: 'binary' },
-      { kind: 'run', gen: 3, src: 'c', encoding: 'binary' },
+      { kind: 'run', gen: 1, src: 'a', encoding: 'binary', width: 8, clif: null },
+      { kind: 'run', gen: 2, src: 'b', encoding: 'binary', clif: null },
+      { kind: 'run', gen: 3, src: 'c', encoding: 'binary', clif: null },
     ])
   })
 
@@ -213,11 +231,12 @@ describe('SessionClient streaming', () => {
         lambda: LAMBDA_OK,
         rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
         tm: TM_OK,
+        clif: { available: false, reason: '', run: null, cap: null, total_steps: null },
       },
-      programs: { rxm: null, tm: null },
+      programs: { rxm: null, tm: null, clif: null },
       declinedSpan: null,
       linkIndex: null,
-      first: { lambda: null, rxm: null, tm: null },
+      first: { lambda: null, rxm: null, tm: null, clif: null },
       lambdaTree: null,
     })
     deliver({ kind: 'frames', leg: 'lambda', gen: 1, epoch: 0, frames: [], done: null })
@@ -232,6 +251,7 @@ describe('SessionClient streaming', () => {
           value: null,
         },
         tm: TM_LEG_OK,
+        clif: { status: { available: false, reason: '', run: null, cap: null, total_steps: null }, value: null },
       },
       pinned: false,
     })
@@ -290,11 +310,12 @@ const compiled = (gen: number): RunReply => ({
     lambda: { available: true, reason: '', node: null, run: 'Running' },
     rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
     tm: { available: true, reason: '', width: null, run: 'Running', total_steps: null },
+    clif: { available: false, reason: '', run: null, cap: null, total_steps: null },
   },
-  programs: { rxm: null, tm: null },
+  programs: { rxm: null, tm: null, clif: null },
   declinedSpan: null,
   linkIndex: null,
-  first: { lambda: null, rxm: null, tm: null },
+  first: { lambda: null, rxm: null, tm: null, clif: null },
   lambdaTree: null,
 })
 
@@ -347,7 +368,9 @@ describe('SessionClient generation', () => {
   it('drops the previous generation as soon as supersede is called, before request posts', () => {
     const p = port()
     const seen: number[] = []
-    const c = new SessionClient(p, (r) => seen.push(r.gen))
+    const c = new SessionClient(p, (r) => {
+      if ('gen' in r) seen.push(r.gen)
+    })
 
     const g1 = c.supersede()
     c.request(g1, 'a', 'binary')
@@ -372,7 +395,7 @@ describe('SessionClient generation', () => {
     expect(p.sent).toEqual([])
 
     c.request(g2, 'fresh', 'binary')
-    expect(p.sent).toEqual([{ kind: 'run', gen: g2, src: 'fresh', encoding: 'binary' }])
+    expect(p.sent).toEqual([{ kind: 'run', gen: g2, src: 'fresh', encoding: 'binary', clif: null }])
   })
 
   it('extend addresses the current generation and does not advance it', () => {

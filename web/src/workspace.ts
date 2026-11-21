@@ -84,10 +84,23 @@ export const DEFAULT_TM_DISPLAY: TmDisplay = { level: 'program', edges: 'arcs' }
 /** Each TM view's display settings, by leaf — a view with none stored draws with `DEFAULT_TM_DISPLAY`. */
 export type TmDisplays = Readonly<Record<LeafId, TmDisplay>>
 
+/** How a CLIF view lays out its listing (`clif-view.ts`'s `clifLeads`): compact, or as Cranelift prints it. */
+export type ClifDisplay = {
+  readonly layout: 'compact' | 'exact'
+}
+
+export const DEFAULT_CLIF_DISPLAY: ClifDisplay = { layout: 'compact' }
+
+/** Each CLIF view's display settings, by leaf — a view with none stored draws with `DEFAULT_CLIF_DISPLAY`. */
+export type ClifDisplays = Readonly<Record<LeafId, ClifDisplay>>
+
 /** The settings of each leg whose views have any. */
-export type LegDisplay = { lambda: LambdaDisplay; tm: TmDisplay }
+export type LegDisplay = { lambda: LambdaDisplay; tm: TmDisplay; clif: ClifDisplay }
 
 export type DisplayLeg = keyof LegDisplay
+
+/** The `Workspace` field each such leg's settings are stored in, `LEG_DISPLAY`'s `field`. */
+type DisplayField = 'display' | 'tmDisplay' | 'clifDisplay'
 
 /**
  * Each such leg's settings: `field` names both the `Workspace` field and the key they are stored under, `fallback`
@@ -97,7 +110,7 @@ export type DisplayLeg = keyof LegDisplay
  */
 export const LEG_DISPLAY: {
   readonly [K in DisplayLeg]: {
-    readonly field: 'display' | 'tmDisplay'
+    readonly field: DisplayField
     readonly fallback: LegDisplay[K]
     parse(entry: unknown): LegDisplay[K] | null
   }
@@ -123,6 +136,16 @@ export const LEG_DISPLAY: {
       if (level !== 'program' && level !== 'local') return null
       if (edges !== 'arcs' && edges !== 'chips') return null
       return { level, edges }
+    },
+  },
+  clif: {
+    field: 'clifDisplay',
+    fallback: DEFAULT_CLIF_DISPLAY,
+    parse(entry) {
+      if (typeof entry !== 'object' || entry === null) return null
+      const { layout } = entry as Record<string, unknown>
+      if (layout !== 'compact' && layout !== 'exact') return null
+      return { layout }
     },
   },
 }
@@ -157,6 +180,11 @@ export type Workspace = {
    * own rather than a second shape in `display`, so neither leg's parser has to tell the other's entries apart.
    */
   readonly tmDisplay: TmDisplays
+  /**
+   * Each CLIF view's display settings — absent in a workspace stored before the field existed. A field of its own, for
+   * `tmDisplay`'s reason.
+   */
+  readonly clifDisplay: ClifDisplays
   /**
    * The arrangement each combination of views remembers, by `arrangements.ts`'s key — every combination visited but
    * the one `tree` shows (the view layouts spec §4.2). Absent in a workspace stored before it, and not written
@@ -194,13 +222,14 @@ export function defaultWorkspace(shape: Shape): Workspace {
     inspector: true,
     display: {},
     tmDisplay: {},
+    clifDisplay: {},
     arrangements: {},
   }
 }
 
 /** One view's stored settings. The cast holds because `LEG_DISPLAY` names each leg's own field. */
 export function legDisplayOf<K extends DisplayLeg>(
-  ws: Pick<Workspace, 'display' | 'tmDisplay'>,
+  ws: Pick<Workspace, DisplayField>,
   leg: K,
   leaf: LeafId,
 ): LegDisplay[K] | undefined {
@@ -208,7 +237,7 @@ export function legDisplayOf<K extends DisplayLeg>(
 }
 
 /** `ws` with one view's settings recorded — a new object, as `withPanel` returns. */
-export function withLegDisplay<W extends Pick<Workspace, 'display' | 'tmDisplay'>, K extends DisplayLeg>(
+export function withLegDisplay<W extends Pick<Workspace, DisplayField>, K extends DisplayLeg>(
   ws: W,
   leg: K,
   leaf: LeafId,
@@ -225,7 +254,7 @@ export function withLegDisplay<W extends Pick<Workspace, 'display' | 'tmDisplay'
  * new entry, so a field named by hand would lose that leg's settings on reload.
  */
 function keptLegDisplays(
-  ws: Pick<Workspace, 'display' | 'tmDisplay'>,
+  ws: Pick<Workspace, DisplayField>,
   keep: (leaf: LeafId) => boolean,
 ): Record<string, Readonly<Record<LeafId, unknown>>> {
   return Object.fromEntries(
@@ -237,7 +266,7 @@ function keptLegDisplays(
 }
 
 /** `ws` with every leg's settings dropped for the views `keep` refuses — a new object, as `withLegDisplay` returns. */
-export function withLegDisplaysKept<W extends Pick<Workspace, 'display' | 'tmDisplay'>>(
+export function withLegDisplaysKept<W extends Pick<Workspace, DisplayField>>(
   ws: W,
   keep: (leaf: LeafId) => boolean,
 ): W {
@@ -421,6 +450,7 @@ export function parseWorkspace(raw: string | null): Workspace | null {
       inspector: true,
       display: {},
       tmDisplay: {},
+      clifDisplay: {},
       arrangements: {},
     }
   }
@@ -452,6 +482,8 @@ export function parseWorkspace(raw: string | null): Workspace | null {
   if (display === null) return null
   const tmDisplay = parseDisplays('tm', e, ids)
   if (tmDisplay === null) return null
+  const clifDisplay = parseDisplays('clif', e, ids)
+  if (clifDisplay === null) return null
   return {
     tree,
     switches,
@@ -462,6 +494,7 @@ export function parseWorkspace(raw: string | null): Workspace | null {
     inspector: e.inspector ?? true,
     display,
     tmDisplay,
+    clifDisplay,
     arrangements,
   }
 }

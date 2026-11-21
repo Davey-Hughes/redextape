@@ -268,10 +268,10 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * `HEADER_ORDER` and `KIND_WORD`, so they hold their place from the first paint, as not pressed, which is true of a
  * page with no view built yet.
  *
- * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `rxm` and
- * `TM` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
+ * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `rxm`, `TM`
+ * and `CLIF` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
  * carries its state. The tooltip is `toggleTitle`'s: what a press does, *hide the TM view*, *show the TM view*, or with
- * `count` saying two views of the kind, *hide the 2 TM views*, and for rxm a line saying what the view is.
+ * `count` saying two views of the kind, *hide the 2 TM views*, and for rxm and CLIF a line saying what the view is.
  *
  * **THE LAST PRESSED BUTTON IS DISABLED, AND ITS TOOLTIP IS THE REASON** (rule 4): it could apply and cannot now,
  * since one view stays, or one kind of view where it stands for several (`toggleSentence`). `aria-description` says
@@ -346,7 +346,8 @@ export function toggleSentence(kind: PaneKind, count: number, state: 'shown' | '
 
 /**
  * What a kind's word does not say, as the second line of its toggle's tooltip, or `null`. `rxm` is redextape's own name
- * for its register machine (`tm::rxm::Program`), so no reader knows it on sight. **`help.html` SAYS WHAT THE VIEW IS
+ * for its register machine (`tm::rxm::Program`), so no reader knows it on sight, and `CLIF` is Cranelift's, which a
+ * reader who has not built with Cranelift does not. **`help.html` SAYS WHAT THE VIEW IS
  * TOO** and cannot import this: `tests/node/app-header.test.ts` checks that the page holds each clause of it.
  */
 export const KIND_GLOSS: Readonly<Record<PaneKind, string | null>> = {
@@ -354,6 +355,7 @@ export const KIND_GLOSS: Readonly<Record<PaneKind, string | null>> = {
   rxm: "redextape's register machine: the IR between the source and the Turing machine",
   lambda: null,
   tm: null,
+  clif: "Cranelift's IR: what the native backends build from the rxm program",
 }
 
 /** A `views` toggle's tooltip: `toggleSentence`'s words, then its kind's `KIND_GLOSS` line where it has one. */

@@ -3,12 +3,13 @@ import { canRecordFurther } from './controls'
 import type { KeymapSetting } from './editor-keymap'
 import type { FieldWidth } from './field-width'
 import type { LinkWiring } from './link-wiring'
+import { isLinkedLeg, LINKED } from './linked-legs'
 import type { LspClient } from './lsp-client'
 import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_OF_PANE } from './lsp-protocol'
 import type { PaneEvents } from './pane-chrome'
 import { createPlayer } from './player'
-import type { Leg, LegFrame } from './protocol'
+import type { CopyLeg, Leg, LegFrame } from './protocol'
 import { BufferCapReached, type ScratchBuffers } from './scratch'
 import type { SessionId } from './session-client'
 import { type Binding, type LegState, type PaneSlot, rewindLeg, type SessionRegistry } from './sessions'
@@ -17,12 +18,22 @@ import type { Speed } from './workspace'
 
 /**
  * What `forkCopy` throws when a handler reaches it with no text — a wiring bug on every leg, named by the handler, so
- * a leg added to `Leg` is a type error here until it says which handler forks it.
+ * a leg added to `CopyLeg` is a type error here until it says which handler forks it.
  */
-const NO_TEXT: Record<Leg, string> = {
+const NO_TEXT: Record<CopyLeg, string> = {
   lambda: 'detach reached with no term text',
   tm: 'detachProgram reached with no machine text',
   rxm: 'detachProgram reached with no rxm text',
+}
+
+/**
+ * The language of the editor a view of `leg` holds. **A CLIF VIEW HOLDS NONE** (`pane-host.ts`'s `holdsEditor`), so a
+ * build of one reaching here is a wiring bug, and it throws rather than build an editor in no language.
+ */
+function editorLanguage(leg: Leg): LanguageId {
+  const id = LANGUAGE_OF_PANE[leg]
+  if (id === null) throw new Error(`a ${leg} view holds no editor`)
+  return id
 }
 
 /**
@@ -52,6 +63,10 @@ export function createTransport(deps: {
   setSpeed: (s: Speed) => void
   /** The program's one field width, handed to every view as `speed` is; a caller without it builds no width box. */
   fieldWidth?: FieldWidth
+  /** The page's `pkg-clif` load, handed to every view as `fieldWidth` is, for a CLIF view to say. */
+  clifLoad?: NonNullable<PaneEvents['clifLoad']>
+  /** The program's one listing, handed to every view as `fieldWidth` is, for a CLIF view to show and switch. */
+  clifListing?: NonNullable<PaneEvents['clifListing']>
   /** Say a refusal — `notice.ts`'s `notify`. */
   notify: (text: string) => void
   linkWiring: () => LinkWiring
@@ -164,7 +179,7 @@ export function createTransport(deps: {
    * Make a copy on `slot`'s leg from `text` at `step`, move `slot`'s view onto it, and say what happened — the one body
    * behind every *edit a copy*: `detach` on the λ leg, from the source's term at the step the view shows, and
    * `detachProgram` on the TM and rxm legs, from the program's whole text at step 0. Each handler resolves its own
-   * text and hands it here, so the two cannot drift apart in what follows.
+   * text and leg and hands them here, so the two cannot drift apart in what follows.
    *
    * **`null` TEXT IS A WIRING BUG, NOT A USER ACTION — LOUD, NOT SWALLOWED.** Each view withdraws or disables its
    * control whenever its handler would pass none (`CopyEditor.#refreshDetach` for the machine views), so a click that
@@ -185,10 +200,9 @@ export function createTransport(deps: {
    * line would swallow it. Anything else is re-thrown unchanged. `tests/node/sessions.test.ts` holds both arms, for
    * the λ, TM and rxm handlers.
    */
-  const forkCopy = (slot: PaneSlot<Leg>, text: string | null, step: number): void => {
-    // THE SLOT'S OWN LEG — a slot's leg has no writer (`PaneSlot`'s doc), so the copy is made on the leg the view
-    // shows.
-    const leg = slot.binding.leg
+  const forkCopy = (slot: PaneSlot<Leg>, leg: CopyLeg, text: string | null, step: number): void => {
+    // `leg` IS THE SLOT'S OWN, which each handler reads off it and hands on narrowed — a slot's leg has no writer
+    // (`PaneSlot`'s doc), so the copy is made on the leg the view shows, and a CLIF view offers no copy.
     if (text === null) throw new Error(NO_TEXT[leg])
     let id: SessionId
     try {
@@ -225,7 +239,7 @@ export function createTransport(deps: {
   }
 
   /**
-   * `PaneEvents.detachProgram` on every leg that compiles a program, from that program's whole text at step 0, where
+   * `PaneEvents.detachProgram` on every leg that copies a program, from that program's whole text at step 0, where
    * λ's *edit a copy* is `detach`, at a step. The text is the one `replies.ts`'s `setLegProgram` keeps for the
    * session the view is bound to when the click comes, read under the leg the view shows, so a TM view forks its
    * machine and an rxm view its listing. `null` there only where the control is withdrawn or disabled
@@ -235,12 +249,47 @@ export function createTransport(deps: {
     const leg = slot.binding.leg
     switch (leg) {
       case 'lambda':
+      // A CLIF VIEW OFFERS NO COPY, so it has no *edit a copy*.
+      case 'clif':
         return {}
       case 'rxm':
       case 'tm':
         return {
-          detachProgram: () => forkCopy(slot, sessions.entryOf(slot.binding.session).programs[leg]?.text ?? null, 0),
+          detachProgram: () =>
+            forkCopy(slot, leg, sessions.entryOf(slot.binding.session).programs[leg]?.text ?? null, 0),
         }
+    }
+  }
+
+  /**
+   * A linked leg's row click, under the `PaneEvents` member its `LINKED` entry names (`linkInstr` for rxm and CLIF,
+   * `linkState` for TM), and OMITTED ENTIRELY ON THE λ LEG, not set to `undefined` — both members are optional under
+   * `exactOptionalPropertyTypes`, which distinguishes "absent" from "present and undefined". The λ pane has no rows to
+   * click. What a row links is the entry's `click.link`: an rxm instruction by its owner (Plan 7 part 5 spec §6.6),
+   * where one `defunc` minted has none and `linkInstr` says so on the status line; a TM state by its node.
+   *
+   * DECIDED FROM THE SLOT'S LEG, ONCE, AT CONSTRUCTION — not per click like `events`' other handlers, and sound for two
+   * reasons. Which handlers a pane HAS is a fact about the pane's shape (the λ pane has no δ-table to click), and
+   * `events`' object is built once and then held by the pane for the life of the page, so there is no later moment at
+   * which a spread could take effect anyway. The second reason is `PaneSlot`'s: a slot's leg cannot change, so a fact
+   * decided from it at construction cannot go stale the way one decided from its session would.
+   *
+   * **A ROW IN A COPY LINKS NOTHING AND SAYS NOTHING** (spec amendment 28), in either view that numbers its rows by the
+   * machine it shows. The link index describes the PROGRAM, so an instruction or state index read in a copy names
+   * whatever the program has at that index: an unedited copy would line up with the program and pin its constructs, and
+   * an edited one would pin whatever the program happens to have there. `detached` is the session's own fact, read at
+   * click time since the view's binding moves; it is asked AHEAD OF `click.link`, so a row of a copy counts no link
+   * gesture and the click's clear unpins the program.
+   */
+  const linkedRowClick = (slot: PaneSlot<Leg>): Pick<PaneEvents, 'linkInstr' | 'linkState'> => {
+    const leg = slot.binding.leg
+    if (!isLinkedLeg(leg)) return {}
+    const { click } = LINKED[leg]
+    return {
+      [click.event]: (row: number | null) => {
+        if (sessions.entryOf(slot.binding.session).detached) return
+        click.link(linkWiring(), row)
+      },
     }
   }
 
@@ -265,6 +314,9 @@ export function createTransport(deps: {
     speed: deps.speed,
     setSpeed: deps.setSpeed,
     ...(deps.fieldWidth !== undefined ? { fieldWidth: deps.fieldWidth } : {}),
+    ...(deps.clifLoad !== undefined ? { clifLoad: deps.clifLoad } : {}),
+    ...(deps.clifListing !== undefined ? { clifListing: deps.clifListing } : {}),
+    legReason: () => slot.resolve(sessions).status.reason,
     back: () => {
       taken(slot).hist.back()
       draw()
@@ -274,7 +326,8 @@ export function createTransport(deps: {
       // `canRecordFurther` is `controls.ts`'s call, not re-derived here — see its doc comment.
       const leg = taken(slot)
       const entry = sessions.entryOf(slot.binding.session)
-      if (!leg.hist.forward() && canRecordFurther(leg.done, entry.client.awaitingRun)) {
+      // NOT ON A HELD RING, as `restart` says.
+      if (!leg.hist.forward() && leg.clifHold === undefined && canRecordFurther(leg.done, entry.client.awaitingRun)) {
         entry.client.extend(slot.binding.leg, leg.epoch)
       }
       draw()
@@ -306,15 +359,19 @@ export function createTransport(deps: {
       flushEdit(slot.binding.session)
       const leg = taken(slot)
       const { client } = sessions.entryOf(slot.binding.session)
-      if (leg.hist.evicted && leg.gen === client.gen) {
+      // **NOT ON A HELD RING** (`ClifHold`), nor `extend` or a frontier `▶` there: its frames are of a recording a CLIF
+      // request replaced, and its end is that recording's. A rewind's epoch would drop the listing the request is
+      // answered with, and a request under the new epoch would act on the listing chosen for a gesture on the other.
+      if (leg.hist.evicted && leg.gen === client.gen && leg.clifHold === undefined) {
         rewindLeg(leg)
         client.rewind(slot.binding.leg, leg.epoch)
       } else leg.hist.toStart()
       draw()
     },
     extend: () => {
-      const { epoch } = taken(slot)
-      sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg, epoch)
+      const { epoch, clifHold } = taken(slot)
+      // NOT ON A HELD RING, as `restart` says.
+      if (clifHold === undefined) sessions.entryOf(slot.binding.session).client.extend(slot.binding.leg, epoch)
     },
     // THE SELECTOR'S PICK, ON THE SESSION AXIS. `PaneSlot.rebind` writes the session and nothing else —
     // the leg is fixed by `K` and has no writer anywhere in the app, which is what keeps `Binding<K>`'s
@@ -406,7 +463,7 @@ export function createTransport(deps: {
             const wiring = linkWiring()
             if (wiring.index === null || wiring.index.lambdaText === '') return
             // THE CAP'S REFUSAL, THE NARROW CATCH AND WHAT IS SAID AND PAINTED AFTER: `forkCopy`, every leg's.
-            forkCopy(slot, wiring.index.lambdaText, step)
+            forkCopy(slot, 'lambda', wiring.index.lambdaText, step)
           },
         }
       : {}),
@@ -438,7 +495,7 @@ export function createTransport(deps: {
     // ONE EXTENSION PER EDITOR, BUILT FROM THE ONE REGISTRY — the grammar is fetched once for the page
     // however many editors ask for it (`colour.ts`'s `createGrammarRegistry` caches per language,
     // including a failure), so building a plugin here costs nothing beyond the plugin.
-    colour: () => colour(LANGUAGE_OF_PANE[slot.binding.leg]),
+    colour: () => colour(editorLanguage(slot.binding.leg)),
     // A VALUE, NOT A THUNK — one keymap serves the page, so there is no binding to resolve. See the
     // dependency's own doc for why it is an object rather than a getter.
     keymap,
@@ -447,8 +504,8 @@ export function createTransport(deps: {
     // as it moves between panes. Read inside the thunk, like `editSink` below, because a
     // slot's binding changes under a pane that was constructed once.
     lspDocument: () => ({
-      uri: documentUri(slot.binding.session, LANGUAGE_OF_PANE[slot.binding.leg]),
-      languageId: LANGUAGE_OF_PANE[slot.binding.leg],
+      uri: documentUri(slot.binding.session, editorLanguage(slot.binding.leg)),
+      languageId: editorLanguage(slot.binding.leg),
       client: lspClient,
       formatOnBlur,
       notify,
@@ -505,45 +562,8 @@ export function createTransport(deps: {
       scratchpad.setCollapsed(slot.binding.session, collapsed)
       onBuffersPersist()
     },
-    // OMITTED ENTIRELY ON THE λ LEG, not set to `undefined` — `PaneEvents.linkState` is optional
-    // under `exactOptionalPropertyTypes`, which distinguishes "absent" from "present and undefined".
-    // The λ pane has no table to click.
-    //
-    // DECIDED FROM THE SLOT'S LEG, ONCE, AT CONSTRUCTION — not per click like the handlers above, and
-    // sound for two reasons. Which handlers a pane HAS is a fact about the pane's shape (the λ pane has
-    // no δ-table to click), and this object is built once and then held by the pane for the life of the
-    // page, so there is no later moment at which a spread could take effect anyway. The second reason is
-    // `PaneSlot`'s: a slot's leg cannot change, so a fact decided from it at construction cannot go stale
-    // the way one decided from its session would.
-    // THE RXM VIEW'S ROWS LINK THE SAME WAY, BY THE INSTRUCTION'S OWNER (Plan 7 part 5 spec §6.6) — an instruction
-    // `defunc` minted has none, and `linkInstr` says so on the status line rather than leaving it blank.
-    //
-    // **A ROW IN A COPY LINKS NOTHING AND SAYS NOTHING** (spec amendment 28), in either view that numbers its rows by
-    // the machine it shows. The link index describes the PROGRAM, so an instruction or state index read in a copy names
-    // whatever the program has at that index: an unedited copy would line up with the program and pin its constructs,
-    // and an edited one would pin whatever the program happens to have there. `detached` is the session's own fact,
-    // read at click time since the view's binding moves.
-    ...(slot.binding.leg === 'rxm'
-      ? {
-          linkInstr: (pc: number) => {
-            const wiring = linkWiring()
-            // AHEAD OF `linkInstr`: a row of a copy counts no link gesture, so the click clears the program's pin.
-            if (sessions.entryOf(slot.binding.session).detached) return
-            wiring.linkInstr(pc)
-          },
-        }
-      : {}),
-    ...(slot.binding.leg === 'tm'
-      ? {
-          linkState: (stateId: number) => {
-            const wiring = linkWiring()
-            if (!wiring.linkable || wiring.index === null) return
-            if (sessions.entryOf(slot.binding.session).detached) return
-            wiring.setLinkTo(wiring.index.nodeForState(stateId), 'tm')
-          },
-        }
-      : {}),
-    // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkState` above — `PaneEvents.linkLambda` is
+    ...linkedRowClick(slot),
+    // OMITTED ENTIRELY ON THE TM LEG, mirroring `linkedRowClick` above — `PaneEvents.linkLambda` is
     // optional under `exactOptionalPropertyTypes`, and the TM pane has no λ term to click.
     ...(slot.binding.leg === 'lambda'
       ? {

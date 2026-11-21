@@ -4,7 +4,7 @@
  * module doc gives: the coverage gate cannot see the worker. What touches the worker's state or a wasm handle stays
  * there and is passed in. `tests/node/copy-build.test.ts` holds the order.
  */
-import type { Leg, LegFrame, RunReply } from './protocol'
+import type { CopyLeg, LegFrame, RunReply } from './protocol'
 import { firstFrame, type RecordLeg, type RecordWorker, recordLeg, resetRecording } from './record-loop'
 import type { Diagnostic } from './types'
 
@@ -24,6 +24,10 @@ export type Claim = {
  * **THE OCCUPANT IS DROPPED BEFORE ANYTHING NEW IS BUILT**, a session or a copy alike, so the window with two wasm
  * handles alive on this thread is zero rather than bounded (5d-i design §4.2): the property that makes one worker per
  * session safe. Every build calls this first; the books are reset after the drop, for `resetRecording`'s reason.
+ *
+ * **THE OCCUPANT IS ONE SESSION OR ONE COPY, PLUS, FOR A SESSION, AT MOST ONE CLIF STEPPER BUILT FROM IT**, which is
+ * dropped with it: a session's CLIF stepper is built from that session's `clifInput()` and lives no longer than the
+ * session does. A copy worker never loads `pkg-clif`, since no copy builds a CLIF stepper.
  */
 export async function claimLive(claim: Claim, worker: RecordWorker): Promise<void> {
   await claim.ready
@@ -32,10 +36,13 @@ export async function claimLive(claim: Claim, worker: RecordWorker): Promise<voi
   claim.forgetResult()
 }
 
-/** The worker's one occupant: its session, or one copy of one leg (a worker's own type may add fields). */
-export type Occupant<S, C extends { [K in Leg]: unknown }> =
+/**
+ * The worker's one occupant: its session, or one copy of one leg (a worker's own type may add fields). A copy's leg is
+ * a `CopyLeg`: a CLIF view offers no copy.
+ */
+export type Occupant<S, C extends { [K in CopyLeg]: unknown }> =
   | { gen: number; kind: 'session'; session: S }
-  | { [K in Leg]: { gen: number; kind: 'scratch'; leg: K; session: C[K] } }[Leg]
+  | { [K in CopyLeg]: { gen: number; kind: 'scratch'; leg: K; session: C[K] } }[CopyLeg]
 
 /**
  * What `leg`'s recording may step for `gen`: the session, or this leg's copy; `null` for another leg's copy.
@@ -45,7 +52,7 @@ export type Occupant<S, C extends { [K in Leg]: unknown }> =
  * them hears "no such leg here" rather than a throw from wasm about a method the copy does not have. A copy's own leg
  * is answered: an answer that admitted only a session would make every copy record nothing.
  */
-export function liveHandle<S, C extends { [K in Leg]: unknown }, K extends Leg>(
+export function liveHandle<S, C extends { [K in CopyLeg]: unknown }, K extends CopyLeg>(
   live: Occupant<S, C> | null,
   leg: K,
   gen: number,
@@ -67,7 +74,7 @@ export type CopyCompiled = {
  * What differs by leg in building a copy. Each member calls wasm or sets the occupant, so the entries are the worker's.
  * **`K` IS THE LEG, AS IN A `RecordLeg`**, so that `buildCopy` takes a build and a recording of one leg.
  */
-export type CopyBuild<K extends Leg, M> = {
+export type CopyBuild<K extends CopyLeg, M> = {
   /** `made` is `null` for text that builds no copy, and `diagnostics` say why. */
   build(src: string, step: number): { made: M | null; diagnostics: Diagnostic[] }
   /** Free a build a newer generation superseded. */
@@ -89,7 +96,7 @@ export type CopyBuild<K extends Leg, M> = {
  * has none (`BUILD`'s doc, in the worker), and no reply but `no-session` carries them. **ONLY THE COPY'S OWN LEG IS
  * RECORDED**: a copy has one, and the others' `handle` would answer `null`.
  */
-export async function buildCopy<K extends Leg, M, H>(
+export async function buildCopy<K extends CopyLeg, M, H>(
   build: CopyBuild<K, M>,
   record: RecordLeg<K, H>,
   claim: Claim,

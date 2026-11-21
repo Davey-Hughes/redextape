@@ -1,11 +1,11 @@
-//! The derive-site scanner both crates' `ts_bindings` gates run, and the JSDoc stripper the
+//! The derive-site scanner each crate's `ts_bindings` gates run, and the JSDoc stripper the
 //! `bigint` gate needs.
 //!
-//! **IT LIVES HERE BECAUSE THERE ARE TWO CRATES TO SCAN AND ONE SCANNER IS THE POINT.**
-//! `redextape-core` and `redextape-wire` each declare types carrying `ts_rs::TS`, and each needs the
-//! same coverage gate over its own sources. A second copy of that logic would drift from the first
-//! the moment one is widened and the other is not, which is the same class of defect the gate itself
-//! exists to catch. Parameterising by crate root costs one argument.
+//! **IT LIVES HERE BECAUSE THERE ARE SEVERAL CRATES TO SCAN AND ONE SCANNER IS THE POINT.**
+//! `redextape-core`, `redextape-wire` and `redextape-clif` each declare types carrying `ts_rs::TS`, and
+//! each needs the same coverage gate over its own sources. A second copy of that logic would drift from
+//! the first the moment one is widened and the other is not, which is the same class of defect the gate
+//! itself exists to catch. Parameterising by crate root costs one argument.
 //!
 //! **THE PANICS BELOW ARE THE PRODUCT, NOT A LIBRARY PATH THAT FORGOT TO RETURN `Result`.** This
 //! module is a test gate: a source shape it cannot resolve must fail loudly, naming the file and
@@ -659,7 +659,7 @@ fn check_source(path: &Path, src: &str) {
 /// macro — `syn` reads the invocation as `Item::Macro` and never enters its tokens, while the
 /// sibling's line-based scan resolves forward to the `pub struct` inside it and finds it. The gate
 /// file is protected from that by [`assert_scanner_file_declares_no_types`]'s item-position-macro
-/// refusal; ANY OTHER file in either crate is not, and the macro boundary below is where that is
+/// refusal; ANY OTHER file in a scanned crate is not, and the macro boundary below is where that is
 /// named. A hand-written descent leaves the next container out: a type declared in a nested block,
 /// a closure body, a match arm, a `const _: () = { … }` initializer, or a `union` — all ordinary
 /// Rust, and every one of them a silent pass. Each has the same witness: the sibling

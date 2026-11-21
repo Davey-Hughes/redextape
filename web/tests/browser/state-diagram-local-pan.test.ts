@@ -255,8 +255,8 @@ describe('a level in its panel', () => {
     await frames()
     expect(Math.abs(scroll().left - start.left - 40), 'scrollLeft moved by the drag').toBeLessThanOrEqual(1)
     expect(Math.abs(scroll().top - start.top - 30), 'scrollTop moved by the drag').toBeLessThanOrEqual(1)
-    // A COPY'S NODES LINK NOTHING (`transport.ts`'s `linkState`), so what a click does here is take the tab stop and
-    // the focus, in the one handler that links: a drag that did neither linked nothing.
+    // A COPY'S NODES LINK NOTHING (`transport.ts`'s `linkedRowClick`), so what a click does here is take the tab stop
+    // and the focus, in the one handler that links: a drag that did neither linked nothing.
     // `state-diagram-local-layout.test.ts` links a node of the program's own machine in a panel too narrow for it.
     expect(
       nodes().find((n) => n.tabIndex === 0),

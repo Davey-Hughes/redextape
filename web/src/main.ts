@@ -39,6 +39,8 @@ import { createBase16Dialog } from './base16-dialog'
 import { bufferList } from './buffer-list'
 import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
 import { BUILD } from './build-info'
+import { watchIntent } from './clif-intent'
+import { ClifSync } from './clif-sync'
 import { type CaptureTable, classMapFrom, createGrammarRegistry, treeSitterColour } from './colour'
 import { createCompile } from './compile'
 import {
@@ -90,13 +92,21 @@ import { createPanel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
 import { type LeafId, legOfPane, PaneCollection, type PaneKind } from './panes'
 import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
-import type { Leg, LegProgram, RunReply } from './protocol'
-import { HISTORY_BYTES } from './protocol'
+import type { ClifLoad, CopyLeg, Leg, LegProgram, Listing, RunReply } from './protocol'
+import { CLIF_ABSENT, HISTORY_BYTES } from './protocol'
 import { copyLegOf, copyRow, createReadout, type ProgramResult } from './readout'
 import { createReplies, type UnseenViews } from './replies'
 import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
-import { freshLeg, type LegReading, legControlState, type SessionLegs, SessionRegistry } from './sessions'
+import {
+  freshLeg,
+  holdClifLeg,
+  type LegReading,
+  legControlState,
+  rewindLeg,
+  type SessionLegs,
+  SessionRegistry,
+} from './sessions'
 import { decodeLink, isLink, type OpenedLink, type SharePayload } from './share-link'
 import { createShare } from './share-popover'
 import { LinkPositions, shortNotice } from './share-positions'
@@ -696,10 +706,11 @@ async function main(): Promise<EditorView> {
    * first-load example under the default encoding. A refusal is silent, since it cannot be told from a first visit
    * (`program-store.ts`'s own doc).
    */
-  const storedProgram = parseProgram(readProgramStorage(), encodings() as string[], widths) ?? {
+  const storedProgram: StoredProgram = parseProgram(readProgramStorage(), encodings() as string[], widths) ?? {
     text: FIRST_LOAD.text,
     encoding: EXAMPLE_ENCODING,
     width: null,
+    listing: 'as-built',
   }
   /**
    * A LINK IN THE PAGE'S FRAGMENT — Plan 7 part 6a spec §5.3, read before either store is taken from, since a link
@@ -710,7 +721,7 @@ async function main(): Promise<EditorView> {
    * THE PROGRAM THE PAGE OPENS ON: a link's, whole or alone, under its own encoding or, where the link's is not one this
    * build has, the one storage opens on (spec §5.3); otherwise `storedProgram`. **A LINK'S WIDTH IS ALWAYS ITS OWN**,
    * never storage's: a link without one is an auto run, whose positions are that run's steps (the TM width design,
-   * decision 16).
+   * decision 16). **AND SO IS ITS LISTING**: a link without one is as built, and its CLIF position a step of that run.
    *
    * **CHOSEN HERE, AFTER `init()`, BECAUSE AN ENCODING IS VALID ONLY IF `encodings()` LISTS IT**, and before anything
    * reads it: the editor's document, the language server's first text and the start-up compile are its three uses.
@@ -720,13 +731,49 @@ async function main(): Promise<EditorView> {
   const loaded: StoredProgram =
     startLink === null || startLink.kind === 'unreadable'
       ? storedProgram
-      : { text: startLink.program, encoding: startLink.encoding ?? storedProgram.encoding, width: startLink.width }
+      : {
+          text: startLink.program,
+          encoding: startLink.encoding ?? storedProgram.encoding,
+          width: startLink.width,
+          listing: startLink.listing,
+        }
   picker.value = loaded.encoding
   /**
    * THE PROGRAM'S FIELD WIDTH (`field-width.ts`): `null` for auto. A TM view's width box sets it, a pick, a link or
    * an undo replaces it with the program they put in, and a compile reads it when it posts, as it reads the picker.
    */
   let fieldWidth: number | null = loaded.width
+  /**
+   * The listing every CLIF view shows: the program's, as its field width is. A CLIF view's switch sets it, and a pick,
+   * a link or an undo replaces it with the program they put in.
+   */
+  let clifListing: Listing = loaded.listing
+  /**
+   * The listing the session worker records the CLIF leg for: `clifListing` while the tree in force shows a CLIF view,
+   * `null` while it shows none. **THE TREE IN FORCE**, so a CLIF view on a Stage tab not selected counts and one parked
+   * by another arrangement does not: the leg records only for a view the page holds.
+   */
+  const clifWanted = (): Listing | null => (combinationOf(tree).includes('clif') ? clifListing : null)
+  /** Where the `pkg-clif` load stands, which a CLIF view says while it has no listing. */
+  let clifLoadState: ClifLoad = 'idle'
+  /**
+   * **THE ONE PLACE THE PAGE SAYS `loading` ITSELF**, and it asks the worker for the load as it does, which the worker
+   * always answers with a `clif-load`; the worker says when any other load starts. Only from `idle` or `failed`, since
+   * a load asked for or in needs no other.
+   *
+   * **FROM `failed` IT ASKS WHAT RETRY ASKS TOO**: the pass that failed built no stepper, and a load alone builds none,
+   * so a CLIF view shown would say it loads after the load was in, with no Retry left to ask for its listing. **THE
+   * LOAD IS POSTED FIRST**, so the request's own load shares it or follows it, and the last `clif-load` heard is the
+   * request's: a load that answered `ready` after the request's had failed would leave the view on loading as well.
+   */
+  const askClifLoad = (): void => {
+    if (clifLoadState !== 'idle' && clifLoadState !== 'failed') return
+    const failed = clifLoadState === 'failed'
+    clifLoadState = 'loading'
+    sessions.entryOf(SOURCE_SESSION).client.clifLoad()
+    if (failed) clifSync.retry()
+    draw()
+  }
 
   let view: EditorView
   /** The source editor's document. Per view, never fetched, never parsed — see `documentUri`. */
@@ -878,17 +925,50 @@ async function main(): Promise<EditorView> {
       lambda: freshLeg('lambda', HISTORY_BYTES, { available: false, reason: '' }),
       rxm: freshLeg('rxm', HISTORY_BYTES, { available: false, reason: '' }),
       tm: freshLeg('tm', HISTORY_BYTES, { available: false, reason: '' }),
+      clif: freshLeg('clif', HISTORY_BYTES, { available: false, reason: '' }),
     } satisfies Required<SessionLegs>,
     // NOTHING COMPILED YET, AND THIS SESSION IS THE ONE THAT EVER WILL — `compiled` is the reply the
     // scratch types cannot send (5d-i §4.1), so the scratchpad's own entry states the same `null` and keeps
     // it. See `SessionEntry.programs` for what reads this and when.
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   })
   /** The λ trees the views draw (spec §4) — one cache, asked through each session's own client. */
   const trees = new LambdaTrees((id) => (sessions.has(id) ? sessions.entryOf(id).client : undefined))
-  /** Views a compile reached while they were off the page — `replies.ts` adds, `draw()` seeds and removes. */
+  /** `replies.ts`'s `UnseenViews`: views it adds, and `draw()` seeds from their session and removes. */
   const unseen: UnseenViews = new WeakSet()
+  /**
+   * Take the CLIF leg's part out of the stored result: the stepper it was read off is gone, and the readout gives the
+   * leg rows only while one is built (`results.ts`'s `clifResultRows`).
+   */
+  const forgetClifPart = (): void => {
+    if (program?.kind === 'result') program = { ...program, legs: { ...program.legs, clif: CLIF_ABSENT } }
+  }
+  /**
+   * What the session worker has been told about the CLIF leg (`clif-sync.ts`). **EACH POST RAISES THE LEG'S EPOCH**,
+   * the one a rewind raises, so rewinds and requests count in one sequence, as the worker counts them, and frames of
+   * the recording a request replaces are dropped by their epoch. **A POST THAT DROPS THE LISTING EMPTIES THE LEG**, its
+   * listing and the stored result's CLIF part, as the worker's own `posted` does: a hidden CLIF view keeps no history.
+   */
+  const clifSync = new ClifSync((listing) => {
+    const entry = sessions.entryOf(SOURCE_SESSION)
+    const leg = sessions.legOf({ session: SOURCE_SESSION, leg: 'clif' })
+    if (listing === null) {
+      rewindLeg(leg)
+      entry.programs.clif = null
+      forgetClifPart()
+    } else {
+      // **ONE THAT ASKS FOR A LISTING KEEPS ALL THREE ON THE PAGE**: the leg and its listing until the new listing's
+      // first frames replace them in one draw (`ClifHold`), the CLIF part until the new stepper's `result` or a
+      // reason (`absent`), and through the hold against a result of another request (`ClifHold.part`). Emptied at
+      // the press, a CLIF view would draw the old rows bare, then the new rows before their step 0, and the readout
+      // would lose its CLIF rows and get them back, moving the views.
+      holdClifLeg(leg, program?.kind === 'result' ? { gen: program.gen, clif: program.legs.clif } : undefined)
+    }
+    entry.client.clif(listing, leg.epoch)
+    draw()
+  })
+
   /**
    * TRANSPORT, BEFORE ANY PANE — its `events(...)` is what each pane is constructed with, so it has
    * to exist first. `scratchpad` is a real value (constructed above, and nothing later reassigns it);
@@ -921,6 +1001,15 @@ async function main(): Promise<EditorView> {
       widths,
       current: () => fieldWidth,
       choose: (width) => chooseFieldWidth(width),
+    },
+    clifLoad: {
+      state: () => clifLoadState,
+      retry: () => clifSync.retry(),
+    },
+    // `choose` IS A THUNK over `chooseClifListing`, for `fieldWidth`'s reason.
+    clifListing: {
+      current: () => clifListing,
+      choose: (listing) => chooseClifListing(listing),
     },
     linkWiring: () => linkWiring,
     // A THUNK FOR THE SAME REASON `draw` IS ONE, one step further down the file: `refreshBuffers` is
@@ -1238,8 +1327,8 @@ async function main(): Promise<EditorView> {
   let restorable: StoredProgram = storedProgram
 
   /**
-   * Store the program — `compile.ts` calls this as each compile posts, with the text, the encoding and the width it
-   * posted (Plan 7 part 6a spec §4.3).
+   * Store the program — as each compile posts, with what it posted and the listing in force, and at each listing chosen
+   * (Plan 7 part 6a spec §4.3).
    *
    * **A REFUSED WRITE IS REPORTED ONLY WHILE THE PROGRAM DIFFERS FROM WHAT A RELOAD WOULD RESTORE** (spec row 17), as
    * the copies' writer reports only when there are copies to lose (`hasBuffers`, above). A program a reload would not
@@ -1250,13 +1339,17 @@ async function main(): Promise<EditorView> {
    * shows. That refines row 17's "changed from what was loaded", under which a change once made was reported for the
    * rest of the page load.
    */
-  const writeProgramStorage = (text: string, encoding: string, width: number | null): void => {
+  const writeProgramStorage = (program: StoredProgram): void => {
     try {
-      localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram({ text, encoding, width }))
-      restorable = { text, encoding, width }
+      localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram(program))
+      restorable = program
       unsaved.saved('program')
     } catch (thrown) {
-      const differs = text !== restorable.text || encoding !== restorable.encoding || width !== restorable.width
+      const differs =
+        program.text !== restorable.text ||
+        program.encoding !== restorable.encoding ||
+        program.width !== restorable.width ||
+        program.listing !== restorable.listing
       if (differs) unsaved.refused('program', refusalOf(thrown))
       else unsaved.saved('program')
     }
@@ -1290,6 +1383,7 @@ async function main(): Promise<EditorView> {
     inspector: restored.inspector,
     display: restored.display,
     tmDisplay: restored.tmDisplay,
+    clifDisplay: restored.clifDisplay,
     arrangements: restored.arrangements,
   }
   /**
@@ -1424,6 +1518,9 @@ async function main(): Promise<EditorView> {
     liveLeaves: () => liveLeaves(tree, ws.arrangements),
     applied: () => {
       viewsToggles.sync(combinationOf(tree), viewsOfKind)
+      // **THE CLIF LEG FOLLOWS THE TREE**, so a CLIF view shown or hidden by any road, a toggle, a key, a `✕`,
+      // `+ view`, a workspace or a link, is told to the session worker here.
+      clifSync.want(clifWanted())
       // **`+ view`'S MENU, OPEN WHILE THE TREE CHANGES UNDER IT, IS FILLED AGAIN**, as the workspace menu is at a pick
       // (`applySwitches`). It lists `source` while no view shows it, and a menu opened then stays open while the source
       // view comes back by another road: its toggle, reached with `Shift+Tab` and pressed with `Enter`. Left unfilled,
@@ -1731,6 +1828,11 @@ async function main(): Promise<EditorView> {
   // THE `views` TOGGLES — spec §6. `pane-host.ts`'s `applied` brings them up to the tree each time one is rendered,
   // so a `✕`, a `+ view` and an opened link move them as a press does.
   const viewsToggles = viewToggles(viewsShown, toggleView)
+  // **`pkg-clif` IS FETCHED ON INTENT** (CLIF view design §6, *Loading*): the pointer resting on the CLIF toggle, or
+  // the focus reaching it, loads the package before the press, and nothing else does until a CLIF view is shown. Only
+  // from `idle` or `failed`, since a load asked for or in needs no other. `viewToggles` has thrown already where the
+  // page has no CLIF toggle.
+  watchIntent(viewsShown.querySelector('button.view-toggle[data-shows="clif"]') as HTMLElement, askClifLoad)
   // **HIDDEN IN A WINDOW 40rem WIDE OR NARROWER**, which is `app-header.ts`'s `NARROW_WINDOW` (`style.css` has what
   // they cost the header there, and a rule of the same width). A view key, a view's `✕` and `+ view` still choose the
   // views; what a narrow window goes without is the header's one press.
@@ -1928,14 +2030,16 @@ async function main(): Promise<EditorView> {
   wireMenu(addViewButton, addViewMenu, fillAddViewMenu)
 
   /**
-   * Put `program` in the source editor: its encoding into the picker, its width into `fieldWidth`, and its text in one
-   * dispatch, whose update listener clears the link state and schedules the compile as it does for any edit. The
-   * compile reads the picker and the width when it posts, `DEBOUNCE_MS` later, so it posts the three together, and the
-   * `supersede` that schedule claims draws every view, which brings each width box to the width.
+   * Put `program` in the source editor: its encoding into the picker, its width into `fieldWidth`, its listing into
+   * `clifListing`, and its text in one dispatch, whose update listener clears the link state and schedules the compile
+   * as it does for any edit. The compile reads the picker, the width and the listing when it posts, `DEBOUNCE_MS`
+   * later, so it posts them together, and the `supersede` that schedule claims draws every view, which brings each
+   * width box and each listing switch to the program's.
    */
   const replaceProgram = (program: StoredProgram): void => {
     picker.value = program.encoding
     fieldWidth = program.width
+    clifListing = program.listing
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: program.text } })
   }
 
@@ -2007,9 +2111,36 @@ async function main(): Promise<EditorView> {
   }
 
   /**
+   * A LISTING CHOSEN IN A CLIF VIEW IS THE PROGRAM'S, as a width is, so it is stored with the program, and the draw
+   * shows it in every CLIF view. **IT RECOMPILES NOTHING**: no other leg's run depends on it, so `clifSync` asks the
+   * session worker for the CLIF leg alone, recorded again from step 0 under a new epoch (CLIF view design §6, *The
+   * switch*). It ends a pick's and a link's notice as a width chosen does: their undo puts back the listing they
+   * replaced.
+   */
+  const chooseClifListing = (listing: Listing): void => {
+    if (listing === clifListing) return
+    clifListing = listing
+    pick?.dismiss()
+    withdrawOffer()
+    writeProgramStorage({ text: view.state.doc.toString(), encoding: picker.value, width: fieldWidth, listing })
+    // **A LINK'S CLIF POSITION GOES**, held for the link's compile or pending on the leg: it is a step of the run of
+    // the listing it was made in, and the share link's reader drops one whose listing it cannot run for the same
+    // reason.
+    const leg = sessions.legOf({ session: SOURCE_SESSION, leg: 'clif' })
+    const going = leg.pending
+    positions.forget('clif')
+    clifSync.want(clifWanted())
+    // **THE STEP LINE GOES ON SAYING WHERE THE LINK WAS TAKING THE LEG WHILE THE CHOICE HOLDS IT**
+    // (`ClifHold.linkStep`), until the new listing's frames replace the line: said no longer at the press, the line
+    // would change, and could re-wrap and move the rows, a frame or more before the view does.
+    if (going !== undefined && leg.clifHold !== undefined) leg.clifHold.linkStep = going
+    draw()
+  }
+
+  /**
    * PICK AN EXAMPLE — Plan 7 part 6a spec §4.5. It replaces the program at once, under the default encoding at auto,
    * since the manifest's outcomes and descriptions are theirs (the TM width design, decision 7); the workspace is
-   * untouched. The notice's `undo` puts back the text, encoding and width it replaced, and so recompiles.
+   * untouched. The notice's `undo` puts back the text, encoding, width and listing it replaced, and so recompiles.
    *
    * **THE UNDO IS WITHDRAWN AT THE NEXT EDIT THAT CHANGES THE PROGRAM**, typed or otherwise, and by the next pick,
    * whose own replacement is such an edit. It puts back the whole document the pick replaced, so offered past an edit
@@ -2035,8 +2166,13 @@ async function main(): Promise<EditorView> {
    * focus lands, so the sentence is not spoken over by the editor or the button taking it.
    */
   const openExample = (example: Example): void => {
-    const before: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value, width: fieldWidth }
-    replaceProgram({ text: example.text, encoding: EXAMPLE_ENCODING, width: null })
+    const before: StoredProgram = {
+      text: view.state.doc.toString(),
+      encoding: picker.value,
+      width: fieldWidth,
+      listing: clifListing,
+    }
+    replaceProgram({ text: example.text, encoding: EXAMPLE_ENCODING, width: null, listing: 'as-built' })
     pick = notices.notify(`opened the example ${example.title}`, {
       action: {
         label: 'undo',
@@ -2056,7 +2192,7 @@ async function main(): Promise<EditorView> {
 
   /**
    * WHAT A LINK CARRIES — Plan 7 part 6a spec §5.1: the source editor's text, the encoding in the picker, the
-   * program's width, the workspace as `serializeWorkspace` writes it, and the step of each program leg with frames.
+   * program's width and listing, the workspace as `serializeWorkspace` writes it, and each program leg's step.
    *
    * **A POSITION IS TAKEN ONLY WHILE THE PROGRAM SESSION IS NOT AWAITING A RUN** (`SessionClient.awaitingRun`).
    * Positions describe the frames on screen, and while the editor's text is compiling those are the last program's, so
@@ -2072,14 +2208,16 @@ async function main(): Promise<EditorView> {
     const steps: { [L in Leg]?: number } = { ...positions.pendingFor(client.gen) }
     if (!client.awaitingRun) {
       for (const leg of LEGS) {
-        const { hist } = sessions.legOf({ session: SOURCE_SESSION, leg })
-        if (steps[leg] === undefined && hist.length > 0) steps[leg] = hist.currentStep
+        // NOT A HELD RING'S (`ClifHold`): its frames are of the listing the program has just left.
+        const { hist, clifHold } = sessions.legOf({ session: SOURCE_SESSION, leg })
+        if (steps[leg] === undefined && hist.length > 0 && clifHold === undefined) steps[leg] = hist.currentStep
       }
     }
     return {
       program: view.state.doc.toString(),
       encoding: picker.value,
       width: fieldWidth,
+      ...(clifListing === 'optimised' ? { listing: clifListing } : {}),
       // **THE ARRANGEMENT ON SCREEN AND NO OTHER** (the view layouts spec §4.7): a reader needs what the sender saw, and
       // a link has a size to keep down. Emptied here, `serializeWorkspace` writes no `arrangements` and no state of a
       // view only a remembered arrangement held.
@@ -2231,18 +2369,28 @@ async function main(): Promise<EditorView> {
     // COMPARED AFTER THE READ, NOT BEFORE IT: before it, every call's ticket is the latest.
     if (ticket !== linkTicket) return
     if (opened.kind !== 'unreadable') shareMenu.hidePopover()
-    const program: StoredProgram = { text: view.state.doc.toString(), encoding: picker.value, width: fieldWidth }
+    const program: StoredProgram = {
+      text: view.state.doc.toString(),
+      encoding: picker.value,
+      width: fieldWidth,
+      listing: clifListing,
+    }
     if (opened.kind === 'whole') {
       const copies = panes
         .all()
         .flatMap((p) => (p.slot.binding.session === SOURCE_SESSION ? [] : [[p.id, p.slot.binding.session] as const]))
       const before: Replaced = { program, workspace: { tree, ...ws }, copies }
-      replaceProgram({ text: opened.program, encoding: opened.encoding, width: opened.width })
+      replaceProgram({ text: opened.program, encoding: opened.encoding, width: opened.width, listing: opened.listing })
       showWorkspace(opened.workspace)
       announceOpen(opened, before)
     } else {
       if (opened.kind === 'program')
-        replaceProgram({ text: opened.program, encoding: opened.encoding ?? picker.value, width: opened.width })
+        replaceProgram({
+          text: opened.program,
+          encoding: opened.encoding ?? picker.value,
+          width: opened.width,
+          listing: opened.listing,
+        })
       announceOpen(opened, { program, workspace: null, copies: [] })
     }
   }
@@ -2307,7 +2455,7 @@ async function main(): Promise<EditorView> {
    * legs `ScratchBuffers` registers for one (`scratch.ts`) — and it would escape the `beforetoggle` handler, as a cold
    * buffer's would if `term` below did not branch on `warm`.
    */
-  const copyHolds = (session: SessionId, leg: Leg): string | null => {
+  const copyHolds = (session: SessionId, leg: CopyLeg): string | null => {
     switch (leg) {
       case 'lambda': {
         const copy = sessions.legOf({ session, leg: 'lambda' })
@@ -2457,7 +2605,7 @@ async function main(): Promise<EditorView> {
           `${name} paused${shown === 0 ? '' : ` · ${shown === 1 ? '1 view now shows' : `${shown} views now show`} the program`}`,
         )
     },
-    (leg: Leg) => {
+    (leg: CopyLeg) => {
       /**
        * **THE SECOND GESTURE — 5d-iv design §4.7.** `ScratchBuffers.fork` detaches a pane onto a copy of
        * what it was showing, and is unavailable above the fork cap; `forkBlank` mints a warm, empty
@@ -2653,9 +2801,11 @@ async function main(): Promise<EditorView> {
     results,
     picker,
     width: () => fieldWidth,
+    clif: clifWanted,
+    clifSync,
     view: () => view,
     sourceSession: SOURCE_SESSION,
-    persist: writeProgramStorage,
+    persist: (text, encoding, width) => writeProgramStorage({ text, encoding, width, listing: clifListing }),
   })
 
   /**
@@ -2699,6 +2849,13 @@ async function main(): Promise<EditorView> {
     // BARE, NOT A THUNK, for the reason the doc above gives for `links` and `draw`: `persistBuffers` is
     // a real value hundreds of lines before this call.
     onBuffersPersist: persistBuffers,
+    clif: {
+      loaded: (state) => {
+        clifLoadState = state
+      },
+      settled: () => clifSync.settled(),
+      absent: forgetClifPart,
+    },
   })
 
   view = new EditorView({

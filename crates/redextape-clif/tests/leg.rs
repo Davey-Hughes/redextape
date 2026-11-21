@@ -10,8 +10,9 @@
 mod common;
 
 use common::{TIGHT, program_of};
-use redextape_clif::{ClifInput, ClifLeg, ClifStatus, ClifWindow};
-use redextape_core::tm::{Caps, DEFAULT_CAPS};
+use redextape_clif::{ClifInput, ClifLeg, ClifStatus, ClifWindow, decline_reason};
+use redextape_core::core::NodeId;
+use redextape_core::tm::{Caps, DEFAULT_CAPS, Instr, LowerError, Program};
 use redextape_core::trace::RxmCap;
 use redextape_core::ty::Ty;
 use redextape_native::Listing;
@@ -60,8 +61,8 @@ fn the_end_is_found_in_chunks() {
     }
 }
 
-/// The length is known once the cursor ends, with no scout sent ahead, as a worker that reports the end when
-/// the recording reaches it needs; a pause is not the end.
+/// The length is known once the cursor stops, with no scout sent ahead, as a worker that reports the end when
+/// the recording reaches it needs; a pause under the input's caps gives what a scout run to that cap would.
 #[test]
 fn a_cursor_that_ends_gives_the_length_without_the_scout() {
     for (listing, steps) in [(Listing::AsBuilt, 189), (Listing::Optimised, 131)] {
@@ -78,8 +79,71 @@ fn a_cursor_that_ends_gives_the_length_without_the_scout() {
     assert_eq!(step_to_stop(&mut paused), 1205);
     assert_eq!(
         paused.status(),
-        ClifStatus { run: RunStatus::Capped, cap: Some(RxmCap::Steps), total_steps: None },
+        ClifStatus { run: RunStatus::Capped, cap: Some(RxmCap::Steps), total_steps: Some(1205) },
         "the cursor's pause"
+    );
+}
+
+/// The length and the value the cursor found outlast a rewind, so a worker that never sends the scout ahead
+/// does not lose them.
+#[test]
+fn a_rewind_keeps_the_length_the_cursor_found() {
+    for (listing, steps) in [(Listing::AsBuilt, 189), (Listing::Optimised, 131)] {
+        let mut leg = leg(FACT, Ty::Nat, DEFAULT_CAPS, listing);
+        assert_eq!(step_to_stop(&mut leg), steps, "{}", listing.name());
+        assert_eq!(leg.status().total_steps, Some(steps), "{}: the cursor's end", listing.name());
+        leg.rewind();
+        assert_eq!(
+            leg.status(),
+            ClifStatus { run: RunStatus::Running, cap: None, total_steps: Some(steps) },
+            "{}: rewound",
+            listing.name()
+        );
+        assert_eq!(leg.value(), Decoded::Value { text: "24".into() }, "{}: rewound", listing.name());
+    }
+}
+
+/// A pause the cursor reaches under the input's caps stays the run's length once a raise has carried the
+/// cursor past it and a rewind has brought it back.
+#[test]
+fn a_pause_before_any_raise_is_kept() {
+    let mut leg = leg(loop_src(), Ty::Nat, TIGHT, Listing::AsBuilt);
+    assert_eq!(step_to_stop(&mut leg), 1205, "the cursor's pause");
+    assert_eq!(leg.status().total_steps, Some(1205), "the cursor's pause");
+    leg.raise_cap(40);
+    let further = step_to_stop(&mut leg);
+    assert!(further > 1205, "the next stop, {further}, is past the first");
+    assert_eq!(leg.status().total_steps, Some(further), "past the pause the total is the cursor's");
+    leg.rewind();
+    assert_eq!(leg.status().total_steps, Some(1205), "rewound, the pause under the input's caps");
+}
+
+/// A cursor raised before it stops can go where the input's caps do not take the run, so its stop is not
+/// kept as the run's length; rewound, its stop under the input's caps is.
+#[test]
+fn a_raised_end_is_not_the_runs_length() {
+    let mut leg = leg(loop_src(), Ty::Nat, TIGHT, Listing::AsBuilt);
+    leg.raise_cap(40);
+    let raised = step_to_stop(&mut leg);
+    assert!(raised > 1205, "the raised stop, {raised}, is past the input's");
+    leg.rewind();
+    assert_eq!(leg.status().total_steps, None, "rewound, the raised stop is not the run's");
+    assert_eq!(step_to_stop(&mut leg), 1205, "a rewound cursor runs under the input's caps");
+    assert_eq!(leg.status().total_steps, Some(1205), "the stop under the input's caps");
+}
+
+/// A program the leg cannot build is refused with a sentence a page can show after its own words.
+#[test]
+fn a_build_failure_is_a_sentence() {
+    let program = Program { code: vec![Instr::Call("missing".into()), Instr::Halt], labels: vec![] };
+    let input = ClifInput { program, ty: Ty::Nat, caps: DEFAULT_CAPS };
+    let Err(e) = ClifLeg::new(input, Listing::AsBuilt) else {
+        panic!("a call to an undefined label built");
+    };
+    assert_eq!(decline_reason(&e), "call to undefined label `missing`");
+    assert_eq!(
+        decline_reason(&LowerError::TooDeep { node: NodeId::default() }),
+        "the program nests deeper than the rxm lowering guard allows"
     );
 }
 

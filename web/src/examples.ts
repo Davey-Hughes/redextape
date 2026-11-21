@@ -52,7 +52,7 @@ const SUM_TO: Example = {
   description: 'a while loop adding 5 down to 1; every leg ends at 15',
   text: sumTo,
   value: '15',
-  outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended' },
+  outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended', clif: 'ended' },
 }
 
 export const EXAMPLES: readonly Example[] = [
@@ -62,7 +62,7 @@ export const EXAMPLES: readonly Example[] = [
     description: 'a binding and a sum; every leg ends at 42',
     text: arithmetic,
     value: '42',
-    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended' },
+    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended', clif: 'ended' },
   },
   {
     id: 'closure',
@@ -70,7 +70,7 @@ export const EXAMPLES: readonly Example[] = [
     description: 'a function that captures n; every leg ends at 42',
     text: closure,
     value: '42',
-    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended' },
+    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended', clif: 'ended' },
   },
   {
     id: 'is-even',
@@ -78,7 +78,7 @@ export const EXAMPLES: readonly Example[] = [
     description: 'two functions calling each other; every leg ends at true',
     text: isEven,
     value: 'true',
-    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended' },
+    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended', clif: 'ended' },
   },
   {
     id: 'fact',
@@ -86,7 +86,7 @@ export const EXAMPLES: readonly Example[] = [
     description: 'recursion, where λ fills its history before its value',
     text: fact,
     value: '24',
-    outcomes: { lambda: 'history-full', rxm: 'ended', tm: 'ended' },
+    outcomes: { lambda: 'history-full', rxm: 'ended', tm: 'ended', clif: 'ended' },
   },
   {
     id: 'map-fold',
@@ -94,7 +94,7 @@ export const EXAMPLES: readonly Example[] = [
     description: 'functions passed as values over a list; the TM’s history fills before it halts',
     text: mapFold,
     value: '9',
-    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'history-full' },
+    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'history-full', clif: 'ended' },
   },
   SUM_TO,
   {
@@ -103,7 +103,7 @@ export const EXAMPLES: readonly Example[] = [
     description: 'a value too wide for unary: λ and the TM fill their histories, rxm ends',
     text: fact12,
     value: '479001600',
-    outcomes: { lambda: 'history-full', rxm: 'ended', tm: 'history-full' },
+    outcomes: { lambda: 'history-full', rxm: 'ended', tm: 'history-full', clif: 'ended' },
   },
 ]
 

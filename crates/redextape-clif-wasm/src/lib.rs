@@ -3,7 +3,7 @@
 //!
 //! A panic under wasm aborts the module, so every export that can fail returns `Result<_, JsValue>`.
 
-use redextape_clif::{ClifInput, ClifLeg, ClifWindow};
+use redextape_clif::{ClifInput, ClifLeg, ClifWindow, decline_reason};
 use redextape_native::Listing;
 use redextape_wire::to_value;
 use wasm_bindgen::prelude::*;
@@ -25,14 +25,15 @@ impl ClifSession {
     /// # Errors
     ///
     /// `ClifSession: not a clifInput(): <error>` when `input` does not deserialize, `unknown listing "<name>"` for a
-    /// name `Listing::parse` refuses, and `ClifSession: <error>` when the CLIF cannot be built.
+    /// name `Listing::parse` refuses, and `decline_reason`'s sentence alone when the CLIF cannot be built, since the
+    /// page shows it after words of its own.
     #[wasm_bindgen(constructor)]
     pub fn new(input: JsValue, listing: &str) -> Result<ClifSession, JsValue> {
         let input: ClifInput = serde_wasm_bindgen::from_value(input)
             .map_err(|e| JsValue::from_str(&format!("ClifSession: not a clifInput(): {e}")))?;
         let listing =
             Listing::parse(listing).ok_or_else(|| JsValue::from_str(&format!("unknown listing {listing:?}")))?;
-        let leg = ClifLeg::new(input, listing).map_err(|e| JsValue::from_str(&format!("ClifSession: {e:?}")))?;
+        let leg = ClifLeg::new(input, listing).map_err(|e| JsValue::from_str(&decline_reason(&e)))?;
         Ok(ClifSession(leg))
     }
 

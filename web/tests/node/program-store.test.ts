@@ -7,21 +7,23 @@ const ENCODINGS = ['unary', 'binary']
 /** The widths `main.ts` hands in, as `fieldWidths()` lists them today. */
 const WIDTHS = Array.from({ length: 64 }, (_, i) => i + 1)
 
-const PROGRAM: StoredProgram = { text: 'let x = 40;\nx + 2\n', encoding: 'binary', width: null }
+const PROGRAM: StoredProgram = { text: 'let x = 40;\nx + 2\n', encoding: 'binary', width: null, listing: 'as-built' }
 
 /** A raw value with `fields` merged over a valid one, at auto — the shape a hand-edit produces. */
 const raw = (fields: Record<string, unknown>): string =>
   JSON.stringify({ version: PROGRAM_VERSION, text: PROGRAM.text, encoding: PROGRAM.encoding, ...fields })
 
 describe('parseProgram', () => {
-  it('round-trips a program: its text, whatever it holds, its encoding and its width', () => {
+  it('round-trips a program: its text, whatever it holds, its encoding, its width and its listing', () => {
     expect(parseProgram(serializeProgram(PROGRAM), ENCODINGS, WIDTHS)).toEqual(PROGRAM)
-    const odd: StoredProgram = { text: '', encoding: 'unary', width: null }
+    const odd: StoredProgram = { text: '', encoding: 'unary', width: null, listing: 'as-built' }
     expect(parseProgram(serializeProgram(odd), ENCODINGS, WIDTHS)).toEqual(odd)
     for (const width of [4, 8, 64]) {
       const pinned: StoredProgram = { ...PROGRAM, width }
       expect(parseProgram(serializeProgram(pinned), ENCODINGS, WIDTHS), `width ${width}`).toEqual(pinned)
     }
+    const optimised: StoredProgram = { ...PROGRAM, width: 8, listing: 'optimised' }
+    expect(parseProgram(serializeProgram(optimised), ENCODINGS, WIDTHS)).toEqual(optimised)
   })
 
   it('writes version 1, the text and the encoding, and nothing else', () => {
@@ -44,6 +46,49 @@ describe('parseProgram', () => {
 
   it('reads a program stored with no width as auto', () => {
     expect(parseProgram(raw({}), ENCODINGS, WIDTHS)).toStrictEqual(PROGRAM)
+  })
+
+  /**
+   * **A PROGRAM AS BUILT IS STORED WITH NO `listing` KEY**, as auto is stored with no `width`, so it is the version-1
+   * payload every build at this version reads as this program, and `PROGRAM_VERSION` stays 1. Optimised sits after the
+   * width.
+   */
+  it('stores as built with no listing key, and optimised after the width', () => {
+    expect(PROGRAM_VERSION).toBe(1)
+    expect(serializeProgram(PROGRAM)).toBe('{"version":1,"text":"let x = 40;\\nx + 2\\n","encoding":"binary"}')
+    expect(serializeProgram({ ...PROGRAM, listing: 'optimised' })).toBe(
+      '{"version":1,"text":"let x = 40;\\nx + 2\\n","encoding":"binary","listing":"optimised"}',
+    )
+    expect(serializeProgram({ ...PROGRAM, width: 8, listing: 'optimised' })).toBe(
+      '{"version":1,"text":"let x = 40;\\nx + 2\\n","encoding":"binary","width":8,"listing":"optimised"}',
+    )
+  })
+
+  it('reads a program stored as optimised as optimised', () => {
+    expect(parseProgram(raw({ listing: 'optimised' }), ENCODINGS, WIDTHS)).toStrictEqual({
+      ...PROGRAM,
+      listing: 'optimised',
+    })
+  })
+
+  /**
+   * **A LISTING IT DOES NOT KNOW READS AS BUILT, AND REFUSES NOTHING**, as a width it does not list reads as auto:
+   * refusing the program would lose its text over a field that only says which listing its CLIF views show.
+   */
+  it('reads a listing it does not know, or none, as built, and keeps the text and the encoding', () => {
+    expect(parseProgram(raw({}), ENCODINGS, WIDTHS)?.listing).toBe('as-built')
+    for (const listing of [
+      'sideways',
+      'as built',
+      'Optimised',
+      null,
+      true,
+      1,
+      ['optimised'],
+      { listing: 'optimised' },
+    ]) {
+      expect(parseProgram(raw({ listing }), ENCODINGS, WIDTHS), JSON.stringify(listing)).toStrictEqual(PROGRAM)
+    }
   })
 
   /**

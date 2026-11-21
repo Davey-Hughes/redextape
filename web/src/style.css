@@ -142,31 +142,48 @@ body {
   min-height: 100vh;
 }
 
+/* **THE COLUMN GAP IS 0.8125rem, NOT A SPACE TOKEN**, Instrument's, and Terminal's over 85rem; Paper and Terminal up to
+   85rem have their own, below. Debugger's header, Instrument's widest, keeps to one row at 1280px with the five
+   toggles at this gap, and not at a sixteenth of a rem more, on any machine, since Instrument's face is one the app
+   ships. Smaller would move every control further for no row gained. `--bar-column-gap` is a property so that
+   `.bar-spacer` can give one back. */
 .bar {
+  --bar-column-gap: 0.8125rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-3) var(--bar-column-gap);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--rule);
   background: var(--bg-chrome);
 }
-/* AT A PHONE'S WIDTH THE HEADER'S CONTROLS SIT CLOSER, so `examples ▾` does not cost the page a row. At 390px, in
-   Explorer and Debugger, it would take the header from three rows to four at the full gap, and half the gap between
-   controls keeps it at three, in Instrument and Paper. Terminal's monospace is wider: on a machine whose
-   `ui-monospace` is Noto Sans Mono it stays at four there, where without `examples ▾` it is three. */
+/* AT A PHONE'S WIDTH THE HEADER'S CONTROLS SIT CLOSER: the header wraps there, and a narrower gap between its
+   controls lets more of them share a row. */
 @media (max-width: 30rem) {
   .bar {
-    column-gap: var(--space-2);
+    --bar-column-gap: var(--space-2);
+  }
+}
+/* PAPER'S HEADER SITS CLOSER TOO. Its face is the machine's sans-serif, and where that is as wide as DejaVu Sans the
+   five `views` toggles take the header past a 1280 px window at `.bar`'s gap, `settings` going to a second row.
+   0.5625rem is the widest sixteenth of a rem at which Explorer's, Debugger's and Stage's keep to one row there with
+   DejaVu Sans, Liberation Sans or Noto Sans. The rule starts above 30rem, below which the phone's rule above gives
+   Paper the same gap as the other two styles. */
+@media (width > 30rem) {
+  :root[data-style="paper"] .bar {
+    --bar-column-gap: 0.5625rem;
   }
 }
 /* TERMINAL'S HEADER SITS CLOSER TOO, IN A WINDOW ITS CONTROLS WOULD NOT OTHERWISE FIT ACROSS. Its face is the
    machine's monospace, wider than the other two styles' faces, and at the full gap the `views` toggles take the
-   header past a 1280 px window, `settings` going to a second row. The rule ends at 85rem, above which the header
-   fits at the full gap. Only the column gap changes, and only in this style. */
-@media (max-width: 85rem) {
+   header past a 1280 px window, `settings` going to a second row. It is 0.3125rem, and not a sixteenth of a rem
+   more, so that a monospace as wide as DejaVu Sans Mono keeps Debugger's and Explorer's to one row there with room
+   to spare. The rule ends at 85rem, above which the header fits at the full gap, and starts above 30rem, below which
+   the phone's rule above gives Terminal the same gap as the other two styles. Only the column gap changes, and only
+   in this style. */
+@media (30rem < width <= 85rem) {
   :root[data-style="terminal"] .bar {
-    column-gap: var(--space-2);
+    --bar-column-gap: 0.3125rem;
   }
 }
 
@@ -213,8 +230,14 @@ select option {
   color: var(--fg);
 }
 
+/* **AT ITS NARROWEST THE SPACER TAKES NO ROOM, NOT EVEN A GAP**: its start margin gives back the column gap before it,
+   so the controls on either side of it are one gap apart, as any two neighbours are, and not two. Without it the
+   header would keep a gap's width for an empty spacer, and at 1280px the five `views` toggles' row would need that
+   width (`.bar`'s gap above). Its box, the run `notice.ts`'s `floatInRun` floats a notice in, starts at the control
+   before it. */
 .bar-spacer {
   flex: 1 1 auto;
+  margin-inline-start: calc(-1 * var(--bar-column-gap));
 }
 /* THE HEADER'S BUTTONS: `#appearance`'s chrome, shared, so the header reads as one row of controls — and not
    the browser's default dark button. */
@@ -239,7 +262,7 @@ select option {
   cursor: pointer;
   white-space: nowrap;
 }
-/* THE `views` TOGGLES (the view layouts spec §6; their look, the view switcher style design): four of the header's
+/* THE `views` TOGGLES (the view layouts spec §6; their look, the view switcher style design): five of the header's
    buttons, apart, one a kind of view.
 
    **A PRESSED TOGGLE IS EDGED AND UNDERLINED IN THE ACCENT**, the panel radios' cue (`.map-mode`); the underline is a
@@ -255,7 +278,10 @@ select option {
   gap: var(--space-1);
 }
 /* Each corner takes the shared rule's `--radius`, as every header button does. The inline padding is narrower than
-   theirs so that the four, with their gaps, keep the header to one row at 1280px in the Debugger preset. */
+   theirs so that the five, with their gaps (`.bar`'s, and the one `.bar-spacer` gives back), keep the header to one
+   row at 1280px in every preset: in Instrument, whose face the app ships; in Terminal where the machine's monospace is
+   no wider than DejaVu Sans Mono; and in Paper where its sans-serif is no wider than DejaVu Sans (Paper's own gap,
+   beside `.bar`'s). `clif-header.test.ts` holds the row. */
 .view-toggle {
   padding-inline: 0.2em;
   border-color: var(--rule);
@@ -271,7 +297,7 @@ select option {
 }
 /* **IN FORCED COLOURS ONE THAT IS NOT PRESSED IS DASHED, AND A PRESSED ONE IS EDGED IN `Highlight`.** Forced colours
    put a system colour in place of each of the page's and draw no shadow, so the accent edge, the dim text and the
-   underline go and the four would look alike. A border's style and a system colour the page names are kept. */
+   underline go and the five would look alike. A border's style and a system colour the page names are kept. */
 @media (forced-colors: active) {
   .view-toggle[aria-pressed="false"] {
     border-style: dashed;
@@ -582,6 +608,7 @@ select option {
 .buffer-delete,
 .buffer-temperature,
 .buffer-new,
+.clif-listing-choice,
 .panel-actions button {
   font: inherit;
   font-family: var(--font-mono);
@@ -1040,7 +1067,8 @@ button.view-title[aria-expanded="true"] {
    `.view-menu-choice[aria-checked="true"]` uses: heavier than its sibling, plus a bar in `--accent`. A mode's
    button is otherwise every panel action's (`.panel-actions button`), which outranks a rule on its class. */
 .map-mode[aria-checked="true"],
-.diagram-mode[aria-checked="true"] {
+.diagram-mode[aria-checked="true"],
+.clif-listing-choice[aria-checked="true"] {
   font-weight: 600;
   border-color: var(--accent);
   box-shadow: inset 0 -2px 0 var(--accent);
@@ -1395,10 +1423,11 @@ button.view-title[aria-expanded="true"] {
 /* A SETTING'S CHECKED CHOICE (`view-header.ts`'s `radioGroup`), DRAWN WITHOUT RELYING ON COLOUR: heavier
    than its siblings, with a bar at its leading edge. The bar takes `--accent`, a palette token; the weight is
    what still shows in a palette whose colours a reader cannot tell apart. `lambda-display.test.ts` compares
-   the computed weights of a checked and an unchecked choice. "expand all" is a setting in force the same way,
-   so it is drawn checked with the same cue. */
+   the computed weights of a checked and an unchecked choice. "expand all" and a CLIF view's "compact" are
+   settings in force the same way, so each is drawn checked with the same cue. */
 .view-menu-choice[aria-checked="true"],
-.expand-all[aria-checked="true"] {
+.expand-all[aria-checked="true"],
+.clif-compact[aria-checked="true"] {
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--accent);
 }
@@ -1748,19 +1777,22 @@ button.view-title[aria-expanded="true"] {
    view's give the rxm listing two. Its height is still bounded, and has to be — unbounded, it grows to the
    full height of its rows and every draw renders every row — but by the view, which the layout sizes. */
 .state-table,
-.rxm-listing {
+.rxm-listing,
+.clif-listing {
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: var(--step--2);
 }
 
 .state-spacer,
-.rxm-spacer {
+.rxm-spacer,
+.clif-spacer {
   position: relative;
 }
 
 .state-rows,
-.rxm-rows {
+.rxm-rows,
+.clif-rows {
   position: absolute;
   inset-inline: 0;
   top: 0;
@@ -1769,10 +1801,11 @@ button.view-title[aria-expanded="true"] {
 
 /* MUST equal ROW_HEIGHT in state-table.ts. virtual-list.ts's offset arithmetic assumes it exactly, and
    a mismatch drifts the rows out from under the scrollbar without any test noticing. `tm-pane.ts`
-   re-exports the constant; it does not define it. The rxm listing's rows are the same grid's (`virtual-grid.ts`),
-   so the same height and the same marks. */
+   re-exports the constant; it does not define it. The rxm and CLIF listings' rows are the same grid's
+   (`virtual-grid.ts`), so the same height and the same marks. */
 .state-row,
-.rxm-row {
+.rxm-row,
+.clif-row {
   height: 24px;
   line-height: 24px;
   padding-inline: 0.5rem;
@@ -1792,19 +1825,22 @@ button.view-title[aria-expanded="true"] {
 }
 /* A row's one grid cell holds its text, so the text's clipping lives here and not on the row. */
 .state-cell,
-.rxm-cell {
+.rxm-cell,
+.clif-cell {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .state-table:focus-visible .state-row.is-active,
-.rxm-listing:focus-visible .rxm-row.is-active {
+.rxm-listing:focus-visible .rxm-row.is-active,
+.clif-listing:focus-visible .clif-row.is-active {
   --row-active: 0 0 0 2px var(--focus-ring);
 }
 /* A mark's words for a screen reader — "fires next" — as generated content, so they are read and are not the
    row's text; clipped away, so they are not seen. The λ view's marks do the same (`.term [data-marks]`). */
 .state-cell[data-marks]::before,
-.rxm-cell[data-marks]::before {
+.rxm-cell[data-marks]::before,
+.clif-cell[data-marks]::before {
   content: attr(data-marks);
   position: absolute;
   width: 1px;
@@ -1834,7 +1870,8 @@ button.view-title[aria-expanded="true"] {
    SOURCE ORDER decides which background shows: this rule has to come first so those two, declared
    after it, are the ones that win. */
 .state-row.is-linked,
-.rxm-row.is-linked {
+.rxm-row.is-linked,
+.clif-row.is-linked {
   background: var(--link-bg);
   border-inline-start-style: dashed;
   border-inline-start-color: var(--link-edge);
@@ -1854,13 +1891,15 @@ button.view-title[aria-expanded="true"] {
 
    ITS CUE IS THE BOTTOM EDGE, composed through `--row-edge` so it survives beside the current row's bar. */
 .state-row.is-focus,
-.rxm-row.is-focus {
+.rxm-row.is-focus,
+.clif-row.is-focus {
   background: color-mix(in oklab, var(--tok-operator) 22%, var(--bg));
   --row-edge: 0 -2px 0 var(--tok-operator);
 }
 
 .state-row,
-.rxm-row {
+.rxm-row,
+.clif-row {
   cursor: pointer;
 }
 
@@ -2925,17 +2964,21 @@ main {
    each body keeps a floor of five rows. `.rxm-machine` is the row the registers and the call stack share: it wraps, so
    the two stack when the view is too narrow for both, and it takes no share of its own while both are closed. On a
    copy the text panel keeps its own height above them all, until a boundary beside it is dragged, and the outline
-   takes one share below, as in a TM view. */
-.pane[data-kind="rxm"] {
+   takes one share below, as in a TM view. The CLIF view's listing, values and call stack, and heap share its height
+   by the same rules; it has no copy, so no text panel and no outline. */
+.pane[data-kind="rxm"],
+.pane[data-kind="clif"] {
   display: flex;
   flex-direction: column;
 }
-.rxm-pane {
+.rxm-pane,
+.clif-pane {
   flex: 1 0 auto;
   display: flex;
   flex-direction: column;
 }
-.rxm-pane > * {
+.rxm-pane > *,
+.clif-pane > * {
   flex: none;
 }
 /* NAMED, NOT EVERY OPEN PANEL: the text panel keeps its own height, and both it and the outline are `hidden` on a view of
@@ -2943,6 +2986,8 @@ main {
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
 .rxm-pane > .panel[data-panel="heap"][data-open="true"],
 .rxm-pane > .panel[data-panel="outline"][data-open="true"]:not([hidden]),
+.clif-pane > .panel[data-panel="listing"][data-open="true"],
+.clif-pane > .panel[data-panel="heap"][data-open="true"],
 .rxm-machine > .panel[data-open="true"] {
   display: flex;
   flex-direction: column;
@@ -2952,7 +2997,10 @@ main {
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
 .rxm-pane > .panel[data-panel="heap"][data-open="true"],
 .rxm-pane > .panel[data-panel="outline"][data-open="true"],
-.rxm-pane > .rxm-machine:has(> .panel[data-open="true"]) {
+.rxm-pane > .rxm-machine:has(> .panel[data-open="true"]),
+.clif-pane > .panel[data-panel="listing"][data-open="true"],
+.clif-pane > .panel[data-panel="heap"][data-open="true"],
+.clif-pane > .rxm-machine:has(> .panel[data-open="true"]) {
   flex: var(--share, 1) 1 0;
 }
 .rxm-pane > .panel[data-open="true"] > .outline {
@@ -2981,7 +3029,8 @@ main {
   flex: none;
   align-self: flex-start;
 }
-.rxm-pane > .panel[data-open="true"] > .rxm-listing {
+.rxm-pane > .panel[data-open="true"] > .rxm-listing,
+.clif-pane > .panel[data-open="true"] > .clif-listing {
   flex: 1 1 0;
   min-height: calc(5 * 24px);
 }
@@ -3016,9 +3065,25 @@ main {
   color: var(--fg-dim);
   font-weight: 600;
 }
+/* A CLIF ROW THAT SHOWS NO INSTRUCTION, as Cranelift prints it, dimmed as the rxm view's labels are; the two that head
+   what follows them, a function's and a block's, bold. */
+.clif-row.is-label {
+  color: var(--fg-dim);
+}
+.clif-cell.is-function,
+.clif-cell.is-block {
+  font-weight: 600;
+}
+/* WHAT A CLIF VIEW'S LISTING SAYS WHILE IT HAS NONE, at the top of the listing's body: words, so in the page's face. */
+.clif-notice {
+  margin: 0;
+  padding: var(--space-2) 0.5rem;
+  font-family: var(--font-ui);
+}
 /* THE INSTRUCTION ABOUT TO RUN: the rule table's current-row bar and next-rule outline together, since for rxm the
    two are one row. Its words, "runs next", are the cell's generated content. */
-.rxm-row.is-next {
+.rxm-row.is-next,
+.clif-row.is-next {
   background: color-mix(in oklab, var(--accent) 24%, var(--bg));
   outline: 1px solid var(--accent);
   outline-offset: -1px;
@@ -3047,6 +3112,10 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The rxm registers a CLIF value stands for, after its word: `v1  2 a0`. */
+.value-regs {
+  color: var(--fg-dim);
 }
 .rxm-register.is-changed {
   outline: 1px solid var(--accent);

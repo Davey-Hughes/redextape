@@ -14,6 +14,22 @@ declare module 'vitest/browser' {
      * click count (1 by default): every project's.
      */
     mouse: (type: 'move' | 'down' | 'up', x: number, y: number, clickCount?: number) => Promise<void>
+    /**
+     * `'start'` logs, for this file, the URLs containing `match` of every request the page and its context report from
+     * then on; `'read'` returns that log, `null` before a start: every project's.
+     */
+    watchRequests: (op: 'start' | 'read', match: string) => Promise<{ page: string[]; context: string[] } | null>
+    /** Aborts the next `times` requests whose URL contains `match`, a worker's included: every project's. */
+    failRequests: (match: string, times: number) => Promise<void>
+    /**
+     * Answers the next request whose URL contains `match` with `body`, as a script, or with `null` drops a stub no
+     * request came for: every project's.
+     */
+    stubRequest: (match: string, body: string | null) => Promise<void>
+    /** Holds the next request whose URL contains `match` until `releaseRequests`: every project's. */
+    holdRequests: (match: string) => Promise<void>
+    /** Lets this file's held request go, or stops waiting for one: every project's. */
+    releaseRequests: () => Promise<void>
     /** Playwright's `page.requestGC()`, a full collection, registered by the Firefox projects alone. */
     requestGC: () => Promise<void>
     /** Registers this project's browser in the config's process; replies how many other projects have, and browsers. */

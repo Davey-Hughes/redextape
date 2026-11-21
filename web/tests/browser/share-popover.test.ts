@@ -124,6 +124,7 @@ describe('share', () => {
       program: 'let x = 40; x + 2',
       encoding: 'unary',
       width: null,
+      listing: 'as-built',
       workspace: parseWorkspace(localStorage.getItem(LAYOUT_STORAGE_KEY)),
       // STEP 0 IN EVERY LEG, where a run opens (`History`), and where each head is.
       positions: { lambda: 0, rxm: 0, tm: 0 },

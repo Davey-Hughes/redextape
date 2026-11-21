@@ -14,8 +14,8 @@ import type { Leg, RecordEnd, RunReply } from '../../src/protocol'
  * them by hand.
  *
  * **THE REAL WORKER, ONE `run` PER EXAMPLE**, as `worker.test.ts` asks it: a fresh `session-worker.ts`, the example's
- * text under the default encoding, every reply until `result`. A declined leg is one `compiled` says is unavailable;
- * an ended leg and a leg whose history fills are its last frames reply's `done`, `ended` or `budget`.
+ * text under the default encoding with a CLIF view shown, every reply until the CLIF pass's own `result`. A declined
+ * leg is one `compiled` calls unavailable; another leg's stop is its last frames reply's `done`, `ended` or `budget`.
  *
  * **A FAILURE HERE CAN BE A TRUE ONE: A CHANGE IN A FRAME'S SIZE CAN FLIP A LEG'S STOP.** Plan 7 part 6a spec
  * §4.6's note of 2026-10-01 has the margins under `binary`. A leg that flips has its outcome in the manifest
@@ -33,7 +33,7 @@ const RUN_MS = 20_000
 
 function run(example: Example): Promise<Heard> {
   const worker = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
-  const done: Record<Leg, RecordEnd | null> = { lambda: null, rxm: null, tm: null }
+  const done: Record<Leg, RecordEnd | null> = { lambda: null, rxm: null, tm: null, clif: null }
   let compiled: Compiled | null = null
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -51,7 +51,10 @@ function run(example: Example): Promise<Heard> {
       else if (r.kind === 'frames' && r.leg === 'lambda') done.lambda = r.done
       else if (r.kind === 'frames' && r.leg === 'rxm') done.rxm = r.done
       else if (r.kind === 'frames' && r.leg === 'tm') done.tm = r.done
+      else if (r.kind === 'frames' && r.leg === 'clif') done.clif = r.done
       else if (r.kind === 'result') {
+        // THE FIRST `result` COMES BEFORE THE CLIF LEG RECORDS: the one wanted is the CLIF pass's own, after its end.
+        if (done.clif === null) return
         const c = compiled
         end(() =>
           c === null
@@ -60,6 +63,9 @@ function run(example: Example): Promise<Heard> {
         )
       } else if (r.kind === 'no-session' || r.kind === 'worker-error') {
         end(() => reject(new Error(`${example.id}: ${r.kind}`)))
+      } else if ((r.kind === 'clif-load' && r.state === 'failed') || (r.kind === 'clif-listing' && r.error !== null)) {
+        // EVERY EXAMPLE HAS A CLIF LEG, so a pass that builds none is named here rather than by the timeout.
+        end(() => reject(new Error(`${example.id}: no CLIF stepper: ${JSON.stringify(r)}`)))
       }
     })
     // A WORKER THAT FAILS TO LOAD, OR THROWS, IS NAMED BY ITS OWN ERROR, rather than by the timeout above twenty seconds
@@ -69,7 +75,7 @@ function run(example: Example): Promise<Heard> {
       const what = e instanceof ErrorEvent && e.message !== '' ? e.message : 'the worker did not load'
       end(() => reject(new Error(`${example.id}: ${what}`)))
     })
-    worker.postMessage({ kind: 'run', gen: 1, src: example.text, encoding: EXAMPLE_ENCODING })
+    worker.postMessage({ kind: 'run', gen: 1, src: example.text, encoding: EXAMPLE_ENCODING, clif: 'as-built' })
   })
 }
 
@@ -90,8 +96,8 @@ describe.each(EXAMPLES)('$title', (example) => {
   })
 
   it('stops each leg where the manifest says', () => {
-    expect({ lambda: stopOf(heard, 'lambda'), rxm: stopOf(heard, 'rxm'), tm: stopOf(heard, 'tm') }).toEqual(
-      example.outcomes,
+    expect(Object.fromEntries(LEGS.map((leg) => [leg, stopOf(heard, leg)]))).toEqual(
+      Object.fromEntries(LEGS.map((leg) => [leg, example.outcomes[leg]])),
     )
   })
 

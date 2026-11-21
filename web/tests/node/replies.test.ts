@@ -3,15 +3,18 @@ import { describe, expect, it } from 'vitest'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
 import { PaneCollection, type PaneEntry } from '../../src/panes'
-import type { RecordEnd, RunReply, RunRequest } from '../../src/protocol'
-import { lambdaFrameBytes, rxmFrameBytes, tmFrameBytes } from '../../src/protocol'
+import type { FramesReply, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
+import { CLIF_ABSENT, clifFrameBytes, lambdaFrameBytes, rxmFrameBytes, tmFrameBytes } from '../../src/protocol'
+import type { ProgramResult } from '../../src/readout'
 import { createReplies } from '../../src/replies'
 import { ScratchBuffers } from '../../src/scratch'
 import type { PoolPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
-import type { LegState, SessionEntry } from '../../src/sessions'
-import { PaneSlot, SessionRegistry } from '../../src/sessions'
+import type { ClifHold, LegState, SessionEntry } from '../../src/sessions'
+import { holdClifLeg, PaneSlot, rewindLeg, SessionRegistry } from '../../src/sessions'
 import type {
+  ClifListing,
+  ClifState,
   Decoded,
   Diagnostic,
   LambdaState,
@@ -22,6 +25,7 @@ import type {
   TmScratchStatus,
   TmState,
 } from '../../src/types'
+import { FACT_95 } from './clif-frames'
 import { legState } from './leg-fixture'
 import { frameOf } from './rxm-fixtures'
 import { fakeClient, lambdaFrame } from './session-fixtures'
@@ -82,7 +86,7 @@ function sourceEntry(): SessionEntry {
       rxm: legState<RxmState>(false, 1_000_000),
       tm: legState<TmState>(false, 1_000_000),
     },
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   }
 }
@@ -94,14 +98,16 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<Run
     lambda: { available: true, reason: '', node: null, run: null },
     rxm: { available: false, reason: 'no rxm leg', run: null, cap: null, total_steps: null },
     tm: { available: true, reason: '', width: 8, run: null, total_steps: null },
+    clif: { available: false, reason: '', run: null, cap: null, total_steps: null },
   },
   programs: {
     rxm: null,
     tm: tmProgram === null ? null : { program: tmProgram, tapeNames, text: null, tmResultDecodable: true },
+    clif: null,
   },
   declinedSpan: null,
   linkIndex: null,
-  first: { lambda: null, rxm: null, tm: null },
+  first: { lambda: null, rxm: null, tm: null, clif: null },
   lambdaTree: null,
 })
 
@@ -114,7 +120,14 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<Run
  */
 function driver(
   entry: SessionEntry,
-  opts: { frame?: (cb: () => void) => void; trees?: LambdaTrees; onDraw?: () => void } = {},
+  opts: {
+    frame?: (cb: () => void) => void
+    trees?: LambdaTrees
+    onDraw?: () => void
+    clif?: NonNullable<Parameters<typeof createReplies>[0]['clif']>
+    /** For the `result` arm alone, which writes `results` and stores what `setProgram` takes. */
+    results?: { readonly results: HTMLElement; readonly setProgram: (r: ProgramResult) => void }
+  } = {},
 ) {
   const reg = new SessionRegistry()
   reg.add(entry)
@@ -124,11 +137,11 @@ function driver(
   const view = { dispatch: (t: unknown) => dispatched.push(t) } as unknown as EditorView
   const links = { setIndex: (i: unknown) => indexed.push(i) } as unknown as LinkWiring
   const replies = createReplies({
-    setProgram: () => undefined,
+    setProgram: opts.results?.setProgram ?? (() => undefined),
     trees: opts.trees ?? new LambdaTrees(() => undefined),
     sessions: reg,
     scratchpad: undefined as unknown as ScratchBuffers,
-    results: undefined as unknown as HTMLElement,
+    results: opts.results?.results ?? (undefined as unknown as HTMLElement),
     view: () => view,
     panes: new PaneCollection(),
     links,
@@ -144,6 +157,7 @@ function driver(
     // OTHER switch. A no-op rather than a throw, because "this driver does not exercise those arms" is
     // a fact about the fixture and not a claim any test here is making.
     onBuffersPersist: () => undefined,
+    ...(opts.clif === undefined ? {} : { clif: opts.clif }),
   })
   return { replies, dispatched, indexed, drawn: () => drawn }
 }
@@ -207,6 +221,149 @@ describe('a session retains its last compiled machine', () => {
 })
 
 /**
+ * **A `clif-listing` WITH NO LISTING SAYS THE CLIF LEG HAS NO STEPPER**, so the page takes the leg's part out of the
+ * result it stored: a stepper that throws is dropped with no `result` after it to say so.
+ */
+describe('a `clif-listing` reply with no listing', () => {
+  it("tells the page the CLIF leg has no stepper, at the leg's epoch alone, and draws", () => {
+    const entry = sourceEntry()
+    const withClif = { ...entry, legs: { ...entry.legs, clif: legState<ClifState>(false, 1_000_000) } }
+    let absent = 0
+    const clif = {
+      loaded: () => undefined,
+      settled: () => undefined,
+      absent: () => {
+        absent += 1
+      },
+    }
+    const { replies, drawn } = driver(withClif, { clif })
+
+    replies.onReply(SOURCE, {
+      kind: 'clif-listing',
+      gen: 1,
+      epoch: 0,
+      listing: { functions: [], rows: [] },
+      error: null,
+    })
+    expect(absent, 'a listing').toBe(0)
+    replies.onReply(SOURCE, { kind: 'clif-listing', gen: 1, epoch: 1, listing: null, error: 'the stepper threw' })
+    expect(absent, "another epoch's").toBe(0)
+    expect(drawn()).toBe(1)
+
+    replies.onReply(SOURCE, { kind: 'clif-listing', gen: 1, epoch: 0, listing: null, error: 'the stepper threw' })
+    expect(absent, "none, at the leg's epoch").toBe(1)
+    expect(withClif.legs.clif.status).toEqual({ available: false, reason: 'the stepper threw' })
+    expect(drawn()).toBe(2)
+  })
+})
+
+/**
+ * **A CLIF LEG HELD FOR A LISTING CHOSEN CHANGES IN ONE DRAW** (`ClifHold`): its ring, end and listing stay as they
+ * are until the first chunk of the hold's epoch, which comes with the listing that came for it, and the readout keeps
+ * the CLIF part it held. The leg holds two frames of `fact.rxt`'s step 95, so a ring emptied for the new chunk's one
+ * frame is told from one it was pushed onto.
+ */
+describe('a CLIF leg held for a listing chosen', () => {
+  /** The listing the leg shows when the hold begins, and the one the hold's `clif-listing` brings. */
+  const LEFT: ClifListing = { functions: [], rows: [] }
+  const CHOSEN: ClifListing = { functions: [], rows: [] }
+  /** The listing `entry` holds as its CLIF program, told by identity: the two above are equal in value. */
+  const shown = (entry: SessionEntry) => {
+    const p = entry.programs.clif
+    return p !== null && 'listing' in p ? p.listing : null
+  }
+
+  function held(part?: ClifHold['part']) {
+    const entry = sourceEntry()
+    const clif = legState<ClifState>(true, 1_000_000)
+    for (let i = 0; i < 2; i++) clif.hist.push(FACT_95, clifFrameBytes(FACT_95))
+    clif.done = 'ended'
+    clif.gen = 1
+    const withClif: SessionEntry = {
+      ...entry,
+      legs: { ...entry.legs, clif },
+      programs: { ...entry.programs, clif: { listing: LEFT } },
+    }
+    holdClifLeg(clif, part)
+    return { entry: withClif, clif }
+  }
+  const listing = (epoch: number, gen = 1): RunReply => ({
+    kind: 'clif-listing',
+    gen,
+    epoch,
+    listing: CHOSEN,
+    error: null,
+  })
+  const chunk = (epoch: number, gen = 1): RunReply => ({
+    kind: 'frames',
+    leg: 'clif',
+    gen,
+    epoch,
+    frames: [FACT_95],
+    done: null,
+  })
+
+  it('keeps the listing a clif-listing brings until its first chunk, then shows the two in one task', () => {
+    const { entry, clif } = held()
+    let drawn = 0
+    const { replies } = driver(entry, { onDraw: () => (drawn += 1) })
+    replies.onReply(SOURCE, listing(clif.epoch))
+    expect(shown(entry), 'the listing the hold keeps, until the chunk').toBe(LEFT)
+    expect(clif.hist.length, 'the frames the hold keeps').toBe(2)
+    expect(clif.done, 'the end the hold keeps').toBe('ended')
+    expect(drawn, 'no draw for the listing alone').toBe(0)
+    replies.onReply(SOURCE, chunk(clif.epoch))
+    expect(shown(entry), 'the listing chosen, with its chunk').toBe(CHOSEN)
+    expect(clif.hist.length, "the chunk's frame alone").toBe(1)
+    expect(clif.clifHold).toBeUndefined()
+    expect(drawn).toBe(1)
+  })
+
+  it('drops a first chunk no listing came for, and stays held', () => {
+    const { entry, clif } = held()
+    const { replies } = driver(entry)
+    replies.onReply(SOURCE, chunk(clif.epoch))
+    replies.onReply(SOURCE, listing(clif.epoch, 1))
+    replies.onReply(SOURCE, chunk(clif.epoch, 2))
+    expect(shown(entry), 'the listing the hold keeps').toBe(LEFT)
+    expect(clif.hist.length, 'the frames the hold keeps, none pushed').toBe(2)
+    expect(clif.done).toBe('ended')
+    expect(clif.clifHold, 'still held').toBeDefined()
+  })
+
+  it('lets go of the listing it kept at a compile and at a rewind', () => {
+    for (const end of ['compiled', 'rewind'] as const) {
+      const { entry, clif } = held()
+      const { replies } = driver(entry)
+      replies.onReply(SOURCE, listing(clif.epoch))
+      expect(clif.clifHold?.landing?.compiled, `precondition: the listing is kept on the leg (${end})`).toEqual({
+        listing: CHOSEN,
+      })
+      if (end === 'compiled') replies.onReply(SOURCE, compiled(null, []))
+      else rewindLeg(clif)
+      expect(clif.clifHold, end).toBeUndefined()
+    }
+  })
+
+  it("keeps the CLIF part it held in a result of its generation, and not in one of another's", () => {
+    const part = { held: 'the CLIF part at the press' } as never
+    const { entry } = held({ gen: 1, clif: part })
+    const stored: ProgramResult[] = []
+    const { replies } = driver(entry, {
+      results: { results: { dataset: {} } as HTMLElement, setProgram: (r) => stored.push(r) },
+    })
+    const result = (gen: number): RunReply =>
+      ({ kind: 'result', gen, legs: { lambda: 'λ', rxm: 'rxm', tm: 'tm', clif: CLIF_ABSENT }, pinned: false }) as never
+    replies.onReply(SOURCE, result(1))
+    replies.onReply(SOURCE, result(2))
+    const clifOf = (r: ProgramResult | undefined) => (r?.kind === 'result' ? r.legs.clif : 'no result')
+    expect(clifOf(stored[0]), 'its generation').toBe(part)
+    expect(clifOf(stored[1]), "another generation's").toBe(CLIF_ABSENT)
+    expect(stored[0]?.kind === 'result' && stored[0].legs.tm, 'the other legs, as they came').toBe('tm')
+  })
+})
+
+/**
  * **THE NEW PROGRAM'S STEP 0 IS ON THE PAGE IN THE ONE DRAW ITS `compiled` REPLY MAKES** (recompile-flash design): each
  * leg's step-0 frame in its ring and λ's step-0 tree in the cache, so no view draws an empty ring or flat text first.
  */
@@ -233,7 +390,7 @@ describe("a `compiled` reply's step-0 pictures", () => {
 
     replies.onReply(SOURCE, {
       ...compiled(ONE_RULE_PROGRAM, ['TAPE']),
-      first: { lambda, rxm: null, tm },
+      first: { lambda, rxm: null, tm, clif: null },
       lambdaTree: tree,
     })
 
@@ -821,7 +978,7 @@ describe('a recording chunk redraws once per frame', () => {
     from: number,
     done: RecordEnd | null,
     epoch = 0,
-  ): { reply: RunReply; frames: unknown[] } => {
+  ): { reply: FramesReply; frames: unknown[] } => {
     const steps = [from, from + 1]
     switch (leg) {
       case 'lambda': {

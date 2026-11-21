@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { CYCLE } from '../../src/arrangements'
-import { KIND_ORDER, KIND_WORD } from '../../src/layout'
+import { KIND_WORD } from '../../src/layout'
 import { LINK_KEY } from '../../src/link-wiring'
 import { navKeymap } from '../../src/lsp-nav'
 import { HINT_ROWS, PREFIX, PREFIX_LABEL, VIEW_KEYS } from '../../src/view-keys'
@@ -135,17 +135,15 @@ describe('the help page’s view keys', () => {
   })
 
   /**
-   * **THE STOPS ARE `arrangements.ts`'s `CYCLE`, IN ITS ORDER**: the source beside each other kind, by the kind's own
-   * word, and then every kind.
+   * **THE STOPS ARE `arrangements.ts`'s `CYCLE`, IN ITS ORDER**: the source beside each other kind the cycle holds, by
+   * the kind's own word, and then its last stop, all of those kinds, by their count.
    */
   it('lists the layouts the cycle keys step through, in the cycle’s order', () => {
-    // `help.html` SPELLS THE COUNT AS A WORD, AND ONLY THIS ONE HAS A WORD: another kind fails here until its sentence
-    // is rewritten.
+    // `help.html` SPELLS THE LAST STOP'S COUNT AS A WORD, AND ONLY THIS COUNT HAS ONE: a last stop of another size
+    // fails here until its sentence is rewritten.
     const countWord: Readonly<Record<number, string>> = { 4: 'four' }
     const stops = CYCLE.map((stop) =>
-      stop.length === KIND_ORDER.length
-        ? `all ${countWord[KIND_ORDER.length]}`
-        : stop.map((kind) => KIND_WORD[kind]).join(' beside '),
+      stop === CYCLE.at(-1) ? `all ${countWord[stop.length]}` : stop.map((kind) => KIND_WORD[kind]).join(' beside '),
     )
     expect(stops.slice(0, -1).every((stop) => stop.startsWith('source beside '))).toBe(true)
     expect(prose('view-keys-cycle')).toBe(

@@ -39,7 +39,9 @@ import { seededRandom } from './seeded-random'
  */
 
 const of = (...kinds: PaneKind[]): LayoutNode => defaultArrangement(kinds, 'wide')
-const FOUR = of(...KIND_ORDER)
+/** The four views the cycle's last stop shows: every kind but CLIF, which the cycle leaves out. */
+const FOUR_KINDS: PaneKind[] = ['source', 'lambda', 'rxm', 'tm']
+const FOUR = of(...FOUR_KINDS)
 const ALL = treeKey(FOUR)
 /** All four views after *TM · program* is picked in the rxm view's title: `rxm-0` is a TM view, under its own id. */
 const PICKED = setLeafKind(FOUR, 'rxm-0', 'tm')
@@ -74,7 +76,7 @@ describe('a combination and its key', () => {
     ['a kind twice', 'source+source'],
     ['kinds out of KIND_ORDER', 'tm+source'],
     // THE ONE ORDER BESIDE IT THE APP KNOWS, which a toggle key and the live region's sentence do follow.
-    ['all four kinds in the header’s order', HEADER_ORDER.join('+')],
+    ['every kind in the header’s order', HEADER_ORDER.join('+')],
     ['a trailing +', 'source+'],
     ['another separator', 'source,tm'],
   ])('reads %s as no key', (_what, key) => {
@@ -480,22 +482,22 @@ describe('the cycle', () => {
   it('steps to the next and the previous stop, wrapping', () => {
     expect(cycleFrom(['source', 'lambda'], 1)).toEqual(['source', 'tm'])
     expect(cycleFrom(['source', 'tm'], 1)).toEqual(['source', 'rxm'])
-    expect(cycleFrom(['source', 'rxm'], 1)).toEqual(KIND_ORDER)
-    expect(cycleFrom(KIND_ORDER, 1)).toEqual(['source', 'lambda'])
-    expect(cycleFrom(['source', 'lambda'], -1)).toEqual(KIND_ORDER)
+    expect(cycleFrom(['source', 'rxm'], 1)).toEqual(FOUR_KINDS)
+    expect(cycleFrom(FOUR_KINDS, 1)).toEqual(['source', 'lambda'])
+    expect(cycleFrom(['source', 'lambda'], -1)).toEqual(FOUR_KINDS)
     expect(cycleFrom(['source', 'rxm'], -1)).toEqual(['source', 'tm'])
   })
 
   it('goes to the first stop forward and the last stop back from a combination that is not a stop', () => {
     expect(cycleFrom(['tm'], 1)).toEqual(['source', 'lambda'])
-    expect(cycleFrom(['tm'], -1)).toEqual(KIND_ORDER)
+    expect(cycleFrom(['tm'], -1)).toEqual(FOUR_KINDS)
     expect(cycleFrom(['source', 'lambda', 'tm'], 1)).toEqual(['source', 'lambda'])
   })
 })
 
 describe('the header’s order', () => {
-  it('is source, λ, TM, rxm: every kind of KIND_ORDER, each once', () => {
-    expect(HEADER_ORDER).toEqual(['source', 'lambda', 'tm', 'rxm'])
+  it('is source, λ, TM, rxm, CLIF: every kind of KIND_ORDER, each once', () => {
+    expect(HEADER_ORDER).toEqual(['source', 'lambda', 'tm', 'rxm', 'clif'])
     expect([...HEADER_ORDER].sort()).toEqual([...KIND_ORDER].sort())
     expect(new Set(HEADER_ORDER).size).toBe(KIND_ORDER.length)
   })

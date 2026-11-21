@@ -128,6 +128,16 @@ describe('a CLIF session built from clifInput()', () => {
     expect(thrown(() => new ClifSession({ program: null }, 'as-built'))).toMatch(/^ClifSession: not a clifInput\(\): /)
   })
 
+  /** The sentence alone, since the page shows it after words of its own. */
+  it('says why a program has no CLIF', () => {
+    const input = {
+      program: { code: [{ Call: 'missing' }, 'Halt'], labels: [] },
+      ty: 'Nat',
+      caps: { steps: 5_000_000, stack: 100_000, heap: 5_000_000, mem: 64_000_000 },
+    }
+    expect(thrown(() => new ClifSession(input, 'as-built'))).toBe('call to undefined label `missing`')
+  })
+
   it('has no input to give for a program the rxm leg declines', () => {
     const list = `[${Array.from({ length: 2048 }, (_, i) => i).join(', ')}]`
     expect(compiled(list).clifInput()).toBeNull()

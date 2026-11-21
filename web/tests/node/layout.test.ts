@@ -25,7 +25,11 @@ import {
   splitLeaf,
 } from '../../src/layout'
 import { DIVIDER_PX } from '../../src/layout-view'
+import type { PaneKind } from '../../src/panes'
 import { fourViews, leafOf, pressedLayout, rowOfLeaves, sourceBeside } from '../browser/harness'
+
+/** The four kinds the arrangements below were drawn for: every kind but CLIF, in `KIND_ORDER`. */
+const FOUR: readonly PaneKind[] = ['source', 'lambda', 'rxm', 'tm']
 
 /**
  * THE TREE MODEL, WITH NO DOM ANYWHERE — every invariant 5d-ii-a design §4.1 states, asserted as a value.
@@ -66,7 +70,7 @@ describe('defaultArrangement', () => {
   })
 
   it('puts all four in two columns of two in a wide area: source over rxm, beside λ over TM', () => {
-    expect(defaultArrangement(KIND_ORDER, 'wide')).toEqual({
+    expect(defaultArrangement(FOUR, 'wide')).toEqual({
       kind: 'split',
       dir: 'row',
       sizes: [0.5, 0.5],
@@ -88,7 +92,7 @@ describe('defaultArrangement', () => {
   })
 
   it('puts all four in two rows of two in a tall area, the harness’s fourViews()', () => {
-    expect(defaultArrangement(KIND_ORDER, 'tall')).toEqual(fourViews())
+    expect(defaultArrangement(FOUR, 'tall')).toEqual(fourViews())
     expect(fourViews()).toEqual({
       kind: 'split',
       dir: 'column',
@@ -127,8 +131,8 @@ describe('defaultArrangement', () => {
 
   it('puts the same view in the same corner in both shapes', () => {
     // FOUR CORNERS, READ OFF EACH TREE'S OWN NESTING: [top left, top right, bottom left, bottom right].
-    const wide = defaultArrangement(KIND_ORDER, 'wide')
-    const tall = defaultArrangement(KIND_ORDER, 'tall')
+    const wide = defaultArrangement(FOUR, 'wide')
+    const tall = defaultArrangement(FOUR, 'tall')
     const at = (t: LayoutNode, i: number, j: number): string => {
       const outer = t.kind === 'split' ? t.children[i] : undefined
       const inner = outer?.kind === 'split' ? outer.children[j] : undefined
@@ -150,13 +154,11 @@ describe('defaultArrangement', () => {
 
   it('lays the kinds out from KIND_ORDER whatever order they are handed in', () => {
     expect(defaultArrangement(['tm', 'source'], 'wide')).toEqual(defaultArrangement(['source', 'tm'], 'wide'))
-    expect(defaultArrangement(['tm', 'rxm', 'lambda', 'source'], 'wide')).toEqual(
-      defaultArrangement(KIND_ORDER, 'wide'),
-    )
+    expect(defaultArrangement(['tm', 'rxm', 'lambda', 'source'], 'wide')).toEqual(defaultArrangement(FOUR, 'wide'))
     // A WIDE AREA'S LEAVES RUN DOWN EACH COLUMN IN TURN, and a tall one's are in `KIND_ORDER`. Spelled out and not read
     // from `HEADER_ORDER`: where a view sits in the grid is its own decision, so moving a toggle cannot move a view.
-    expect(leaves(defaultArrangement(KIND_ORDER, 'wide')).map((l) => l.pane)).toEqual(['source', 'rxm', 'lambda', 'tm'])
-    expect(leaves(defaultArrangement(KIND_ORDER, 'tall')).map((l) => l.pane)).toEqual([...KIND_ORDER])
+    expect(leaves(defaultArrangement(FOUR, 'wide')).map((l) => l.pane)).toEqual(['source', 'rxm', 'lambda', 'tm'])
+    expect(leaves(defaultArrangement(FOUR, 'tall')).map((l) => l.pane)).toEqual([...FOUR])
   })
 
   it('makes a tree parseTree takes, holding the kinds asked, for every combination and both shapes', () => {

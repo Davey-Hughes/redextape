@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view'
+import { ClifPane } from './clif-pane'
 import type { EditablePane, EditorCustody } from './editor-custody'
 import { keepFocusOn } from './focus-handoff'
 import { LambdaPane } from './lambda-pane'
@@ -20,7 +21,7 @@ import { DIVIDER_PX, renderLayout, renderStage, syncSizes } from './layout-view'
 import type { PaneChoice, PaneEvents } from './pane-chrome'
 import type { Shares } from './panel-stack'
 import { LEG_PANELS, type LeafId, type PaneCollection, type PaneEntry, type PaneKind, storedPanels } from './panes'
-import type { Leg, LegFrame, LegProgram } from './protocol'
+import type { CopyLeg, Leg, LegFrame, LegProgram } from './protocol'
 import { RxmPane } from './rxm-pane'
 import { seedRxm } from './rxm-seed'
 import type { Detachable } from './scratch'
@@ -29,7 +30,14 @@ import { type Binding, type LegReading, PaneSlot, type PaneView } from './sessio
 import { restoreScroll } from './state-table'
 import { TmPane } from './tm-pane'
 import { seedTm } from './tm-seed'
-import { type DisplayLeg, type LambdaDisplay, LEG_DISPLAY, type LegDisplay, type TmDisplay } from './workspace'
+import {
+  type ClifDisplay,
+  type DisplayLeg,
+  type LambdaDisplay,
+  LEG_DISPLAY,
+  type LegDisplay,
+  type TmDisplay,
+} from './workspace'
 
 /**
  * THE PANE LIFECYCLE — which panes exist, what element each one lives in, and what its controls do.
@@ -144,7 +152,7 @@ export type LayoutEvent =
 export type AddRefused = { readonly leaf: LeafId; readonly gesture: 'view' | Dir; readonly why: AddRefusal }
 
 /** The class of a view on each leg: what `SEED`'s entries are handed. */
-type LegPane = { lambda: LambdaPane; rxm: RxmPane; tm: TmPane }
+type LegPane = { lambda: LambdaPane; rxm: RxmPane; tm: TmPane; clif: ClifPane }
 
 /**
  * What becomes of a copy's editor when the view holding it leaves the copy: closed, changed to another leg, or picked
@@ -155,7 +163,14 @@ type LegPane = { lambda: LambdaPane; rxm: RxmPane; tm: TmPane }
  * editor left as garbage keeps its document in `LspClient`'s map, whose diagnostics sink closes over the editor and its
  * pending debounce, and `#died` replays `didOpen` for a document no view holds, for the life of the page.
  */
-const EDITOR_ON_LEAVE: Readonly<Record<Leg, 'hold' | 'destroy'>> = { lambda: 'hold', rxm: 'destroy', tm: 'destroy' }
+const EDITOR_ON_LEAVE: Readonly<Record<CopyLeg, 'hold' | 'destroy'>> = { lambda: 'hold', rxm: 'destroy', tm: 'destroy' }
+
+/**
+ * Whether the editor a view of `leg` gives up is held, by `EDITOR_ON_LEAVE`. **NEVER ASKED OF A CLIF VIEW**, which
+ * holds no editor (`holdsEditor`), and one asked would destroy it: destroyed is never dropped, and a held editor waits
+ * on a claim no CLIF view makes.
+ */
+const holdsOnLeave = (leg: Leg): boolean => leg !== 'clif' && EDITOR_ON_LEAVE[leg] === 'hold'
 
 /**
  * Whether a pane of `kind` can hold a copy's editor — what `rebind`'s same-leg arm asks before it takes the
@@ -185,6 +200,9 @@ function holdsEditor(kind: PaneKind): boolean {
       // side, so a TM pane picked onto a warm buffer through its own selector would render that buffer's frames
       // with no editor and no route to one.
       return true
+    case 'clif':
+      // A CLIF VIEW OFFERS NO COPY (`transport.ts`'s `programFork`), so there is no CLIF copy's editor to hold.
+      return false
   }
 }
 
@@ -479,6 +497,8 @@ export function createPaneHost(deps: {
     lambda: () => {},
     rxm: (pane, session) => seedRxm(pane, programOf(session, 'rxm'), readingOf(session, 'rxm')),
     tm: (pane, session) => seedTm(pane, programOf(session, 'tm'), readingOf(session, 'tm')),
+    // THE CLIF THE SESSION KEPT, `null` until its listing or its reason came: the view says it is loading until then.
+    clif: (pane, session) => pane.setProgram(programOf(session, 'clif')),
   }
 
   /**
@@ -521,6 +541,14 @@ export function createPaneHost(deps: {
         storedPanels(LEG_PANELS.tm, (name) => panelOpen(leaf, name)),
         displayOf('tm', leaf) ?? LEG_DISPLAY.tm.fallback,
         panelSizesOf(leaf) ?? {},
+      ),
+    clif: (host, on, leaf) =>
+      new ClifPane(
+        host,
+        on,
+        storedPanels(LEG_PANELS.clif, (name) => panelOpen(leaf, name)),
+        panelSizesOf(leaf) ?? {},
+        displayOf('clif', leaf) ?? LEG_DISPLAY.clif.fallback,
       ),
   }
 
@@ -1005,7 +1033,7 @@ export function createPaneHost(deps: {
             // HELD OR DESTROYED BY THE LEG OF THE COPY IT LEAVES, AS THE DROP PASS DOES (`EDITOR_ON_LEAVE`); after a
             // destroy, a view still showing that copy mounts a fresh editor at once (`mountOnViewOf`, below).
             if (held !== null) {
-              if (EDITOR_ON_LEAVE[slot.binding.leg] === 'hold') custody.hold(leaving, held)
+              if (holdsOnLeave(slot.binding.leg)) custody.hold(leaving, held)
               else {
                 held.destroy()
                 unmounted = leaving
@@ -1065,6 +1093,10 @@ export function createPaneHost(deps: {
       },
       tmDisplay: (d: TmDisplay) => {
         setLegDisplay('tm', id, d)
+        persist()
+      },
+      clifDisplay: (d: ClifDisplay) => {
+        setLegDisplay('clif', id, d)
         persist()
       },
     }
@@ -1502,7 +1534,7 @@ export function createPaneHost(deps: {
       // THE CAST IS `seedPane`'s: an entry's pane is the class of the leg its kind names.
       const held = (p.pane as LegPane[Leg]).takeEditor()
       if (held !== null) {
-        if (EDITOR_ON_LEAVE[p.slot.binding.leg] === 'hold') custody.hold(p.slot.binding.session, held)
+        if (holdsOnLeave(p.slot.binding.leg)) custody.hold(p.slot.binding.session, held)
         else {
           held.destroy()
           unmounted.push(p.slot.binding.session)

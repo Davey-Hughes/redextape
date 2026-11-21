@@ -26,11 +26,14 @@ describe('the language ids the client sends', () => {
     expect([...LANGUAGE_IDS].sort()).toEqual([...arms].sort())
   })
 
-  it('cover every pane kind that has an editor, and every id has an extension', () => {
+  it('cover every pane kind that has an editor, CLIF with none, and every id has an extension', () => {
     // EVERY `PaneKind`, rxm included: an rxm view's editor is an rxm copy's, which takes its language from here.
     expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual([...KIND_ORDER].sort())
     expect(LANGUAGE_OF_PANE.rxm).toBe('redextape_rxm')
-    for (const id of Object.values(LANGUAGE_OF_PANE)) expect(LANGUAGE_IDS).toContain(id)
+    // A CLIF VIEW OFFERS NO COPY, SO IT HOLDS NO EDITOR, and its kind names no language.
+    expect(LANGUAGE_OF_PANE.clif).toBeNull()
+    for (const [kind, id] of Object.entries(LANGUAGE_OF_PANE))
+      if (kind !== 'clif') expect(LANGUAGE_IDS, kind).toContain(id)
     for (const id of LANGUAGE_IDS) expect(EXTENSION_OF_LANGUAGE[id]).toBeTruthy()
   })
 })

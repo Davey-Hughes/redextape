@@ -321,7 +321,7 @@ describe('a notice floats over the page', () => {
       { width: 1600, height: 900, preset: 'explorer', where: 'end' },
       { width: 1920, height: 1080, preset: 'explorer', where: 'run' },
       { width: 1920, height: 1080, preset: 'debugger', where: 'run' },
-      { width: 900, height: 800, preset: 'debugger', where: 'band' },
+      { width: 940, height: 800, preset: 'debugger', where: 'band' },
       { width: 375, height: 800, preset: 'explorer', where: 'end' },
       { width: 365, height: 800, preset: 'stage', where: 'band' },
       { width: 1280, height: 800, preset: 'debugger', where: 'end' },
@@ -348,6 +348,36 @@ describe('a notice floats over the page', () => {
     await write(null)
     await until(() => noticeEl().hidden === true, 'the resting sentence to go')
   }, 90_000)
+
+  /**
+   * **THE RUN'S BOX STARTS AT THE CONTROL BEFORE IT**, since the spacer gives the gap there back (`style.css`), so a
+   * notice as wide as the box would sit flush against that control. A window that makes the run half a gap wider than
+   * the notice shows that the gap is kept.
+   */
+  it('keeps the header’s gap after the control before the run', async () => {
+    await pick('fact')
+    const gap = Number.parseFloat(getComputedStyle(header()).columnGap)
+    const wanted = noticeEl().getBoundingClientRect().width + gap / 2
+    try {
+      await page.viewport(Math.round(1280 + wanted - run().getBoundingClientRect().width), 800)
+      await until(
+        () => Math.abs(run().getBoundingClientRect().width - wanted) < 1,
+        'the run half a gap wider than the notice',
+      )
+      await frames()
+      const preceding = (c: Element) => (run().compareDocumentPosition(c) & Node.DOCUMENT_POSITION_PRECEDING) !== 0
+      const before = [...header().children].filter((c) => preceding(c) && c.getBoundingClientRect().width > 0).at(-1)
+      const b = (before as HTMLElement).getBoundingClientRect()
+      const r = run().getBoundingClientRect()
+      expect(centreY(b), `precondition: ${named(before as HTMLElement)} on the run’s row`).toBeCloseTo(centreY(r), 0)
+      expect(noticeEl().hidden, 'precondition: the notice is up').toBe(false)
+      expect(noticeEl().getBoundingClientRect().left - b.right, 'the room before the notice').toBeGreaterThanOrEqual(
+        gap - 0.5,
+      )
+    } finally {
+      await page.viewport(1280, 800)
+    }
+  })
 
   /**
    * **THE RESTING SENTENCE'S `hide` TAKES IT OFF UNTIL THE CONDITION SAYS SOMETHING ELSE**, so a sentence that can last

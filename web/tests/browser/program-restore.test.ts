@@ -49,14 +49,14 @@ describe('a stored program', () => {
   it('is stored again under the encoding a change picks', async () => {
     await userEvent.selectOptions(picker(), 'unary')
     await until(() => stored()?.encoding === 'unary', 'the new encoding, stored')
-    expect(stored()).toEqual({ text: STORED.text, encoding: 'unary', width: null })
+    expect(stored()).toEqual({ text: STORED.text, encoding: 'unary', width: null, listing: 'as-built' })
   })
 
   it('is stored with the text an edit leaves', async () => {
     const edited = 'fn times4(y) {\n    y * 4\n}\ntimes4(6)\n'
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: edited } })
     await until(() => stored()?.text === edited, 'the edit, stored')
-    expect(stored()).toEqual({ text: edited, encoding: 'unary', width: null })
+    expect(stored()).toEqual({ text: edited, encoding: 'unary', width: null, listing: 'as-built' })
   })
 
   /**

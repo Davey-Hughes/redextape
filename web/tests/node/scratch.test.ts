@@ -119,7 +119,7 @@ function sourceEntry(text = 'from source'): SessionEntry {
     detached: false,
     client: fakeClient(),
     legs: { lambda },
-    programs: { rxm: null, tm: null },
+    programs: { rxm: null, tm: null, clif: null },
     readings: { rxm: null, tm: null },
   }
 }

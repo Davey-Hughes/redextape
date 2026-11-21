@@ -50,6 +50,7 @@ describe('armed', () => {
     expect(step(true, key('2')).action).toEqual({ kind: 'toggle', pane: 'lambda' })
     expect(step(true, key('3')).action).toEqual({ kind: 'toggle', pane: 'tm' })
     expect(step(true, key('4')).action).toEqual({ kind: 'toggle', pane: 'rxm' })
+    expect(step(true, key('5')).action).toEqual({ kind: 'toggle', pane: 'clif' })
   })
 
   /**
@@ -174,7 +175,7 @@ describe('the hint', () => {
   it('is said as one sentence that names each key with what it does', () => {
     expect(HINT_SENTENCE).toBe(
       'view keys: ] the next layout, [ the previous layout, 1 show or hide source, 2 show or hide λ, ' +
-        '3 show or hide TM, 4 show or hide rxm, Esc or Ctrl+. leave',
+        '3 show or hide TM, 4 show or hide rxm, 5 show or hide CLIF, Esc or Ctrl+. leave',
     )
     // AND THOSE WORDS ARE THE TABLE'S, NOT A SECOND COPY OF THEM: each row's key and what it does, in its order.
     const said = HINT_SENTENCE.replace(/^view keys: /, '').split(', ')

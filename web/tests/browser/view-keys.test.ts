@@ -15,6 +15,7 @@ import {
   PREFIX,
   SHELL,
   stateIdle,
+  titleText,
   until,
 } from './harness'
 
@@ -54,7 +55,10 @@ const hint = (): HTMLElement => document.querySelector('#view-keys') as HTMLElem
 
 /** All four views, the program as this file wrote it, and the caret in the source editor at `CARET`. */
 async function start(): Promise<void> {
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="false"]')) b.click()
+  // EVERY TOGGLE BUT CLIF'S PRESSED, AND CLIF'S NOT: a case that fails between showing the CLIF view and hiding it
+  // again leaves it shown.
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button'))
+    if ((b.getAttribute('aria-pressed') === 'true') === (b.dataset.shows === 'clif')) b.click()
   if (view.state.doc.toString() !== SOURCE) {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SOURCE } })
     await until(stateIdle, 'the program to compile again')
@@ -211,6 +215,20 @@ describe('view keys', () => {
     await userEvent.keyboard('1')
     expect(mounted(), 'after 1 again').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
     expect(view.state.doc.toString(), 'a digit was typed').toBe(SOURCE)
+  })
+
+  it('toggles CLIF on 5', async () => {
+    await start()
+    await prefix()
+    await userEvent.keyboard('5')
+    // THE FIVE, IN WHATEVER ORDER THE ARRANGEMENT OF ALL FIVE PLACES THEM.
+    expect([...mounted()].sort(), 'after 5').toEqual(['clif-0', 'lambda-0', 'rxm-0', 'source', 'tm-0'])
+    expect(titleText('clif-0'), 'the view 5 showed is not a CLIF view').toBe('CLIF · program')
+    await prefix()
+    await userEvent.keyboard('5')
+    expect(mounted(), 'after 5 again').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
+    expect(view.state.doc.toString(), 'a digit was typed').toBe(SOURCE)
+    caretKept()
   })
 
   it('hands the focus to the focused view when the key hides the view that held it', async () => {

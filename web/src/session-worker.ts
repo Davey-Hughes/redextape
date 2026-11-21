@@ -19,6 +19,11 @@
  * asserts a shared worker cannot have. A scratchpad is a DIFFERENT WORKER holding a different single
  * handle, not a second handle in this one.
  *
+ * **ONE SESSION OR ONE COPY, PLUS, FOR A SESSION, AT MOST ONE CLIF STEPPER BUILT FROM IT AND DROPPED WITH IT.** The
+ * stepper lives on the session's arm of `live`, is freed with the session or by a `clif` request, and is built only
+ * while a CLIF view is shown, once the run's other legs have posted their `result`. `pkg-clif` is loaded when the page
+ * asks, for a stepper or on intent, and never before, and a copy worker never loads it.
+ *
  * **LOGIC PUT HERE IS INVISIBLE TO THE COVERAGE GATE** — `vite.config.ts` excludes this module from
  * the `include` set for a measured instrumentation reason (v8 coverage does not attach to a dedicated
  * worker's context), so a new untested branch in this file moves none of the four numbers. That is
@@ -29,14 +34,17 @@
  * Section and decision citations here are the 5d-i design's unless they name another.
  */
 import init, { compile, lambdaScratchAt, rxmScratch, tapeNames, tmScratch } from '../../pkg/redextape_wasm.js'
+import { type ClifHandle, type ClifModule, clifLoader } from './clif-loader'
 import { buildCopy, type Claim, type CopyBuild, claimLive, liveHandle } from './copy-build'
-import { LEGS, mapLegs, perLeg, unhandled } from './legs'
+import { LEGS, perLeg, unhandled } from './legs'
 import type { LinkIndexWire } from './link'
 import type {
+  CopyLeg,
   HeldLegs,
   LambdaLeg,
   LambdaTreeWire,
   Leg,
+  Listing,
   ResultLegs,
   RunReply,
   RunRequest,
@@ -44,6 +52,10 @@ import type {
   TmLeg,
 } from './protocol'
 import {
+  CLIF_ABSENT,
+  CLIF_WINDOW,
+  clifCompileStatus,
+  clifPart,
   EXTEND_CELLS,
   EXTEND_STEPS,
   endOf,
@@ -60,7 +72,7 @@ import {
   TM_RADIUS,
   VALUE_CHUNK,
 } from './protocol'
-import { extendLeg, type RecordLeg, type RecordWorker, recordBuild, rewindAndRecord } from './record-loop'
+import { extendLeg, type RecordLeg, type RecordWorker, recordBuild, recordFresh, rewindAndRecord } from './record-loop'
 import type {
   Decoded,
   Diagnostic,
@@ -126,6 +138,11 @@ type Session = {
    * through unchanged, as it does `tmText`.
    */
   rxmText(): string | null
+  /**
+   * What a CLIF stepper is built from, the rxm program, its type and compile's rxm caps, or `null` for a program the
+   * rxm leg declined. **`unknown`**: only `ClifSession`'s constructor reads it.
+   */
+  clifInput(): unknown
   free(): void
 }
 
@@ -206,7 +223,7 @@ type RxmScratchHandle = {
   free(): void
 }
 
-/** Each leg's copy, the wasm type that holds that leg alone. */
+/** Each leg's copy, the wasm type that holds that leg alone. No CLIF entry: a CLIF view offers no copy. */
 type ScratchOf = { lambda: LambdaScratchHandle; rxm: RxmScratchHandle; tm: TmScratchHandle }
 
 type CompileResult = { diagnostics: Diagnostic[]; session: Session | null }
@@ -251,8 +268,36 @@ const ctx = self as unknown as WorkerScope
 
 const ready = init()
 
+/**
+ * `pkg-clif`, loaded the first time the page asks for it, for a stepper or on intent, and kept once it loads. **A
+ * LITERAL SPECIFIER**, which the licence scan reads to find the package's licences.
+ */
+const loadClif = clifLoader(async () => {
+  const clif = await import('../../pkg-clif/redextape_clif_wasm.js')
+  await clif.default()
+  return clif
+})
+
 /** The newest generation this worker has been asked for. */
 let latest = 0
+
+/** A run's `result` to come: a promise, and what settles it once `onRun` has posted that `result`. */
+type ResultToCome = { readonly gen: number; readonly posted: Promise<void>; readonly settle: () => void }
+
+function resultToCome(gen: number): ResultToCome {
+  let settle: () => void = () => {}
+  const posted = new Promise<void>((resolve) => {
+    settle = resolve
+  })
+  return { gen, posted, settle }
+}
+
+/**
+ * The newest `run`'s `result` to come: what a `clif` request waits on before it builds, so that a stepper asked for at
+ * `compiled` records neither beside the run's first fills nor ahead of its `result`. **EACH `run` REPLACES IT AS IT
+ * STARTS**, so a superseded run, which posts no `result`, never holds a newer generation's request.
+ */
+let runResult = resultToCome(0)
 
 /**
  * The ONE live session, with the generation that owns it: `copy-build.ts`'s `Occupant`, with a TM copy's value run.
@@ -278,12 +323,25 @@ let latest = 0
  * `RxmScratchHandle` carries the rxm leg's alone. See `liveHandle`.
  */
 type Live =
-  | { gen: number; kind: 'session'; session: Session; pinned: boolean }
+  | {
+      gen: number
+      kind: 'session'
+      session: Session
+      pinned: boolean
+      /**
+       * The CLIF stepper built from this session, with the listing it was built for, `null` while none is built: part
+       * of this occupant, not a second one, since `dropLive` frees it with the session.
+       */
+      clif: { session: ClifHandle; listing: Listing } | null
+    }
   | { gen: number; kind: 'scratch'; leg: 'lambda'; session: LambdaScratchHandle }
   | { gen: number; kind: 'scratch'; leg: 'tm'; session: TmScratchHandle; value: TmValueRunHandle | null }
   | { gen: number; kind: 'scratch'; leg: 'rxm'; session: RxmScratchHandle }
 
 let live: Live | null = null
+
+/** The session's arm of `live`: what a `result` is read from. */
+type SessionLive = Extract<Live, { kind: 'session' }>
 
 /**
  * Bytes recorded per leg, and the allowance each is spending against. `[continue]` on a `budget`
@@ -305,9 +363,9 @@ const allowance: Record<Leg, number> = perLeg(() => HISTORY_BYTES)
 const recording: Record<Leg, boolean> = perLeg(() => false)
 
 /**
- * Each leg's epoch: 0 at a build and set by each `rewind` to the page's count of that leg's rewinds, so that a reply
- * or a request of an older epoch is told apart from the rewound leg's (the `rewind` request, in `protocol.ts`'s
- * `RunRequest`).
+ * Each leg's epoch: 0 at a build and set by each `rewind`, and each `clif` request for the CLIF leg, to the page's
+ * count of them, so that a reply or a request of an older epoch is told apart from the leg's now (the `rewind`
+ * request, in `protocol.ts`'s `RunRequest`).
  */
 const epoch: Record<Leg, number> = perLeg(() => 0)
 
@@ -324,12 +382,17 @@ let posted: ResultLegs | null = null
  */
 const rewoundFrom: HeldLegs = perLeg(() => null)
 
-/** Each leg's part of a session's `result`, read off its cursor. */
-const PART: { readonly [K in Leg]: (session: Session) => ResultLegs[K] } = { lambda: lambdaLeg, rxm: rxmLeg, tm: tmLeg }
+/** Each leg's part of a session's `result`, read off its cursor, or for CLIF off the stepper beside it. */
+const PART: { readonly [K in Leg]: (held: SessionLive) => ResultLegs[K] } = {
+  lambda: (held) => lambdaLeg(held.session),
+  rxm: (held) => rxmLeg(held.session),
+  tm: (held) => tmLeg(held.session),
+  clif: (held) => (held.clif === null ? CLIF_ABSENT : clifPart(held.clif.session.status(), held.clif.session.value())),
+}
 
 /** `rewoundFrom`'s part for `leg`, read as `postResult` reads it. */
-function holdPart<K extends Leg>(leg: K, session: Session): void {
-  rewoundFrom[leg] = PART[leg](session)
+function holdPart<K extends Leg>(leg: K, held: SessionLive): void {
+  rewoundFrom[leg] = PART[leg](held)
 }
 
 function dropLive(): void {
@@ -364,6 +427,24 @@ function dropLive(): void {
     if (held?.kind === 'scratch' && held.leg === 'tm') held.value?.free()
   } catch {
     /* As above. */
+  }
+  // A SESSION'S CLIF STEPPER IS FREED AFTER IT, under the same rule and in its own `try`, for the value run's reason.
+  try {
+    if (held?.kind === 'session') held.clif?.session.free()
+  } catch {
+    /* As above. */
+  }
+}
+
+/** Drop the live session's CLIF stepper, if it has one: nulled before freed, and freed in its own `try`, as above. */
+function dropClif(): void {
+  if (live?.kind !== 'session') return
+  const held = live.clif
+  live.clif = null
+  try {
+    held?.session.free()
+  } catch {
+    /* As in `dropLive`: a stepper that cannot be freed is already unusable. */
   }
 }
 
@@ -412,16 +493,19 @@ const claim: Claim = {
 }
 
 /** What `leg`'s recording may step for `gen`, `liveHandle`'s answer for what is live. */
-function handleOf<K extends Leg>(leg: K, gen: number): Session | ScratchOf[K] | null {
+function handleOf<K extends CopyLeg>(leg: K, gen: number): Session | ScratchOf[K] | null {
   return liveHandle<Session, ScratchOf, K>(live, leg, gen)
 }
+
+/** What each leg's recording steps: a session, or the leg's copy; for CLIF, the session's CLIF stepper. */
+type HandleOf = { [K in CopyLeg]: Session | ScratchOf[K] } & { clif: ClifHandle }
 
 /**
  * Each leg's pieces for `record-loop.ts`: a `Session`'s leg, or a copy's (`ScratchOf`), which carries that leg's
  * methods under `Session`'s names. Reached only through `onRun`'s `recordBuild`, `extend`, `rewind` and `onScratch`
  * below (`extend`'s doc).
  */
-const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, Session | ScratchOf[K]> } = {
+const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, HandleOf[K]> } = {
   // The λ leg's recording is what decides its value, where TM's and rxm's replay a run `compile` already finished,
   // whose allowance costs history alone.
   lambda: {
@@ -457,6 +541,19 @@ const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, Session | ScratchOf[K]> } 
     raise: (s) => s.raiseTmCap(EXTEND_STEPS, EXTEND_CELLS),
     rewind: (s) => s.rewindTm(),
   },
+  // A STEPPER IS BUILT ONLY FROM A PROGRAM THE CLIF LEG CAN RUN, so a built one is available. Its cap counts
+  // `EXTEND_STEPS` loop ticks rather than instructions, as the compiled program's own step cap does.
+  clif: {
+    leg: 'clif',
+    handle: (gen) => (live?.gen === gen && live.kind === 'session' ? (live.clif?.session ?? null) : null),
+    available: () => true,
+    frame: (s) => s.state(CLIF_WINDOW),
+    bytes: LEG_FRAME_BYTES.clif,
+    step: (s) => s.step(),
+    end: (s) => rxmRecordEnd(s.status()),
+    raise: (s) => s.raiseCap(EXTEND_STEPS),
+    rewind: (s) => s.rewind(),
+  },
 }
 
 /**
@@ -471,7 +568,7 @@ function extend<K extends Leg>(leg: K, gen: number): Promise<boolean> {
 /** `rewindAndRecord` for `leg`, holding a session's part first when its generation has posted no `result`. */
 function rewind<K extends Leg>(leg: K, gen: number, toEpoch: number): Promise<void> {
   return rewindAndRecord(RECORDINGS[leg], worker, gen, toEpoch, () => {
-    if (posted === null && live?.kind === 'session') holdPart(leg, live.session)
+    if (posted === null && live?.kind === 'session') holdPart(leg, live)
   })
 }
 
@@ -516,16 +613,25 @@ function rxmLeg(session: Session): RxmLeg {
 /**
  * Post the live session's `result`, through `keepInFlight` so that a leg a rewind is recording again is not read
  * mid-fill, and `keepDecided` so that a value decided before a rewind is not taken away by the rewound cursor's
- * `Unfinished`, and keep what it posted as `posted`. `onRun` and `onExtend` both post here, `pinned` as the session's
- * `run` request carried a width.
+ * `Unfinished`, and keep what it posted as `posted`. `onRun`, `onExtend` and the CLIF pass post here, `pinned` as the
+ * session's `run` request carried a width.
  */
-function postResult(gen: number, session: Session, pinned: boolean): void {
-  const read = mapLegs<ResultLegs>((leg) => PART[leg](session))
+function postResult(gen: number, held: SessionLive): void {
+  const read: ResultLegs = {
+    lambda: PART.lambda(held),
+    rxm: PART.rxm(held),
+    tm: PART.tm(held),
+    // A STEPPER THAT THROWS AS IT IS READ COSTS THE `result` ITS CLIF PART ALONE: the other legs' parts are the
+    // session's, which ran.
+    clif: clifRead(gen, () => PART.clif(held)) ?? CLIF_ABSENT,
+  }
   posted = keepDecided(posted, keepInFlight(posted ?? rewoundFrom, read, recording))
-  ctx.postMessage({ kind: 'result', gen, legs: posted, pinned })
+  ctx.postMessage({ kind: 'result', gen, legs: posted, pinned: held.pinned })
 }
 
 async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
+  const result = resultToCome(req.gen)
+  runResult = result
   await claimLive(claim, worker)
 
   // `compile` RUNS THE WHOLE TM LEG and is one uninterruptible call. Off the main thread that can only
@@ -541,7 +647,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
     session.free()
     return
   }
-  live = { gen: req.gen, kind: 'session', session, pinned: req.width !== undefined }
+  live = { gen: req.gen, kind: 'session', session, pinned: req.width !== undefined, clif: null }
 
   const lambda = session.lambdaStatus()
   const rxm = session.rxmStatus()
@@ -563,17 +669,20 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   const rxmText = session.rxmText()
   // GUARDED FOR `tmProgram`'s REASON: `lambdaTree` throws for a declined λ leg.
   const lambdaTree = lambda.available ? session.lambdaTree(0, LAMBDA_TREE_NODES) : null
-  // λ, THEN RXM, THEN TM (Plan 7 part 5 spec §5.4), `LEGS`' order, which is `LEG_NAME`'s. rxm is the cheapest leg per
-  // step, and TM's recording can run to its whole `HISTORY_BYTES` before a leg after it starts; the λ leg stays first,
-  // since its recording is what decides its value. `compiled` goes out with every leg's step 0 before any of them.
+  // λ, THEN RXM, THEN TM (Plan 7 part 5 spec §5.4), `COPY_LEGS`' order, which is `LEG_NAME`'s less CLIF, which records
+  // only while a CLIF view is shown. rxm is the cheapest leg per step, and TM's recording can run to its whole
+  // `HISTORY_BYTES` before a leg after it starts; the λ leg stays first, since its recording is what decides its value.
+  // `compiled` goes out with every leg's step 0 before any of them.
   await recordBuild(RECORDINGS, worker, req.gen, (first) =>
     ctx.postMessage(
       {
         kind: 'compiled',
         gen: req.gen,
-        statuses: { lambda, rxm, tm },
+        statuses: { lambda, rxm, tm, clif: clifCompileStatus(rxm, req.clif) },
         programs: {
           rxm: rxmProgram === null ? null : { program: rxmProgram, text: rxmText },
+          // A COMPILE BUILDS NO CLIF LISTING: a CLIF view is handed one once its stepper is built.
+          clif: null,
           tm:
             tmProgram === null
               ? null
@@ -608,7 +717,134 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   // Deliberate silence: superseded while recording ran. The generation that wanted this result is gone.
   // The `kind` half is the type restating the `gen` half — see `liveHandle`'s doc for the argument.
   if (live?.gen !== req.gen || live.kind !== 'session') return
-  postResult(req.gen, live.session, live.pinned)
+  postResult(req.gen, live)
+  result.settle()
+  // AFTER THE RESULT, NOT BESIDE THE OTHER LEGS: nothing the other legs or the result do waits on the CLIF pass.
+  if (req.clif !== null) await recordClif(req.gen, 0, req.clif)
+}
+
+/**
+ * The live session, when it is still `gen`'s and the CLIF leg still at `epoch`; else `null`, and the CLIF pass that
+ * asks has been replaced: by a newer run, which dropped this session, or by a newer CLIF request.
+ */
+function clifOwner(gen: number, epoch: number): SessionLive | null {
+  return live?.gen === gen && live.kind === 'session' && worker.epoch.clif === epoch ? live : null
+}
+
+/**
+ * The CLIF pass: load `pkg-clif`, build a stepper of `listing` from the live session's `clifInput()`, post the
+ * listing, record the leg from step 0 under `epoch`, then post a `result` that carries its part.
+ *
+ * **EVERY AWAIT IS FOLLOWED BY `clifOwner`**, since a newer run or CLIF request can be dispatched at any of them: a
+ * pass that went on would build from, and record into, a generation it does not own. **A LOAD OR A BUILD THAT FAILS
+ * POSTS ITS TEXT, NOT A `worker-error`**, which would drop a session whose other legs ran.
+ */
+async function recordClif(gen: number, epoch: number, listing: Listing): Promise<void> {
+  const clif = await loadClifAndSay()
+  if (clif === null) return
+  const held = clifOwner(gen, epoch)
+  if (held === null) return
+  const input = held.session.clifInput()
+  if (input === null) {
+    ctx.postMessage({ kind: 'clif-listing', gen, epoch, listing: null, error: held.session.rxmStatus().reason })
+    return
+  }
+  let stepper: ClifHandle
+  try {
+    stepper = new clif.ClifSession(input, listing)
+  } catch (e) {
+    // `ClifSession` throws its sentence as a string, not an `Error`.
+    ctx.postMessage({ kind: 'clif-listing', gen, epoch, listing: null, error: String(e) })
+    return
+  }
+  held.clif = { session: stepper, listing }
+  const rows = clifRead(gen, () => stepper.listing())
+  if (rows === null) return
+  ctx.postMessage({ kind: 'clif-listing', gen, epoch, listing: rows, error: null })
+  if ((await clifRecorded(gen, () => recordFresh(RECORDINGS.clif, worker, gen, epoch))) === null) return
+  const after = clifOwner(gen, epoch)
+  if (after === null) return
+  postResult(gen, after)
+}
+
+/**
+ * `record`, a recording of generation `gen`'s CLIF leg, or `null` once its stepper has thrown, which `clifThrew` is
+ * then told.
+ */
+async function clifRecorded<T>(gen: number, record: () => Promise<T>): Promise<T | null> {
+  try {
+    return await record()
+  } catch (e) {
+    clifThrew(gen, e)
+    return null
+  }
+}
+
+/** `clifRecorded` for a `read` of generation `gen`'s CLIF stepper that records nothing: its listing, or its part. */
+function clifRead<T>(gen: number, read: () => T): T | null {
+  try {
+    return read()
+  } catch (e) {
+    clifThrew(gen, e)
+    return null
+  }
+}
+
+/**
+ * Generation `gen`'s CLIF stepper threw `thrown`. **A STEPPER THAT THROWS IS DROPPED, AND THE CLIF VIEW SAYS WHY**, as
+ * for a build that fails: left to the listener's `catch`, the throw would be a `worker-error`, which drops a session
+ * whose other legs ran. **EVERY CALL ON A STEPPER BUT ITS `free` IS MADE UNDER `clifRecorded` OR `clifRead`**, so no
+ * call on one reaches that `catch`. **ITS PART OF THE LAST `result` GOES WITH IT**, as for a `clif` request: a
+ * `result` read while a loop is still in flight on the stepper keeps the leg's last part (`keepInFlight`), which
+ * would say the stepper dropped here is still running.
+ */
+function clifThrew(gen: number, thrown: unknown): void {
+  dropClif()
+  if (posted !== null) posted = { ...posted, clif: CLIF_ABSENT }
+  const error = thrown instanceof Error ? thrown.message : String(thrown)
+  ctx.postMessage({ kind: 'clif-listing', gen, epoch: epoch.clif, listing: null, error })
+}
+
+/**
+ * `pkg-clif`, loaded or already in, said to the page as a `clif-load`; `null` once a failure is said. **A FAILURE IS
+ * CAUGHT HERE, NEVER THROWN**: the listener's `catch` would make it a `worker-error`, which drops the session.
+ */
+async function loadClifAndSay(): Promise<ClifModule | null> {
+  // **A LOAD THAT FETCHES SAYS SO AS IT STARTS**, so the page says it is loading only while one is under way.
+  if (!clifIn) ctx.postMessage({ kind: 'clif-load', state: 'loading' })
+  let clif: ClifModule
+  try {
+    clif = await loadClif()
+  } catch (e) {
+    ctx.postMessage({ kind: 'clif-load', state: 'failed', error: String(e) })
+    return null
+  }
+  clifIn = true
+  ctx.postMessage({ kind: 'clif-load', state: 'ready' })
+  return clif
+}
+
+/** Whether `pkg-clif` is in, after which a load fetches nothing and says nothing of loading. */
+let clifIn = false
+
+/**
+ * Build generation `gen`'s CLIF stepper again for another listing, or drop it (the request's doc in `protocol.ts`).
+ * **THE EPOCH IS RAISED AND THE STEPPER DROPPED AT ONCE**, so a loop in flight on the old stepper stops at its next
+ * chunk and an `extend` of the new epoch finds nothing to step; the flag is cleared for the new loop, as a rewind
+ * clears it. **THE BUILD WAITS FOR THE RUN'S `result`**, and `runResult` is that run's while its session is live: the
+ * next `run` replaces it and drops the session before this thread reads another request.
+ */
+async function onClif(req: Extract<RunRequest, { kind: 'clif' }>): Promise<void> {
+  if (live?.gen !== req.gen || live.kind !== 'session' || req.epoch <= epoch.clif) return
+  epoch.clif = req.epoch
+  recording.clif = false
+  dropClif()
+  // THE PART THE LAST `result` POSTED IS THE OLD STEPPER'S, and `keepDecided` would answer the new stepper's unfinished
+  // fill with it: another listing's end, and its count of steps.
+  if (posted !== null) posted = { ...posted, clif: CLIF_ABSENT }
+  if (req.listing === null) return
+  await runResult.posted
+  await recordClif(req.gen, req.epoch, req.listing)
 }
 
 /** Each leg's copy as its build makes it: the handle, and what its reply or its free needs beside it. */
@@ -628,7 +864,7 @@ type Made = {
  * `tm::parse_tm_full` makes every diagnostic an error and builds no machine once there is one; a headerless file is
  * `tm.header: false` on the status, not a diagnostic. `rxm_scratch` builds no copy unless its diagnostics are empty.
  */
-const BUILD: { readonly [K in Leg]: CopyBuild<K, Made[K]> } = {
+const BUILD: { readonly [K in CopyLeg]: CopyBuild<K, Made[K]> } = {
   // THE REPLAY TO THE FORKED STEP IS IN RUST, INSIDE `lambdaScratchAt`, NOT HERE: this file is reachable only from the
   // browser tier, which the coverage gate cannot see.
   lambda: {
@@ -703,7 +939,7 @@ const BUILD: { readonly [K in Leg]: CopyBuild<K, Made[K]> } = {
  * Build `leg`'s copy. **GENERIC IN THE LEG, AS `extend` IS**: `tsc` checks this body with `K` abstract, so a build of
  * one leg paired with another leg's recording is refused, `buildCopy` taking both of one `K`.
  */
-function onScratch<K extends Leg>(leg: K, req: Extract<RunRequest, { kind: 'scratch' }>): Promise<void> {
+function onScratch<K extends CopyLeg>(leg: K, req: Extract<RunRequest, { kind: 'scratch' }>): Promise<void> {
   return buildCopy(BUILD[leg], RECORDINGS[leg], claim, () => latest, worker, req)
 }
 
@@ -740,10 +976,10 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   // Deliberate silence: the generation being extended is not the live one anymore (superseded by a
   // later `run`, or there was never a session for it).
   if (live?.gen !== req.gen) return
-  // Deliberate silence, and a state the page cannot reach: it raises a leg's epoch only as it posts `rewind`, and
-  // this thread takes messages in order, so no `extend` of an older epoch arrives after the `rewind` that replaced
-  // it. Checked as the generation is, so that a stale request records nothing whoever posts it, as
-  // `tests/browser/worker.test.ts` does.
+  // Deliberate silence, and a state the page cannot reach: it raises a leg's epoch only as it posts a `rewind` or a
+  // `clif` request, and this thread takes messages in order, so no `extend` of an older epoch arrives after the
+  // request that replaced it. Checked as the generation is, so that a stale request records nothing whoever posts
+  // it, as `tests/browser/worker.test.ts` does.
   if (req.epoch !== epoch[req.leg]) return
   // ONE MORE ALLOWANCE FROM WHERE RECORDING STOPPED, not stacked on the old allowance. On a `budget`
   // stop `recorded[leg] >= allowance[leg]`, but not necessarily equal to it: the check runs BEFORE
@@ -758,7 +994,10 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
 
   // Written before `extend` asks whether what is live has the leg: harmless for a leg that never records, where asking
   // first would put a `kind` test in front of the ordinary path.
-  const ran = await extend(req.leg, req.gen)
+  const ran =
+    req.leg === 'clif'
+      ? ((await clifRecorded(req.gen, () => extend('clif', req.gen))) ?? false)
+      : await extend(req.leg, req.gen)
   // A SUPPRESSED CALL MUST NOT POST A RESULT. `ran === false` is a live thing without the leg, a leg that did not
   // compile, or a loop already in flight for this leg, which owns it — that loop posts its own frames, and its caller
   // any `result`, when it finishes. Posting one here too would answer with whatever partial state that other loop had
@@ -781,7 +1020,7 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
     return
   }
   if (live.kind !== 'session') return
-  postResult(req.gen, live.session, live.pinned)
+  postResult(req.gen, live)
 }
 
 /**
@@ -797,7 +1036,8 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
  * keeps the leg's last part, read here first if none was posted (`keepInFlight`), and later its decided value.
  */
 async function onRewind(req: Extract<RunRequest, { kind: 'rewind' }>): Promise<void> {
-  await rewind(req.leg, req.gen, req.epoch)
+  if (req.leg === 'clif') await clifRecorded(req.gen, () => rewind('clif', req.gen, req.epoch))
+  else await rewind(req.leg, req.gen, req.epoch)
 }
 
 /**
@@ -855,6 +1095,12 @@ ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
         break
       case 'lambda-tree':
         onLambdaTree(req)
+        break
+      case 'clif-load':
+        await loadClifAndSay()
+        break
+      case 'clif':
+        await onClif(req)
         break
       default:
         unhandled(req)

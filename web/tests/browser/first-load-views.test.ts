@@ -53,30 +53,31 @@ describe('a first load, in a window wider than it is tall', () => {
     expect(Math.abs(source.height - tm.height)).toBeLessThan(1)
   })
 
-  it('presses the source and TM toggles and leaves λ and rxm unpressed', () => {
+  it('presses the source and TM toggles and leaves λ, rxm and CLIF unpressed', () => {
     expect(pressed()).toEqual(['source', 'tm'])
     const all = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
-    expect(all.map((b) => b.textContent)).toEqual(['source', 'λ', 'TM', 'rxm'])
+    expect(all.map((b) => b.textContent)).toEqual(['source', 'λ', 'TM', 'rxm', 'CLIF'])
     expect(all.map((b) => b.title)).toEqual([
       'hide the source view',
       'show the λ view',
       'hide the TM view',
       `show the rxm view\n${KIND_GLOSS.rxm}`,
+      `show the CLIF view\n${KIND_GLOSS.clif}`,
     ])
     // `aria-disabled` IS HOW A TOGGLE IS DISABLED (`app-header.ts`'s `viewToggles`): the `disabled` property is
     // false of every toggle whatever the page shows.
-    expect(all.map((b) => b.getAttribute('aria-disabled'))).toEqual([null, null, null, null])
+    expect(all.map((b) => b.getAttribute('aria-disabled'))).toEqual([null, null, null, null, null])
   })
 
   /**
    * **WHERE THE TOGGLES ARE DRAWN, AND NOT THE ORDER THE MARKUP LISTS THEM IN**: a stylesheet can lay a row out in
    * another order than its document's, and the order a reader goes by is the one across the header.
    */
-  it('draws the toggles left to right as source, λ, TM and rxm, on one line', () => {
+  it('draws the toggles left to right as source, λ, TM, rxm and CLIF, on one line', () => {
     const onScreen = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
       .map((b) => ({ word: b.textContent, box: b.getBoundingClientRect() }))
       .sort((a, b) => a.box.left - b.box.left)
-    expect(onScreen.map((toggle) => toggle.word)).toEqual(['source', 'λ', 'TM', 'rxm'])
+    expect(onScreen.map((toggle) => toggle.word)).toEqual(['source', 'λ', 'TM', 'rxm', 'CLIF'])
     for (const [i, { word, box }] of onScreen.entries()) {
       expect(box.width, `the ${word} toggle has no width`).toBeGreaterThan(0)
       const before = onScreen[i - 1]
@@ -92,7 +93,7 @@ describe('a first load, in a window wider than it is tall', () => {
   })
 
   /**
-   * **THE TOGGLES' LOOK** (the view switcher style design): four buttons apart, each with a solid edge, a pressed one
+   * **THE TOGGLES' LOOK** (the view switcher style design): five buttons apart, each with a solid edge, a pressed one
    * edged and underlined in `--accent` and one that is not edged in `--rule`. The underline is an inset shadow along
    * the foot, the cue that is not a colour. Each part is a case of its own, so each taken out of `style.css` fails on
    * its own. Their corners differ by style, so `view-toggle-focus-ring.test.ts` reads those, in every style: a style
@@ -121,6 +122,7 @@ describe('a first load, in a window wider than it is tall', () => {
       ['lambda', 'false', ['solid rule']],
       ['tm', 'true', ['solid accent']],
       ['rxm', 'false', ['solid rule']],
+      ['clif', 'false', ['solid rule']],
     ])
   })
 
@@ -131,19 +133,20 @@ describe('a first load, in a window wider than it is tall', () => {
       ['lambda', 'none'],
       ['tm', `${accent} 0px -2px 0px 0px inset`],
       ['rxm', 'none'],
+      ['clif', 'none'],
     ])
   })
 
   it('sets the toggles apart, a gap between each and the next', () => {
     const boxes = toggles().map((b) => b.getBoundingClientRect())
-    expect(boxes, 'precondition: the four').toHaveLength(4)
+    expect(boxes, 'precondition: the five').toHaveLength(5)
     const gaps = boxes.slice(1).map((b, i) => b.left - (boxes[i] as DOMRect).right)
     for (const [i, gap] of gaps.entries()) expect.soft(gap, `the gap after toggle ${i + 1}`).toBeGreaterThan(0)
   })
 
   /**
    * **FORCED COLOURS TAKE EVERY CUE ABOVE AWAY**: they put a system colour in place of each of the page's and draw no
-   * shadow, so the four would be alike. What they leave is a border's style and a system colour the page names, so
+   * shadow, so the five would be alike. What they leave is a border's style and a system colour the page names, so
    * there one that is not pressed is dashed and a pressed one is edged in `Highlight`.
    */
   it('tells a pressed toggle from one that is not in forced colours, solid in Highlight against dashed', async (ctx) => {
@@ -166,6 +169,7 @@ describe('a first load, in a window wider than it is tall', () => {
         ['lambda', 'false', ['dashed a button’s']],
         ['tm', 'true', ['solid Highlight']],
         ['rxm', 'false', ['dashed a button’s']],
+        ['clif', 'false', ['dashed a button’s']],
       ])
     } finally {
       await cdp().send('Emulation.setEmulatedMedia', { features: [] })

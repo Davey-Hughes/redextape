@@ -1,0 +1,40 @@
+import type { ClifState } from '../../src/types'
+
+/** `fact.rxt` as built at step 95: three calls of `fact.0` deep under `$main`, 17 values, no heap. */
+export const FACT_95: ClifState = {
+  step: 95,
+  at: { function: 1, inst: 27 },
+  next: { function: 1, inst: 27 },
+  pc: 11,
+  values: [
+    { value: 0, word: { word: '0', tag: 'Value' }, regs: [] },
+    { value: 1, word: { word: '2', tag: 'Value' }, regs: ['a0'] },
+    { value: 2, word: { word: '0', tag: 'Value' }, regs: ['r0'] },
+    { value: 3, word: { word: '0', tag: 'Value' }, regs: ['r1'] },
+    { value: 4, word: { word: '0', tag: 'Value' }, regs: ['r2'] },
+    { value: 5, word: { word: '0', tag: 'Value' }, regs: ['r3'] },
+    { value: 6, word: { word: '0', tag: 'Value' }, regs: ['r4'] },
+    { value: 7, word: { word: '0', tag: 'Value' }, regs: ['r5'] },
+    { value: 8, word: { word: '0', tag: 'Value' }, regs: ['r6'] },
+    { value: 9, word: { word: '0', tag: 'Value' }, regs: ['r7'] },
+    { value: 10, word: { word: '0', tag: 'Value' }, regs: ['r8'] },
+    { value: 11, word: { word: '0', tag: 'Value' }, regs: ['rr'] },
+    { value: 14, word: { word: '0', tag: 'Value' }, regs: ['r3'] },
+    { value: 17, word: { word: '0', tag: 'Value' }, regs: [] },
+    { value: 18, word: { word: '0', tag: 'Value' }, regs: ['r1'] },
+    { value: 23, word: { word: '1', tag: 'Value' }, regs: ['r8'] },
+    { value: 26, word: { word: '1', tag: 'Value' }, regs: [] },
+  ],
+  values_len: 17,
+  depth: 4,
+  frames: [
+    { function: 1, inst: 27 },
+    { function: 1, inst: 32 },
+    { function: 1, inst: 32 },
+    { function: 0, inst: 10 },
+  ],
+  heap_len: 0,
+  cells: [],
+  box_len: 0,
+  boxes: [],
+}

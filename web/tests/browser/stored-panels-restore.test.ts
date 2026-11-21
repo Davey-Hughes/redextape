@@ -15,7 +15,14 @@ import { fourViewWorkspace, host, inertEvents, SHELL, stateIdle, until } from '.
  * view built with nothing stored draws, so a panel the load did not read back fails whichever way its default falls.
  */
 
-const BUILD_BARE: { readonly [K in Leg]: (el: HTMLElement) => void } = {
+/**
+ * The legs whose views `fourViewWorkspace` shows, every leg but CLIF: a CLIF view draws none of its panels while it
+ * says it is loading, so there is nothing of it to read back.
+ */
+type PanelLeg = Exclude<Leg, 'clif'>
+const PANEL_LEGS = LEGS.filter((leg): leg is PanelLeg => leg !== 'clif')
+
+const BUILD_BARE: { readonly [K in PanelLeg]: (el: HTMLElement) => void } = {
   lambda: (el) => {
     new LambdaPane(el, inertEvents())
   },
@@ -34,18 +41,18 @@ const drawsOpen = (view: HTMLElement, name: string): boolean =>
   view.querySelector<HTMLElement>(`[data-panel="${name}"]`)?.dataset.open === 'true'
 
 /** What a view of `leg` draws for each of its panels with nothing stored. */
-const bareDefaults = (leg: Leg): ReadonlyMap<string, boolean> => {
+const bareDefaults = (leg: PanelLeg): ReadonlyMap<string, boolean> => {
   const el = document.createElement('div')
   BUILD_BARE[leg](el)
   return new Map(LEG_PANELS[leg].map((name) => [name, drawsOpen(el, name)]))
 }
 
-const defaults = new Map<Leg, ReadonlyMap<string, boolean>>()
+const defaults = new Map<PanelLeg, ReadonlyMap<string, boolean>>()
 
 beforeAll(async () => {
-  for (const leg of LEGS) defaults.set(leg, bareDefaults(leg))
+  for (const leg of PANEL_LEGS) defaults.set(leg, bareDefaults(leg))
   const panels = Object.fromEntries(
-    LEGS.map((leg) => [
+    PANEL_LEGS.map((leg) => [
       leafOf(leg),
       Object.fromEntries([...(defaults.get(leg) ?? [])].map(([name, open]) => [name, !open])),
     ]),
@@ -58,7 +65,7 @@ beforeAll(async () => {
 
 describe('a workspace that stores every panel', () => {
   it('opens every stored panel as the workspace stored it', () => {
-    for (const leg of LEGS) {
+    for (const leg of PANEL_LEGS) {
       const view = host(leafOf(leg)) as HTMLElement
       for (const [name, open] of defaults.get(leg) ?? []) {
         expect(drawsOpen(view, name), `${leg}'s ${name}`).toBe(!open)
@@ -67,7 +74,7 @@ describe('a workspace that stores every panel', () => {
   })
 
   it('draws exactly the panels the table names, and the text panel', () => {
-    for (const leg of LEGS) {
+    for (const leg of PANEL_LEGS) {
       const drawn = [...(host(leafOf(leg)) as HTMLElement).querySelectorAll<HTMLElement>('[data-panel]')]
       expect(drawn.map((el) => el.dataset.panel).sort(), leg).toEqual([...LEG_PANELS[leg], 'text'].sort())
     }

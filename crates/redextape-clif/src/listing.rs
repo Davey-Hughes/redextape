@@ -15,6 +15,7 @@ use crate::state::ClifAt;
 use crate::stepper::pc_of;
 
 /// What a listing row shows.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum ClifRowKind {
     /// `function u0:12(i64, i64) -> i64 system_v {`.
@@ -34,6 +35,7 @@ pub enum ClifRowKind {
 }
 
 /// One line of the listing.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifRow {
     pub kind: ClifRowKind,
@@ -49,6 +51,7 @@ pub struct ClifRow {
 }
 
 /// One function of the listing.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifFunction {
     /// Its name as Cranelift prints it, `u0:12`.
@@ -60,6 +63,7 @@ pub struct ClifFunction {
 }
 
 /// The rows of a run's functions, each function's rows starting where the one before ended.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ClifListing {
     pub functions: Vec<ClifFunction>,

@@ -1,10 +1,10 @@
 //! Fidelity gates on the generated TypeScript for the types THIS crate declares. Feature-gated
 //! whole: without `ts` there are no `TS` impls to ask and this target compiles to nothing.
 //!
-//! **THE SIBLING OF `crates/redextape-core/tests/ts_bindings.rs`, OVER A DIFFERENT SET OF TYPES.**
-//! Both run the same three gates and both call the same scanner —
+//! **A SIBLING OF `crates/redextape-core/tests/ts_bindings.rs` AND `crates/redextape-clif/tests/ts_bindings.rs`,
+//! OVER A DIFFERENT SET OF TYPES.** Each runs the same three gates and calls the same scanner —
 //! `redextape_test_support::ts_derive_scan` — which is why that scanner lives in a shared crate
-//! rather than in either test file. Read its doc for what the coverage scan guarantees and the three
+//! rather than in any one test file. Read its doc for what the coverage scan guarantees and the three
 //! routes it names as outside its reach rather than closed. What is local to this file is the list
 //! below and the reason each entry is on it.
 //!
@@ -101,7 +101,7 @@ fn the_gate_covers_every_exported_type() {
 /// THE RULE AND ITS REASONING LIVE IN `redextape_test_support::ts_derive_scan` — read
 /// `assert_overrides_match_field_nullability`'s own doc for why it parses with `syn`, the rule over
 /// the keys that say anything about null, and what it names as outside its reach rather than
-/// closed. One implementation with two callers is deliberate: a second copy drifts the moment one is
+/// closed. One implementation with a caller per crate is deliberate: a second copy drifts the moment one is
 /// widened and the other is not.
 #[test]
 fn no_override_misstates_a_field_s_nullability() {

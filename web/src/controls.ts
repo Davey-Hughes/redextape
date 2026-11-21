@@ -24,8 +24,8 @@ export type LegView = {
   /** The step a shared link's position is taking this leg to, or `null` — `LegState.pending`. */
   pending: number | null
   /**
-   * Whether a rewind emptied the ring and its first frames have not come (`LegState.epoch` above 0 and nothing
-   * recorded): the leg is recording from step 0, which `recording` and the step line say, rather than not run.
+   * Whether a rewind emptied the ring and its first frames have not come (`sessions.ts`'s `legRewinding`): the leg is
+   * recording from step 0, which `recording` and the step line say, rather than not run.
    */
   rewinding: boolean
 }

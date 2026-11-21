@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildCopy, type Claim, type CopyBuild, claimLive, liveHandle, type Occupant } from '../../src/copy-build'
-import { LEGS, perLeg } from '../../src/legs'
-import { HISTORY_BYTES, type Leg, type RunReply, rxmRecordEnd } from '../../src/protocol'
+import { COPY_LEGS, LEGS, perLeg } from '../../src/legs'
+import { type CopyLeg, HISTORY_BYTES, type Leg, type RunReply, rxmRecordEnd } from '../../src/protocol'
 import type { RecordLeg, RecordWorker } from '../../src/record-loop'
 import type { Diagnostic } from '../../src/types'
 import { FACT3, frameOf, rxmSnapshot } from './rxm-fixtures'
@@ -220,8 +220,8 @@ describe('buildCopy', () => {
 
 describe('liveHandle', () => {
   it("answers the session for every leg, a copy for its own leg alone, and null for another generation's", () => {
-    type Handles = Record<Leg, string>
-    const copy = (gen: number, leg: Leg): Occupant<string, Handles> => ({
+    type Handles = Record<CopyLeg, string>
+    const copy = (gen: number, leg: CopyLeg): Occupant<string, Handles> => ({
       gen,
       kind: 'scratch',
       leg,
@@ -229,13 +229,13 @@ describe('liveHandle', () => {
     })
     const occupants: [string, Occupant<string, Handles> | null][] = [
       ['session', { gen: 1, kind: 'session', session: 'session' }],
-      ...LEGS.map((leg): [string, Occupant<string, Handles>] => [`${leg} copy`, copy(1, leg)]),
+      ...COPY_LEGS.map((leg): [string, Occupant<string, Handles>] => [`${leg} copy`, copy(1, leg)]),
       ['older session', { gen: 0, kind: 'session', session: 'session' }],
       ['older tm copy', copy(0, 'tm')],
       ['nothing', null],
     ]
 
-    const answers = occupants.map(([name, live]) => [name, LEGS.map((leg) => liveHandle(live, leg, 1))])
+    const answers = occupants.map(([name, live]) => [name, COPY_LEGS.map((leg) => liveHandle(live, leg, 1))])
 
     expect(answers).toEqual([
       ['session', ['session', 'session', 'session']],

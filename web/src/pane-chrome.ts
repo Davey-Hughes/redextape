@@ -1,11 +1,11 @@
 import type { FieldWidth } from './field-width'
 import { createPanel, type Panel } from './panel'
 import type { Shares } from './panel-stack'
-import type { Leg } from './protocol'
+import type { ClifLoad, Leg, Listing } from './protocol'
 import type { ScratchEditorConfig } from './scratch-editor'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
-import type { LambdaDisplay, Speed, TmDisplay } from './workspace'
+import type { ClifDisplay, LambdaDisplay, Speed, TmDisplay } from './workspace'
 
 export type PaneEvents = {
   /**
@@ -174,11 +174,29 @@ export type PaneEvents = {
   display?: (d: LambdaDisplay) => void
   /** A TM view's display settings changed — `display`'s twin. */
   tmDisplay?: (d: TmDisplay) => void
+  /** A CLIF view's display settings changed — `display`'s twin. */
+  clifDisplay?: (d: ClifDisplay) => void
   /**
    * The program's one field width, which a TM view shows and sets in its header (`field-width.ts`).
    * OPTIONAL for `panel`'s reason: a TM view built without it has no width box.
    */
   fieldWidth?: FieldWidth
+  /**
+   * Where the page's `pkg-clif` load stands, for a CLIF view to say while it has no listing, and `retry`, which asks
+   * for the shown listing again after a load that failed. OPTIONAL for `panel`'s reason.
+   */
+  clifLoad?: { state(): ClifLoad; retry(): void }
+  /**
+   * Why this view's leg cannot run, as its step bar says it, or `''` while nothing stops it: read through the slot, as
+   * the controls' handlers are, so it follows a rebind. OPTIONAL for `panel`'s reason.
+   */
+  legReason?: () => string
+  /**
+   * The program's one listing, which every CLIF view shows and switches on its bar, as a TM view does the width: the
+   * listing now, and `choose`, which `main.ts` records and re-records the CLIF leg for. OPTIONAL for `panel`'s
+   * reason: a CLIF view built without it has no switch.
+   */
+  clifListing?: { current(): Listing; choose(l: Listing): void }
   /**
    * Copy this view's PROGRAM, a TM view's machine or an rxm view's listing, into a copy on the view's leg — 5d-iv
    * design §4.3, Plan 7 part 5 spec §7.
@@ -195,8 +213,11 @@ export type PaneEvents = {
   detachProgram?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
-  /** An instruction row in the rxm view's listing was clicked, or Enter pressed on it; `pc` is its index. */
-  linkInstr?: (pc: number) => void
+  /**
+   * An instruction row in the rxm or CLIF view's listing was clicked, or Enter pressed on it; `pc` is the rxm
+   * instruction it names, `null` for a row that names none.
+   */
+  linkInstr?: (pc: number | null) => void
   /** A token in the λ view was clicked; `node` is the construct its node belongs to. */
   linkLambda?: (node: number) => void
   /**

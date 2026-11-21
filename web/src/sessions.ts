@@ -7,7 +7,7 @@ import { LEGS } from './legs'
 // is declared beside the control that reads it because it is that control's input, not the registry's
 // output — this module does not supply all of it, and a count of what it does would go stale on sight.
 import type { SplitChoices } from './pane-chrome'
-import type { Leg, LegFrame, LegProgram, RecordEnd } from './protocol'
+import type { ClifCompiled, Leg, LegFrame, LegProgram, RecordEnd, RxmLeg } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
 import type { Decoded, RxmStatus, TmScratchStatus, ValueReading } from './types'
 
@@ -30,9 +30,9 @@ export type LegState<T> = {
    */
   playing: boolean
   /**
-   * How many times the leg has been rewound since its build, which set it to 0 (`resetLegs`). Frames carrying another
-   * epoch are from a recording a rewind replaced, and the requests for the leg carry this one (the `rewind` request,
-   * in `protocol.ts`'s `RunRequest`).
+   * How many times the leg has been rewound since its build, which set it to 0 (`resetLegs`), and the CLIF leg asked
+   * for a listing: frames carrying another epoch are from a recording one of those replaced, and the requests for the
+   * leg carry this one (the `rewind` request, in `protocol.ts`'s `RunRequest`).
    */
   epoch: number
   /**
@@ -48,6 +48,41 @@ export type LegState<T> = {
    * line; and taken away by a gesture on the leg's step controls. Absent on every leg no link is taking anywhere.
    */
   pending?: number
+  /**
+   * The CLIF leg's hold while a `clif` request replaces the recording its ring holds (`holdClifLeg`). Absent on every
+   * other leg, and on the CLIF leg at every other time.
+   */
+  clifHold?: ClifHold
+}
+
+/**
+ * What the CLIF leg keeps on the page while a `clif` request replaces its recording (`holdClifLeg`): **ITS RING, END
+ * AND LISTING STAY AS THEY ARE UNTIL THE NEW RECORDING'S FIRST FRAMES COME**, which `replies.ts` shows with the
+ * listing that came for them, or until a listing that says the leg has none; and these, which the page goes on saying
+ * or keeps until then. Every reset and rewind of the leg drops it whole.
+ */
+export type ClifHold = {
+  /**
+   * The step a link's position was taking the leg to when a listing chosen dropped the position: **THE STEP LINE AND
+   * THE READOUT GO ON SAYING IT** until the new frames replace the line it was in, so neither moves before the view
+   * does. `LinkPositions` holds it no longer, so nothing seeks or continues the leg towards it.
+   */
+  linkStep?: number
+  /**
+   * The CLIF part of the result stored when the hold began, and that result's generation: a result of that generation
+   * that comes during the hold keeps it (`replies.ts`), so the readout neither loses nor changes its CLIF rows before
+   * the view changes. A result of another generation is a compile's, which the hold does not outlast.
+   */
+  readonly part?: { readonly gen: number; readonly clif: RxmLeg }
+  /** The listing a `clif-listing` gave for the hold's epoch, kept until that epoch's first frames show it with them. */
+  landing?: { readonly gen: number; readonly epoch: number; readonly compiled: ClifCompiled }
+  /**
+   * Whether a rewind had emptied the ring, its first frames not come, when the first hold began: **THE STEP LINE GOES
+   * ON SAYING THE LEG RECORDS FROM STEP 0** (`ControlState.rewinding`), as it did then, where a ring a compile emptied
+   * goes on reading not run. Kept, because the leg cannot tell the two apart once held: each hold raises the epoch a
+   * compile put to 0, and a recompile claimed during the hold leaves neither ring's frames the client's generation.
+   */
+  readonly rewinding: boolean
 }
 
 /**
@@ -227,6 +262,7 @@ export function resetLegs(
     if (leg === undefined) continue
     leg.hist.clear()
     leg.done = null
+    delete leg.clifHold
     leg.playing = false
     leg.epoch = 0
     const status = statuses[l]
@@ -243,6 +279,29 @@ export function rewindLeg(leg: LegState<unknown>): void {
   leg.epoch += 1
   leg.hist.clear()
   leg.done = null
+  delete leg.clifHold
+}
+
+/**
+ * Raise the CLIF leg's epoch for a `clif` request that replaces the recording its ring holds, as `rewindLeg` does, but
+ * keep the ring and its end (`ClifHold`): **A VIEW OF THE LEG GOES STRAIGHT FROM THE RECORDING REPLACED TO THE NEW
+ * ONE'S FIRST FRAMES**, with no draw of an empty ring between them. Frames of the recording replaced are still dropped
+ * by their epoch (`replies.ts`'s `pushFrames`). **A HOLD BEGUN DURING A HOLD KEEPS ITS LINK STEP AND ITS REWINDING**,
+ * which the line it is in still says, and lets go of the listing that came for the epoch it replaces.
+ */
+export function holdClifLeg(leg: LegState<LegFrame['clif']>, part: ClifHold['part']): void {
+  const rewinding = legRewinding(leg)
+  leg.epoch += 1
+  const linkStep = leg.clifHold?.linkStep
+  leg.clifHold = { ...(linkStep === undefined ? {} : { linkStep }), ...(part === undefined ? {} : { part }), rewinding }
+}
+
+/**
+ * Whether `leg`'s ring is one a rewind emptied and its first frames have not come (`ControlState.rewinding`): empty at
+ * an epoch above 0, which a compile's reset puts to 0, or while held what that said when the hold began.
+ */
+function legRewinding(leg: LegState<unknown>): boolean {
+  return leg.clifHold?.rewinding ?? (leg.epoch > 0 && leg.hist.length === 0)
 }
 
 /**
@@ -528,8 +587,8 @@ export function legControlState<K extends Leg>(
     done: leg.done,
     awaitingRun: reg.entryOf(binding.session).client.awaitingRun,
     playing: leg.playing,
-    pending: leg.pending ?? null,
-    rewinding: leg.epoch > 0 && leg.hist.length === 0,
+    pending: leg.pending ?? leg.clifHold?.linkStep ?? null,
+    rewinding: legRewinding(leg),
   })
 }
 

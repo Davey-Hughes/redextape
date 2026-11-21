@@ -1,12 +1,13 @@
 import { deflateRawSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { defaultArrangement, KIND_ORDER } from '../../src/layout'
+import { defaultArrangement } from '../../src/layout'
 import { LEGS } from '../../src/legs'
 import {
   decodeLink,
   encodeLink,
   isLink,
   LINK_PREFIX,
+  LINK_VERSION,
   MAX_LINK_BYTES,
   type OpenedLink,
   type Positions,
@@ -74,7 +75,9 @@ describe('encodeLink and decodeLink', () => {
       if (next() < 0.5) continue
       positions[leg] = pick([0, 1, Math.floor(next() * 100_000), Number.MAX_SAFE_INTEGER])
     }
-    return { program, encoding: pick(ENCODINGS), width: pick([null, 4, 13, 64]), workspace, positions }
+    const width = pick([null, 4, 13, 64])
+    const listing = next() < 0.5 ? { listing: 'optimised' as const } : {}
+    return { program, encoding: pick(ENCODINGS), width, ...listing, workspace, positions }
   }
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8])('reads back whole what it wrote, generated from seed %i', async (seed) => {
@@ -85,6 +88,7 @@ describe('encodeLink and decodeLink', () => {
       program: payload.program,
       encoding: payload.encoding,
       width: payload.width,
+      listing: payload.listing ?? 'as-built',
       workspace: parseWorkspace(payload.workspace),
       positions: payload.positions,
     })
@@ -126,6 +130,26 @@ describe('encodeLink and decodeLink', () => {
       '{"version":1,"program":"let x = 40; x + 2","encoding":"binary","width":4,"workspace":"{}","positions":{"tm":3}}',
     )
   })
+
+  /**
+   * **A LINK AS BUILT HAS NO `listing` KEY**, as an auto link has no `width`, so it is the version-1 payload every
+   * build at this version reads alike, and `LINK_VERSION` stays 1. Optimised sits after the width.
+   */
+  it('writes as built with no listing key, and optimised after the width', async () => {
+    expect(LINK_VERSION).toBe(1)
+    const payload = { program: 'let x = 40; x + 2', encoding: 'binary', workspace: '{}', positions: { clif: 3 } }
+    expect(await inflatedOf(await encodeLink(payload))).toBe(
+      '{"version":1,"program":"let x = 40; x + 2","encoding":"binary","workspace":"{}","positions":{"clif":3}}',
+    )
+    expect(await inflatedOf(await encodeLink({ ...payload, listing: 'optimised' }))).toBe(
+      '{"version":1,"program":"let x = 40; x + 2","encoding":"binary","listing":"optimised","workspace":"{}",' +
+        '"positions":{"clif":3}}',
+    )
+    expect(await inflatedOf(await encodeLink({ ...payload, width: 4, listing: 'optimised' }))).toBe(
+      '{"version":1,"program":"let x = 40; x + 2","encoding":"binary","width":4,"listing":"optimised",' +
+        '"workspace":"{}","positions":{"clif":3}}',
+    )
+  })
 })
 
 /**
@@ -148,6 +172,8 @@ describe('the frozen format of a version 1 link', () => {
         'fn sum_to(n) {\n    let mut acc = 0;\n    while n > 0 {\n        acc = acc + n;\n        n = n - 1;\n    }\n    acc\n}\nsum_to(5)\n',
       encoding: 'binary',
       width: null,
+      // WRITTEN BEFORE A LINK COULD CARRY A LISTING, SO IT CARRIES NONE, AND OPENS AS BUILT.
+      listing: 'as-built',
       workspace: {
         tree: {
           kind: 'split',
@@ -182,6 +208,8 @@ describe('the frozen format of a version 1 link', () => {
         inspector: true,
         display: {},
         tmDisplay: {},
+        // WRITTEN BEFORE A CLIF VIEW HAD A LAYOUT TO STORE, SO IT CARRIES NONE, AND READS AS NONE STORED.
+        clifDisplay: {},
         // WRITTEN BEFORE THE VIEW LAYOUTS, SO IT CARRIES NONE, AND READS AS REMEMBERING NOTHING: its four views are
         // the arrangement on screen, as they were.
         arrangements: {},
@@ -248,7 +276,13 @@ describe('a link nothing can be read from', () => {
 })
 
 describe('a link that opens the program alone', () => {
-  const alone = (encoding: string | null) => ({ kind: 'program', program: 'let x = 40; x + 2', encoding, width: null })
+  const alone = (encoding: string | null) => ({
+    kind: 'program',
+    program: 'let x = 40; x + 2',
+    encoding,
+    width: null,
+    listing: 'as-built',
+  })
 
   it('opens the program alone, under its encoding, for a version other than 1', async () => {
     for (const version of [2, '1', undefined])
@@ -341,7 +375,57 @@ describe('a link carrying a width', () => {
       program: 'let x = 40; x + 2',
       encoding: 'binary',
       width: null,
+      listing: 'as-built',
     })
+  })
+})
+
+/**
+ * **A LISTING THE BUILD DOES NOT KNOW READS AS BUILT, AND THE LINK STAYS WHOLE, LESS ITS CLIF POSITION**, as an
+ * unlisted width keeps the link less its TM position: the CLIF position is a step of the run of the listing the link
+ * names, and the listing as built is another run. A link with no listing is as built, and keeps it.
+ */
+describe('a link carrying a listing', () => {
+  const whole = { kind: 'whole', program: 'let x = 40; x + 2', encoding: 'binary', width: null }
+  const positions = { clif: 9, rxm: 4 }
+  const opened = (fields: Record<string, unknown>) =>
+    decodeLink(payloadLink({ positions, ...fields }), ENCODINGS, WIDTHS)
+  const positionsOf = (link: OpenedLink) => (link.kind === 'whole' ? link.positions : null)
+
+  it('opens whole, optimised, with every position', async () => {
+    const link = await opened({ listing: 'optimised' })
+    expect(link).toMatchObject({ ...whole, listing: 'optimised' })
+    expect(positionsOf(link)).toEqual(positions)
+  })
+
+  it('opens whole as built, with every position, for no listing and for as built', async () => {
+    for (const fields of [{}, { listing: 'as-built' }]) {
+      const link = await opened(fields)
+      expect(link, JSON.stringify(fields)).toMatchObject({ ...whole, listing: 'as-built' })
+      expect(positionsOf(link), JSON.stringify(fields)).toEqual(positions)
+    }
+  })
+
+  it.each(['sideways', 'as built', 'Optimised', null, true, 1, ['optimised'], { listing: 'optimised' }])(
+    'opens whole as built for a listing of %j, with its workspace and every position but the CLIF’s',
+    async (listing) => {
+      const link = await opened({ listing })
+      expect(link).toMatchObject({ ...whole, listing: 'as-built' })
+      expect(link.kind === 'whole' && link.workspace).toEqual(parseWorkspace(WORKSPACE))
+      expect(positionsOf(link)).toEqual({ rxm: 4 })
+    },
+  )
+
+  it('drops the TM and CLIF positions both, for a width it does not list and a listing it does not know', async () => {
+    const link = await opened({ width: 65, listing: 'sideways', positions: { clif: 9, rxm: 4, tm: 12 } })
+    expect(link).toMatchObject({ ...whole, listing: 'as-built' })
+    expect(positionsOf(link)).toEqual({ rxm: 4 })
+  })
+
+  it('opens the program alone in its listing, or as built for one it does not know', async () => {
+    const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary', width: null }
+    expect(await opened({ version: 2, listing: 'optimised' })).toEqual({ ...alone, listing: 'optimised' })
+    expect(await opened({ version: 2, listing: 'sideways' })).toEqual({ ...alone, listing: 'as-built' })
   })
 })
 
@@ -352,7 +436,7 @@ describe('a link carrying a width', () => {
  * arrangements into force and into the reader's storage.
  */
 describe('a link whose workspace carries remembered arrangements', () => {
-  const FOUR = defaultArrangement(KIND_ORDER, 'wide')
+  const FOUR = defaultArrangement(['source', 'lambda', 'rxm', 'tm'], 'wide')
   const carried = {
     ...defaultWorkspace('wide'),
     arrangements: { 'source+lambda+rxm+tm': FOUR },
@@ -390,7 +474,7 @@ describe('a link whose workspace carries remembered arrangements', () => {
  * leaves, and leaf ids whose numbers the leaf counter can step past. A workspace past it opens the program alone.
  */
 describe("a link whose workspace's tree is past the bound", () => {
-  const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary', width: null }
+  const alone = { kind: 'program', program: 'let x = 40; x + 2', encoding: 'binary', width: null, listing: 'as-built' }
   /** The default workspace's string with `tree` in place of its tree, and `pane-1` focused. */
   const holding = (tree: unknown): string => JSON.stringify({ ...JSON.parse(WORKSPACE), tree, focused: 'pane-1' })
   const lambda = (n: number) => ({ kind: 'leaf', id: `pane-${n}`, pane: 'lambda' })

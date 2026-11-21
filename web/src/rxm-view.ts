@@ -145,8 +145,11 @@ export function frames(count: number): string {
   return `${n(count)} ${count === 1 ? 'frame' : 'frames'}`
 }
 
+/** What the heap panel reads of a frame: the heap's sizes and its window, which an rxm and a CLIF frame both carry. */
+export type HeapWindow = Pick<RxmState, 'heap_len' | 'cells' | 'box_len' | 'boxes'>
+
 /** The heap panel's count: `57 cells · 2 boxes`, with no boxes clause while there are none. */
-export function heapSummary(s: RxmState): string {
+export function heapSummary(s: HeapWindow): string {
   const cells = `${n(s.heap_len)} ${s.heap_len === 1 ? 'cell' : 'cells'}`
   return s.box_len === 0 ? cells : `${cells} · ${n(s.box_len)} ${s.box_len === 1 ? 'box' : 'boxes'}`
 }
@@ -191,8 +194,16 @@ export function rxmStack(s: RxmState, program: RxmProgram): StackView {
   }
 }
 
-/** The heap panel at `s`: the cells, how many older ones the window hides, then the same for the boxes. */
+/** The heap panel at `s`: `heapView` with the registers that name each cell and box. */
 export function rxmHeap(s: RxmState): HeapView {
+  return heapView(s, (at, tag) => backRefs(s, at, tag))
+}
+
+/**
+ * The heap panel at `s`: the cells, how many older ones the window hides, then the same for the boxes. `refs` names
+ * what holds the cell or box `at`, a word of `tag`, which each machine reads from its own frame.
+ */
+export function heapView(s: HeapWindow, refs: (at: number, tag: WordTag) => string[]): HeapView {
   const items: HeapView['items'][number][] = []
   const note = (text: string) => items.push({ kind: 'note', text })
   for (const c of s.cells) {
@@ -200,7 +211,7 @@ export function rxmHeap(s: RxmState): HeapView {
       kind: 'line',
       lead: `#${c.cell}`,
       body: `${wordText(c.head)} → ${wordText(c.tail)}`,
-      refs: backRefs(s, c.cell, 'List'),
+      refs: refs(c.cell, 'List'),
     })
   }
   const olderCells = s.heap_len - s.cells.length
@@ -210,7 +221,7 @@ export function rxmHeap(s: RxmState): HeapView {
       kind: 'line',
       lead: `box #${b.handle}`,
       body: wordText(b.content),
-      refs: backRefs(s, b.handle, 'Box'),
+      refs: refs(b.handle, 'Box'),
     })
   }
   const olderBoxes = s.box_len - s.boxes.length

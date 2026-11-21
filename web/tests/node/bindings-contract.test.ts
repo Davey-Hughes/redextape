@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type {
+  ClifRow,
+  ClifState,
+  ClifStatus,
   LambdaState,
   LambdaStatus,
   RuleView,
@@ -61,6 +64,12 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     const rxmStatusRun: RxmStatus['run'] = null
     const rxmStatusCap: RxmStatus['cap'] = null
     const rxmStatusTotalSteps: RxmStatus['total_steps'] = null
+    const clifStateNext: ClifState['next'] = null
+    const clifStatePc: ClifState['pc'] = null
+    const clifRowPc: ClifRow['pc'] = null
+    const clifRowAt: ClifRow['at'] = null
+    const clifStatusCap: ClifStatus['cap'] = null
+    const clifStatusTotalSteps: ClifStatus['total_steps'] = null
 
     expect(lambdaStatusNode).toBeNull()
     expect(lambdaStatusRun).toBeNull()
@@ -81,5 +90,11 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     expect(rxmStatusRun).toBeNull()
     expect(rxmStatusCap).toBeNull()
     expect(rxmStatusTotalSteps).toBeNull()
+    expect(clifStateNext).toBeNull()
+    expect(clifStatePc).toBeNull()
+    expect(clifRowPc).toBeNull()
+    expect(clifRowAt).toBeNull()
+    expect(clifStatusCap).toBeNull()
+    expect(clifStatusTotalSteps).toBeNull()
   })
 })

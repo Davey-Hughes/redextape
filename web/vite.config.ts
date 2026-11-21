@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 // package, is the documented factory — see the JSDoc on `BrowserConfigOptions.provider` in
 // `@vitest/browser`'s own shipped types.
 import { playwright } from '@vitest/browser-playwright'
-import type { Browser } from 'playwright'
+import type { Browser, BrowserContext, Page, Request, Route } from 'playwright'
 // `defineConfig` comes from `vitest/config`, not `vite`, even though this file is also the Vite
 // config. Vitest augments Vite's `UserConfig` type with the `test` field via a `declare module
 // "vite"` block in its own type-only entry point — TypeScript only applies that augmentation to
@@ -196,8 +196,132 @@ const mouse: BrowserCommand<[type: 'move' | 'down' | 'up', x: number, y: number,
   if (type === 'up') await page.mouse.up({ clickCount })
 }
 
+/** Each test file's request log, and how to stop the listeners that fill it. */
+const requestLogs = new Map<string, { log: { page: string[]; context: string[] }; stop: () => void }>()
+
+/**
+ * `'start'`: log the URLs containing `match` of every request Playwright's page and its context report from now on,
+ * for this test file, in place of any log it started before; `'read'`: that log, `null` before a start. **BOTH
+ * LISTS**, since a page and its context each report a dedicated worker's requests, and a test reads both.
+ */
+const watchRequests: BrowserCommand<[op: 'start' | 'read', match: string]> = ({ page, testPath }, op, match) => {
+  const key = testPath ?? ''
+  if (op === 'read') return requestLogs.get(key)?.log ?? null
+  requestLogs.get(key)?.stop()
+  const log = { page: [] as string[], context: [] as string[] }
+  const onPage = (r: Request) => {
+    if (r.url().includes(match)) log.page.push(r.url())
+  }
+  const onContext = (r: Request) => {
+    if (r.url().includes(match)) log.context.push(r.url())
+  }
+  page.on('request', onPage)
+  page.context().on('request', onContext)
+  const stop = () => {
+    page.off('request', onPage)
+    page.context().off('request', onContext)
+  }
+  requestLogs.set(key, { log, stop })
+  return log
+}
+
+/**
+ * What a context's standing route for one `match` does with the requests whose URL contains it: it aborts the next
+ * `fail` of them, then answers the next one with `stub` when one is set, then holds the next one while `hold` is
+ * set, and lets every other go.
+ */
+type RequestPlan = { fail: number; stub: string | null; hold: Promise<void> | null }
+
+/** Each context's plans by `match`, each ready once its standing route is installed. */
+const requestPlans = new WeakMap<BrowserContext, Map<string, Promise<RequestPlan>>>()
+
+/**
+ * The plan for `match` on `page`'s context, its route installed the first time it is asked for. **THE ROUTE IS NEVER
+ * REMOVED**, so the context never runs out of routes. When it does, as a route of limited uses expires, Playwright
+ * turns interception off with a call it does not wait for, and that call can finish after the next route's own call has
+ * turned interception on: the next route is then installed and never asked about a request.
+ */
+function planFor(page: Page, match: string): Promise<RequestPlan> {
+  const context = page.context()
+  const plans = requestPlans.get(context) ?? new Map<string, Promise<RequestPlan>>()
+  requestPlans.set(context, plans)
+  const known = plans.get(match)
+  if (known !== undefined) return known
+  const plan: RequestPlan = { fail: 0, stub: null, hold: null }
+  const route = async (r: Route): Promise<void> => {
+    if (plan.fail > 0) {
+      plan.fail -= 1
+      await r.abort()
+      return
+    }
+    const stub = plan.stub
+    if (stub !== null) {
+      plan.stub = null
+      await r.fulfill({ contentType: 'text/javascript', body: stub })
+      return
+    }
+    const hold = plan.hold
+    plan.hold = null
+    if (hold !== null) await hold
+    await r.continue()
+  }
+  const made = context.route((url) => url.href.includes(match), route).then(() => plan)
+  plans.set(match, made)
+  return made
+}
+
+/** Abort the next `times` requests whose URL contains `match`, a worker's included: a fetch that fails on demand. */
+const failRequests: BrowserCommand<[match: string, times: number]> = async ({ page }, match, times) => {
+  const plan = await planFor(page, match)
+  plan.fail += times
+}
+
+/**
+ * Answer the next request whose URL contains `match` with `body`, as a script: a module a test writes, served where
+ * a worker asks for the real one, which no test can otherwise hand a worker. `null` drops a stub no request came
+ * for, which would otherwise answer the context's next one, another file's included.
+ */
+const stubRequest: BrowserCommand<[match: string, body: string | null]> = async ({ page }, match, body) => {
+  const plan = await planFor(page, match)
+  plan.stub = body
+}
+
+/** Each test file's hold: what lets its request go, or drops a hold no request came for. */
+const heldRequests = new Map<string, () => void>()
+
+/**
+ * Hold the next request whose URL contains `match` until `releaseRequests`, so that a load a test needs pending is
+ * certainly pending rather than racing the network.
+ */
+const holdRequests: BrowserCommand<[match: string]> = async ({ page, testPath }, match) => {
+  const plan = await planFor(page, match)
+  let open: () => void = () => {}
+  const gate = new Promise<void>((resolve) => {
+    open = resolve
+  })
+  plan.hold = gate
+  heldRequests.set(testPath ?? '', () => {
+    open()
+    if (plan.hold === gate) plan.hold = null
+  })
+}
+
+/** Let this test file's held request go, or drop its hold. */
+const releaseRequests: BrowserCommand<[]> = async ({ testPath }) => {
+  const release = heldRequests.get(testPath ?? '')
+  heldRequests.delete(testPath ?? '')
+  release?.()
+}
+
 /** What every browser project registers. */
-const COMMANDS = { mouse } satisfies Record<string, BrowserCommand<never[]>>
+const COMMANDS = {
+  mouse,
+  watchRequests,
+  failRequests,
+  stubRequest,
+  holdRequests,
+  releaseRequests,
+} satisfies Record<string, BrowserCommand<never[]>>
 
 /** What each Firefox project registers. */
 const FIREFOX_COMMANDS = {

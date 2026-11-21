@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
+import initClif, { ClifSession } from '../../../pkg-clif/redextape_clif_wasm.js'
+import { EXAMPLES } from '../../src/examples'
 import {
+  CLIF_WINDOW,
+  clifFrameBytes,
   FRAME_BYTES,
+  HISTORY_BYTES,
   lambdaFrameBytes,
   RXM_WINDOW,
   RXM_WORD_BYTES,
   SPAN_BYTES,
   SPAN_WIRE_BYTES,
 } from '../../src/protocol'
-import type { Cut, LambdaState, RxmState, RxmWindow } from '../../src/types'
+import type { ClifState, ClifWindow, Cut, LambdaState, RxmState, RxmWindow } from '../../src/types'
 import { chromiumOnly } from './engine'
 import { heapNow, mean } from './probe-fixture'
 
@@ -298,6 +303,146 @@ describe('rxm frame cost', () => {
     // more than `HISTORY_BYTES` says, `SPAN_BYTES`' failure one leg over.
     expect(bytesPerWord).toBeLessThanOrEqual(RXM_WORD_BYTES)
   })
+})
+
+/**
+ * `measure::CORPUS`'s `map30000`: a call depth of 30,000 and a heap of cons cells, so its frames fill the whole window.
+ */
+const CLIF_SRC =
+  'fn build(n){ if n==0 {nil} else { cons(n, build(n-1)) } } ' +
+  'fn map(xs,f){ if is_empty(xs){nil}else{cons(f(head(xs)),map(tail(xs),f))} } fn add1(x){x+1} map(build(30000),add1)'
+
+/**
+ * The `arithmetic` example, the one whose CLIF frames hold the fewest words, so that the part of a frame that does not
+ * grow with its words weighs most against its charge.
+ */
+const CLIF_SMALL_SRC = EXAMPLES.find((e) => e.id === 'arithmetic')?.text ?? ''
+
+/**
+ * The fewest frames a reading holds: a run that ends sooner is filled again, so its differential stands above noise.
+ */
+const CLIF_MIN_FRAMES = 20_000
+
+/** The two `ClifSession` methods a fill calls, for `Session`'s reason above. */
+type ClifStepper = { step(): boolean; state(window: ClifWindow): ClifState; free(): void }
+
+/**
+ * The CLIF leg's first fill of `CLIF_SRC` as built, each frame kept with `pick`: from step 0 until the frames' charges
+ * reach `HISTORY_BYTES`, where `recordLeg` stops, or the run ends.
+ */
+function clifFirstFill<T>(src: string, pick: (st: ClifState) => T): { frames: T[]; charge: number } {
+  const { session } = compile(src, 'binary') as { session: { clifInput(): unknown; free(): void } | null }
+  if (!session) throw new Error('compile produced no session for the CLIF probe program')
+  const stepper = new ClifSession(session.clifInput(), 'as-built') as ClifStepper
+  session.free()
+  const frames: T[] = []
+  let charge = 0
+  let st = stepper.state(CLIF_WINDOW)
+  for (;;) {
+    frames.push(pick(st))
+    charge += clifFrameBytes(st)
+    if (charge >= HISTORY_BYTES || !stepper.step()) break
+    st = stepper.state(CLIF_WINDOW)
+  }
+  stepper.free()
+  return { frames, charge }
+}
+
+/**
+ * `clifFirstFill` of `src`, again while the frames are fewer than `CLIF_MIN_FRAMES` and their charges short of a
+ * fill's.
+ */
+function clifFills<T>(src: string, pick: (st: ClifState) => T): { frames: T[]; charge: number } {
+  const frames: T[] = []
+  let charge = 0
+  do {
+    const fill = clifFirstFill(src, pick)
+    frames.push(...fill.frames)
+    charge += fill.charge
+  } while (frames.length < CLIF_MIN_FRAMES && charge < HISTORY_BYTES)
+  return { frames, charge }
+}
+
+describe('clif frame cost', () => {
+  /**
+   * **WHAT THE RING KEEPS OF A CLIF FRAME, AGAINST WHAT `clifFrameBytes` CHARGES IT**, measured as the rxm case
+   * measures a word: by heap differential after a full collection, full frames against the same frames emptied to their
+   * step and pc, three alternating rounds after a discarded pair. A `ClifValue` is an object holding a word object and
+   * an array of register names, which the charge's words must cover. **ON A PROGRAM OF LARGE FRAMES AND ON ONE OF
+   * SMALL**, where the part of a frame that does not grow with its words weighs most.
+   */
+  it.for<[string, string]>([
+    ['map30000', CLIF_SRC],
+    ['arithmetic', CLIF_SMALL_SRC],
+  ])(
+    'keeps no more of a %s CLIF frame than clifFrameBytes charges it, by heap differential',
+    { timeout: 120_000 },
+    async ([name, src], ctx) => {
+      chromiumOnly(ctx, HEAP)
+      await init()
+      await initClif()
+      if (heapNow() === 0)
+        throw new Error('BLOCKED: performance.memory.usedJSHeapSize reads 0 — cannot measure heap size')
+      const collect = (globalThis as GlobalWithGc).gc
+      if (typeof collect !== 'function') {
+        throw new Error('BLOCKED: globalThis.gc is unavailable — launch Chromium with --js-flags=--expose-gc')
+      }
+
+      const retainedFull: ClifState[][] = []
+      const retainedSlim: { step: number; pc: number | null }[][] = []
+      const readingsA: number[] = []
+      const readingsB: number[] = []
+      let charge = 0
+      const roundA = (): number => {
+        collect()
+        const before = heapNow()
+        const a = clifFills<ClifState>(src, (st) => st)
+        collect()
+        const after = heapNow()
+        retainedFull.push(a.frames)
+        charge = a.charge
+        return after - before
+      }
+      const roundB = (): number => {
+        collect()
+        const before = heapNow()
+        const b = clifFills(src, (st) => ({ step: st.step, pc: st.pc }))
+        collect()
+        const after = heapNow()
+        retainedSlim.push(b.frames)
+        return after - before
+      }
+      roundA()
+      roundB()
+      for (let round = 0; round < 3; round++) {
+        readingsA.push(roundA())
+        readingsB.push(roundB())
+      }
+      for (const frames of retainedFull) expect(frames.length).toBeGreaterThan(0)
+      for (const frames of retainedSlim) expect(frames.length).toBeGreaterThan(0)
+
+      const frames = retainedFull[0]?.length ?? 0
+      const meanCharge = charge / frames
+      const bytesPerFrame = (mean(readingsA) - mean(readingsB)) / frames
+      console.error(name, 'clif run A (full ClifState) heap deltas, bytes:', readingsA)
+      console.error(name, 'clif run B (emptied) heap deltas, bytes:', readingsB)
+      console.error(
+        name,
+        'clif frames per fill:',
+        frames,
+        'mean charge, bytes:',
+        meanCharge,
+        'retained bytes/frame:',
+        bytesPerFrame,
+      )
+
+      // Sanity bounds, for the λ case's reason: they catch a broken measurement, not a machine.
+      expect(bytesPerFrame).toBeGreaterThan(0)
+      // THE ONE DIRECTION WITH A CONSEQUENCE: a frame keeping more than it is charged means the ring keeps more than
+      // `HISTORY_BYTES` says, `SPAN_BYTES`' failure on the CLIF leg.
+      expect(bytesPerFrame).toBeLessThanOrEqual(meanCharge)
+    },
+  )
 })
 
 /**

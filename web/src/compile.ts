@@ -1,4 +1,6 @@
 import type { EditorView } from '@codemirror/view'
+import type { ClifSync } from './clif-sync'
+import type { Listing } from './protocol'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 
@@ -6,12 +8,12 @@ import type { SessionRegistry } from './sessions'
  * Milliseconds to wait after the last keystroke before posting a compile. The comments on `schedule`'s
  * body below have the load-bearing detail.
  */
-const DEBOUNCE_MS = 300
+export const DEBOUNCE_MS = 300
 
 /**
  * `schedule`, its debounce timer, and the encoding picker's `change` listener. See `schedule`'s own doc
  * below for what it does; this one is only about the dependencies. A compile is a `supersede` and a
- * `request` against the source session's own client and nothing more.
+ * `request` against the source session's own client, each told to the CLIF sync, and nothing more.
  *
  * `view` IS A THUNK, NOT A VALUE, SAME REASON AS `link-wiring.ts`, `draw.ts` AND `replies.ts`. The
  * picker's `change` listener is wired here, at construction, but `main.ts` does not assign `let view:
@@ -28,12 +30,19 @@ export function createCompile(deps: {
   picker: HTMLSelectElement
   /** The program's field width, read at each post: `null` for auto (`field-width.ts`). */
   width: () => number | null
+  /** The listing a CLIF view shows, read at each post as `width` is: `null` while none is shown. */
+  clif: () => Listing | null
+  /** Told that a run is scheduled, then what it carried, so that no `clif` request is posted ahead of its reply. */
+  clifSync: Pick<ClifSync, 'scheduled' | 'ran'>
   view: () => EditorView
   sourceSession: SessionId
-  /** Store the program as it is posted: its text, and the encoding and width the compile was given. */
+  /**
+   * Store the program as it is posted: its text, and the encoding and width the compile was given. **NOT THE LISTING**,
+   * which `clif` reads as `null` while no CLIF view is shown: the program's listing is the page's to store beside them.
+   */
   persist: (text: string, encoding: string, width: number | null) => void
 }): { schedule(src: string): void } {
-  const { sessions, results, picker, width: widthNow, view, sourceSession, persist } = deps
+  const { sessions, results, picker, width: widthNow, clif: clifNow, clifSync, view, sourceSession, persist } = deps
 
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -74,10 +83,13 @@ export function createCompile(deps: {
     // replies stop being current at the instant of dispatch; `request` drops the post if another
     // keystroke claimed a newer one during the debounce. See `SessionClient.supersede`.
     const gen = client.supersede()
+    clifSync.scheduled()
     timer = setTimeout(() => {
       const encoding = picker.value
       const width = widthNow()
-      client.request(gen, src, encoding, width)
+      const clif = clifNow()
+      client.request(gen, src, encoding, width, clif)
+      clifSync.ran(clif)
       // **THE PROGRAM IS STORED WHERE IT IS POSTED — Plan 7 part 6a spec §4.3.** A keystroke, an encoding or width change, a
       // picked example and the start-up program all arrive here, so this is the one write site and there is one write
       // per pause. A keystroke in the last `DEBOUNCE_MS` before the tab closes is not stored, as a copy's is not.

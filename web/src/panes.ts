@@ -31,6 +31,8 @@ export function legOfPane(kind: PaneKind): Leg | null {
       return 'rxm'
     case 'tm':
       return 'tm'
+    case 'clif':
+      return 'clif'
   }
 }
 
@@ -42,6 +44,7 @@ export const LEG_PANELS = {
   lambda: ['map'],
   rxm: ['listing', 'registers', 'stack', 'heap', 'outline'],
   tm: ['rules', 'diagram', 'outline'],
+  clif: ['listing', 'values', 'stack', 'heap'],
 } as const satisfies { readonly [K in Leg]: readonly string[] }
 
 /**

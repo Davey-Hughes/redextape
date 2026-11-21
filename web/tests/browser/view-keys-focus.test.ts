@@ -47,7 +47,9 @@ async function preset(name: 'explorer' | 'stage'): Promise<void> {
 async function start(): Promise<void> {
   await page.viewport(1280, 896)
   if (document.querySelector('#views [role="tab"]') !== null) await preset('explorer')
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button[aria-pressed="false"]')) b.click()
+  // EVERY TOGGLE BUT CLIF'S PRESSED, AND CLIF'S NOT, as `view-keys.test.ts`'s `start` has it.
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button'))
+    if ((b.getAttribute('aria-pressed') === 'true') === (b.dataset.shows === 'clif')) b.click()
   view.focus()
   await until(() => view.hasFocus, 'the source editor to take the focus')
   expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
