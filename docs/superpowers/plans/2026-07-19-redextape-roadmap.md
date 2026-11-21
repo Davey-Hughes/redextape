@@ -39025,3 +39025,69 @@ reads a file changed since: `.bar`'s column gaps, in `style.css`, and the four t
 | `about-menu.test.ts`, 8 tests, 8 skipped; 14 minutes | the first coverage run's last output; the time from its last stamped line, 10:33:31 PM, to its stop, 22:47:54, the log's last write | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-coverage.log \| rg -o 'about-menu\.test\.ts \(8 tests . 8 skipped\)'; rg -o '^[0-9:]+ PM' $R/logs/final5-coverage.log \| tail -n1; stat -c %y $R/logs/final5-coverage.log` |
 | no CPU over a 45-second sample; free | the first coverage run's processes; port 63315 when it started | `rg -o 'used 0 CPU over a 45 s sample' $R/sdd/compact-final-checks.md; rg -o 'wait before each browser run took 0 s' $R/sdd/compact-final-checks.md` |
 | no line | `Failed to fetch dynamically imported module` or `Cannot connect to the server` in the first coverage run | `rg -c 'Failed to fetch\|Cannot connect' $R/logs/final5-coverage.log` prints nothing |
+
+#### `LICENSE.md` IS GNU'S MARKDOWN EDITION OF THE GPLv3, AND THE LICENCES PAGE READS GNU'S PLAIN-TEXT EDITION FROM A NEW `COPYING`, SO WHAT THE PAGE SHOWS DOES NOT CHANGE (2026-11-21, branch `licence-markdown`, `1ac4fc4..65c5e3a`, 1 commit, plus this entry)
+
+`LICENSE.md` held GNU's plain-text edition of the GPLv3, which the forge shows as one block of unformatted text. It now
+holds GNU's Markdown edition, `https://www.gnu.org/licenses/gpl-3.0.md`. The lane's record is
+`~/temp/redextape-gpl-md-record/`, `$R` below.
+
+##### WHAT CHANGED
+
+**The licence's words did not change.** With the Markdown's heading marks, list markers and backslash escapes taken
+out, the two editions have the same whitespace-separated words in the same order; `$R/scripts/wordcheck.py` compares
+them. The backticks in `` `show w' `` are the licence's own quote marks and stay.
+
+**The licences page reads `COPYING`.** The page draws each text in a `<pre>` as it is, so it would have shown the
+Markdown's marks. `COPYING` is GNU's plain-text edition, byte for byte the old `LICENSE.md`, and `web/scripts/licences.ts`
+reads it in place of `LICENSE.md`. The bytes are the same, so the text's id is the same and
+`web/src/third-party-licences.json` does not change.
+
+**What named `LICENSE.md` as the licence check's input names `COPYING`:** the header of `scripts/check-licences.sh`,
+`docs/development.md`, the `push` filter's comment in `.forgejo/workflows/ci.yml` and the header of
+`scripts/ci-docs-only.sh`, whose self-test's `licence` case edits `COPYING`. `scripts/check-scoped.sh`'s arm for paths
+no Rust reads adds `COPYING` beside `LICENSE*`. `scripts/comment-budget.json` raises `web/scripts` for the line in
+`licences.ts` that says why it reads `COPYING`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **GNU's site did not answer:** www.gnu.org timed out over IPv4 and IPv6. Both editions came from the Wayback Machine's
+  unaltered copies of www.gnu.org, and the Markdown edition is byte for byte the one haiyaku's `40d5470` took from
+  gnu.org.
+- **No check holds the two copies' words together.** The GPL's text does not change.
+- **The specs that name `LICENSE.md` as the licence check's input, or quote its size, stay as written;** they are dated.
+- **Not run on this branch:** the rest of the node and browser tiers, Firefox, coverage, `scripts/check-all.sh`,
+  `scripts/check-slow.sh`, the app build and the Docker image.
+
+##### VERIFICATION
+
+**The checks at `65c5e3a`**, run from the worktree with `CARGO_TARGET_DIR=~/.cache/redextape-gpl-md-target`. Each log in
+`$R/logs/` ends with the check's exit status. The pre-commit hooks passed on the commit too.
+
+| Check | Result | Log in `$R/logs/` |
+|---|---|---|
+| `scripts/check-licences.sh --self-test && scripts/check-licences.sh` | the JSON matches what the site ships | `10-check-licences.log` |
+| `scripts/ci-docs-only.sh --self-test` | 13 cases pass | `11-ci-docs-only-selftest.log` |
+| `pnpm exec biome ci --error-on-warnings`, in `web/` | no fixes applied | `12-biome.log` |
+| `pnpm run typecheck`, in `web/` | no errors | `13-typecheck.log` |
+| `node scripts/check-comments.mjs --self-test && node scripts/check-comments.mjs` | every area within its budget | `14-check-comments.log` |
+| `tests/browser/pages.test.ts` and `licences-narrow.test.ts`, `--project browser` | 2 files, 13 tests passed | `15-browser-licences-pages.log` |
+| `tests/node/licences-scan.test.ts` and `licenses.test.ts`, `--project node` | 2 files, 148 tests passed | `16-node-licences.log` |
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-gpl-md-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 1 | commits in the range | `git rev-list --count 1ac4fc4..65c5e3a` |
+| 34893; 35149 | bytes of `LICENSE.md`; of `COPYING`, at `65c5e3a` | `git cat-file -s 65c5e3a:LICENSE.md; git cat-file -s 65c5e3a:COPYING` |
+| same | `COPYING` at `65c5e3a` against `LICENSE.md` at `1ac4fc4` | `cmp <(git show 1ac4fc4:LICENSE.md) <(git show 65c5e3a:COPYING) && echo same` |
+| same; same | `LICENSE.md`; `COPYING`, at `65c5e3a`, against the downloaded Markdown; plain-text edition | `git show 65c5e3a:LICENSE.md \| cmp - $R/download/wb-gpl-3.0.md && echo same; git show 65c5e3a:COPYING \| cmp - $R/download/gpl-3.0.txt.from-wayback && echo same` |
+| same | the downloaded Markdown edition against haiyaku's `40d5470` | `git -C ~/projects/haiyaku show 40d5470:LICENSE.md \| cmp - $R/download/wb-gpl-3.0.md && echo same` |
+| 5644, 5644, True | whitespace-separated words in each edition, markup out; whether they run in the same order | `python3 -I $R/scripts/wordcheck.py $R/download/wb-gpl-3.0.md $R/download/gpl-3.0.txt.from-wayback \| head -1` |
+| 22; 15; 2 | heading marks; list markers; backslash escapes taken out | `python3 -I $R/scripts/wordcheck.py $R/download/wb-gpl-3.0.md $R/download/gpl-3.0.txt.from-wayback \| rg 'markup removed'` |
+| 0 | lines `git diff` prints for the JSON across the range | `git diff 1ac4fc4 65c5e3a -- web/src/third-party-licences.json \| wc -l` |
+| 0.2131 to 0.2139 | `web/scripts`' comment budget | `git diff -U0 1ac4fc4 65c5e3a -- scripts/comment-budget.json \| rg '^[-+] '` |
+| 13 | `ci-docs-only.sh`'s self-test cases | `rg -o 'self-test passed: [0-9]+ cases' $R/logs/11-ci-docs-only-selftest.log` |
+| 2, 13; 2, 148 | the browser run's files and tests; the node run's | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/15-browser-licences-pages.log $R/logs/16-node-licences.log \| rg 'Test Files\|      Tests'` |
+| 0 | the exit status of each check, in the order above | `tail -qn1 $R/logs/1[0-6]-*.log` |
