@@ -107,7 +107,7 @@ add_doc_pkg() {
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
-    docs/*|*.md|LICENSE*)
+    docs/*|*.md|LICENSE*|COPYING)
       ;;
     crates/*/tests/*)
       rest="${f#crates/}"; pkg="${rest%%/*}"; tail="${rest#*/tests/}"

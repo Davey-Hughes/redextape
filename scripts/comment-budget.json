@@ -13,7 +13,7 @@
   "crates/redextape-wire": 0.6328,
   "web/src": 0.4696,
   "web/tests": 0.2641,
-  "web/scripts": 0.2131,
+  "web/scripts": 0.2139,
   "scripts": 0.3200,
   "grammars": 0.5866,
   ".forgejo": 0.4991

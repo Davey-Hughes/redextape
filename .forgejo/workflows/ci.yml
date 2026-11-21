@@ -21,7 +21,7 @@ on:
     # `concurrency` group below and cancel a code merge's run still in progress, and being docs-only it
     # would skip the jobs and the image that run was for, so that code would go untested on `main` and
     # unpublished. `docs/**` and nothing wider: the same definition `scripts/ci-docs-only.sh` applies to
-    # pull requests (`LICENSE.md` feeds the licence check). A `v*` tag is not affected: Forgejo's
+    # pull requests (`COPYING` feeds the licence check). A `v*` tag is not affected: Forgejo's
     # `matchPushEvent` counts `paths`/`paths-ignore` as matched for any tag push, so a release always runs.
     paths-ignore: ["docs/**"]
   pull_request:
