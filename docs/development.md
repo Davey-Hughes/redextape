@@ -92,12 +92,18 @@ nextest is missing rather than falling back, so the gate behaves the same everyw
 `scripts/setup-dev.sh` installs it. Because nextest does not run doctests, the script pairs every
 config with an explicit `cargo test --doc` at the same feature flags.
 
-There are **fourteen** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
+There are **fifteen** pre-commit hooks. A Rust change runs `cargo fmt` and `cargo clippy` and nothing
 heavier; a `web/` change runs `biome ci` and `tsc --noEmit`; a Lua or `parser.c` change runs
 `check-lua`, which parses the tracked Lua and asserts `plugin/redextape.lua`'s parser names still
 equal the `tree_sitter_*` symbols the committed parsers export — a mismatch there loads the wrong
-language in an editor rather than failing, so nothing else in this tree could see it. The other
-nine — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
+language in an editor rather than failing, so nothing else in this tree could see it. A change to
+`LICENSE.md`, `COPYING` or the script itself runs `check-licence-editions`, which holds the
+repository's two copies of the GPLv3 to the same words: `LICENSE.md` is GNU's Markdown edition and
+`COPYING` its plain-text one, and with the Markdown's heading marks, list markers and backslash
+escapes out, the whitespace-separated words of the first must be the second's, in the same order. A
+failure names the first word that differs and its line in each file. It took 0.212-0.223 s with its
+self-test over five runs (2026-11-21).
+The other nine — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
 `check-shared-docs`, `check-colours`, `check-grammar-wasm`, `check-licences` and `check-comments` — are
 unscoped and run on every commit whatever is staged: the first eight because they catch things that
 arrive in a path nobody thought to list, the ninth because it reads the whole branch rather than the
@@ -110,7 +116,7 @@ grammar's `src/parser.c` and its `.wasm` against `grammars/wasm-manifest.json` �
 file that goes stale is the `.wasm`, and the file being committed is `grammar.js` or `src/parser.c`,
 on the other side of the same input set `check-lua`'s own scoping already names. The eighth
 regenerates `web/src/third-party-licences.json`, the list the site's licences page draws, from the
-installed npm packages, `cargo tree`, the repository's `LICENSE.md` and the toolchain and
+installed npm packages, `cargo tree`, the repository's `COPYING` and the toolchain and
 colour-scheme texts under `web/scripts/toolchain-licences/` and `web/scripts/palette-licences/`,
 and compares it with the committed copy — unscoped because what makes it stale is a lockfile, an
 import or a dependency's own licence file, not the file being committed; it needs `web/node_modules`
@@ -126,7 +132,7 @@ flag; 2026-10-30, at a 1-minute load average of 13.92 on 32 cores). `check-comme
 of the nine and `check-attributions` the slowest, at ~3.2 s against the next slowest's ~1.25 s (each
 hook's `--self-test` and scan, measured 2026-09-18), because it strips comments and string literals
 out of every cited file rather than matching patterns line by line — the price of being able to tell
-a file that OWNS a symbol from one that merely talks about it. All **fourteen** are fast enough for
+a file that OWNS a symbol from one that merely talks about it. All **fifteen** are fast enough for
 every commit: measured interleaved in one session (2026-09-21, five rounds, alternating which set
 went first, after one untimed warm-up of each), the unscoped six ran 5.867-5.955 s and the same six
 plus `check-grammar-wasm` ran 6.042-6.084 s — the ranges do not overlap, so the ~0.09-0.22 s gap is

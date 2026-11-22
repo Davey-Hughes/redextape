@@ -374,7 +374,8 @@ export function generate(): string {
   const packages = [...npm(), ...crates(), ...toolchain(), ...colourSchemes()].sort(
     (a, b) => ORDER[a.group] - ORDER[b.group] || byCodeUnit(a.name, b.name) || byCodeUnit(a.version, b.version),
   )
-  const own = { spdx: 'GPL-3.0-only', text: store(readFileSync(join(REPO, 'LICENSE.md'), 'utf8')) }
+  // `COPYING` and not `LICENSE.md`: the page draws every text as it is, and `LICENSE.md` is GNU's Markdown edition.
+  const own = { spdx: 'GPL-3.0-only', text: store(readFileSync(join(REPO, 'COPYING'), 'utf8')) }
   const sortedTexts = Object.fromEntries([...texts].sort(([a], [b]) => byCodeUnit(a, b)))
   return `${JSON.stringify({ redextape: own, packages, texts: sortedTexts }, null, 2)}\n`
 }

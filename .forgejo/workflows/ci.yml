@@ -21,7 +21,7 @@ on:
     # `concurrency` group below and cancel a code merge's run still in progress, and being docs-only it
     # would skip the jobs and the image that run was for, so that code would go untested on `main` and
     # unpublished. `docs/**` and nothing wider: the same definition `scripts/ci-docs-only.sh` applies to
-    # pull requests (`LICENSE.md` feeds the licence check). A `v*` tag is not affected: Forgejo's
+    # pull requests (`COPYING` and `LICENSE.md` feed the licence checks). A `v*` tag is not affected: Forgejo's
     # `matchPushEvent` counts `paths`/`paths-ignore` as matched for any tag push, so a release always runs.
     paths-ignore: ["docs/**"]
   pull_request:
@@ -940,6 +940,12 @@ jobs:
         run: ../scripts/check-licences.sh --self-test
       - name: Third-party licences match what the site ships
         run: ../scripts/check-licences.sh
+      # BESIDE THE CHECK WHOSE INPUT IT GUARDS: `COPYING` is the text that check reads, and this holds
+      # `LICENSE.md`, the edition a forge renders, to the same words.
+      - name: LICENSE.md and COPYING hold the same words (self-test)
+        run: ../scripts/check-licence-editions.sh --self-test
+      - name: LICENSE.md and COPYING hold the same words
+        run: ../scripts/check-licence-editions.sh
       - name: Install the Chromium Playwright needs
         run: pnpm exec playwright install --with-deps chromium
       - name: Lint + format check

@@ -11,8 +11,9 @@
 #
 # **DOCS-ONLY MEANS EVERY CHANGED PATH IS UNDER docs/, AND NOTHING WIDER.** Nothing those jobs run reads
 # docs/, and the checks that do read it (text bytes, citations, attributions, doc figures, shared docs)
-# are in `linear-history`, which still runs. Markdown elsewhere is not docs here: `LICENSE.md` feeds the
-# `web` job's licence check through `web/scripts/licences.ts`, and a README is no safer by its extension.
+# are in `linear-history`, which still runs. Nothing elsewhere is docs here, whatever its extension: `COPYING`
+# feeds the `web` job's licence check through `web/scripts/licences.ts`, the same job holds `LICENSE.md` to
+# `COPYING`'s words, and a README is no safer for being Markdown.
 #
 # **IT FAILS CLOSED.** Anything it cannot establish prints `false`, which runs everything: a base or head
 # that does not resolve (a first push's all-zero `before`), no merge base, an empty diff. A wrong `false`
@@ -27,8 +28,8 @@
 # **`--no-renames`, BECAUSE A RENAME LISTS ONLY ITS DESTINATION OTHERWISE.** Moving `crates/x.rs` to
 # `docs/x.rs` would read as one path under docs/ and pass, with the code gone.
 #
-# `check-scoped.sh` has its own `docs/*|*.md|LICENSE*` arm, and it answers a different question: which
-# parts of the Rust tier a draft needs, where `LICENSE.md` really is irrelevant. Both stay.
+# `check-scoped.sh` has its own `docs/*|*.md|LICENSE*|COPYING` arm, and it answers a different question: which
+# parts of the Rust tier a draft needs, where the licence texts really are irrelevant. Both stay.
 set -euo pipefail
 
 # **THE ONE CLASSIFIER.** The real run and `--self-test` both call this, so the self-test exercises it
@@ -110,6 +111,7 @@ self_test() {
     echo 'fn x() {}' > crates/x.rs
     echo a > docs/a.md
     echo readme > README.md
+    echo licence > COPYING
     echo licence > LICENSE.md
     git add -A
     git commit -q -m base
@@ -128,8 +130,11 @@ self_test() {
     c=$(commit_from "$base" sh -c 'echo more >> README.md')
     expect "top-level markdown" false "$base" "$c"
 
-    c=$(commit_from "$base" sh -c 'echo more >> LICENSE.md')
+    c=$(commit_from "$base" sh -c 'echo more >> COPYING')
     expect "licence" false "$base" "$c"
+
+    c=$(commit_from "$base" sh -c 'echo more >> LICENSE.md')
+    expect "licence, Markdown edition" false "$base" "$c"
 
     c=$(commit_from "$base" sh -c 'mkdir docsite && echo s > docsite/a && echo d > docs.md')
     expect "lookalike paths" false "$base" "$c"
@@ -160,7 +165,7 @@ self_test() {
     rm -f ".git/objects/${tree:0:2}/${tree:2}"
     expect "a diff that fails" false "$base" "$broken"
   )
-  echo "self-test passed: 13 cases; only ranges whose every changed path is under docs/ are true"
+  echo "self-test passed: 14 cases; only ranges whose every changed path is under docs/ are true"
 }
 
 # AN UNRECOGNISED ARGUMENT IS AN ERROR, as in `check-text-bytes.sh`: a typo of `--self-test` must not

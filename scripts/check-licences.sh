@@ -10,7 +10,7 @@
 #
 # WHY THIS GATE EXISTS. The licences page (`web/licences.html`) renders `web/src/third-party-licences.json`,
 # which `web/scripts/licences.ts` writes from the installed npm packages, `cargo tree` for each wasm build, the
-# repository's `LICENSE.md` and the toolchain and colour-scheme texts under `web/scripts/toolchain-licences/` and
+# repository's `COPYING` and the toolchain and colour-scheme texts under `web/scripts/toolchain-licences/` and
 # `web/scripts/palette-licences/` — every package whose code, font or colours reach the browser, with the licence
 # texts it carries (about pages design §8). The file is committed so a dependency bump shows up as a reviewable
 # diff and the Docker build needs no cargo; the price is that it can go stale, and a stale one names licences the

@@ -4,7 +4,7 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
-# `scripts/check-all.sh` states and the eight sibling `check-*.sh` scripts already follow.
+# `scripts/check-all.sh` states and the nine sibling `check-*.sh` scripts already follow.
 #
 #   scripts/check-grammar-wasm.sh              # verify every grammar against the manifest
 #   scripts/check-grammar-wasm.sh --self-test  # prove the detector still detects

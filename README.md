@@ -81,6 +81,7 @@ CodeMirror 6.
 
 ## License
 
-GNU General Public License v3.0, version 3 only; see [LICENSE.md](LICENSE.md). The libraries and
-fonts the site bundles keep their own licences, which are listed on its
-[licences page](https://redextape.com/licences.html).
+GNU General Public License v3.0, version 3 only; see [LICENSE.md](LICENSE.md).
+[COPYING](COPYING) is the same licence as plain text, which is what the site's
+[licences page](https://redextape.com/licences.html) shows. The libraries and fonts the site bundles
+keep their own licences, which are listed on that page.

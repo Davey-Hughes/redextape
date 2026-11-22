@@ -39025,3 +39025,134 @@ reads a file changed since: `.bar`'s column gaps, in `style.css`, and the four t
 | `about-menu.test.ts`, 8 tests, 8 skipped; 14 minutes | the first coverage run's last output; the time from its last stamped line, 10:33:31 PM, to its stop, 22:47:54, the log's last write | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/final5-coverage.log \| rg -o 'about-menu\.test\.ts \(8 tests . 8 skipped\)'; rg -o '^[0-9:]+ PM' $R/logs/final5-coverage.log \| tail -n1; stat -c %y $R/logs/final5-coverage.log` |
 | no CPU over a 45-second sample; free | the first coverage run's processes; port 63315 when it started | `rg -o 'used 0 CPU over a 45 s sample' $R/sdd/compact-final-checks.md; rg -o 'wait before each browser run took 0 s' $R/sdd/compact-final-checks.md` |
 | no line | `Failed to fetch dynamically imported module` or `Cannot connect to the server` in the first coverage run | `rg -c 'Failed to fetch\|Cannot connect' $R/logs/final5-coverage.log` prints nothing |
+
+#### `LICENSE.md` IS GNU'S MARKDOWN EDITION OF THE GPLv3, AND THE LICENCES PAGE READS GNU'S PLAIN-TEXT EDITION FROM A NEW `COPYING`, SO WHAT THE PAGE SHOWS DOES NOT CHANGE, AND A CHECK HOLDS THE TWO TO THE SAME WORDS (2026-11-21, branch `licence-markdown`, `1ac4fc4..db98a55`, 4 commits, the second of them this entry as first written, plus this revision of it)
+
+`LICENSE.md` held GNU's plain-text edition of the GPLv3, which the forge shows as one block of unformatted text. It now
+holds GNU's Markdown edition, `https://www.gnu.org/licenses/gpl-3.0.md`. The lane's record is
+`~/temp/redextape-gpl-md-record/`, `$R` below.
+
+##### WHAT CHANGED
+
+**The licence's words did not change.** With the Markdown's heading marks, list markers and backslash escapes taken
+out, the two editions have the same whitespace-separated words in the same order; `$R/scripts/wordcheck.py` compares
+them. The backticks in `` `show w' `` are the licence's own quote marks and stay.
+
+**The licences page reads `COPYING`.** The page draws each text in a `<pre>` as it is, so it would have shown the
+Markdown's marks. `COPYING` is GNU's plain-text edition, byte for byte the old `LICENSE.md`, and `web/scripts/licences.ts`
+reads it in place of `LICENSE.md`. The bytes are the same, so the text's id is the same and
+`web/src/third-party-licences.json` does not change.
+
+**What named `LICENSE.md` as the licence check's input names `COPYING`:** the header of `scripts/check-licences.sh`,
+`docs/development.md`, the `push` filter's comment in `.forgejo/workflows/ci.yml` and the header of
+`scripts/ci-docs-only.sh`, whose self-test's `licence` case edits `COPYING`. `scripts/check-scoped.sh`'s arm for paths
+no Rust reads adds `COPYING` beside `LICENSE*`.
+
+**`scripts/comment-budget.json` raises `web/scripts` from 0.2131 to 0.2139** for the line in `licences.ts` that says why
+it reads `COPYING`. The old figure was loose and the new one is exact. `scripts/check-comments.mjs`, run with the area's
+budget set to 0 so that it prints what it measures, gives a share of 0.2117 at `1ac4fc4` (76 comment lines, 283 code
+lines) and 0.2139 at `3d9fcc3` (77 and 283). No other budget moves: at `db98a55` the checker measures `scripts` at
+0.3180 under a budget of 0.3200 and `.forgejo` at 0.4872 under 0.4991.
+
+**A check holds the two copies to the same words.** `scripts/check-licence-editions.sh` takes three kinds of mark out of
+`LICENSE.md` and nothing out of `COPYING`: a run of 1 to 6 `#` that is its line's first word, a `-` that is its line's
+first word, and a backslash before a punctuation character. What is left, split on whitespace, must be `COPYING`'s words
+in `COPYING`'s order. A failure names the first word that differs, by its number and its line in each file; a file that
+ends early is named with the other's next word. Its `--self-test` runs the same comparison over planted texts and
+requires each rejection's message, so a case cannot pass on some other failure.
+
+**Where the check runs.** A pre-commit hook, which makes fifteen, runs the self-test and the check when `LICENSE.md`,
+`COPYING` or the script is staged. CI's `web` job runs both after the licence check. `scripts/ci-docs-only.sh`'s header
+says that job holds `LICENSE.md` to `COPYING`'s words, and its self-test has a new case, which makes 14: a change to
+`LICENSE.md` alone is not docs-only. `docs/development.md` describes the hook and counts fifteen. `scripts/check-all.sh`
+runs neither licence check, and its header's list of the scoped hooks names this one. The headers of
+`check-grammar-wasm.sh`, `check-lua.sh` and `check-shared-docs.sh` count nine sibling `check-*.sh` scripts where they
+counted eight.
+
+**The README says what `COPYING` is:** the same licence as plain text, which is what the site's licences page shows.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **GNU's site did not answer:** www.gnu.org timed out over IPv4 and IPv6. Both editions came from the Wayback Machine's
+  unaltered copies of www.gnu.org, and the Markdown edition is byte for byte the one haiyaku's `40d5470` took from
+  gnu.org.
+- **The check compares the two files with each other, not with GNU's.** The same edit made to both passes it. So does a
+  mark added to `LICENSE.md` or taken from it, which changes how a forge draws the licence and none of its words.
+- **The `web` job's two new steps have run only as the same commands on this machine:** `df1cc71` and `db98a55` were not
+  pushed when this was written.
+- **The specs that name `LICENSE.md` as the licence check's input, or quote its size, stay as written;** they are dated.
+- **Not run on this branch:** the rest of the node and browser tiers, Firefox, coverage, `scripts/check-all.sh`,
+  `scripts/check-slow.sh`, the app build and the Docker image.
+
+##### VERIFICATION
+
+**The checks at `65c5e3a`**, run from the worktree with `CARGO_TARGET_DIR=~/.cache/redextape-gpl-md-target`. Each log in
+`$R/logs/` ends with the check's exit status. The pre-commit hooks passed on the commit too.
+
+| Check | Result | Log in `$R/logs/` |
+|---|---|---|
+| `scripts/check-licences.sh --self-test && scripts/check-licences.sh` | the JSON matches what the site ships | `10-check-licences.log` |
+| `scripts/ci-docs-only.sh --self-test` | 13 cases pass | `11-ci-docs-only-selftest.log` |
+| `pnpm exec biome ci --error-on-warnings`, in `web/` | no fixes applied | `12-biome.log` |
+| `pnpm run typecheck`, in `web/` | no errors | `13-typecheck.log` |
+| `node scripts/check-comments.mjs --self-test && node scripts/check-comments.mjs` | every area within its budget | `14-check-comments.log` |
+| `tests/browser/pages.test.ts` and `licences-narrow.test.ts`, `--project browser` | 2 files, 13 tests passed | `15-browser-licences-pages.log` |
+| `tests/node/licences-scan.test.ts` and `licenses.test.ts`, `--project node` | 2 files, 148 tests passed | `16-node-licences.log` |
+
+**The checks at `db98a55`**, run the same way. `web/` did not change after `65c5e3a`, so biome, the typecheck and the
+browser and node runs were not repeated. The pre-commit hooks passed on both new commits (`27-commit-3.log`,
+`28-commit-4.log`).
+
+| Check | Result | Log in `$R/logs/` |
+|---|---|---|
+| `scripts/check-licences.sh --self-test && scripts/check-licences.sh` | the JSON matches what the site ships | `29-check-licences.log` |
+| `scripts/check-licence-editions.sh --self-test && scripts/check-licence-editions.sh` | the self-test passes; the same 5644 words in the same order | `30-check-licence-editions.log` |
+| `scripts/ci-docs-only.sh --self-test` | 14 cases pass | `31-ci-docs-only-selftest.log` |
+| `node scripts/check-comments.mjs --self-test && node scripts/check-comments.mjs` | every area within its budget | `32-check-comments.log` |
+| `scripts/check-doc-figures.sh --self-test && scripts/check-doc-figures.sh` | 45 documented figures match the tree | `33-check-doc-figures.log` |
+| `check-text-bytes`, `check-citations`, `check-attributions`, `check-shared-docs`, `check-colours`, `check-grammar-wasm` and `check-lua`, each its self-test and then its scan | each passes | `34-hygiene-scans.log` |
+
+**The new check, sabotaged** (`$R/logs/24-sabotage.log`). Each edit to `LICENSE.md` or `COPYING` was made in the
+worktree with a copy saved outside it, and after the run the file was restored from the copy and compared with `cmp`.
+
+| Edit | The check |
+|---|---|
+| `verbatim` to `exact` in `LICENSE.md` | fails: `word 25 differs: LICENSE.md line 8 has "exact", COPYING line 5 has "verbatim"` |
+| `ABSOLUTELY` deleted from line 656 of `LICENSE.md` | fails: `word 5481 differs: LICENSE.md line 656 has "NO", COPYING line 656 has "ABSOLUTELY"` |
+| `Preamble` to `Preambles` in `COPYING` | fails: `word 37 differs: LICENSE.md line 11 has "Preamble", COPYING line 8 has "Preambles"` |
+| the `##` taken off `## Preamble` in `LICENSE.md` | passes |
+| the `-` taken off section 5's item a) in `LICENSE.md` | passes |
+
+The script was sabotaged too, each time in a scratch copy, and each time its self-test failed on the case named in
+parentheses: a mark counted anywhere on its line (`a # inside a line`), any backslash taken as an escape
+(`a backslash before a letter`), words never compared (`a changed word`), lengths never compared
+(`a Markdown file that stops early`), and marks taken out of `COPYING` too (`a list marker in the plain text`).
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-gpl-md-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 4 | commits in the range | `git rev-list --count 1ac4fc4..db98a55` |
+| 34893; 35149 | bytes of `LICENSE.md`; of `COPYING`, at `65c5e3a` | `git cat-file -s 65c5e3a:LICENSE.md; git cat-file -s 65c5e3a:COPYING` |
+| same | `COPYING` at `65c5e3a` against `LICENSE.md` at `1ac4fc4` | `cmp <(git show 1ac4fc4:LICENSE.md) <(git show 65c5e3a:COPYING) && echo same` |
+| same; same | `LICENSE.md`; `COPYING`, at `65c5e3a`, against the downloaded Markdown; plain-text edition | `git show 65c5e3a:LICENSE.md \| cmp - $R/download/wb-gpl-3.0.md && echo same; git show 65c5e3a:COPYING \| cmp - $R/download/gpl-3.0.txt.from-wayback && echo same` |
+| same | the downloaded Markdown edition against haiyaku's `40d5470` | `git -C ~/projects/haiyaku show 40d5470:LICENSE.md \| cmp - $R/download/wb-gpl-3.0.md && echo same` |
+| 5644, 5644, True | whitespace-separated words in each edition, markup out; whether they run in the same order | `python3 -I $R/scripts/wordcheck.py $R/download/wb-gpl-3.0.md $R/download/gpl-3.0.txt.from-wayback \| head -1` |
+| 22; 15; 2 | heading marks; list markers; backslash escapes taken out | `python3 -I $R/scripts/wordcheck.py $R/download/wb-gpl-3.0.md $R/download/gpl-3.0.txt.from-wayback \| rg 'markup removed'` |
+| 0 | lines `git diff` prints for the JSON across the range | `git diff 1ac4fc4 65c5e3a -- web/src/third-party-licences.json \| wc -l` |
+| 0.2131 to 0.2139 | `web/scripts`' comment budget | `git diff -U0 1ac4fc4 65c5e3a -- scripts/comment-budget.json \| rg '^[-+] '` |
+| 13 | `ci-docs-only.sh`'s self-test cases at `65c5e3a` | `rg -o 'self-test passed: [0-9]+ cases' $R/logs/11-ci-docs-only-selftest.log` |
+| 2, 13; 2, 148 | the browser run's files and tests; the node run's | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/15-browser-licences-pages.log $R/logs/16-node-licences.log \| rg 'Test Files\|      Tests'` |
+| 0 | the exit status of each check at `65c5e3a`, in the order above | `tail -qn1 $R/logs/1[0-6]-*.log` |
+| 0.2117, 76, 283; 0.2139, 77, 283 | `web/scripts`' share, comment lines and code lines as the checker measures them at `1ac4fc4`; at `3d9fcc3` | `rg -o 'share [0-9.]+ is above its budget of 0.0000 \([0-9]+ comment lines, [0-9]+ code lines' $R/logs/18-comment-share-measure.log` |
+| 0.4872; 0.3180 | `.forgejo`'s measured share; `scripts`', at `db98a55` | `rg -o '^  (\.forgejo\|scripts): has no comment budget \(share [0-9.]+' $R/logs/35-comment-shares.log` |
+| 0.3200; 0.4991 | the budgets of `scripts`; of `.forgejo` | `rg '"scripts"\|"\.forgejo"' scripts/comment-budget.json` |
+| 5644 | words the new check counts in each file | `rg -o 'same [0-9]+ words' $R/logs/30-check-licence-editions.log` |
+| 14 | `ci-docs-only.sh`'s self-test cases at `db98a55` | `rg -o 'self-test passed: [0-9]+ cases' $R/logs/31-ci-docs-only-selftest.log` |
+| 15 | pre-commit hooks | `grep -c '^      - id: ' .pre-commit-config.yaml` |
+| 10 | `check-*.sh` scans, each with nine siblings | `git ls-files 'scripts/check-*.sh' \| rg -cv 'check-(all\|scoped\|slow)\.sh'` |
+| 45 | documented figures that match the tree | `rg -o '[0-9]+ documented figures' $R/logs/33-check-doc-figures.log` |
+| 25, 8, 5; 5481, 656, 656; 37, 11, 8 | the word and the two lines each failing sabotage names | `rg -o 'word [0-9]+ differs.*' $R/logs/24-sabotage.log` |
+| 0.212 to 0.223 | seconds the hook's entry took, five runs, as `docs/development.md` quotes | `sed -n 3,7p $R/logs/36-hook-timing.log` |
+| 0 | the exit status of each check at `db98a55`, in the order above | `tail -qn1 $R/logs/29-*.log $R/logs/3[0-4]-*.log` |

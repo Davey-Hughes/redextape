@@ -3,7 +3,8 @@
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml), so the local and CI gates cannot drift.
 # The pre-commit hooks deliberately do NOT run it — they stay fast: fmt and clippy on a Rust change, biome
-# and tsc on a web/ one, the Lua/parser check on a grammar one, plus the `always_run` tree-wide gates
+# and tsc on a web/ one, the Lua/parser check on a grammar one, the word check on a change to either
+# edition of the licence, plus the `always_run` tree-wide gates
 # (control bytes, `file:line` citations, symbol-citation attributions, documented figures, shared doc
 # regions, colour literals, grammar `.wasm`, third-party licences, comment history, block size and
 # share) on every commit; count them in `.pre-commit-config.yaml`'s `always_run: true` entries, not in
