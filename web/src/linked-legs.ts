@@ -108,7 +108,7 @@ export const LINKED: {
      */
     emits: null,
     /** The rxm leg's `here`, one lowering further on: the clause a user watching another view hears of the CLIF run. */
-    here: 'the CLIF run is here right now',
+    here: 'the clif run is here right now',
   },
 }
 

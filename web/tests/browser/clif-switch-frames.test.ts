@@ -223,7 +223,7 @@ async function open(link: SharePayload): Promise<void> {
 /** What a CLIF view shows from a compile's reply until its CLIF listing comes, as every compile draws it. */
 const COMPILE_FRAME = "the compile's frame"
 const compileFrame = (s: Record<string, string>) =>
-  s.rows === 'none' && s.notice === 'Loading CLIF…' && s.line === 'not run' ? COMPILE_FRAME : JSON.stringify(s)
+  s.rows === 'none' && s.notice === 'Loading clif…' && s.line === 'not run' ? COMPILE_FRAME : JSON.stringify(s)
 
 /**
  * Open `link` with the worker's replies kept from the page, choose `to` while its run is `in flight` (no reply yet)
@@ -305,8 +305,8 @@ describe('a listing switch', () => {
    * result put them back.
    */
   it('keeps the view where it stands while the readout waits for the new run', async () => {
-    await until(() => resultsText().includes('CLIF'), "the readout's CLIF rows")
-    expect(resultsText(), 'precondition: the readout has CLIF rows at the press').toContain('CLIF')
+    await until(() => resultsText().includes('clif'), "the readout's CLIF rows")
+    expect(resultsText(), 'precondition: the readout has CLIF rows at the press').toContain('clif')
     await switchTo('as-built', true, { byListing: true })
   })
 })

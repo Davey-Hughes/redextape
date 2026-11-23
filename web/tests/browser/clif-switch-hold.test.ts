@@ -144,7 +144,7 @@ describe('a gesture while a listing chosen is held', () => {
    * gesture can time that window. The readout keeps its CLIF rows, and so every view stays where it stands.
    */
   it("a result of another request keeps the readout's CLIF rows", async () => {
-    await until(() => resultsText().includes('CLIF'), "the readout's CLIF rows")
+    await until(() => resultsText().includes('clif'), "the readout's CLIF rows")
     const last = repliesOf(ear.heard, 'result').at(-1)
     if (last === undefined) throw new Error('precondition: no result was heard')
     const readout = resultsText()

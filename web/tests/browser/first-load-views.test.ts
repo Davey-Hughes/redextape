@@ -56,13 +56,13 @@ describe('a first load, in a window wider than it is tall', () => {
   it('presses the source and TM toggles and leaves λ, rxm and CLIF unpressed', () => {
     expect(pressed()).toEqual(['source', 'tm'])
     const all = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
-    expect(all.map((b) => b.textContent)).toEqual(['source', 'λ', 'TM', 'rxm', 'CLIF'])
+    expect(all.map((b) => b.textContent)).toEqual(['source', 'λ', 'TM', 'rxm', 'clif'])
     expect(all.map((b) => b.title)).toEqual([
       'hide the source view',
       'show the λ view',
       'hide the TM view',
       `show the rxm view\n${KIND_GLOSS.rxm}`,
-      `show the CLIF view\n${KIND_GLOSS.clif}`,
+      `show the clif view\n${KIND_GLOSS.clif}`,
     ])
     // `aria-disabled` IS HOW A TOGGLE IS DISABLED (`app-header.ts`'s `viewToggles`): the `disabled` property is
     // false of every toggle whatever the page shows.
@@ -77,7 +77,7 @@ describe('a first load, in a window wider than it is tall', () => {
     const onScreen = [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]
       .map((b) => ({ word: b.textContent, box: b.getBoundingClientRect() }))
       .sort((a, b) => a.box.left - b.box.left)
-    expect(onScreen.map((toggle) => toggle.word)).toEqual(['source', 'λ', 'TM', 'rxm', 'CLIF'])
+    expect(onScreen.map((toggle) => toggle.word)).toEqual(['source', 'λ', 'TM', 'rxm', 'clif'])
     for (const [i, { word, box }] of onScreen.entries()) {
       expect(box.width, `the ${word} toggle has no width`).toBeGreaterThan(0)
       const before = onScreen[i - 1]

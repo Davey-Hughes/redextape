@@ -223,7 +223,7 @@ describe('view keys', () => {
     await userEvent.keyboard('5')
     // THE FIVE, IN WHATEVER ORDER THE ARRANGEMENT OF ALL FIVE PLACES THEM.
     expect([...mounted()].sort(), 'after 5').toEqual(['clif-0', 'lambda-0', 'rxm-0', 'source', 'tm-0'])
-    expect(titleText('clif-0'), 'the view 5 showed is not a CLIF view').toBe('CLIF · program')
+    expect(titleText('clif-0'), 'the view 5 showed is not a CLIF view').toBe('clif · program')
     await prefix()
     await userEvent.keyboard('5')
     expect(mounted(), 'after 5 again').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])

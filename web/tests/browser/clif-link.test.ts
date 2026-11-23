@@ -420,7 +420,7 @@ describe('linking through the CLIF view', () => {
       linkAt(view, bare.at)
       await until(() => sourceLinked() === bare.text, 'the source to be linked')
       expect(linkStatus()).toContain('this construct emits no instructions')
-      expect(linkStatus()).not.toContain('CLIF')
+      expect(linkStatus()).not.toContain('clif')
       expect(where(await scan(clif(), 'clif'), (r) => r.linked)).toEqual([])
     },
     CASE_MS,
@@ -452,13 +452,13 @@ describe('linking through the CLIF view', () => {
       await follow()
       linkAt(view, construct.at)
       await until(() => sourceLinked() === construct.text, 'the source to be linked')
-      expect(linkStatus(), 'precondition: the CLIF run is elsewhere').not.toContain('the CLIF run is here right now')
+      expect(linkStatus(), 'precondition: the CLIF run is elsewhere').not.toContain('the clif run is here right now')
       for (let step = 1; nextPc() !== 'pc13'; step += 1) {
         if (step > 189) throw new Error('the CLIF run never reached pc 13')
         await userEvent.click(control(clif(), '▶') as HTMLButtonElement)
         await until(() => stepOf(clif()).startsWith(`step ${step} of`), `the CLIF view to reach step ${step}`)
       }
-      expect(linkStatus()).toContain('the CLIF run is here right now')
+      expect(linkStatus()).toContain('the clif run is here right now')
       const rows = await scan(clif(), 'clif')
       const focused = where(rows, (r) => r.focus)
       expect(focused).toEqual(where(rows, (r) => CONSTRUCT_PCS.includes(r.pc)))

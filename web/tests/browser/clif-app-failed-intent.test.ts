@@ -44,7 +44,7 @@ it('lists the program once a load the toggle asks for follows a failed one', asy
   await userEvent.keyboard(PREFIX)
   await userEvent.keyboard('5')
   await until(() => host('clif-0') !== null, 'the view keys and 5 to show a CLIF view')
-  await until(() => sentence() === 'CLIF could not be loaded.', 'the CLIF view to say the load failed')
+  await until(() => sentence() === 'clif could not be loaded.', 'the CLIF view to say the load failed')
   expect(drawn(retry()), 'precondition: the failed view offers Retry').toBe(true)
 
   const mark = ear.heard.length
@@ -58,7 +58,7 @@ it('lists the program once a load the toggle asks for follows a failed one', asy
     'the load the toggle asked for to answer ready',
   )
   // **THE LOAD IS IN, SO A VIEW STILL SAYING IT LOADS SAYS IT OF NOTHING**, and offers no Retry to end it.
-  await until(() => sentence() !== 'Loading CLIF…', 'the loading notice to end once the load it names is in')
+  await until(() => sentence() !== 'Loading clif…', 'the loading notice to end once the load it names is in')
   await until(() => row() !== null, 'the CLIF listing to follow the load')
   expect(drawn(row())).toBe(true)
   expect(notice()).toBeNull()

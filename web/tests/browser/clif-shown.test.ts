@@ -82,12 +82,12 @@ describe('a CLIF view shown and hidden', () => {
     await until(() => clifStopped(ear.heard.slice(mark), shown.epoch), "the CLIF leg's recording under its epoch")
     fromStepZero(shown.epoch, mark)
     controlsLive()
-    await until(() => resultsText().includes('CLIF'), "the CLIF pass's result in the readout")
+    await until(() => resultsText().includes('clif'), "the CLIF pass's result in the readout")
 
     mark = ear.heard.length
     await userEvent.click(host('clif-0')?.querySelector('.view-close') as HTMLElement)
     expect(clifShown(), 'precondition: ✕ hid the CLIF view').toBe(false)
-    expect(resultsText(), 'the readout once the CLIF view is hidden').not.toContain('CLIF')
+    expect(resultsText(), 'the readout once the CLIF view is hidden').not.toContain('clif')
     const hidden = await nextClif(mark, 'the clif request ✕ posts')
     expect(hidden.listing).toBeNull()
     expect(hidden.epoch, 'its epoch, above the shown one').toBeGreaterThan(shown.epoch)

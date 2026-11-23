@@ -50,11 +50,11 @@ it('takes the CLIF leg out of the readout when its stepper throws as a continue 
   await until(() => requestsOf(ear.heard.slice(mark), 'clif').length > 0, 'the clif request 5 posts')
   const epoch = requestsOf(ear.heard.slice(mark), 'clif')[0]?.epoch ?? -1
   await until(() => clifStopped(ear.heard.slice(mark), epoch), "the CLIF leg's first fill")
-  await until(() => resultsText().includes('CLIF'), "the CLIF pass's result in the readout")
+  await until(() => resultsText().includes('clif'), "the CLIF pass's result in the readout")
   expect(drawn(more()), 'precondition: the first fill stopped short, so the view offers a continue').toBe(true)
 
   await userEvent.click(more() as HTMLButtonElement)
-  await until(() => sentence() === `No CLIF for this program: ${THROWN}`, 'the CLIF view to say what the stepper threw')
+  await until(() => sentence() === `No clif for this program: ${THROWN}`, 'the CLIF view to say what the stepper threw')
   // THE CASE'S PRECONDITION: the throw was the continue's, which posts no `result` of its own. The throw's
   // `clif-listing` and anything the continue posts after it go out in one task, so `caughtUp` is answered after them.
   const refused = ear.heard.findIndex(
@@ -63,5 +63,5 @@ it('takes the CLIF leg out of the readout when its stepper throws as a continue 
   expect(refused, "precondition: the throw's clif-listing was heard").toBeGreaterThanOrEqual(0)
   await ear.caughtUp()
   expect(repliesOf(ear.heard.slice(refused), 'result'), 'precondition: no result follows the throw').toEqual([])
-  expect(resultsText(), 'the readout once the stepper is dropped').not.toContain('CLIF')
+  expect(resultsText(), 'the readout once the stepper is dropped').not.toContain('clif')
 }, 30_000)

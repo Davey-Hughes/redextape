@@ -54,11 +54,11 @@ describe('toggleTitle', () => {
 describe('the help page', () => {
   it('says what the rxm and CLIF views are where it names the views', () => {
     expect(readRelative('../../help.html').replace(/\s+/g, ' ')).toContain(
-      "<strong>TM</strong>, <strong>rxm</strong> and <strong>CLIF</strong>. The rxm view shows redextape's register" +
+      "<strong>TM</strong>, <strong>rxm</strong> and <strong>clif</strong>. The rxm view shows redextape's register" +
         " machine, the IR between the source and the Turing machine: its control flow becomes the machine's states," +
         " and its registers, stack and heap become the machine's tapes. A software interpreter steps it, and it is" +
-        " not x86, ARM, WebAssembly or LLVM output. The CLIF view shows Cranelift's IR: what the native backends" +
-        ' build from the rxm program, stepped one CLIF instruction at a time by the rules the compiled program runs' +
+        " not x86, ARM, WebAssembly or LLVM output. The clif view shows Cranelift's IR: what the native backends" +
+        ' build from the rxm program, stepped one clif instruction at a time by the rules the compiled program runs' +
         " by. Its <strong>as built</strong> and <strong>optimised</strong> buttons switch between redextape's" +
         " lowering before Cranelift's passes and Cranelift's output at every opt level from O1 up, the same for every" +
         " target. Its step cap counts loop iterations, as the compiled program's does, not instructions. Each" +

@@ -143,7 +143,7 @@ export function programSegments(r: ProgramResult | null, recording: ProgramRecor
     const width = name === 'TM' && tmWidth !== null ? [`width ${n(tmWidth)}${r.pinned ? ` ${PINNED}` : ''}`] : []
     return [value === undefined ? name : `${name} ${value}`, ...rest.map((row) => row.value), ...width].join(' · ')
   }
-  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM, CLIF — named as `LEG_NAME` names them, which is what
+  // ONE SEGMENT PER LEG, IN `LEGS`' ORDER — λ, rxm, TM, clif — named as `LEG_NAME` names them, which is what
   // `results.ts`'s rows are labelled with. **A LEG WITH NO ROWS HAS NO SEGMENT**: CLIF has none while no stepper is
   // built (`clifResultRows`), and its bare name would say nothing.
   return LEGS.filter((l) => rows.some((row) => row.leg === LEG_NAME[l])).map((l) => leg(LEG_NAME[l]))

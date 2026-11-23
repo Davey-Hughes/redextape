@@ -328,10 +328,10 @@ describe('clifResultRows', () => {
     const asRxm = resultRows({ lambda: lambdaOk, rxm: part, tm: tmOk, clif: CLIF_ABSENT }).filter(
       (r) => r.leg === 'rxm',
     )
-    expect(clifResultRows(part)).toEqual(asRxm.map((r) => ({ ...r, leg: 'CLIF' })))
+    expect(clifResultRows(part)).toEqual(asRxm.map((r) => ({ ...r, leg: 'clif' })))
     expect(clifResultRows(part)).toEqual([
-      { leg: 'CLIF', label: 'steps', value: '189 instructions' },
-      { leg: 'CLIF', label: 'value', value: '24' },
+      { leg: 'clif', label: 'steps', value: '189 instructions' },
+      { leg: 'clif', label: 'value', value: '24' },
     ])
   })
 })

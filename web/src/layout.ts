@@ -106,7 +106,7 @@ export const KIND_WORD: Readonly<Record<PaneKind, string>> = {
   lambda: 'λ',
   rxm: 'rxm',
   tm: 'TM',
-  clif: 'CLIF',
+  clif: 'clif',
 }
 
 /** Whether the views area is wider than it is tall (`wide`) or taller than it is wide (`tall`) — spec §4.4. */

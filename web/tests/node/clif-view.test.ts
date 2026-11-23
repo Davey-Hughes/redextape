@@ -280,7 +280,7 @@ describe('the notice', () => {
 
   it('says why a program has no CLIF', () => {
     expect(clifNotice('ready', { error: 'x' }, '')).toEqual({ kind: 'declined', text: 'x' })
-    expect(CLIF_COPY.declined('x')).toBe('No CLIF for this program: x')
+    expect(CLIF_COPY.declined('x')).toBe('No clif for this program: x')
   })
 
   it('says a failed load failed', () => {

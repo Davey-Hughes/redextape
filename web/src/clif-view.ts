@@ -199,10 +199,10 @@ export function clifHeap(s: ClifState): HeapView {
 
 /** The CLIF view's own copy: what its listing area says while it has no listing. */
 export const CLIF_COPY = {
-  loading: 'Loading CLIF…',
-  failed: 'CLIF could not be loaded.',
+  loading: 'Loading clif…',
+  failed: 'clif could not be loaded.',
   retry: 'Retry',
-  declined: (why: string): string => `No CLIF for this program: ${why}`,
+  declined: (why: string): string => `No clif for this program: ${why}`,
 } as const
 
 export type ClifNotice =

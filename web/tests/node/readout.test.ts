@@ -125,7 +125,7 @@ describe('a machine leg’s full history, in the program’s readout', () => {
   it('says nothing of a full CLIF history while its held step line still says the link’s step', () => {
     const r = { kind: 'result', gen: GEN, legs: { lambda: LAMBDA, rxm: RXM, tm: TM, clif: RXM }, pinned: false }
     const held = { ...leg(40_000, 'budget'), clifHold: { linkStep: 50_000 } }
-    expect(programSegments(r as never, { ...ENDED, clif: held })).toEqual([...PLAIN, 'CLIF 42 · 55 instructions'])
+    expect(programSegments(r as never, { ...ENDED, clif: held })).toEqual([...PLAIN, 'clif 42 · 55 instructions'])
   })
 
   /**
@@ -170,10 +170,10 @@ describe('a machine leg’s full history, in the program’s readout', () => {
       legs: { lambda: LAMBDA, rxm: RXM, tm: TM, clif: RXM },
       pinned: false,
     } as never
-    expect(programSegments(r, ENDED)).toEqual([...PLAIN, 'CLIF 42 · 55 instructions'])
+    expect(programSegments(r, ENDED)).toEqual([...PLAIN, 'clif 42 · 55 instructions'])
     expect(programSegments(r, { ...ENDED, clif: leg(40_000, 'budget') })).toEqual([
       ...PLAIN,
-      'CLIF 42 · 55 instructions · history is full at 40,000',
+      'clif 42 · 55 instructions · history is full at 40,000',
     ])
   })
 

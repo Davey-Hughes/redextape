@@ -135,10 +135,10 @@ describe('the CLIF view in the app', () => {
 
   it('says why a program has no CLIF', async () => {
     await compile(view, LIST)
-    await until(() => sentence().startsWith('No CLIF for this program: '), 'the CLIF view to say why')
+    await until(() => sentence().startsWith('No clif for this program: '), 'the CLIF view to say why')
     const reason = stepOf(rxm())
     expect(reason, 'precondition: the rxm view gives a reason, not a step').not.toMatch(/^step |^$/)
-    expect(sentence()).toBe(`No CLIF for this program: ${reason}`)
+    expect(sentence()).toBe(`No clif for this program: ${reason}`)
     expect(clif().querySelectorAll('.clif-row')).toHaveLength(0)
   })
 

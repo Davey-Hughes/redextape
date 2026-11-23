@@ -40218,3 +40218,131 @@ whole branch's rows read its logs in `$R/final/`, at `c969f4e` and `24ef8c3`.
 | 3, 0 | the lines of the review's results file with an exit status that say the file was restored and `cmp` equal; those that do not | `rg 'exit [0-9]' $R/final/sab-results.txt \| rg -c 'restored, cmp equal'; rg 'exit [0-9]' $R/final/sab-results.txt \| awk '!/restored, cmp equal/' \| wc -l` |
 | none: prints nothing; 524, 524; 18, 33 | `error TS` lines at `c969f4e` and at `24ef8c3`; the files `biome ci` checked at each; the comment check's areas within budget and the files changed since `2cc48da` it read, at each | `rg -c 'error TS' $R/final/m5-tsc.log $R/final/m7-tsc.log; sed 's/\x1b\[[0-9;]*m//g' $R/final/m5-lint.log $R/final/m7-lint.log \| rg -o 'Checked [0-9]+ files'; cat $R/final/m5-comments.log $R/final/m7-comments.log` |
 | 45, 10; same | `inspector-phone.test.ts`'s cases and failures in the CLIF view lane's Firefox gate before #190 merged; its failing cases there against those with `5992779` | `sed 's/\x1b\[[0-9;]*m//g' ~/temp/redextape-clif-view-record/pr2/gate/08-test-firefox.log \| rg -a -o 'inspector-phone.test.ts .[0-9]+ tests . [0-9]+ failed.'; diff <(sed 's/\x1b\[[0-9;]*m//g' ~/temp/redextape-clif-view-record/pr2/gate/08-test-firefox.log \| rg -a -o '^ FAIL .*inspector-phone.test.ts > .*' \| sed 's/^.*inspector-phone/inspector-phone/' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L3/04-m2-inspector-phone-firefox.log \| rg -a -o '^ FAIL .*inspector-phone.test.ts > .*' \| sed 's/^.*inspector-phone/inspector-phone/' \| sort -u) && echo same` |
+
+#### THE CLIF VIEW'S NAME READS `clif`, LOWERCASE, WHEREVER THE SITE SHOWS OR SAYS IT, AS THE RXM VIEW'S DOES (2026-11-21 and 22, branch `clif-lowercase`, `96acc41` and `9fc56de` on `ee5d657`, plus this entry in three commits)
+
+The user, on 2026-11-21: "CLIF capitalized in docs and comments is ok, just for the visual on the site it should be
+consistent and lowercase." #190 named the fifth view `CLIF` on its toggle, in its title and in every sentence the app
+says about it. This branch writes `clif` everywhere a user reads or hears the name, as the rxm view's name already is.
+It was cut from `1ac4fc4` on 2026-11-21 and rebased on 2026-11-22 onto `ee5d657`, after #191 and #192; every count
+below is of the rebased branch. The lane's record is `~/temp/redextape-clif-lowercase-record/`, `$R` below.
+
+##### WHAT CHANGED
+
+**Two tables and four sentences.** `KIND_WORD.clif` in `web/src/layout.ts` and `LEG_NAME.clif` in `web/src/legs.ts` are
+`clif`. Every other place that names the view reads one of the two: the `views` toggle, its tooltip and the notice
+line's answer to a refused press, the view keys' hint, the live region's sentence, the view's title, the menus, Stage
+tab and step bar that repeat the title, the readout's segment and the notice about share-link positions. The four
+sentences that spell the name out are the link status's clause in `web/src/linked-legs.ts`, `the clif run is here right
+now`, and the listing's three notices in `web/src/clif-view.ts`: `Loading clif…`, `clif could not be loaded.` and
+`No clif for this program: …`. `web/help.html` says `clif` on the 6 lines that said `CLIF`.
+
+**Lowercase at the start of a sentence too**, as "redextape" is: `clif could not be loaded.`
+
+**No style uppercases the name.** Instrument's `--label-transform` is `uppercase`, and a view's title sits in a
+`.pane h2` that carries it, but `.view-title` sets `text-transform: none`, which is how `rxm · program` already
+rendered lowercase in Instrument. The toggles, menus, Stage tabs, step bar, notices and readout carry no transform in
+any style, and no rule sets `small-caps`. The new `web/tests/browser/view-names-rendered.test.ts` reads every toggle and
+every view title in each of the three styles, by its computed `text-transform` and by `innerText`, which applies it.
+Its assertions on each name are soft, so one run reports every name a fault breaks.
+
+**What keeps `CLIF`**: comments, identifiers, `docs/`, the README, the Rust crates, the CLI, and the tests' names and
+wait messages. The exceptions are two comments that quote the toggle words, in `viewToggles`'s doc in
+`web/src/app-header.ts` and in `programSegments` in `web/src/readout.ts`, which now quote `clif`, since a comment
+quoting a label must stay true. The tooltip's gloss, "Cranelift's IR: what the native backends build from the rxm
+program", does not use the word.
+
+**The tests that pinned the old words** now pin the new ones, in 6 node files and 12 browser files. Three of them
+asserted that a text did not contain `CLIF`, which the new words would have passed whatever the page did, so they now
+assert it does not contain `clif`.
+
+**Nothing #191 or #192 added says the view's name on the site, so the rebase brought no new text to lowercase.**
+Of the lines the two added under `web/src` and `web/*.html`, 5 match `clif` in any case: one comment, three
+selectors on `.clif-pane` and `positions.forget('clif')`. Of the 39 they added under `web/tests`, none reads the
+view's name from the page. The CLIF view's panels are labelled `listing`, `values`, `call stack` and `heap`, and the
+panel stack names the boundaries between them from those labels. The rebase's one conflict outside the roadmap was in
+`web/tests/browser/clif-switch-frames.test.ts`, where #192 reads a listing switch's frames by listing and this branch
+waits for the readout's `clif`; the line keeps both.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Three files fail in Firefox at `ee5d657` and here alike**, with the set varying between runs:
+  `view-keys.test.ts`, mostly at "the caret is not where it was", 17 to 20 of its 40 tests a run;
+  `view-keys-focus.test.ts`, 3 to 5 of its 15; and `clif-worker.test.ts`'s "drops the stepper for a request with no
+  listing", at `expected 2 to be less than or equal to 1`, in 1 of 3 runs here and 2 of 3 at `ee5d657`. This branch
+  does not address them.
+- **Not run on this branch:** the rest of the Chromium tier, the rest of the Firefox tier, coverage,
+  `scripts/check-all.sh`, `scripts/check-slow.sh`, the app build and the Docker image.
+
+##### VERIFICATION
+
+**The gates at `96acc41`**, run from `web/`, the comment check from the root. `9fc56de` changes only the new test: on
+it the pre-commit hooks passed, biome, the typecheck and the comment check among them, the node tier passed again, 83
+files and 1748 tests, and `view-names-rendered.test.ts` passed alone in Chromium and in Firefox, 3 of 3 tests each. The
+browser runs below are at `96acc41`.
+
+| Gate | Result |
+|---|---|
+| `pnpm exec biome ci --error-on-warnings` | no fixes applied |
+| `pnpm run typecheck`, which builds the bindings and runs `tsc --noEmit` | exit 0 |
+| `pnpm exec vitest run --project node` | 83 files, 1748 tests passed |
+| `node scripts/check-comments.mjs --base origin/main` | exit 0 |
+| `--project browser --project browser-scrollbars`: the 12 changed files, the new one, `clif-header`, `view-toggles-narrow`, `view-toggles-first-paint`, `view-toggle-tooltips`, `view-toggle-focus-ring` and `first-load-views-tall`, since the clif toggle is narrower, every other browser test file that says `clif` in any case, and `machine-row-scrollbars`: 44 files named | 43 files, 416 tests passed; `record-cost.test.ts` is a probe, which no run without `REDEXTAPE_PROBE` includes |
+| `--project firefox --project firefox-capture`: the 43 that ran in Chromium but `machine-row-scrollbars`, which only the scroll-bar project runs: 42 files | 40 files passed, 2 failed; 24 tests failed, 382 passed, 7 skipped |
+| the same, at `ee5d657` (`~/temp/redextape-clif-lowercase-base`, since removed), where the new file is not: 41 files | 38 files passed, 3 failed; 25 tests failed, 378 passed, 7 skipped |
+
+**The three failing files alone in Firefox**, twice on each side: `view-keys.test.ts` failed 17 and 19 of 40 here, 18
+and 18 at `ee5d657`; `view-keys-focus.test.ts` 4 and 4 of 15 here, 3 and 4 there; `clif-worker.test.ts` 0 and 1 of 21
+on each side. Across the three Firefox runs on each side, 25 tests failed here and 27 at `ee5d657`, and every one that
+failed here failed there too. The two that failed only at `ee5d657` are `view-keys-focus.test.ts`'s "leaves the caret
+in the source editor, and the key chooses the tabs" and `view-keys.test.ts`'s "ends on a key it does not know, which
+types as it does while the mode is idle", the second of which had failed once on this branch before the rebase and
+not at `1ac4fc4`.
+
+**The sabotages**, on `9fc56de`, where each name's assertions are soft, so a run reports every name a sabotage breaks.
+Each saved the files it changed to `$R/sab/`, restored them from there and checked them with `cmp`. Each ran
+`view-names-rendered.test.ts` in Chromium and in Firefox.
+
+| Sabotage | What failed, in each engine | Tests failed | Logs in `$R/logs/` |
+|---|---|---|---|
+| `.view-title`'s `text-transform: none` removed from `web/src/style.css` | the Instrument case, at the source view's title alone: its case, `uppercase`, and its text, `SOURCE` | 1 of 3 | `51-sab-transform-chromium.log`, `51-sab-transform-firefox.log` |
+| `KIND_WORD.clif` back to `CLIF` in `web/src/layout.ts` | every style's case, at the clif toggle alone: `CLIF` | 3 of 3 | `52-sab-kindword-chromium.log`, `52-sab-kindword-firefox.log` |
+
+The first row's two failures show that `innerText` applies the transform in both engines. The other titles, which are
+buttons, kept their case, so the first sabotage reaches the source view's title alone. The titles take the view's name
+from `LEG_NAME`, which the second leaves alone. At `96acc41`, before the assertions were soft, the first sabotage
+stopped at the source title in both engines, at its case (`45-sab-*.log`) and, with the computed-case assertion for the
+titles taken out, at its text (`46-sab-*.log`).
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-clif-lowercase-record`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 2 | commits on `ee5d657` that change `web/` | `git rev-list --count ee5d657..9fc56de -- web` |
+| 6, 6 | `web/help.html`'s lines with `clif` added and with `CLIF` removed | `git diff ee5d657 96acc41 -- web/help.html \| grep -c '^+.*clif'; git diff ee5d657 96acc41 -- web/help.html \| grep -c '^-.*CLIF'` |
+| 6; 12; 1 | node test files changed; browser test files changed; added | `git diff --name-only ee5d657 96acc41 -- web/tests/node \| wc -l; git diff --name-only --diff-filter=M ee5d657 96acc41 -- web/tests/browser \| wc -l; git diff --name-only --diff-filter=A ee5d657 96acc41 -- web/tests/browser \| wc -l` |
+| 5; 39 | lines #191 and #192 added that match `clif` in any case, under `web/src` and `web/*.html`; under `web/tests` | `git diff -U0 1ac4fc4 ee5d657 -- web/src 'web/*.html' \| grep '^+' \| grep -v '^+++' \| grep -ic clif; git diff -U0 1ac4fc4 ee5d657 -- web/tests \| grep '^+' \| grep -v '^+++' \| grep -ic clif` |
+| 1 | biome's "no fixes applied" | `grep -c 'No fixes applied' $R/logs/40-rebased-biome.log` |
+| exit 0 | the typecheck | `tail -1 $R/logs/40-rebased-typecheck.log` |
+| 83, 1748 | the node tier | `grep -aE 'Test Files  \|Tests  ' $R/logs/40-rebased-node.log` |
+| exit 0 | the comment check | `tail -1 $R/logs/40-rebased-check-comments.log` |
+| 1 | `record-cost.test.ts` in `PROBE_FILES` | `grep -c "'tests/browser/record-cost.test.ts'" web/vite.config.ts` |
+| 43, 416 | the Chromium run | `grep -aE 'Test Files  \|Tests  ' $R/logs/41-chromium-branch.log` |
+| 2, 40; 24, 382, 7 | the Firefox run here: files failed, passed; tests failed, passed, skipped | `grep -aE 'Test Files  \|Tests  ' $R/logs/42-firefox-branch.log` |
+| 3, 38; 25, 378, 7 | the Firefox run at `ee5d657` | `grep -aE 'Test Files  \|Tests  ' $R/logs/43-firefox-base-ee5d657.log` |
+| 20, 4; 19, 5, 1 | the failing files' failed tests in those two runs, here; at `ee5d657` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/42-firefox-branch.log \| grep -aE '\([0-9]+ tests'`, and the same for `43-firefox-base-ee5d657.log` |
+| 44 | the browser files named: the changed and new ones, those that say `clif`, the six beside the toggles, and `machine-row-scrollbars` | `{ git diff --name-only ee5d657 96acc41 -- web/tests/browser; rg -l -i clif web/tests/browser web/tests/firefox -g '*.test.ts'; printf 'web/tests/browser/%s.test.ts\n' clif-header view-toggles-narrow view-toggles-first-paint view-toggle-tooltips view-toggle-focus-ring first-load-views-tall machine-row-scrollbars; } \| sort -u \| wc -l` |
+| 17, 19; 18, 18 | `view-keys.test.ts`'s failed tests in the two runs of the three files alone, here; at `ee5d657` | `sed 's/\x1b\[[0-9;]*m//g' $R/logs/44-firefox-rerun1-branch.log $R/logs/44-firefox-rerun2-branch.log $R/logs/44-firefox-rerun1-base.log $R/logs/44-firefox-rerun2-base.log \| grep -aE '/view-keys\.test\.ts \([0-9]+ tests'` |
+| 4, 4; 3, 4 | the same for `view-keys-focus.test.ts` | the same, with `/view-keys-focus\.test\.ts` |
+| 0, 1; 0, 1 | the runs of the three files alone in which `clif-worker.test.ts` printed its file's line, which only a file with a failure prints, here; at `ee5d657`; each such line says 1 of its 21 failed | `grep -ac 'clif-worker.test.ts.*21 tests' $R/logs/44-firefox-rerun1-branch.log $R/logs/44-firefox-rerun2-branch.log $R/logs/44-firefox-rerun1-base.log $R/logs/44-firefox-rerun2-base.log` |
+| 25; 27 | distinct tests failed over the three Firefox runs, here; at `ee5d657` | `cat $R/logs/42-firefox-branch.log.fails $R/logs/44-firefox-rerun?-branch.log.fails \| sort -u \| wc -l`, and the same for `43-firefox-base-ee5d657.log.fails` and `44-firefox-rerun?-base.log.fails`, the `.fails` files being each log's sorted `FAIL` names |
+| 0; 2 | of those, failed here alone; at `ee5d657` alone | `comm -23` and `comm -13` of the two sorted lists above, `\| wc -l` |
+| 1, 1; 1, 1 | at `96acc41`, the hard-assertion sabotages' failed tests, Chromium and Firefox, the first; it without the computed-case assertion | `grep -ah 'Tests  ' $R/logs/45-sab-chromium.log $R/logs/45-sab-firefox.log $R/logs/46-sab-innertext-chromium.log $R/logs/46-sab-innertext-firefox.log` |
+| 1, 1; 1, 1 | the quoted assertions in those runs | `grep -ac "the source title's case:" $R/logs/45-sab-chromium.log $R/logs/45-sab-firefox.log; grep -ac 'the source title:' $R/logs/46-sab-innertext-chromium.log $R/logs/46-sab-innertext-firefox.log` |
+| 11, 0 | `9fc56de`'s pre-commit hooks passed; failed | `grep -c Passed $R/logs/53-commit4.log; grep -c Failed $R/logs/53-commit4.log` |
+| 83, 1748 | the node tier at `9fc56de` | `grep -aE 'Test Files  \|Tests  ' $R/logs/54-review-node.log` |
+| 3, 3 | the new test alone at `9fc56de`, tests passed, Chromium and Firefox | `grep -ah 'Tests  ' $R/logs/50-names-soft-chromium.log $R/logs/50-names-soft-firefox.log` |
+| 1, 1; 3, 3 | the sabotages on `9fc56de`, failed tests, Chromium and Firefox: first row; second row | `grep -ah 'Tests  ' $R/logs/51-sab-transform-chromium.log $R/logs/51-sab-transform-firefox.log $R/logs/52-sab-kindword-chromium.log $R/logs/52-sab-kindword-firefox.log` |
+| 2, 2; 0 | the first row's assertion lines at the source title, Chromium and Firefox; at anything else | `grep -ac 'AssertionError: the source title' $R/logs/51-sab-transform-chromium.log $R/logs/51-sab-transform-firefox.log; grep -ah 'AssertionError' $R/logs/51-sab-transform-chromium.log $R/logs/51-sab-transform-firefox.log \| grep -vc 'the source title'` |
+| 0 | the second row's assertion lines at anything but the clif toggle | `grep -ah 'AssertionError' $R/logs/52-sab-kindword-chromium.log $R/logs/52-sab-kindword-firefox.log \| grep -vc 'the clif toggle:'` |

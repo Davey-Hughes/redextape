@@ -269,7 +269,7 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * page with no view built yet.
  *
  * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `rxm`, `TM`
- * and `CLIF` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
+ * and `clif` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
  * carries its state. The tooltip is `toggleTitle`'s: what a press does, *hide the TM view*, *show the TM view*, or with
  * `count` saying two views of the kind, *hide the 2 TM views*, and for rxm and CLIF a line saying what the view is.
  *

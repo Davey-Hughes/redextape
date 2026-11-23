@@ -40,7 +40,7 @@ it('says the load failed, and loads on Retry', async () => {
   await userEvent.keyboard(PREFIX)
   await userEvent.keyboard('5')
   await until(() => host('clif-0') !== null, 'the view keys and 5 to show a CLIF view')
-  await until(() => sentence() === 'CLIF could not be loaded.', 'the CLIF view to say the load failed')
+  await until(() => sentence() === 'clif could not be loaded.', 'the CLIF view to say the load failed')
   expect(drawn(notice())).toBe(true)
   expect(retry()?.textContent).toBe('Retry')
   expect(drawn(retry())).toBe(true)

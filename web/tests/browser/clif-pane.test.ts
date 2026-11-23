@@ -77,7 +77,7 @@ function drawnInListing(host: HTMLElement, el: HTMLElement | null): boolean {
 describe('the CLIF view without a listing', () => {
   it('says it is loading while the package loads', () => {
     const { host } = mount('loading', null)
-    expect(sentence(host)).toBe('Loading CLIF…')
+    expect(sentence(host)).toBe('Loading clif…')
     expect(notice(host)?.getAttribute('role')).toBe('status')
     expect(drawnInListing(host, notice(host))).toBe(true)
     expect(host.querySelector('button.clif-retry')).toBeNull()
@@ -85,7 +85,7 @@ describe('the CLIF view without a listing', () => {
 
   it('says the load failed, and Retry asks for it again', async () => {
     const { host, retry, loaded } = mount('failed', null)
-    expect(sentence(host)).toBe('CLIF could not be loaded.')
+    expect(sentence(host)).toBe('clif could not be loaded.')
     expect(drawnInListing(host, notice(host))).toBe(true)
     const button = host.querySelector<HTMLButtonElement>('button.clif-retry')
     expect(button?.textContent).toBe('Retry')
@@ -96,14 +96,14 @@ describe('the CLIF view without a listing', () => {
     // THE RETRY GOES WITH ITS NOTICE, AND HANDS ITS FOCUS TO THE LISTING'S TOGGLE rather than leaving it nowhere.
     expect(document.activeElement, 'precondition: the press focused Retry').toBe(button)
     loaded('loading')
-    expect(sentence(host)).toBe('Loading CLIF…')
+    expect(sentence(host)).toBe('Loading clif…')
     expect(host.querySelector('button.clif-retry')).toBeNull()
     expect(document.activeElement).toBe(listingPanel(host).querySelector('.panel-toggle'))
   })
 
   it('says why a program has no CLIF', () => {
     const { host } = mount('ready', { error: 'x' })
-    expect(sentence(host)).toBe('No CLIF for this program: x')
+    expect(sentence(host)).toBe('No clif for this program: x')
     expect(drawnInListing(host, notice(host))).toBe(true)
   })
 })
@@ -111,7 +111,7 @@ describe('the CLIF view without a listing', () => {
 describe('the CLIF view with a listing', () => {
   it('shows the listing once it arrives, and no notice, a function header as Cranelift prints it', () => {
     const { host, pane } = mount('ready', null)
-    expect(sentence(host), 'precondition: a notice before the listing').toBe('Loading CLIF…')
+    expect(sentence(host), 'precondition: a notice before the listing').toBe('Loading clif…')
     pane.setProgram({ listing })
     pane.render(null, controlState(false, ''))
     expect(notice(host)).toBeNull()

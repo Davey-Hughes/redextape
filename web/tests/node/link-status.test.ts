@@ -115,7 +115,7 @@ describe('linkStatus', () => {
           clif: { emits: true, here: true },
         }),
       ),
-    ).toBe('the rxm run is here right now · the machine is here right now · the CLIF run is here right now')
+    ).toBe('the rxm run is here right now · the machine is here right now · the clif run is here right now')
   })
 
   // PLAN 7 PART 5 SPEC AMENDMENT 11: an rxm instruction `defunc` minted links to nothing, and the line says so,
