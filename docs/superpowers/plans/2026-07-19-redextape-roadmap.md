@@ -40346,3 +40346,297 @@ titles taken out, at its text (`46-sab-*.log`).
 | 1, 1; 3, 3 | the sabotages on `9fc56de`, failed tests, Chromium and Firefox: first row; second row | `grep -ah 'Tests  ' $R/logs/51-sab-transform-chromium.log $R/logs/51-sab-transform-firefox.log $R/logs/52-sab-kindword-chromium.log $R/logs/52-sab-kindword-firefox.log` |
 | 2, 2; 0 | the first row's assertion lines at the source title, Chromium and Firefox; at anything else | `grep -ac 'AssertionError: the source title' $R/logs/51-sab-transform-chromium.log $R/logs/51-sab-transform-firefox.log; grep -ah 'AssertionError' $R/logs/51-sab-transform-chromium.log $R/logs/51-sab-transform-firefox.log \| grep -vc 'the source title'` |
 | 0 | the second row's assertion lines at anything but the clif toggle | `grep -ah 'AssertionError' $R/logs/52-sab-kindword-chromium.log $R/logs/52-sab-kindword-firefox.log \| grep -vc 'the clif toggle:'` |
+
+#### A CUT TEXT IN THE TM, RXM AND CLIF VIEWS, AND A COPY'S `no term yet`, READS WHOLE IN THE BROWSER'S TOOLTIP WHILE THE POINTER RESTS ON IT, AND ONLY WHILE IT IS CUT (2026-11-23, branch `cut-text-tooltips`, `798fa38..9f0b08d`, 11 commits, and those after it, which change this entry and the design alone)
+
+The user, on 2026-11-21, asking for the program's result to be highlighted in every view at the end of a run: "we also
+need to be able to see the entire return value even when it's long. right now a long return value in clif for example
+gets truncated and does ...". On 2026-11-23 they chose both ways to read a long value whole: every cut value in a
+tooltip, which is this branch, and the result shown whole at a run's end, which comes with the highlight. This is the
+first of the return-value lane's three pull requests. Of the branch's 11 commits to `9f0b08d`, 6 change `web/`:
+`065c221` and `593d3c3` build it, and `362a644`, `53dea8c`, `3d1c520` and `9f0b08d` fix what the review of the whole
+branch found. `7fb0f1d` and `4aebaab` hold this entry and the design's *As built*, and the other 3 hold the design,
+`docs/superpowers/specs/2026-11-23-cut-text-tooltips-design.md`, the plan,
+`docs/superpowers/plans/2026-11-23-cut-text-tooltips.md`, and the decisions and rulings made on them before the build.
+The lane's record is `~/temp/redextape-return-value-record/`; `$L` below is its `pr1/impl/`.
+
+##### WHAT CHANGED
+
+**Which texts.** The stylesheet cuts text with `text-overflow: ellipsis` in 11 rules. Nine selectors name the texts
+among them that had no way to be read whole, `CUT_TEXT_SELECTORS` in the new `web/src/cut-text.ts`: a cell of the TM
+rule table, the rxm listing or the clif listing (`.state-cell`, `.rxm-cell`, `.clif-cell`); an instruction's text on a
+state-diagram program row (`.program-text`); a machine panel's name (`.machine-panel .panel-name`); a clif value or an
+rxm register (`.rxm-register dd`); a call-stack frame and a heap line, in both machine views (`.rxm-frame`,
+`.rxm-cell-line`); and a copy's `no term yet` in the header's copies list (`.buffer-row-term.is-absent`).
+
+**When.** When the pointer arrives on one of them and it is cut at that moment, its `title` becomes its text, and the
+browser shows that whole text in its own tooltip, as it does on the readout's segments. At the next arrival anywhere,
+that title is taken off first. So the only watched text with a title is the cut one under the pointer, a text that fits
+gets none, and nothing is measured but at an arrival the browser reports. A clif value's tooltip holds its registers too
+(`479001600 rr`); a frame's or a heap line's is the whole line, wherever on it the pointer rests.
+
+**Cut, and the text it reads.** A text is cut where the ellipsis is drawn: its text runs past the end of its content
+box, read by a Range to a fraction of a pixel, or its line runs past its box by a whole pixel
+(`scrollWidth > clientWidth`), which counts an accept state's ` · accept`, generated content no Range sees. Its tooltip
+reads as the text is drawn: its `textContent`, with a space where one of its elements meets another part with none
+between them, so an rxm listing row reads `pc0 jmp skip1` and not `pc0jmp skip1`.
+
+**Where.** One `pointerover` listener on the document, which `main()` adds after its call of `wireLinkClear`. Nothing
+in it names a view, so a copy's view is covered as any other is.
+
+**What keeps its own title.** Every cut text whose own code gives it a title keeps it: a readout segment, a view's
+title, a TM line's state, a diagram node, a machine panel's count and a copy's term. A copy's term is why
+`.buffer-row-term` is watched only on a row that is `.is-absent`: the watcher would take a term's title off when the
+pointer left it. `.program-count-word` stays cut with no tooltip, since only its unit word is cut, by design.
+
+**The class guard.** `web/tests/node/cut-text.test.ts` reads every rule of `web/src/style.css` that declares
+`text-overflow: ellipsis`. Its first case fails on a selector of one that is neither watched nor in its `TITLED`
+record, 7 selectors whose own code titles them or which are cut by design, each with its reason, nor in its
+`PART_WATCHED` record, which holds `.buffer-row-term`. Its second fails on a watched selector the stylesheet does not
+cut or that a record names. So a new cut text fails it until it is given one way to read whole.
+
+**The help page** says it, after the clif view's step cap: "In the TM, rxm and clif views, a value, an instruction or a
+line cut short reads whole in a tooltip while the pointer rests on it." `web/tests/node/app-header.test.ts` pins the
+paragraph it sits in, so its literal now holds the sentence.
+
+**The tests.** Besides the node test, `web/tests/browser/cut-text.test.ts` holds C1 to C8 in the rxm and the clif view,
+each drawn by hand, and C9 in the copies list, and the review's fixes add three cases: a title cut by less than a pixel
+and a listing row whose pc column meets its text, in each machine view, and an accept state in a TM rule table drawn by
+hand. `web/tests/browser/cut-text-app.test.ts` boots the whole app, runs fact(12) and holds A1 to A3: fact(12)'s result
+in the clif view, a TM rule and a diagram instruction. C1 to C9 and A1 to A3 are the plan's names; the fixes' cases have
+none. `web/tests/browser/machine-views.ts`, which draws both machine views for the tests, can now draw a long word, the
+registers a clif value names, heap lines and a frame's saved register, and hands a case fact.rxt's clif listing.
+
+**Nothing else changed.** The branch adds 4 files under `web/` and modifies 4. Under `web/src` it adds `cut-text.ts` and
+modifies `main.ts`, and touches neither `web/src/style.css` nor any container.
+
+##### THE RULINGS
+
+What the design left to the builder, the plan settled; the user decided two more things after the plan was written.
+
+- **One listener on the document, added once by `main()`,** rather than one per container: it names no view, so no
+  view can be missed.
+- **The cut test reads where the ellipsis is drawn, only at an arrival.** The plan settled on
+  `scrollWidth > clientWidth`, which it said reads a text cut by less than about half a pixel as whole. The review of
+  the whole branch measured the two, both whole pixels, missing a cut of up to 0.906 px in Chromium and 0.9 px in
+  Firefox; so the watcher reads a Range over the text against its content box as well, and keeps the scroll width for an
+  accept state's ` · accept`, whose ellipsis can draw over the end of a name the Range reads whole.
+- **The tooltip is the text as it reads**: the element's `textContent`, with a space where one of its elements meets
+  another part with none between them. The plan settled on `textContent` as it is, which runs an rxm listing row's pc
+  and mnemonic together, `pc8mov r4, r0` for a row drawn `pc8  mov  r4, r0`, as the review found. Generated content,
+  `data-marks`' `fires next` and `runs next` and an accept state's ` · accept`, is not text and is not in it.
+- **G5, that a tooltip never shows another text, rests on the containers.** `VirtualGrid` builds every row and cell
+  anew at each draw rather than recycling them, the machine panels build their bodies anew at each `show`, a panel's
+  name is written once and the copies list builds its rows anew; so a title leaves with its element. The design's *As
+  built* records it.
+- **An arrival is whatever the browser reports as one.** With the pointer resting off every watched text, a stepping run
+  measures nothing. Both engines report an arrival at each step on a value the step draws anew under a still pointer,
+  whether or not its text changed, in a probe of both machine views built by hand (`$L/06-probe-arrival-chromium.log`,
+  `$L/06-probe-arrival-firefox.log`); so with the pointer resting on a watched text, a run measures that one text at
+  each step. The design's *As built* records this too.
+- **A resize under a still pointer** keeps the arrival's decision until the pointer next arrives on a text (the user,
+  2026-11-23): a text a resize makes whole keeps its tooltip, and one it cuts gets none, until the pointer moves off it
+  and back.
+- **`no term yet` is watched** like every other cut text (the user, 2026-11-23).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The rest of the lane:** pull request 2, the result highlighted in every view at a run's end and shown whole there,
+  and pull request 3, list results: their heap cells lit, and an example whose result is a list.
+- **Keyboard and touch**, the design's non-goals: the values are not tab stops, so focus shows no tooltip, and a touch
+  screen gets none.
+- **A resize under a still pointer**, as ruled above.
+- **A tooltip on a text drawn whole, in two corners.** In Chromium, a text past its box by less than 0.02 px gets one,
+  though Chromium draws it whole; and where only an accept state's ` · accept` is cut, its tooltip repeats a name drawn
+  whole.
+- **Whether the browser shows the tooltip** is seen by hand only. Every test, and the drive below, reads the `title`
+  that asks for it. The user checks the native tooltip in Firefox when they try the branch, with the pointer resting on
+  fact(12)'s result in the clif view.
+- **A TM rule is cut only in a narrow window.** With the source, TM and clif views shown, none of fact(12)'s 14 rules is
+  cut in a window 1412, 1300, 1200, 1100, 1000 or 900 px wide, in either engine; at 800 px, 3 are in Chromium and 5 in
+  Firefox. So a rule's tooltip shows only in a window about 800 px wide or narrower.
+- **Two branches of `cut-text.ts` no test takes:** a `pointerover` whose target is not an `Element`, and a part whose
+  `textContent` is `null`, on its lines 41 and 58 at `3d1c520`. The full gate at `30128a8` reads 88.23% of its
+  branches, as a coverage run of the file with its three test files alone does, and its thresholds were met.
+- **A coverage run hung, once.** The first of the gate at `593d3c3` had reported 348 of the 349 files by `00:07:10`,
+  local time, and then nothing more until it was stopped by hand at `00:23:03`, about 16 minutes on; the one file it
+  never reported was `tests/browser/clif-fetch-stored.test.ts`. Another project's build and tests were loading the
+  machine, as `$L/task-3-report.md` records: the 1-minute load was 17.00 when the run started and 13.57 when it was
+  stopped, and the report reads 17 to 37 during the hang. The file passed alone, 1 of 1, and in the rerun, in 483 ms;
+  and in the full gate at `30128a8`, in 422 ms, with the 1-minute load at 34.91 as its coverage run started. Nothing
+  was changed.
+
+##### VERIFICATION
+
+**Test first.** Against stubs that watched nothing, the node test failed 1 of 2; `cut-text.test.ts` failed 15 of 17,
+all but C2, a value that fits, which passes in both views while nothing is watched; and `cut-text-app.test.ts`, before
+`main()` added the watcher, failed 3 of 3. With the build, 2 of 2, 17 of 17 and 3 of 3 passed, the two browser files in
+Chromium and in Firefox.
+
+**Each task's gates.** On the plan's commit, `242615d`, the plan's set of affected browser files passed in Chromium, 13
+files and 303 tests, with `machine-row-scrollbars.test.ts`, 3 tests, in its own project; in Firefox, 4 files and 133
+tests passed, with no failure, so every later Firefox run was held to no failure. On the tree of `065c221`, with
+`cut-text.test.ts`, 14 files and 320 tests passed, and in Firefox 5 files and 150; on that of `593d3c3`, with
+`cut-text-app.test.ts`, 15 and 323, and 6 and 153. The typecheck, `biome ci` and the comment check passed on each, and
+the pre-commit hook at each commit. The reviews of `065c221` and `593d3c3` approved them; their minor findings were
+fixed, or kept for a reason the review gave, after the review of the whole branch, `$L/review.md`.
+
+**The full gate at `30128a8`**, whose `web/` is `9f0b08d`'s, with the review's fixes below. Each leg wrote
+`$L/07-<leg>.log`, and its exit and seconds to `$L/07-gate-exits.txt`, which has 29 such lines, none with an exit other
+than 0. The same gate ran first at `593d3c3`, before the review, into `$L/03-<leg>.log`; its first coverage run hung,
+as *What this did not close* says.
+
+| Leg | Result |
+|---|---|
+| `pnpm run build:bindings`; `scripts/check-licences.sh`, with `--self-test` and alone; `pnpm exec biome ci --error-on-warnings`; `pnpm run typecheck` | exit 0 each |
+| `scripts/check-text-bytes.sh`, `check-citations.sh`, `check-attributions.sh`, `check-doc-figures.sh`, `check-shared-docs.sh`, `check-colours.sh`, `check-grammar-wasm.sh`, `check-lua.sh` and `check-licence-editions.sh`, each with `--self-test` and alone; `node scripts/check-comments.mjs`, with `--self-test` and with `--base 798fa38` | exit 0 each |
+| `pnpm run test:coverage`, the node and Chromium tiers, in a unit capped at 16 GB | 349 files; 4000 tests passed and 2 expected to fail; statements 97.95%, branches 92.27%, functions 98.71% and lines 99.16%, against thresholds of 95, 89, 97 and 97; `cut-text.ts`'s branches 88.23%, and its statements, functions and lines 100% |
+| `pnpm run build:app` | exit 0 |
+| `machine-row-scrollbars.test.ts` in its own project | 1 file, 3 tests passed |
+| in Firefox, `cut-text`, `cut-text-app`, `machine-panel-headers`, `machine-row`, `rxm-pane` and `clif-pane` | 6 files, 158 tests passed |
+
+**The sabotages.** Each saved the file it changed to `$L/sab/`, made the one edit, ran the named files, restored the
+file from the copy and compared it with `cmp`: `$L/01-sab-results.txt` and `$L/02-sab-results.txt` have 24 and 3 lines
+that say a file was restored and `cmp` equal, and no sabotage's line says otherwise. The browser runs are in Chromium,
+and S6's and S7's in Firefox too. C1 to C8 run in the rxm and the clif view, so most rows fail a case twice. "The guard"
+is the node test.
+
+| Id | The one edit | Failed, at | Tests failed | Logs in `$L` |
+|---|---|---|---|---|
+| S1 | the cut test answers `true` | C2 at `value 1 has a title`, C5 at `at 200 px, the title has a tooltip`, and C8 at its instrument check, since the answer reads no width | 6 of 17 | `01-sab-S1.log` |
+| S2 | the cut test answers `false` | C1 at `value 0`, C3 at `value 1`, C4 at `value 0, the pointer moved on it`, C5 at `at 110 px`, C6 at the frame, C7 at `the row under the pointer`, C8 at its instrument check, C9 at `no term yet` | 15 of 17 | `01-sab-S2.log` |
+| S3 | the last titled text forgotten without its title taken off | C3 at `value 0 keeps a title once the pointer has moved to value 1`, C5 at 200 px, C2 at `the texts with a title`, C9 at `the texts with a title, the pointer on a name` | 7 of 17 | `01-sab-S3.log` |
+| S4 | the title is the text of the element's first child | C1 at `value 0`, C3 at `value 1` and C4 at `a title is not its own text`, in clif, each without the registers; C6 at the frame, in each view; C7 at `the row under the pointer`, in rxm, which got its pc alone | 6 of 17 | `01-sab-S4.log` |
+| S5 | the watched text is the target itself, `matches` for `closest` | C6 at `the frame, the pointer on its callee`, in each view; C7 at `the row under the pointer`, in rxm, whose point is on the row's pc | 3 of 17 | `01-sab-S5.log` |
+| S6 | the values panel writes each value into the `dd` it drew last rather than building a new list | C4 at `before the next frame, a title holds the value from the step before`, in each engine | 2 of 17; 2 of 17 | `01-sab-S6.log`, `01-sab-S6-firefox.log` |
+| S7 | `VirtualGrid.draw` reuses, for each place in the drawn window, the cell it drew there last, emptied | C7 at `before the next frame, a title holds the text of the row the scroll moved on`, in each engine | 2 of 17; 2 of 17 | `01-sab-S7.log`, `01-sab-S7-firefox.log` |
+| S8 | the values panel reads each new `dd`'s `scrollWidth` | C8 at `the watched texts measured while the run stepped` | 2 of 17 | `01-sab-S8.log` |
+| S9 | `.machine-panel .panel-name` out of the list | C5 at `at 110 px`; the guard's first case, naming it | 2 of 17; 1 of 2 | `01-sab-S9.log`, `01-sab-S9-node.log` |
+| S10 | `.rxm-frame` out | C6 at the frame; the guard's first case, naming it | 2 of 17; 1 of 2 | `01-sab-S10.log`, `01-sab-S10-node.log` |
+| S14 | `.buffer-row-term.is-absent` out | C9 at `no term yet`; the guard's first case, naming `.buffer-row-term` | 1 of 17; 1 of 2 | `01-sab-S14.log`, `01-sab-S14-node.log` |
+| S15 | `.buffer-row-term` for `.buffer-row-term.is-absent` | C9 at `the first copy's term, once the pointer has rested on it and left`; the guard's second case, naming `.buffer-row-term` | 1 of 17; 1 of 2 | `01-sab-S15.log`, `01-sab-S15-node.log` |
+| N-a | `style.css` gains a rule `.cut-probe` that cuts with an ellipsis | the guard's first case, naming `.cut-probe` | 1 of 2 | `01-sab-N-a-node.log` |
+| N-b | the list gains `.rxm-frames` | the guard's second case, naming it | 1 of 2 | `01-sab-N-b-node.log` |
+| S11 | `main()` without the watcher | A1 at `the result`, A2 at `the rule`, A3 at `the instruction` | 3 of 3 | `02-sab-S11.log` |
+| S12 | `.state-cell` out | A2 at `the rule`; the guard's first case, naming it | 1 of 3; 1 of 2 | `02-sab-S12.log`, `02-sab-S12-node.log` |
+| S13 | `.program-text` out | A3 at `the instruction`; the guard's first case, naming it | 1 of 3; 1 of 2 | `02-sab-S13.log`, `02-sab-S13-node.log` |
+
+**As first written, C4 and C7 read the titles only after the next frame, and S6 and S7 did not fire in Chromium,** 17
+of 17 passing under each. Chromium sent a `pointerover` at the next frame to the text under the still pointer, though
+the element was kept, and the watcher titled it afresh (`$L/01-probe-s6s7.log`); in Firefox, S6 fired and S7 did not.
+So C4 and C7 also read every title straight after the step or the scroll, before the next frame. That holds what the
+code does, a changed text is a new element and carries no title, whatever the engine sends; with it, both fire in both
+engines.
+
+**The built app, driven** by `$L/03-hand.zsh` and `$L/hand/drive.mjs`: `vite build`, `vite preview` under the browser
+lock, then Playwright's Chromium 156.0.8078.4 and its Firefox 157.0, each in a new profile. The encoding read binary at
+the first load. fact(12) was picked from *examples ▾*, the clif view shown by its toggle and ⏭ pressed, to `step 493 of
+493`; then the mouse moved onto each text, a real move each time.
+
+| What | Chromium | Firefox |
+|---|---|---|
+| fact(12)'s result among the clif values, in a window 1412 by 896 | `479001600 rr`, cut, 84 px wide in 78; its title `479001600 rr`, the one watched text with a title | cut, 87 in 77; the same title, the one titled |
+| the first cut rule of the TM rule table, at 800 px wide | 371 px in 359; its title its whole text, the one titled | 382 in 359; the same |
+| the value `0`, which fits, at 1412 again | 7 px in 7; no title, and no watched text with one | the same |
+| errors on the page or in its console | none | none |
+
+The screenshots in `$L/hand/` were taken with the mouse resting on each text; the native tooltip is in none of them.
+
+**The review's fixes, test first.** The review of the whole branch, `798fa38..7fb0f1d`, found two important defects, I1
+and I2, and minor ones, each fixed or answered in `$L/task-6-report.md`. Against the code before each fix, the sub-pixel
+case failed 2 of 20 tests in `cut-text.test.ts`, at its title in each view, and the listing row case 2 of 22, likewise.
+The accept state's case passes on the scroll width alone, which the fix keeps, and C8's wider spies pass on the code
+they spy on, so their sabotages, S17 and S18, show they can fail. With the fixes, `cut-text.test.ts` and
+`cut-text-app.test.ts` passed 25 of 25 tests in Chromium and in Firefox.
+
+**At `3d1c520`** the plan's affected set passed in Chromium, 15 files and 328 tests, with
+`machine-row-scrollbars.test.ts`, 1 file and 3 tests, in its own project; in Firefox, 6 files and 158 tests; and the
+node test, 2 tests. The typecheck, `biome ci` and the comment check exited 0, and the pre-commit hook passed at each
+commit. `9f0b08d` changes comments alone; on its tree, `cut-text.test.ts`
+passed 22 of 22 tests in Chromium, and the typecheck, `biome ci` and the comment check exited 0.
+
+**The fixes' sabotages, and the first ones again.** `$L/06-sab-driver.mjs` ran each of these on `3d1c520`, then S1 to S8
+again with their anchors moved to the fixed code, in Chromium, and S6 and S7 in Firefox too. `$L/06-sab-results.txt` has
+14 lines that say a file was restored and `cmp` equal, and each run failed what its row names. S1 to S8 failed 6, 20, 7,
+8, 5, 2, 2 and 2 of 22 tests, the fixes' cases among them where the edit breaks what they read, and S6 and S7 2 of 22
+each in Firefox. Under S2, C4 now fails at `value 0, the pointer on it`, its first hover, which no assertion checked
+before.
+
+| Id | The one edit | Failed, at | Tests failed | Logs in `$L` |
+|---|---|---|---|---|
+| S16 | the Range test answers `false` | the sub-pixel case at `the title cut by less than a pixel`, in each view | 2 of 22 | `06-sab-S16.log` |
+| S17 | the scroll width test taken out | the accept state's case at `the accept state` | 1 of 22 | `06-sab-S17.log` |
+| S18 | the values panel reads each new `dd`'s `getBoundingClientRect` | C8 at `the watched texts measured while the run stepped`, in each view | 2 of 22 | `06-sab-S18.log` |
+| S19 | no space where an element meets another part | the listing row case at `the row, its pc column and its text a space apart`, in each view | 2 of 22 | `06-sab-S19.log` |
+
+**The probes behind the fixes**, in `$L/06-probes/`: standalone pages in Playwright's Chromium 156.0.8078.4 and Firefox
+157.0 held each test against whether the engine draws the ellipsis, by comparing the pixels it draws with
+`text-overflow: ellipsis` and with `clip`. Over 6 texts, at 180 or 181 widths 0.01 px apart about where each begins to
+be cut, the Range test missed no cut in either engine, where `scrollWidth > clientWidth` missed between 30 and 80 a
+text. In Chromium only, it also titles a text past its box by less than 0.02 px, which Chromium draws whole, at between
+1 and 4 of those widths a text. Over 1637 widths of an accept state's row, the ellipsis of its ` · accept` drew over the
+end of its name at 187 in Chromium and 186 in Firefox; the Range alone read the name whole at 157 and 156 of them, and
+with the scroll width as well, at none. No instruction of fact's or fact(12)'s clif listing, of 59 as built and 45
+optimised, is printed at Cranelift's bare indent, so the listing row case builds a listing whose instructions are.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, after
+`9f0b08d`, with `L=~/temp/redextape-return-value-record/pr1/impl` and `strip` standing for `sed 's/\x1b\[[0-9;]*m//g'`.
+`$L/07-figures.zsh` runs them, and `$L/07-figures.log` is its output.
+
+| Value | What | Produced by |
+|---|---|---|
+| 11; `9f0b08d`, `3d1c520`, `53dea8c`, `362a644`, `593d3c3`, `065c221` | commits in `798fa38..9f0b08d`; those that change `web/` | `git rev-list --count 798fa38..9f0b08d; git log --format=%h 798fa38..9f0b08d -- web` |
+| 4; 4; 0 | files under `web/` the branch adds; modifies; `web/src/style.css` among them | `git diff --name-only --diff-filter=A 798fa38 9f0b08d -- web \| wc -l; git diff --name-only --diff-filter=M 798fa38 9f0b08d -- web \| wc -l; git diff --name-only 798fa38 9f0b08d -- web/src/style.css \| wc -l` |
+| `web/src/cut-text.ts`; `web/src/main.ts` | the file under `web/src` the branch adds; the one it modifies | `git diff --name-only --diff-filter=A 798fa38 9f0b08d -- web/src; git diff --name-only --diff-filter=M 798fa38 9f0b08d -- web/src` |
+| 2 | the files the other 3 commits change: the plan and the design | `git diff --name-only 798fa38 242615d` |
+| 11 | `text-overflow: ellipsis` declarations in `web/src/style.css` | `grep -c '^ *text-overflow: ellipsis;' web/src/style.css` |
+| 9; 7; 1 | the selectors in `CUT_TEXT_SELECTORS`; the keys of `TITLED`; of `PART_WATCHED` | `sed -n '/^export const CUT_TEXT_SELECTORS/,/^]/p' web/src/cut-text.ts \| grep -c "^  '"; sed -n '/^const TITLED/,/^}/p' web/tests/node/cut-text.test.ts \| grep -c "^  '"; sed -n '/^const PART_WATCHED/,/^}/p' web/tests/node/cut-text.test.ts \| grep -c "^  '"` |
+| 13, 303; 1, 3; 4, 133 | on `242615d`: the Chromium set's files and tests; `machine-row-scrollbars`'; the Firefox set's | `for f in 00-base-affected 00-base-scrollbars 00-base-firefox; do print -n "$f "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| 1, 1; 15, 2; 3 | before the build: the node test's tests failed and passed; `cut-text.test.ts`'s; `cut-text-app.test.ts`'s failed | `for f in 01-red-node 01-red 02-red; do print -n "$f "; strip $L/$f.log \| grep -a 'Tests  ' \| tr -s ' '; done` |
+| 2; 17, 17; 3, 3 | after it, tests passed: the node test's; `cut-text.test.ts`'s in Chromium and in Firefox; `cut-text-app.test.ts`'s | `for f in 01-green-node 01-green 01-green-firefox 02-green 02-green-firefox; do print -n "$f "; strip $L/$f.log \| grep -a 'Tests  ' \| tr -s ' '; done` |
+| exit 0, 6 times | the typecheck, `biome ci` and the comment check on `065c221`'s tree; on `593d3c3`'s | `for f in 01-tsc 01-lint 01-comments 02-tsc 02-lint 02-comments; do print -n "$f: "; strip $L/$f.log \| tail -1; done` |
+| 14, 320; 5, 150; 15, 323; 6, 153 | files and tests passed: the Chromium set and the Firefox set on `065c221`'s tree; on `593d3c3`'s | `for f in 01-affected 01-firefox 02-affected 02-firefox; do print -n "$f "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| `docs/superpowers/plans/2026-07-19-redextape-roadmap.md`, `docs/superpowers/specs/2026-11-23-cut-text-tooltips-design.md`; 0 | the files changed after `9f0b08d`, read on the tree of the commit that holds this row; `web/` files `30128a8` changes | `git diff --name-only 9f0b08d; git diff --name-only 9f0b08d 30128a8 -- web \| wc -l` |
+| 29; 0 | `$L/07-gate-exits.txt`'s lines with a leg's exit and seconds; those whose exit is not 0 | `grep -cE ' exit [0-9]+ [0-9]+s ' $L/07-gate-exits.txt; grep -E ' exit [0-9]+ [0-9]+s ' $L/07-gate-exits.txt \| grep -vc ' exit 0 '` |
+| 349; 4000, 2; 97.95, 92.27, 98.71, 99.16; 100, 88.23, 100, 100 and `41,58` | the gate's coverage run at `30128a8`: files; tests passed and expected to fail; statements, branches, functions and lines; `cut-text.ts`'s, and its lines with a branch no test takes | `strip $L/07-coverage.log \| grep -aE 'Test Files  \|Tests  \|All files \| cut-text.ts '` |
+| 97, 97, 89, 95 | the thresholds: lines, functions, branches, statements | `grep -o 'thresholds: {[^}]*}' web/vite.config.ts` |
+| 348; 0; `00:07:10`; `00:23:03`; 17.00, 13.57 | the hung run: the files it reported; its lines naming `clif-fetch-stored`; its log's last write; the stop; the 1-minute load at its start and at the stop | `strip $L/03-coverage.log \| grep -acE '^ (✓\|×\|❯) +(node\|browser)'; strip $L/03-coverage.log \| grep -ac 'clif-fetch-stored'; date -r $L/03-coverage.log -Iseconds; grep -E '^(start coverage\|coverage exit)' $L/03-gate-exits.txt \| head -2` |
+| 17 to 37 | the load during the hang, as the task's report gives it | `grep -o 'Machine load was [0-9-]*' $L/task-3-report.md` |
+| 349 | the files of the coverage rerun at `593d3c3`, of which the hung run reported 348 | `strip $L/03-coverage-2.log \| grep -a 'Test Files  ' \| tr -s ' '` |
+| 1; 483 ms; 422 ms | `clif-fetch-stored.test.ts` alone, tests passed; its time in the rerun; in the gate at `30128a8` | `strip $L/03-clif-fetch-stored.log \| grep -a 'Tests  ' \| tr -s ' '; strip $L/03-coverage-2.log \| grep -a 'clif-fetch-stored' \| tr -s ' '; strip $L/07-coverage.log \| grep -a 'clif-fetch-stored' \| tr -s ' '` |
+| 34.91 | the 1-minute load as the coverage run of the gate at `30128a8` started | `grep '^start coverage' $L/07-gate-exits.txt` |
+| 1, 3; 6, 158 | files and tests passed in the gate at `30128a8`: `machine-row-scrollbars`; the Firefox set | `for f in 07-scrollbars 07-firefox-affected; do print -n "$f "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| 156.0.8078.4; 157.0 | the drive's engines | `jq -r '.version' $L/hand/chromium-summary.json $L/hand/firefox-summary.json` |
+| 1412, 896 | the drive's window | `grep -nE '^const (WIDTH\|HEIGHT)' $L/hand/drive.mjs` |
+| `binary`; `step 493 of 493` | the encoding at the first load, in each engine; the clif view's step after ⏭ | `jq -c '.[] \| select(.step == "loaded" or .step == "clif at its end") \| [.step, .encoding, .clifStep]' $L/hand/chromium-drive.json $L/hand/firefox-drive.json` |
+| 84, 78; 87, 77; `479001600 rr`, 1 | the result's `scrollWidth` and `clientWidth` in Chromium; in Firefox; its title, and the watched texts with one, in each | `jq -c '[.result.width, .result.before.scrollWidth, .result.before.clientWidth, .result.under.title, .result.under.titledWatched]' $L/hand/chromium-summary.json $L/hand/firefox-summary.json` |
+| 14; 0; 3, 5 | fact(12)'s TM rules; those cut at each width from 1412 down to 900, in each engine; at 800, in Chromium and in Firefox | `jq -c '.[] \| select(.step == "rule candidates") \| [.width, .count, .cut]' $L/hand/chromium-drive.json $L/hand/firefox-drive.json` |
+| 800; 371, 359; 382, 359; `true`, 1 | the window's width; the first cut rule's `scrollWidth` and `clientWidth` in Chromium; in Firefox; its title its text, and the watched texts with one, in each | `jq -c '[.rule.width, .rule.before.scrollWidth, .rule.before.clientWidth, .rule.under.titleIsText, (.rule.under.titledWatched \| length)]' $L/hand/chromium-summary.json $L/hand/firefox-summary.json` |
+| `0`; 7, 7; `null`; `[]` | the value that fits; its `scrollWidth` and `clientWidth`; its title; the watched texts with one, in each | `jq -c '[.fits.width, .fits.before.text, .fits.before.scrollWidth, .fits.before.clientWidth, .fits.under.title, .fits.under.titledWatched]' $L/hand/chromium-summary.json $L/hand/firefox-summary.json` |
+| `[]` each; 0, 0 | the page's errors and rejections at each stop and at the end, in each engine; the console's errors and warnings and the page errors the drive noted, in Chromium and in Firefox | `jq -c '[.errors, .pageErrors, .result.under.errors, .rule.under.errors, .fits.under.errors]' $L/hand/chromium-summary.json $L/hand/firefox-summary.json; jq -c '[.[] \| select(.console != null or .pageerror != null)] \| length' $L/hand/chromium-drive.json $L/hand/firefox-drive.json` |
+| each log's line | the tests each sabotage failed, of those its run held | `for f in $L/0[12]-sab-*.log; do print -n "$f:t "; strip $f \| grep -a 'Tests  ' \| tr -s ' '; done` |
+| each log's lines | the assertions each sabotage's run failed at, which the table's third column quotes | `for f in $L/0[12]-sab-*.log; do print -- "== $f:t"; strip $f \| grep -aoE 'AssertionError: [^:]+' \| sort \| uniq -c; done` |
+| 24, 3; 0 | the results files' lines that say a file was restored and `cmp` equal; a sabotage's lines that do not | `grep -c 'restored, cmp equal' $L/01-sab-results.txt $L/02-sab-results.txt; grep -hE '^[SN][-0-9a-z]* ' $L/01-sab-results.txt $L/02-sab-results.txt \| grep -vc 'restored, cmp equal'` |
+| 17 of 17, 17 of 17; 2 failed, 17 of 17 | S6 and S7 as first run: in Chromium; in Firefox | the first 4 lines of `awk '/^S[67] /{s = ($2 == "[firefox]") ? $1 " firefox" : $1 " chromium"; getline; print s, $0}' $L/01-sab-results.txt \| tr -s ' '` |
+| 2 | the review's important findings | `grep -c '^\*\*I[0-9]\. ' $L/review.md` |
+| 0.906; 0.9 | the largest cut `scrollWidth > clientWidth` missed in the review's sweep, in Chromium and in Firefox, in px | `grep -oE '[\|] 0\.9[0-9]* [\|]' $L/review-probes/sweep-pw.log` |
+| `pc8mov r4, r0` | an rxm row's title under `textContent` as it is | `grep -o 'title "pc8mov r4, r0"' $L/01-probe-s6s7.log \| head -1` |
+| `pc0 jmp skip1`; `pc0jmp skip1` | an rxm row's title with the fix; without it | `strip $L/06-sab-S19.log \| grep -ao "expected 'pc0jmp skip1' to be 'pc0 jmp skip1'" \| head -1` |
+| 2, 18; 2, 20 | before the fixes, tests failed and passed: with the sub-pixel case; with the listing row case | `for f in 06-red-i1 06-red-i2; do print -n "$f "; strip $L/$f.log \| grep -a 'Tests  ' \| tr -s ' '; done` |
+| 2, 25; 2, 25 | after them, the two cut-text browser files and their tests passed, in Chromium; in Firefox | `for f in 06-m-chromium 06-m-firefox; do print -n "$f "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| 15, 328; 1, 3; 6, 158; 2 | on `3d1c520`: the Chromium set's files and tests; `machine-row-scrollbars`'; the Firefox set's; the node test's tests | `for f in 06-affected 06-affected-scrollbars 06-firefox 06-affected-node; do print -n "$f "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| exit 0, 3 times | the typecheck, `biome ci` and the comment check on `3d1c520` | `for f in 06-tsc 06-lint 06-comments; do print -n "$f: "; strip $L/$f.log \| tail -1; done` |
+| comments alone | what `9f0b08d` changes | `git show 9f0b08d -U0 -- web \| grep -E '^[-+] ' \| grep -vcE '^[-+] +(\*\|//)'` (0 lines that are not a comment's) |
+| 22; exit 0, 3 times | on `9f0b08d`'s tree: `cut-text.test.ts`'s tests passed in Chromium; the typecheck, `biome ci` and the comment check | `strip $L/06-c-chromium.log \| grep -a 'Tests  ' \| tr -s ' '; for f in 06-c-tsc 06-c-lint 06-c-comments; do print -n "$f: "; strip $L/$f.log \| tail -1; done` |
+| 14; 0 | `$L/06-sab-results.txt`'s lines that say a file was restored and `cmp` equal; a sabotage's lines that do not | `grep -c 'restored, cmp equal' $L/06-sab-results.txt; grep -E '^S[0-9]+ ' $L/06-sab-results.txt \| grep -vc 'restored, cmp equal'` |
+| each log's line | the tests each of the fixes' and the rerun sabotages failed: S1 to S8 6, 20, 7, 8, 5, 2, 2 and 2 of 22, S16 to S19 2, 1, 2 and 2, S6 and S7 in Firefox 2 each | `for f in $L/06-sab-S*.log; do print -n "$f:t "; strip $f \| grep -a 'Tests  ' \| tr -s ' '; done` |
+| each log's lines | the assertions each of those runs failed at | `for f in $L/06-sab-S*.log; do print -- "== $f:t"; strip $f \| grep -aoE 'AssertionError: [^:]+' \| sort \| uniq -c; done` |
+| 2 | C4's failures under S2 at `value 0, the pointer on it`, one in each view | `strip $L/06-sab-S2.log \| grep -ac 'AssertionError: value 0, the pointer on it'` |
+| 6; 180 or 181; 0, 0; 30 to 80; 1 to 4, 0 | the sweep's texts; widths a text; cuts the Range test missed in Chromium, in Firefox; those `scrollWidth > clientWidth` missed a text; widths a text it titled while the engine drew no ellipsis, in Chromium, in Firefox | `jq -r 'to_entries[] \| .key as $e \| .value[] \| select(test("^accept") \| not) \| "\($e) \(.)"' $L/06-probes/cut-sweep.log` (the fields `widths`, `miss`, `swMiss`, `falsePos`) |
+| less than 0.02 | how far past its box, in px, a text Chromium drew whole and the Range test titled | `jq -r 'to_entries[] \| .key as $e \| .value[] \| "\($e) \(.)"' $L/06-probes/cut-edge.log` (the field `maxUndrawnPast`) |
+| 1637; 187, 186; 157, 156; 0, 0 | an accept state's widths; those where its ellipsis drew over its name, in Chromium, in Firefox; those the Range alone read whole; with the scroll width as well | `jq -r '.[] \| .[] \| select(test("^accept"))' $L/06-probes/cut-sweep.log` (the fields `widths`, `nameCovered`, `nameCoveredRangeMiss`, `nameCoveredOrMiss`) |
+| 59, 0; 45, 0 | fact's and fact(12)'s clif instructions, and those at Cranelift's bare indent: as built; optimised | `strip $L/06-probe-clif2.log \| grep -aoE 'PROBE fact(-12)? [a-z-]+ [0-9]+ [0-9]+'` |
+| 3 steps, 1 arrival each | the arrival probe: each step's arrivals on the value under the still pointer, drawn anew, in each view and engine | `strip $L/06-probe-arrival-chromium.log $L/06-probe-arrival-firefox.log \| grep -aoE 'PROBE (rxm\|clif) step [0-9]+ .*'` |
+| `e.target instanceof Element`; `part.textContent ?? ''` | the tests on `cut-text.ts`'s lines 41 and 58 at `3d1c520` | `sed -n '41p;58p' web/src/cut-text.ts` |
+| 100, 88.23, 100, 100 and `41,58` | `cut-text.ts`'s statements, branches, functions and lines in a coverage run of its three test files alone, and its lines with a branch no test takes | `strip $L/06-coverage-cut-text.log \| grep -a ' cut-text.ts '` |
+| 16 GB | the memory cap of the coverage run's unit | `grep -o 'MemoryMax=[^ ]*' $L/07-gate-run.zsh` |

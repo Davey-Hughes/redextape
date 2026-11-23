@@ -51,6 +51,7 @@ import {
   withHalf,
   withoutHalf,
 } from './custom-palette'
+import { watchCutText } from './cut-text'
 import { lspLintRanges } from './diagnostics'
 import { createDraw } from './draw'
 import { createEditorCustody } from './editor-custody'
@@ -1890,6 +1891,7 @@ async function main(): Promise<EditorView> {
   })
   // THUNKS: `linkWiring` is assigned further down this function.
   wireLinkClear(root, { unpin: () => linkWiring.unpin(), gestures: () => linkWiring.gestures })
+  watchCutText(document)
 
   /**
    * A view's title, in the title-selector's own spelling — the bar's prefix (spec §8) and a Stage tab's label (§5).

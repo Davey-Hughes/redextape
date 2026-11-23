@@ -61,8 +61,9 @@ describe('the help page', () => {
         ' build from the rxm program, stepped one clif instruction at a time by the rules the compiled program runs' +
         " by. Its <strong>as built</strong> and <strong>optimised</strong> buttons switch between redextape's" +
         " lowering before Cranelift's passes and Cranelift's output at every opt level from O1 up, the same for every" +
-        " target. Its step cap counts loop iterations, as the compiled program's does, not instructions. Each" +
-        ' combination of views keeps its own arrangement,',
+        " target. Its step cap counts loop iterations, as the compiled program's does, not instructions. In the TM," +
+        ' rxm and clif views, a value, an instruction or a line cut short reads whole in a tooltip while the pointer' +
+        ' rests on it. Each combination of views keeps its own arrangement,',
     )
   })
 

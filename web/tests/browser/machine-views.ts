@@ -7,7 +7,7 @@ import { EXAMPLE_ENCODING, EXAMPLES } from '../../src/examples'
 import type { Shares } from '../../src/panel-stack'
 import { RxmPane, type RxmPanels } from '../../src/rxm-pane'
 import type { ClifListing, ClifState } from '../../src/types'
-import { FACT3, frameOf, valueWord } from '../node/rxm-fixtures'
+import { FACT3, frameOf, listWord, valueWord } from '../node/rxm-fixtures'
 import { boundary, controlState, frames, inertEvents, panelOf, panelToggle, region } from './harness'
 
 /**
@@ -19,6 +19,9 @@ import { boundary, controlState, frames, inertEvents, panelOf, panelToggle, regi
 const CONTROLS = controlState(true, 'step 3 of 55')
 
 let clifListing: ClifListing
+
+/** `fact.rxt`'s CLIF listing, which `loadViews` loads and the CLIF view draws. */
+export const factClif = (): ClifListing => clifListing
 
 /**
  * Size the page and load what `VIEWS` builds from, before the calling file's first case: the CLIF view's listing is
@@ -43,17 +46,31 @@ export function loadViews(): void {
 /**
  * How much a frame's counts say: the call stack's frames, the heap's cells and boxes. `rows`, where given, is how many
  * rows the call stack and the first panel draw: frames, and locals in rxm or values in CLIF. With none given they draw
- * no frame and no local or value.
+ * no frame and no local or value. The rest say what those rows read, for a case that needs a text long enough to cut.
  */
 export type Counts = {
   readonly depth: number
   readonly cells: number
   readonly boxes: number
   readonly rows?: { readonly stack: number; readonly values: number }
+  /** The word of value or local `i`, and the head of heap cell `i + 1`: `String(i)` without it. */
+  readonly words?: (i: number) => string
+  /** The rxm registers every CLIF value names. */
+  readonly regs?: readonly string[]
+  /** How many heap cells the window draws as lines, each with `nil` for its tail. */
+  readonly lines?: number
+  /** The word every rxm frame saved, as its one saved register. */
+  readonly saved?: string
 }
 
 /** `n` of what `one` makes, its index given. */
 const many = <T>(n: number, one: (i: number) => T): T[] => Array.from({ length: n }, (_, i) => one(i))
+
+/** The word `c` gives value, local or heap head `i`. */
+const wordOf = (c: Counts, i: number) => valueWord(c.words?.(i) ?? String(i))
+
+/** The heap cells `c` draws as lines. */
+const cellsOf = (c: Counts) => many(c.lines ?? 0, (i) => ({ cell: i + 1, head: wordOf(c, i), tail: listWord('0') }))
 
 /** The stored panel states either view reads: each takes its own names from it. */
 export type StoredPanels = RxmPanels & ClifPanels
@@ -88,8 +105,12 @@ export const VIEWS = [
             depth: c.depth,
             heap_len: c.cells,
             box_len: c.boxes,
-            frames: many(c.rows?.stack ?? 0, () => ({ ret_pc: 3, saved: [], saved_len: 0 })),
-            locals: many(c.rows?.values ?? 0, (i) => valueWord(String(i))),
+            frames: many(c.rows?.stack ?? 0, () => {
+              const saved = c.saved === undefined ? [] : [valueWord(c.saved)]
+              return { ret_pc: 3, saved, saved_len: saved.length }
+            }),
+            locals: many(c.rows?.values ?? 0, (i) => wordOf(c, i)),
+            cells: cellsOf(c),
           }),
           CONTROLS,
         )
@@ -113,12 +134,12 @@ export const VIEWS = [
           at,
           next: at,
           pc: null,
-          values: many(c.rows?.values ?? 0, (i) => ({ value: i, word: valueWord(String(i)), regs: [] })),
+          values: many(c.rows?.values ?? 0, (i) => ({ value: i, word: wordOf(c, i), regs: [...(c.regs ?? [])] })),
           values_len: c.rows?.values ?? 0,
           depth: c.depth,
           frames: many(c.rows?.stack ?? 0, () => at),
           heap_len: c.cells,
-          cells: [],
+          cells: cellsOf(c),
           box_len: c.boxes,
           boxes: [],
         }
