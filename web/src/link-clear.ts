@@ -1,3 +1,5 @@
+import { DRAG_THRESHOLD } from './separator'
+
 /**
  * CLEARING THE LINK BY CLICKING EMPTY SPACE IN A VIEW, OR BY ESCAPE IN ONE
  * (`docs/superpowers/specs/2026-11-17-link-clear-design.md`).
@@ -6,13 +8,6 @@
  * the view's own handler's answer, read off `LinkWiring.gestures` around it, because only the view knows which of its
  * rows link. The source view is left out: a click there links or clears by the editor's own rule.
  */
-
-/**
- * How far, in CSS px, a press may go from where it was pressed and still be a click. Past it the press is a drag: the
- * state diagram's local level pans, and the link's clear stays its hand. One number, so a press that pans never also
- * clears.
- */
-export const DRAG_THRESHOLD = 4
 
 /** Where the focus is, as Escape's rule reads it. */
 export type EscapeFocus = 'view' | 'body' | 'editor' | 'other'

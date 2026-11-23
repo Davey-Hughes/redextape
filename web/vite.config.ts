@@ -111,7 +111,10 @@ export const CAPTURE_FILES = [
  * with that flag, under which a scroll bar takes no width, and neither a `::-webkit-scrollbar` rule nor CDP's
  * `Emulation.setScrollbarsHidden` brings one back in a page. Paths are relative to `web/`.
  */
-export const SCROLLBAR_FILES = ['tests/browser/state-diagram-local-scrollbars.test.ts']
+export const SCROLLBAR_FILES = [
+  'tests/browser/machine-row-scrollbars.test.ts',
+  'tests/browser/state-diagram-local-scrollbars.test.ts',
+]
 
 /** Every Chromium project's flags: the `browser` project below says what each is for. */
 const CHROMIUM_ARGS = ['--enable-precise-memory-info', '--js-flags=--expose-gc']

@@ -1,7 +1,7 @@
-import { DRAG_THRESHOLD } from './link-clear'
 import { type Box, CAP_CHARS, layoutLocal, type Metrics } from './local-layout'
 import { type Local, localLevel, predecessors, REACH } from './local-level'
 import { type Arc, arcsOf, chipsOf, type Edges, type ProgramRow, programRows } from './program-level'
+import { DRAG_THRESHOLD } from './separator'
 import { type Groups, groupStates, stepOf, type Tier } from './state-groups'
 import { ROW_HEIGHT } from './state-table'
 import type { TmProgram, TmState } from './types'

@@ -10,6 +10,7 @@ import {
   type ValuesView,
   valuesPanel,
 } from './machine-panels'
+import { MachineRow } from './machine-row'
 import { MachineViewChrome } from './machine-view-chrome'
 import type { PaneEvents } from './pane-chrome'
 import { PanelStack, type Shares } from './panel-stack'
@@ -35,8 +36,8 @@ export type RxmPanels = {
  * stands at the displayed step.
  *
  * **A PAGE OF PANELS SHARING THE VIEW'S HEIGHT, AS THE TM VIEW'S ARE** (spec §6.1; `style.css`'s `.rxm-pane` rules):
- * the listing two shares, the registers and call stack side by side in one share, the heap one. Each panel's toggle and
- * actions sit in its own header, not the view's (amendment 9), and its open state is saved per view.
+ * the listing two shares, the row under it one, the heap in that row or in a region of its own (`machine-row.ts`). Each
+ * panel's toggle and actions sit in its own header, not the view's (amendment 9), and its open state is saved per view.
  *
  * **THE LISTING IS A `VirtualGrid`**, the rule table's (amendment 7): one tab stop, a roving active row, a click that
  * survives the redraw focusing causes, and following the instruction about to run until the user scrolls away.
@@ -122,11 +123,15 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
       onToggle: (open) => on.panel?.('heap', open),
     })
 
-    // THE REGISTERS AND THE CALL STACK SHARE ONE ROW, side by side, and stack when the view is too narrow for both
-    // (spec §6.1) — a wrapping flex row, `style.css`'s `.rxm-machine`.
-    const machine = document.createElement('div')
-    machine.className = 'rxm-machine'
-    machine.append(this.#values.panel.el, this.#stack.panel.el)
+    // THE REGISTERS, THE CALL STACK AND THE HEAP, laid out by the view's width (`machine-row.ts`). 18REM EACH (the
+    // machine panels row design §5.1): a frame lists its caller's saved locals and a heap line every register that
+    // points at its cell, and a narrower column cuts each short.
+    const row = new MachineRow({
+      values: this.#values.panel,
+      stack: this.#stack.panel,
+      heap: this.#heap.panel,
+      columns: [18, 18, 18],
+    })
 
     // THE TEXT PANEL FIRST, THE OUTLINE LAST — the TM view's order under its status line (spec amendment 28), a line
     // this view does not have. On a view of the program both start hidden and take no room, so this order is
@@ -137,16 +142,16 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
       this.copy.textPanel,
       this.#value,
       listingPanel.el,
-      machine,
-      this.#heap.panel.el,
+      row.el,
+      row.stackRegion,
+      row.heapRegion,
       this.copy.outline,
     )
     this.mount(host, this.#body)
-    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The registers and the
-    // call stack are one region, the row they share: no boundary parts the two (they wrap one under the other in a
-    // narrow view).
-    // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
-    new PanelStack(
+    // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The row and the call
+    // stack's and the heap's regions are three, whichever of them each panel is in now (`machine-row.ts`).
+    // IT KEEPS ITSELF: its listeners are on the regions and their headers, and only the row reads it again.
+    const stack = new PanelStack(
       [
         this.textRegion(),
         {
@@ -157,27 +162,13 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
           panels: [listingPanel],
           bodies: () => [listingPanel.body],
         },
-        {
-          name: 'machine',
-          label: 'registers and call stack',
-          el: machine,
-          share: 1,
-          panels: [this.#values.panel, this.#stack.panel],
-          bodies: () => [this.#values.panel, this.#stack.panel].filter((p) => p.isOpen()).map((p) => p.body),
-        },
-        {
-          name: 'heap',
-          label: 'heap',
-          el: this.#heap.panel.el,
-          share: 1,
-          panels: [this.#heap.panel],
-          bodies: () => [this.#heap.panel.body],
-        },
+        ...row.regions,
         this.outlineRegion(),
       ],
       sizes,
       (next) => on.panelSizes?.(next),
     )
+    row.follow(host, stack)
   }
 
   /**

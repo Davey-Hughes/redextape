@@ -27,7 +27,8 @@ function mount(panels: RxmPanels = {}) {
   host.className = 'pane'
   host.dataset.kind = 'rxm'
   host.style.height = '900px'
-  host.style.width = '1000px'
+  // THE RXM VIEW'S MEDIUM ARRANGEMENT (`machine-row.ts`): the heap in a region of its own.
+  host.style.width = '800px'
   document.body.append(host)
   const pane = new RxmPane(host, inertEvents({ panelSizes: sizes, panel }), panels)
   pane.setProgram(FACT3)

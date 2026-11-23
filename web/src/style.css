@@ -635,6 +635,9 @@ select option {
   font-family: var(--font-mono);
   font-size: var(--step--1);
 }
+.strip[hidden] {
+  display: none;
+}
 .results {
   display: flex;
   flex-wrap: wrap;
@@ -1679,12 +1682,16 @@ button.view-title[aria-expanded="true"] {
   outline-offset: -2px;
 }
 /* A HEADER THAT IS A HANDLE FOR THE BOUNDARY ABOVE IT SAYS SO WITH THE POINTER (`panel-stack.ts`): the boundary's
-   two hands over the bar, and each control on it keeps its own pointer. */
-.panel-header[data-resizes] {
+   two hands over the bar and over its title, whose press is the title's until it moves past the threshold
+   (`separator.ts`), since the title's words are what a person aims at on a header and a click there must stay a click.
+   Each other control on the bar keeps its own pointer. */
+.panel-header[data-resizes],
+.panel-header[data-resizes] > .panel-toggle {
   cursor: grab;
 }
 .panel-boundary[data-dragging],
-.panel-header[data-resizes][data-dragging] {
+.panel-header[data-resizes][data-dragging],
+.panel-header[data-dragging] > .panel-toggle {
   cursor: grabbing;
 }
 /* MAXIMISE (spec §11.3): a toggle, drawn pressed as a checked choice is, without relying on colour. */
@@ -2959,13 +2966,14 @@ main {
   display: none;
 }
 
-/* THE RXM VIEW (Plan 7 part 5 spec §6.1): the TM view's mechanism, with its own shares. The listing takes two, the
-   registers and call stack one between them, side by side, and the heap one; a closed panel keeps only its header, and
-   each body keeps a floor of five rows. `.rxm-machine` is the row the registers and the call stack share: it wraps, so
-   the two stack when the view is too narrow for both, and it takes no share of its own while both are closed. On a
-   copy the text panel keeps its own height above them all, until a boundary beside it is dragged, and the outline
-   takes one share below, as in a TM view. The CLIF view's listing, values and call stack, and heap share its height
-   by the same rules; it has no copy, so no text panel and no outline. */
+/* THE RXM VIEW (Plan 7 part 5 spec §6.1): the TM view's mechanism, with its own shares. The listing takes two and the
+   row under it, `.rxm-machine`, one; the call stack and the heap are in that row, or in regions of their own,
+   `.machine-stack` and `.machine-heap`, by the view's width (`machine-row.ts`, the machine panels row design §5): the
+   heap's with one share, the call stack's with a part of the row's (the after-the-try design's G1). A closed panel
+   keeps only its header's height, and each body keeps a floor (below). A region takes no share of its own while
+   every panel in it is closed. On a copy the text panel keeps its own height above them all, until a boundary beside
+   it is dragged, and the outline takes one share below, as in a TM view. The CLIF view's listing, values, call stack
+   and heap share its height by the same rules; it has no copy, so no text panel and no outline. */
 .pane[data-kind="rxm"],
 .pane[data-kind="clif"] {
   display: flex;
@@ -2982,12 +2990,15 @@ main {
   flex: none;
 }
 /* NAMED, NOT EVERY OPEN PANEL: the text panel keeps its own height, and both it and the outline are `hidden` on a view of
-   the program — a `display` here would outrank the browser's `[hidden]` and show them (`hidden.test.ts`). */
+   the program — a `display` here would outrank the browser's `[hidden]` and show them (`hidden.test.ts`). The call
+   stack's and the heap's regions are `hidden` while their panels are in the row, and are guarded the same way. */
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
-.rxm-pane > .panel[data-panel="heap"][data-open="true"],
 .rxm-pane > .panel[data-panel="outline"][data-open="true"]:not([hidden]),
 .clif-pane > .panel[data-panel="listing"][data-open="true"],
-.clif-pane > .panel[data-panel="heap"][data-open="true"],
+.machine-stack:not([hidden]):has(> .panel[data-open="true"]),
+.machine-stack > .panel[data-open="true"],
+.machine-heap:not([hidden]):has(> .panel[data-open="true"]),
+.machine-heap > .panel[data-open="true"],
 .rxm-machine > .panel[data-open="true"] {
   display: flex;
   flex-direction: column;
@@ -2995,38 +3006,53 @@ main {
 /* THE SHARES ARE `panel-stack.ts`'s TO WRITE, as the TM view's are: the listing's two and the others' one each, or
    what a dragged boundary left. */
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
-.rxm-pane > .panel[data-panel="heap"][data-open="true"],
 .rxm-pane > .panel[data-panel="outline"][data-open="true"],
 .rxm-pane > .rxm-machine:has(> .panel[data-open="true"]),
+.rxm-pane > .machine-stack:has(> .panel[data-open="true"]),
+.rxm-pane > .machine-heap:has(> .panel[data-open="true"]),
 .clif-pane > .panel[data-panel="listing"][data-open="true"],
-.clif-pane > .panel[data-panel="heap"][data-open="true"],
-.clif-pane > .rxm-machine:has(> .panel[data-open="true"]) {
+.clif-pane > .rxm-machine:has(> .panel[data-open="true"]),
+.clif-pane > .machine-stack:has(> .panel[data-open="true"]),
+.clif-pane > .machine-heap:has(> .panel[data-open="true"]) {
   flex: var(--share, 1) 1 0;
+}
+.machine-stack > .panel[data-open="true"],
+.machine-heap > .panel[data-open="true"] {
+  flex: 1 1 0;
 }
 .rxm-pane > .panel[data-open="true"] > .outline {
   flex: 1 1 0;
   min-height: 5lh;
 }
+/* THE ROW NEVER WRAPS: `machine-row.ts` chooses which panels it holds from the view's width. A wrapped line of closed
+   panels would take its line's part of the row's height, an empty gap under its headers (design §5.2). */
 .rxm-machine {
   display: flex;
-  flex-wrap: wrap;
   align-items: stretch;
-  column-gap: 1rem;
-  row-gap: var(--space-2);
+  column-gap: var(--space-2);
   margin-block-start: var(--space-2);
 }
-/* THE ROW CARRIES THE PANELS' SPACING, NOT THE PANELS: a panel's own `margin-block-start` inside the row would sit
-   within the row's share, leaving the registers and the call stack a margin shorter than the heap beside them. */
+/* THE ROW AND THE CALL STACK'S AND THE HEAP'S REGIONS CARRY THE PANELS' SPACING, NOT THE PANELS: a panel's own
+   `margin-block-start` inside any of them would sit within its share, leaving it a margin shorter than its
+   neighbour. */
+.machine-stack,
+.machine-heap {
+  margin-block-start: var(--space-2);
+}
+.machine-stack > .panel,
+.machine-heap > .panel {
+  margin-block-start: 0;
+}
+/* EVERY PANEL OF THE ROW KEEPS ITS COLUMN, OPEN OR CLOSED (design §5.2), so opening, closing or maximising one moves
+   no neighbour sideways. `--column` is the column's part of the row, which `machine-row.ts` sets from the least widths
+   it chooses the arrangement by: the columns and the thresholds are one set of numbers. */
 .rxm-machine > .panel {
-  flex: 1 1 18rem;
+  flex: var(--column, 1) 1 0;
   min-width: 0;
   margin-block-start: 0;
 }
-/* A CLOSED PANEL TAKES NO SHARE OF THE ROW: it is its header and nothing more (spec §6.1), so the open
-   sibling beside it takes the row's width, and `align-self` stops `align-items: stretch` pulling it to the
-   row's height. */
+/* A CLOSED PANEL IS ITS HEADER'S HEIGHT: `align-self` stops `align-items: stretch` pulling it to the row's height. */
 .rxm-machine > .panel[data-open="false"] {
-  flex: none;
   align-self: flex-start;
 }
 .rxm-pane > .panel[data-open="true"] > .rxm-listing,
@@ -3046,9 +3072,58 @@ main {
   font-size: var(--step--2);
   list-style: none;
 }
+/* TWO ROWS FOR THE FIRST PANEL AND THE CALL STACK IN NARROW (the after-the-try design's G1): there the two split the
+   row's share one above the other, and on floors of five rows a short view holds both on them, so the boundary
+   between them cannot move. In medium and wide they stand side by side and keep five; the call stack's region is
+   shown in narrow alone. */
+.rxm-machine[data-arrangement="narrow"] .rxm-registers,
+.machine-stack .rxm-stack {
+  min-height: 2lh;
+}
+/* A COUNT SITS ON ITS HEADER'S BUTTONS' MIDDLE. Stretched to the actions' height, its box would draw its line at its
+   top; centred, a line taller than its text still splits the spare height unevenly and the text sits high, so the line
+   is the font's own height. In the base rule, so the count in every header matches. */
 .panel-note {
+  align-self: center;
+  line-height: normal;
   font-size: var(--step--2);
   color: var(--fg-dim);
+}
+/* A MACHINE PANEL'S HEADER IS ONE LINE AT ANY WIDTH (the machine panels row design §6.4): a header that wrapped as
+   its count grew would move the bodies under it on a step. The count gives way first, cut short with its tooltip whole
+   (`machine-panels.ts`), then the title; the buttons never do. The actions take the room the title leaves and the
+   count takes the actions' room less the buttons': as a container the count adds no width to the actions' own, so
+   the actions are never narrower than their buttons and the title is what shrinks once the count is gone. */
+.machine-panel > .panel-header {
+  flex-wrap: nowrap;
+}
+.machine-panel > .panel-header > .panel-toggle {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+.machine-panel > .panel-header > .panel-actions {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+}
+.machine-panel .panel-name,
+.machine-panel .panel-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.machine-panel .panel-note {
+  flex: 1 1 0;
+  container-type: inline-size;
+  white-space: nowrap;
+  text-align: end;
+}
+/* A COUNT WITH NO ROOM FOR TWO CHARACTERS AND ITS ELLIPSIS IS NOT DRAWN: Chromium draws a line's first character
+   whatever the room and clips the ellipsis after it, so "1,234 frames" would read "1". */
+@container (width < 3ch) {
+  .machine-panel .panel-note > span {
+    visibility: hidden;
+  }
 }
 
 /* An instruction row: its `pc`, its mnemonic, its operands. A label row sits above the instruction it names. */
@@ -3142,11 +3217,18 @@ main {
   color: var(--fg-dim);
 }
 
-/* THE BOUNDARY TAKES THE PLACE OF THE GAP THE REGION UNDER IT KEEPS ABOVE ITSELF. Here, after the rules that set
-   those gaps, with the source and λ views' regions below: Biome's `noDescendingSpecificity` rejects a selector that
-   follows a more specific one for the same element, and each of these narrows a rule far above it. */
+/* THE BOUNDARY TAKES THE PLACE OF THE GAP THE REGION UNDER IT KEEPS ABOVE ITSELF, and does across what draws nothing
+   between the two: the call stack's region outside narrow, both it and the heap's in wide, an rxm copy's empty value
+   line. Here, after the rules that set those gaps, with the source and λ views' regions below: Biome's
+   `noDescendingSpecificity` rejects a selector that follows a more specific one for the same element, and each of
+   these narrows a rule far above it. */
 .panel-boundary + .panel,
-.panel-boundary + .rxm-machine {
+.panel-boundary + .rxm-machine,
+.panel-boundary + .machine-stack,
+.panel-boundary + .machine-heap,
+.panel-boundary + .machine-stack[hidden] + .machine-heap,
+.panel-boundary + .rxm-value:empty + .panel,
+.panel-boundary + .machine-stack[hidden] + .machine-heap[hidden] + .panel {
   margin-block-start: 0;
 }
 
@@ -3213,8 +3295,9 @@ main {
   flex: var(--share, 1) 1 0;
 }
 /* THE TERM MAP KEEPS ITS 120px UNTIL ITS BOUNDARY IS DRAGGED, and from then on its canvas fills the share its panel
-   has, down to half of that. `term-map.ts` reads the canvas's height when it draws. */
-.panel[data-panel="map"][data-sized] > .term-map-host {
+   has, down to half of that. `term-map.ts` reads the canvas's height when it draws. ONLY WHILE THE MAP IS OPEN: this
+   `display` outranks the browser's `[hidden]`, so a closed map would go on drawing its canvas. */
+.panel[data-panel="map"][data-open="true"][data-sized] > .term-map-host {
   display: flex;
   flex-direction: column;
   flex: 1 1 0;

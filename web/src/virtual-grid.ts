@@ -196,7 +196,10 @@ export class VirtualGrid {
     // THE BOX'S HEIGHT IS ITS VIEW'S, NOT THE VIEWPORT'S (Plan 7 part 4 spec §9.1): a divider drag, a panel opening
     // beside it or a window resize changes it with no frame or scroll to redraw the window it draws.
     new ResizeObserver(() => {
-      this.#follow.onResize(this.el.scrollTop)
+      // A BOX DRAWN WITH NO HEIGHT HAS NO SCROLL POSITION TO REPORT. Hidden, its `scrollTop` reads 0, and recorded here
+      // that 0 is the echo `Follow` would expect, so the `scroll` that gives the box its position back when it is
+      // shown again, which can come before this callback, would read as the user's and stop the box following.
+      if (this.el.clientHeight > 0) this.#follow.onResize(this.el.scrollTop)
       this.draw()
     }).observe(this.el)
   }

@@ -196,6 +196,23 @@ describe('a copy’s text, in a TM view', () => {
     ).toBe(0)
     expect(boundary(host, 'rules', 'diagram'), 'no boundary is drawn between the two').not.toBeNull()
   })
+
+  it('drags the boundary between the rules and the diagram by the diagram’s title, and leaves it open', async () => {
+    const { host, sizes } = mount()
+    await frame()
+    const [rules, diagram] = [region(host, 'rules'), region(host, 'diagram')]
+    const bar = diagram.querySelector('.panel-header') as HTMLElement
+    const t = diagram.querySelector('.panel-toggle') as HTMLElement
+    expect(bar.dataset.resizes, 'precondition: the diagram’s header is a handle').toBe('true')
+    expect(getComputedStyle(t).cursor, 'the diagram’s title').toBe('grab')
+    const was = { rules: heightOf(rules), diagram: heightOf(diagram) }
+    // 50 PX, A WHOLE NUMBER OF PAGE PX IN THE SCALED FRAME: Playwright's Firefox moves the mouse by whole page px.
+    await drag(host, t, -50)
+    expect(heightOf(diagram), 'the diagram did not take 50 px').toBeCloseTo(was.diagram + 50, 0)
+    expect(heightOf(rules), 'the rules did not give them').toBeCloseTo(was.rules - 50, 0)
+    expect(t.getAttribute('aria-expanded'), 'the diagram is drawn closed').toBe('true')
+    expect(Object.keys(sizes.mock.calls.at(-1)?.[0] as Shares).sort()).toEqual(['diagram', 'rules'])
+  })
 })
 
 describe('the λ view’s term and its map', () => {
@@ -251,6 +268,41 @@ describe('the λ view’s term and its map', () => {
       Math.round(220 * devicePixelRatio),
     )
     expect(Object.keys(sizes.mock.calls.at(-1)?.[0] as Shares).sort()).toEqual(['map', 'term'])
+  })
+
+  it('drags the boundary over the map by its title, and leaves it open', async () => {
+    const { host } = mount(700)
+    await frame()
+    const map = region(host, 'map')
+    const t = map.querySelector('.panel-toggle') as HTMLElement
+    expect(getComputedStyle(t).cursor, 'the map’s title').toBe('grab')
+    const was = { term: heightOf(term(host)), map: heightOf(map) }
+    await drag(host, t, -100)
+    await frame()
+    expect(heightOf(map), 'the map did not take 100 px').toBeCloseTo(was.map + 100, 0)
+    expect(heightOf(term(host)), 'the term did not give them').toBeCloseTo(was.term - 100, 0)
+    expect(t.getAttribute('aria-expanded'), 'the map is drawn closed').toBe('true')
+  })
+
+  it('closes a map its title gave a share to as far as a map nobody dragged closes', async () => {
+    const { host } = mount(700)
+    await frame()
+    const map = region(host, 'map')
+    const t = map.querySelector('.panel-toggle') as HTMLElement
+    await userEvent.click(t)
+    await frame()
+    expect(t.getAttribute('aria-expanded'), 'precondition: the click closed the map').toBe('false')
+    const closed = heightOf(map)
+    await userEvent.click(t)
+    await frame()
+    await drag(host, t, -100)
+    await frame()
+    expect(map.dataset.sized, 'precondition: the drag gave the map a share').toBe('true')
+    await userEvent.click(t)
+    await frame()
+    expect(t.getAttribute('aria-expanded'), 'precondition: the click closed the map').toBe('false')
+    expect(heightOf(map), 'the closed map is taller than one nobody dragged').toBeCloseTo(closed, 0)
+    expect(heightOf(host.querySelector('.term-map-host') as HTMLElement), 'the closed map draws its body').toBe(0)
   })
 
   /**

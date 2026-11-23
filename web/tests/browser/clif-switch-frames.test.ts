@@ -110,23 +110,24 @@ function seen(pane: HTMLElement, placed: boolean, line = false): Record<string, 
  * `before`, `the listing chosen` for one as `after`, else the frame itself. **WITH THE WHOLE STEP LINE READ, A FRAME
  * IS THE LISTING CHOSEN FROM ITS ROWS, ITS NEXT ROW, ITS PANELS AND NO NOTICE**: the line's count grows as the new
  * listing records, and in a narrow view its wrap changes with it and moves the rows within the box, as in every
- * recording; the frames before the swap are held to every fact.
+ * recording; the frames before the swap are held to every fact. `byListing` reads both sides that way (`switchTo`).
  */
 function runsOf(
   seen: readonly Record<string, string>[],
   before: Record<string, string>,
   after: Record<string, string>,
+  byListing = false,
 ): string[] {
-  const chosen = (s: Record<string, string>) =>
-    'line' in after
-      ? s.rows === after.rows && s.next === after.next && s.panels === after.panels && s.notice === 'none'
-      : JSON.stringify(s) === JSON.stringify(after)
-  const label = (s: Record<string, string>) =>
-    JSON.stringify(s) === JSON.stringify(before)
-      ? 'the listing left'
-      : chosen(s)
-        ? 'the listing chosen'
-        : JSON.stringify(s)
+  type Frame = Record<string, string>
+  const same = (s: Frame, as: Frame) => JSON.stringify(s) === JSON.stringify(as)
+  const listed = (s: Frame, as: Frame) =>
+    s.rows === as.rows && s.next === as.next && s.panels === as.panels && s.notice === 'none'
+  /** Where the pane stands on the page, where `placed` read it: its top and height, without the listing's own. */
+  const stands = (s: Frame) => s.placed?.split(' ').slice(0, 2).join(' ')
+  const shows = (s: Frame, as: Frame) => listed(s, as) && stands(s) === stands(as)
+  const left = (s: Frame) => (byListing ? shows(s, before) : same(s, before))
+  const chosen = (s: Frame) => (byListing ? shows(s, after) : 'line' in after ? listed(s, after) : same(s, after))
+  const label = (s: Frame) => (left(s) ? 'the listing left' : chosen(s) ? 'the listing chosen' : JSON.stringify(s))
   return seen.map(label).filter((s, i, all) => s !== all[i - 1])
 }
 
@@ -140,7 +141,16 @@ function runsOf(
 async function switchTo(
   to: Listing,
   placed: boolean,
-  opts: { readonly line?: boolean; readonly hold?: boolean } = {},
+  opts: {
+    readonly line?: boolean
+    readonly hold?: boolean
+    /**
+     * Name a frame of either listing by its rows, its next row, its panels and no notice, and by where the pane stands
+     * where `placed` reads it: for a press on a listing whose recording then stops, which changes the chrome above the
+     * listing after the press, and with it the box and the scroll of a listing that has height to spare.
+     */
+    readonly byListing?: boolean
+  } = {},
 ): Promise<{ readonly epoch: number; readonly pressed: number; readonly before: Record<string, string> }> {
   const pane = clif()
   const line = opts.line === true
@@ -169,10 +179,10 @@ async function switchTo(
     watch.ticks() - 1,
   )
   expect(watch.seen.length, 'precondition: frames were read through the switch').toBeGreaterThan(4)
-  expect(runsOf(watch.seen, before, after), 'what each frame showed, in order, a run of the same once').toEqual([
-    'the listing left',
-    'the listing chosen',
-  ])
+  expect(
+    runsOf(watch.seen, before, after, opts.byListing === true),
+    'what each frame showed, in order, a run of the same once',
+  ).toEqual(['the listing left', 'the listing chosen'])
   return { epoch, pressed, before }
 }
 
@@ -282,7 +292,7 @@ describe('a listing switch', () => {
     const typed = ear.heard.length
     await program(LOOP)
     await until(() => clifChunks(ear.heard.slice(typed), 0).length > 0, "the first CLIF chunk of the loop's run")
-    const { pressed } = await switchTo('optimised', false)
+    const { pressed } = await switchTo('optimised', false, { byListing: true })
     expect(
       clifChunks(ear.heard.slice(pressed), 0).length,
       'precondition: a chunk of the listing as built came after the press',
@@ -297,7 +307,7 @@ describe('a listing switch', () => {
   it('keeps the view where it stands while the readout waits for the new run', async () => {
     await until(() => resultsText().includes('CLIF'), "the readout's CLIF rows")
     expect(resultsText(), 'precondition: the readout has CLIF rows at the press').toContain('CLIF')
-    await switchTo('as-built', true)
+    await switchTo('as-built', true, { byListing: true })
   })
 })
 
@@ -307,7 +317,9 @@ describe('a listing switch from a link', () => {
    * choice drops the link's CLIF position, so it never lands on the other listing's run, but the line it is in stays as
    * it was, so in a narrow view it re-wraps and moves nothing before the view changes. The position is past the loop's
    * first fill, so the link continues the leg, and the press is made with the worker's replies kept, while it is still
-   * pending.
+   * pending. **NO DRAW WRITES THE LINE WITHOUT THE LINK STEP BEFORE THE SWAP, NOT EVEN ONE THE NEXT DRAW REPLACES
+   * UNPAINTED**: the shorter line re-wraps, the listing's scroll is written for the box that leaves, and a scroll
+   * written away and back does not return to the same fraction of a pixel in a browser that keeps one.
    */
   it("keeps the line saying the link's CLIF step, and the rows where they stand, until the swap", async () => {
     const fill =
@@ -319,10 +331,20 @@ describe('a listing switch from a link', () => {
     const step = fill + 30_000
     await open(linkTo(LOOP, { clif: step }))
     await until(() => stepTextOf('clif-0').includes('from the link'), 'the step line saying where the link goes')
-    const { before } = await switchTo('optimised', true, { line: true, hold: true })
+    const line = clif().querySelector('.step') as HTMLElement
+    const written = [line.textContent ?? '']
+    const writes = new MutationObserver((records) => {
+      for (const r of records) for (const node of r.addedNodes) written.push(node.textContent ?? '')
+    })
+    writes.observe(line, { childList: true })
+    const { before } = await switchTo('optimised', true, { line: true, hold: true }).finally(() => writes.disconnect())
     expect(before.line, 'precondition: the line said the link step at the press').toContain(
       `going to step ${n(step)} from the link`,
     )
+    expect(
+      written.map((s) => s.includes('from the link')).filter((s, i, all) => s !== all[i - 1]),
+      'whether each line written said the link step, in order, a run of the same once',
+    ).toEqual([true, false])
   }, 60_000)
 
   /**

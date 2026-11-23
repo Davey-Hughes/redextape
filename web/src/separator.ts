@@ -29,26 +29,43 @@ export interface SeparatorHandlers {
 export type SeparatorAxis = 'x' | 'y'
 
 /**
+ * How far, in CSS px, a press may go from where it was pressed and still be a click. Past it the press is a drag: a
+ * press on a panel's title that `accept` answers `'past-threshold'` drags its boundary, measured on either axis, the
+ * state diagram's local level pans, and the link's clear stays its hand. One number, so a press that drags or pans
+ * never also clears.
+ */
+export const DRAG_THRESHOLD = 4
+
+/**
  * The pointer's half of the gesture, on any element: a press, frames under capture, and one commit if it moved.
  *
  * `accept` IS ASKED AT THE PRESS, and a press it refuses starts nothing and is left to whatever else hears it: a
  * panel's header is a handle for the boundary above it (`panel-stack.ts`), and a press on one of the header's own
- * buttons is the button's.
+ * buttons is the button's. A press it answers `'past-threshold'` is left to the element, neither prevented nor
+ * captured, until the pointer is more than `DRAG_THRESHOLD` from it on either axis: a panel's title's words are what a
+ * person aims at on its header, and a click there must stay a click. **IT ANSWERS `'past-threshold'` ONLY FOR A PRESS
+ * THAT STARTS NO SELECTION OF ITS OWN**, such as a button's: nothing prevents the press before it arms, so a press on
+ * text would select as it dragged. A double click resets only where it answers `true`.
  */
 export function pointerDrag(
   el: HTMLElement,
   axis: SeparatorAxis,
   handlers: Pick<SeparatorHandlers, 'ready' | 'drag' | 'commit' | 'reset'>,
-  accept: (e: MouseEvent) => boolean = () => true,
+  accept: (e: MouseEvent) => boolean | 'past-threshold' = () => true,
 ): void {
+  const doc = el.ownerDocument
   let dragging = false
   let moved = false
   let last = 0
   /** The pointer the press was made with: another pointer's release, heard on the document, is not this one's. */
   let pointer = -1
+  /** Where a press that waits for the threshold was made, until it becomes the gesture or ends. */
+  let pending: { readonly x: number; readonly y: number } | null = null
 
-  el.addEventListener('pointerdown', (e) => {
-    if (!accept(e)) return
+  const along = (e: MouseEvent): number => (axis === 'x' ? e.clientX : e.clientY)
+
+  /** The gesture takes the press `e` made, or a move of it past the threshold: `from` is the press along the axis. */
+  const arm = (e: PointerEvent, from: number): void => {
     dragging = true
     pointer = e.pointerId
     // HELD, FOR THE STYLESHEET: a handle that draws a hand draws it closed from the press to the release.
@@ -57,22 +74,23 @@ export function pointerDrag(
     // capture, put back or not, and the release then goes to whatever is under the pointer: without these the
     // handle would hear none, stay held, and its caller's gesture would never end. With the capture in place the
     // handle hears the release first and `stop` takes these two off again.
-    el.ownerDocument.addEventListener('pointerup', stop, true)
-    el.ownerDocument.addEventListener('pointercancel', stop, true)
+    doc.addEventListener('pointerup', stop, true)
+    doc.addEventListener('pointercancel', stop, true)
     moved = false
-    last = axis === 'x' ? e.clientX : e.clientY
+    last = from
     // BEFORE `setPointerCapture`, NOT AFTER. Capture throws `NotFoundError` for a `pointerId` the
     // browser holds no active pointer for, which a test's synthetic `PointerEvent` can carry: Firefox
     // holds none for a synthetic id until real mouse input has reached the tab. A test whose event
-    // carried such an id would throw here, and `preventDefault` is what stops a drag from
-    // selecting text across the panes, so it must not be the thing a throw skips.
+    // carried such an id would throw here, and at a press `preventDefault` is what stops a drag from
+    // selecting text across the panes, so it must not be the thing a throw skips. At a move past the
+    // threshold it stops nothing, which is why `accept` answers `'past-threshold'` only where a press selects nothing.
     e.preventDefault()
     el.setPointerCapture(e.pointerId)
-  })
+  }
 
-  el.addEventListener('pointermove', (e) => {
-    if (!dragging) return
-    const now = axis === 'x' ? e.clientX : e.clientY
+  /** A frame of the gesture, the pointer now at `e`. */
+  const frameAt = (e: PointerEvent): void => {
+    const now = along(e)
     // `now !== last` — A ZERO-DISPLACEMENT MOVE DOES NOT ARM THE COMMIT. Browsers do emit `pointermove`
     // at an unchanged coordinate, and without this guard such an event would call `handlers.drag` with
     // 0, set `moved`, and make `pointerup` run a full reconcile-and-write for a gesture that
@@ -86,6 +104,54 @@ export function pointerDrag(
       handlers.drag(now - last)
     }
     last = now
+  }
+
+  // A WAITING PRESS HEARS ITS POINTER ON THE DOCUMENT: one move can leave `el` before the threshold is heard, and a
+  // release or a cancel anywhere ends it, so none outlives its button.
+  const wait = (e: PointerEvent): void => {
+    if (pending === null || e.pointerId !== pointer) return
+    // A PRESS WHOSE BUTTON IS UP OR WHOSE HANDLE LEFT THE PAGE IS OVER: its release went unheard, or the handle could
+    // take no capture.
+    if ((e.buttons & 1) === 0 || !el.isConnected) {
+      unwait()
+      return
+    }
+    const from = pending
+    if (Math.max(Math.abs(e.clientX - from.x), Math.abs(e.clientY - from.y)) <= DRAG_THRESHOLD) return
+    unwait()
+    // THE WHOLE DISTANCE FROM THE PRESS IS THE FIRST FRAME, so the boundary keeps the offset from the pointer that a
+    // press armed at once keeps, and a press that armed across the axis moves nothing.
+    arm(e, axis === 'x' ? from.x : from.y)
+    frameAt(e)
+  }
+  const end = (e: PointerEvent): void => {
+    if (pending !== null && e.pointerId === pointer) unwait()
+  }
+  const unwait = (): void => {
+    pending = null
+    doc.removeEventListener('pointermove', wait, true)
+    doc.removeEventListener('pointerup', end, true)
+    doc.removeEventListener('pointercancel', end, true)
+  }
+
+  el.addEventListener('pointerdown', (e) => {
+    // A NEW PRESS ENDS ONE STILL WAITING, so no pointer's moves are measured from another's press.
+    unwait()
+    const answer = accept(e)
+    if (answer === false) return
+    if (answer === 'past-threshold') {
+      pointer = e.pointerId
+      pending = { x: e.clientX, y: e.clientY }
+      doc.addEventListener('pointermove', wait, true)
+      doc.addEventListener('pointerup', end, true)
+      doc.addEventListener('pointercancel', end, true)
+      return
+    }
+    arm(e, along(e))
+  })
+
+  el.addEventListener('pointermove', (e) => {
+    if (dragging) frameAt(e)
   })
 
   // THE END OF THE GESTURE IS WHERE IT IS COMMITTED — see `SeparatorHandlers`. A press and
@@ -94,8 +160,8 @@ export function pointerDrag(
     if (!dragging || e.pointerId !== pointer) return
     dragging = false
     delete el.dataset.dragging
-    el.ownerDocument.removeEventListener('pointerup', stop, true)
-    el.ownerDocument.removeEventListener('pointercancel', stop, true)
+    doc.removeEventListener('pointerup', stop, true)
+    doc.removeEventListener('pointercancel', stop, true)
     if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
     if (moved) handlers.commit()
     moved = false
@@ -106,7 +172,7 @@ export function pointerDrag(
   if (handlers.reset !== undefined) {
     const reset = handlers.reset
     el.addEventListener('dblclick', (e) => {
-      if (accept(e)) reset()
+      if (accept(e) === true) reset()
     })
   }
 }

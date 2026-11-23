@@ -1,5 +1,5 @@
 import type { EditorView } from '@codemirror/view'
-import { expect, vi } from 'vitest'
+import { afterEach, expect, vi } from 'vitest'
 import html from '../../index.html?raw'
 import type { ControlState, LegView } from '../../src/controls'
 import type { LambdaBody } from '../../src/lambda-body'
@@ -997,6 +997,32 @@ export const frames = (): Promise<void> =>
 
 /** One animation frame: the one the page draws next. */
 export const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()))
+
+/**
+ * Fail each case of the calling file during which the page reports an error: a `ResizeObserver loop`, which the
+ * browser reports and goes on past, or anything thrown where no case catches it (`hear-loops.test.ts`).
+ *
+ * **EVERY ERROR, NOT LOOPS ALONE.** Vitest fails a run for an uncaught error only while the page has no `error`
+ * listener but its own, so one that kept the loops alone would pass a case whose timer or handler threw.
+ *
+ * **IT OWNS THE FILE'S TEARDOWN, TO WAIT BEFORE IT.** A loop is reported at the frame after the write that caused it,
+ * and not at all once its elements are off the page; a teardown in a hook of the file's own would run on whichever
+ * side of the wait the runner's hook order put it.
+ */
+export function hearLoops(teardown: () => void | Promise<void>): void {
+  const errors: string[] = []
+  window.addEventListener('error', (e) => errors.push(String(e.message)))
+  afterEach(async () => {
+    await frames()
+    let heard: string[] = []
+    try {
+      await teardown()
+    } finally {
+      heard = errors.splice(0)
+    }
+    expect(heard, 'errors the page reported in this test').toEqual([])
+  })
+}
 
 /**
  * Wait until `read` gives the same value for six frames running, for a scroll that may animate, and answer it; fail,

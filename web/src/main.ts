@@ -2125,11 +2125,14 @@ async function main(): Promise<EditorView> {
     writeProgramStorage({ text: view.state.doc.toString(), encoding: picker.value, width: fieldWidth, listing })
     // **A LINK'S CLIF POSITION GOES**, held for the link's compile or pending on the leg: it is a step of the run of
     // the listing it was made in, and the share link's reader drops one whose listing it cannot run for the same
-    // reason.
+    // reason. **AFTER THE REQUEST, WHICH DRAWS**: the leg still has the position in that draw and the hold says it from
+    // the next, so no draw writes the step line without it. One that did would re-wrap the line and write the
+    // listing's scroll for a box the next draw takes back, and a scroll written away and back does not return to the
+    // same fraction of a pixel in every browser.
     const leg = sessions.legOf({ session: SOURCE_SESSION, leg: 'clif' })
     const going = leg.pending
-    positions.forget('clif')
     clifSync.want(clifWanted())
+    positions.forget('clif')
     // **THE STEP LINE GOES ON SAYING WHERE THE LINK WAS TAKING THE LEG WHILE THE CHOICE HOLDS IT**
     // (`ClifHold.linkStep`), until the new listing's frames replace the line: said no longer at the press, the line
     // would change, and could re-wrap and move the rows, a frame or more before the view does.

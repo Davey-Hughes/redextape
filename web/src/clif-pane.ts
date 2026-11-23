@@ -22,6 +22,7 @@ import {
   type ValuesView,
   valuesPanel,
 } from './machine-panels'
+import { MachineRow } from './machine-row'
 import { MachineViewChrome } from './machine-view-chrome'
 import type { PaneEvents } from './pane-chrome'
 import { PanelStack, type Shares } from './panel-stack'
@@ -145,18 +146,23 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
       onToggle: (open) => on.panel?.('heap', open),
     })
 
-    // THE VALUES AND THE CALL STACK SHARE ONE ROW, the rxm view's `.rxm-machine`, which wraps them one under the other
-    // in a view too narrow for both.
-    const machine = document.createElement('div')
-    machine.className = 'rxm-machine'
-    machine.append(this.#values.panel.el, this.#stack.panel.el)
+    // THE VALUES, THE CALL STACK AND THE HEAP, laid out by the view's width as the rxm view's are (`machine-row.ts`).
+    // THE VALUES ONE PART, THE CALL STACK AND THE HEAP TWO EACH (the machine panels row design §5.1): a value is short
+    // and a header's count is not, so the two headers that carry a count have the room to hold it whole.
+    const row = new MachineRow({
+      values: this.#values.panel,
+      stack: this.#stack.panel,
+      heap: this.#heap.panel,
+      columns: [7.375, 14.75, 14.75],
+    })
 
     const body = document.createElement('div')
     body.className = 'clif-pane'
-    body.append(listingPanel.el, machine, this.#heap.panel.el)
+    body.append(listingPanel.el, row.el, row.stackRegion, row.heapRegion)
     this.mount(host, body)
-    // IT KEEPS ITSELF, as `RxmPane`'s does: its listeners are on the regions and their headers.
-    new PanelStack(
+    // IT KEEPS ITSELF, as `RxmPane`'s does: its listeners are on the regions and their headers, and only the row reads
+    // it again.
+    const stack = new PanelStack(
       [
         {
           name: 'listing',
@@ -166,26 +172,12 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
           panels: [listingPanel],
           bodies: () => [listingPanel.body],
         },
-        {
-          name: 'machine',
-          label: 'values and call stack',
-          el: machine,
-          share: 1,
-          panels: [this.#values.panel, this.#stack.panel],
-          bodies: () => [this.#values.panel, this.#stack.panel].filter((p) => p.isOpen()).map((p) => p.body),
-        },
-        {
-          name: 'heap',
-          label: 'heap',
-          el: this.#heap.panel.el,
-          share: 1,
-          panels: [this.#heap.panel],
-          bodies: () => [this.#heap.panel.body],
-        },
+        ...row.regions,
       ],
       sizes,
       (next) => on.panelSizes?.(next),
     )
+    row.follow(host, stack)
     this.#draw()
   }
 

@@ -30,6 +30,11 @@ describe('the inspector', () => {
     expect(strip().hidden).toBe(true)
   })
 
+  it('leaves no band of the strip on the page while it holds the readout', () => {
+    expect(strip().hidden, 'precondition: the readout is in the inspector').toBe(true)
+    expect(strip().getBoundingClientRect().height, 'the hidden strip draws a band').toBe(0)
+  })
+
   /**
    * **GEOMETRY, NOT A COUNT.** `#results` carries `class="results"` wherever the switch moves it, and
    * `.results` is a wrapping flex row — so the inspector's rows can pack side by side while a count of

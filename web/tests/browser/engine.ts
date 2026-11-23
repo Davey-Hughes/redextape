@@ -1,5 +1,5 @@
 import type { TestContext } from 'vitest'
-import { server, userEvent } from 'vitest/browser'
+import { commands, server, userEvent } from 'vitest/browser'
 import { until } from './until'
 
 /**
@@ -46,6 +46,21 @@ declare module 'vitest/browser' {
 
 /** Whether this page runs in Chromium, the one engine with CDP, `gc` and `performance.memory`. */
 export const CHROMIUM = server.browser === 'chromium'
+
+/**
+ * Collect garbage now: in Chromium `--js-flags=--expose-gc` in `vite.config.ts` puts `gc` on the global, and Firefox,
+ * which has no such flag, takes Playwright's collection through the `requestGC` command its projects register.
+ */
+export async function collect(): Promise<void> {
+  if (!CHROMIUM) {
+    await commands.requestGC()
+    return
+  }
+  const gc = (globalThis as { gc?: () => void }).gc
+  if (typeof gc !== 'function') throw new Error('BLOCKED: globalThis.gc is unavailable')
+  gc()
+  gc()
+}
 
 /**
  * The first statement of a test that needs what only Chromium has. In Chromium it returns and the test runs; in any

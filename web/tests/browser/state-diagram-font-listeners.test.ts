@@ -1,7 +1,6 @@
 import { expect, it } from 'vitest'
-import { commands } from 'vitest/browser'
 import { StateDiagram } from '../../src/state-diagram'
-import { CHROMIUM } from './engine'
+import { collect } from './engine'
 
 /**
  * The state diagram's font and style listeners (`measureOnFontChange`): one of each for the page, however many
@@ -9,21 +8,6 @@ import { CHROMIUM } from './engine'
  * them gone, the page has no diagram left; the next one must not add a second pair, which would measure every
  * diagram again once more on each font load and style change, a pair more for each such round.
  */
-
-/**
- * Collect garbage now: in Chromium `--js-flags=--expose-gc` in `vite.config.ts` puts `gc` on the global, and Firefox,
- * which has no such flag, takes Playwright's collection through the `requestGC` command its projects register.
- */
-async function collect(): Promise<void> {
-  if (!CHROMIUM) {
-    await commands.requestGC()
-    return
-  }
-  const gc = (globalThis as { gc?: () => void }).gc
-  if (typeof gc !== 'function') throw new Error('BLOCKED: globalThis.gc is unavailable')
-  gc()
-  gc()
-}
 
 /** A macrotask: a `WeakRef` keeps its target alive to the end of the task that made or read it. */
 const task = () => new Promise((resolve) => setTimeout(resolve, 0))

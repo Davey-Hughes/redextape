@@ -16,12 +16,15 @@ import { controlState, inertEvents, panelOf, until } from './harness'
 
 const CONTROLS = controlState(true, 'step 3 of 55')
 
-/** A view in a host `height` pixels tall and `width` wide, attached to the page, with `program` set. */
+/**
+ * A view in a host `height` pixels tall and `width` wide, attached to the page, with `program` set: 800 px by default,
+ * the medium arrangement (`machine-row.ts`), registers and call stack side by side over the heap.
+ */
 function mount(
   program: RxmProgram | null,
   on: PaneEvents = inertEvents(),
   height = 900,
-  width = 1000,
+  width = 800,
   panels: RxmPanels = {},
 ) {
   const host = document.createElement('section')
@@ -379,8 +382,8 @@ describe('the panels', () => {
 })
 
 describe('a closed machine panel', () => {
-  it('shrinks to its header and lets the open call stack panel take the row', () => {
-    const { host, pane } = mount(FACT3, inertEvents(), 900, 1000, { registers: false })
+  it('shrinks to its header and keeps its column, the open call stack beside it keeping its own', () => {
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 800, { registers: false })
     pane.render(frameOf(), CONTROLS)
     const registersPanel = panelOf(host, 'registers')
     const stackPanel = panelOf(host, 'stack')
@@ -390,7 +393,10 @@ describe('a closed machine panel', () => {
     const machine = registersPanel.parentElement as HTMLElement
     const header = registersPanel.querySelector('.panel-header') as HTMLElement
     expect(registersPanel.getBoundingClientRect().height).toBe(header.getBoundingClientRect().height)
-    expect(stackPanel.getBoundingClientRect().width).toBeGreaterThan(machine.getBoundingClientRect().width * 0.8)
+    // EACH KEEPS ITS COLUMN, CLOSED OR OPEN (the machine panels row design §5.2): half the row less half the gap.
+    const column = (machine.getBoundingClientRect().width - Number.parseFloat(getComputedStyle(machine).columnGap)) / 2
+    expect(registersPanel.getBoundingClientRect().width).toBeCloseTo(column, 0)
+    expect(stackPanel.getBoundingClientRect().width).toBeCloseTo(column, 0)
   })
 
   it('leaves the machine row no taller than the two headers when both panels are closed, and grows the listing', () => {
@@ -398,7 +404,7 @@ describe('a closed machine panel', () => {
     openPane.render(frameOf(), CONTROLS)
     const openListingHeight = panelOf(openHost, 'listing').getBoundingClientRect().height
 
-    const { host, pane } = mount(FACT3, inertEvents(), 900, 1000, { registers: false, stack: false })
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 800, { registers: false, stack: false })
     pane.render(frameOf(), CONTROLS)
     const registersPanel = panelOf(host, 'registers')
     const stackPanel = panelOf(host, 'stack')
@@ -410,16 +416,15 @@ describe('a closed machine panel', () => {
       (p) => (p.querySelector('.panel-header') as HTMLElement).getBoundingClientRect().height,
     )
     expect(machine.getBoundingClientRect().height).toBeLessThanOrEqual(Math.max(...headerHeights) + 1)
-    // Neither closed panel takes a share of the row's width either: each stays far short of half the row,
-    // rather than splitting it with its equally-closed sibling.
-    const machineWidth = machine.getBoundingClientRect().width
-    expect(registersPanel.getBoundingClientRect().width).toBeLessThan(machineWidth * 0.3)
-    expect(stackPanel.getBoundingClientRect().width).toBeLessThan(machineWidth * 0.3)
+    // EACH CLOSED PANEL KEEPS ITS COLUMN (the machine panels row design §5.2): half the row less half the gap.
+    const column = (machine.getBoundingClientRect().width - Number.parseFloat(getComputedStyle(machine).columnGap)) / 2
+    expect(registersPanel.getBoundingClientRect().width).toBeCloseTo(column, 0)
+    expect(stackPanel.getBoundingClientRect().width).toBeCloseTo(column, 0)
     expect(panelOf(host, 'listing').getBoundingClientRect().height).toBeGreaterThan(openListingHeight)
   })
 
   it('restores the side-by-side split on re-opening', async () => {
-    const { host, pane } = mount(FACT3, inertEvents(), 900, 1000, { registers: false })
+    const { host, pane } = mount(FACT3, inertEvents(), 900, 800, { registers: false })
     pane.render(frameOf(), CONTROLS)
     const registersPanel = panelOf(host, 'registers')
     // Precondition: registers starts closed.

@@ -53,13 +53,7 @@ export type HeapView = {
 export function valuesPanel(o: MachinePanelOptions): MachinePanel<ValuesView> {
   const body = document.createElement('div')
   body.className = 'rxm-registers'
-  const panel = createPanel({
-    name: o.name,
-    label: o.label,
-    body,
-    open: o.open,
-    onToggle: (open) => o.onToggle(open),
-  })
+  const panel = machinePanel(o, body)
   return {
     panel,
     show(view) {
@@ -107,18 +101,12 @@ export function callStackPanel(o: MachinePanelOptions): MachinePanel<StackView> 
   const body = document.createElement('ol')
   body.className = 'rxm-stack'
   const count = countNote()
-  const panel = createPanel({
-    name: o.name,
-    label: o.label,
-    body,
-    open: o.open,
-    onToggle: (open) => o.onToggle(open),
-  })
-  panel.actions.append(count)
+  const panel = machinePanel(o, body)
+  panel.actions.append(count.el)
   return {
     panel,
     show(view) {
-      count.textContent = view?.count ?? ''
+      count.show(view?.count ?? '')
       if (view === null) {
         body.replaceChildren()
         return
@@ -151,18 +139,12 @@ export function heapPanel(o: MachinePanelOptions): MachinePanel<HeapView> {
   const body = document.createElement('ul')
   body.className = 'rxm-heap'
   const count = countNote()
-  const panel = createPanel({
-    name: o.name,
-    label: o.label,
-    body,
-    open: o.open,
-    onToggle: (open) => o.onToggle(open),
-  })
-  panel.actions.append(count)
+  const panel = machinePanel(o, body)
+  panel.actions.append(count.el)
   return {
     panel,
     show(view) {
-      count.textContent = view?.count ?? ''
+      count.show(view?.count ?? '')
       if (view === null) {
         body.replaceChildren()
         return
@@ -187,10 +169,40 @@ export function heapPanel(o: MachinePanelOptions): MachinePanel<HeapView> {
   }
 }
 
-function countNote(): HTMLElement {
-  const count = document.createElement('span')
-  count.className = 'panel-note'
-  return count
+/**
+ * One of the three panels: `createPanel`'s, marked `machine-panel`, the class the stylesheet keeps their headers one
+ * line by. The class is the panel's and not its container's, so a header reads the same wherever its panel is put.
+ */
+function machinePanel(o: MachinePanelOptions, body: HTMLElement): Panel {
+  const panel = createPanel({
+    name: o.name,
+    label: o.label,
+    body,
+    open: o.open,
+    onToggle: (open) => o.onToggle(open),
+  })
+  panel.el.classList.add('machine-panel')
+  return panel
+}
+
+/**
+ * A header's count. `el` is the room the header gives it, and the text is in a box of its own inside, which the
+ * stylesheet cuts short or hides by that room (`style.css`'s `.machine-panel .panel-note`). `show` gives the same
+ * words as the tooltip, which is how a cut count is read: set cut or not, so that no step has to measure the header.
+ */
+function countNote(): { readonly el: HTMLElement; show(text: string): void } {
+  const el = document.createElement('span')
+  el.className = 'panel-note'
+  const shown = document.createElement('span')
+  el.append(shown)
+  return {
+    el,
+    show(text) {
+      shown.textContent = text
+      if (text === '') el.removeAttribute('title')
+      else el.title = text
+    },
+  }
 }
 
 function note(text: string): HTMLElement {

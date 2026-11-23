@@ -123,7 +123,11 @@ function boxesOf(pane: HTMLElement): { held: Element[]; strays: Element[] } {
   return { held, strays }
 }
 
-/** The boxes a panel's header draws: the header, the toggle, the name, the actions, and each box in them. */
+/**
+ * The boxes a panel's header draws: the header, the toggle, the name, the actions, and each box in them. **NOT THE BOX
+ * A MACHINE PANEL'S COUNT KEEPS ITS TEXT IN**, which is that text and no box the header lays out: an inline box is the
+ * size of its glyphs, wherever its line is. The count's box here is the `.panel-note` around it.
+ */
 function headerBoxes(panel: HTMLElement): HTMLElement[] {
   const header = panel.querySelector<HTMLElement>(':scope > .panel-header') as HTMLElement
   return [
@@ -131,6 +135,7 @@ function headerBoxes(panel: HTMLElement): HTMLElement[] {
     ...header.querySelectorAll<HTMLElement>('.panel-toggle, .panel-name, .panel-actions, .panel-actions *'),
   ]
     .filter((el) => el instanceof HTMLElement)
+    .filter((el) => !el.matches('.machine-panel .panel-note > span'))
     .filter(isShown)
 }
 
@@ -138,10 +143,18 @@ function headerBoxes(panel: HTMLElement): HTMLElement[] {
  * **NOTHING IN A PANEL'S HEADER HIDES TEXT: NO BOX OVERFLOWS, ACROSS OR DOWN** — `view-strip-narrow.test.ts`'
  * `hidesNothing`, for the same reason: whatever its `overflow`, a box can cut only what runs past it, so an ellipsis
  * and a clipped row each show as a `scrollWidth` or `scrollHeight` over the box's `clientWidth` or `clientHeight`.
+ *
+ * **BUT A MACHINE PANEL'S COUNT, ACROSS, WHERE `counts` GIVE WAY**, at a phone's width: a header that wrapped as its
+ * count grew would move the bodies under it on a step, so its count is what gives way (the machine panels row design
+ * §5.5 and §6.4). What is held of it there is its `title`, its whole text, by which a cut one is read. At a
+ * desktop's width a count is `whole`; and every other box of its header, and every other panel's, hides nothing.
  */
-function hidesNothing(leaf: string, name: string): void {
+function hidesNothing(leaf: string, name: string, counts: 'give way' | 'whole'): void {
   for (const el of headerBoxes(panelOf(leaf, name))) {
-    expect.soft(el.scrollWidth, `${leaf} ${name}: ${nameOf(el)}’s scroll width`).toBeLessThanOrEqual(el.clientWidth)
+    const count = el.matches('.machine-panel .panel-note')
+    if (count) expect.soft(el.title, `${leaf} ${name}: ${nameOf(el)}’s tooltip`).toBe(el.textContent)
+    if (!count || counts === 'whole')
+      expect.soft(el.scrollWidth, `${leaf} ${name}: ${nameOf(el)}’s scroll width`).toBeLessThanOrEqual(el.clientWidth)
     expect.soft(el.scrollHeight, `${leaf} ${name}: ${nameOf(el)}’s scroll height`).toBeLessThanOrEqual(el.clientHeight)
   }
 }
@@ -367,11 +380,11 @@ describe('the TM view, on sum_to(5)', () => {
    * by itself (`strays`), and so is a clipping box, other than those, whose content runs past it.
    *
    * **EVERY PANEL HEADER IN EXPLORER LIES INSIDE ITS VIEW AND SQUEEZES NOTHING.** Each box in it inside the view and
-   * hiding no text (`hidesNothing`); the panel's name on one line; each radio group's choices on one row; and an action
-   * set on more than one line only on a row of its own, as wide as the header's content box (`roomOf`), where at 320px
-   * `follow current state` and `follow current rule` are wider than the 138px a row has and wrap. **EVERY CONTROL IN A
-   * PANEL HEADER CAN BE CLICKED WITHOUT A SIDEWAYS SCROLL**: `elementFromPoint` at its centre is the control, once its
-   * view and then the page are scrolled vertically to it.
+   * hiding no text but a machine panel's count (`hidesNothing`); the panel's name on one line; each radio group's
+   * choices on one row; and an action set on more than one line only on a row of its own, as wide as the header's
+   * content box (`roomOf`), where at 320px `follow current state` and `follow current rule` are wider than the 138px
+   * a row has and wrap. **EVERY CONTROL IN A PANEL HEADER CAN BE CLICKED WITHOUT A SIDEWAYS SCROLL**:
+   * `elementFromPoint` at its centre is the control, once its view and then the page are scrolled vertically to it.
    *
    * **THE PROGRAM LEVEL'S ROWS TAKE ITS WHOLE WIDTH**, 154px and 189px; **EACH CONNECTOR SVG'S DRAWING LIES INSIDE ITS
    * BOX** (`drawingsInside`); and the level, which scrolls sideways, **NEVER SCROLLS DOWN**: its `overflow-x` makes its
@@ -412,7 +425,7 @@ describe('the TM view, on sum_to(5)', () => {
         for (const [leaf, name] of PANELS) {
           const panel = panelOf(leaf, name)
           const viewInner = innerOf(leafEl(leaf))
-          hidesNothing(leaf, name)
+          hidesNothing(leaf, name, 'give way')
           for (const el of headerBoxes(panel)) {
             const box = el.getBoundingClientRect()
             expect.soft(box.left, `${leaf} ${name}: ${nameOf(el)}’s left`).toBeGreaterThanOrEqual(viewInner.left)
@@ -473,7 +486,7 @@ describe('the TM view, on sum_to(5)', () => {
       const header = panel.querySelector(':scope > .panel-header') as HTMLElement
       const toggle = panel.querySelector('.panel-toggle') as HTMLElement
       expect.soft(header.getBoundingClientRect().height, `${leaf} ${name}: the header’s height`).toBe(33)
-      hidesNothing(leaf, name)
+      hidesNothing(leaf, name, 'whole')
       for (const el of headerBoxes(panel)) {
         expect
           .soft(Math.abs(centreOf(el) - centreOf(toggle)), `${leaf} ${name}: ${nameOf(el)} on the toggle’s row`)

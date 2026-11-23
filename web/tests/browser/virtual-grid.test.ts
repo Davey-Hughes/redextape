@@ -348,6 +348,42 @@ describe('a virtual grid', () => {
     expect(made.grid.following).toBe(true)
   })
 
+  /**
+   * HIDDEN AS THE APP HIDES IT: by its panel, closed by its own toggle or by another panel's maximise (`panel.ts`), or
+   * with its panel still open, by its view leaving the page. Either way the box is `display: none` for a report of
+   * the grid's observer, where it has no height and its `scrollTop` reads 0.
+   */
+  it.each([
+    ['closed', false],
+    ['open', true],
+  ] as const)('keeps following when its box is hidden with its panel %s and shown again', async (_, open) => {
+    const made = make(1000)
+    made.set({ follow: 500 })
+    made.grid.draw()
+    const top = centred(500, 240, 1000)
+    await resized(made.grid.el)
+    expect(made.grid.el.scrollTop).toBeCloseTo(top, 0)
+    expect(made.grid.following).toBe(true)
+    made.set({ open })
+    const hidden = resized(made.grid.el)
+    made.grid.el.hidden = true
+    await hidden
+    expect(made.grid.el.clientHeight, 'the box is hidden').toBe(0)
+    // SHOWN IN A TASK OF ITS OWN, A PRESS'S, AND ITS LAYOUT READ AT ONCE, as the panel's draw on reopening reads it
+    // (`followed-grid-panel.ts`): there a browser can give the box its scroll position back and send that `scroll`
+    // ahead of the observer's report. Read, not drawn: this box reads its scroll a fraction of a pixel off what was
+    // written, so a draw would write it again and expect its echo, where the app's draw finds the box on its target.
+    await new Promise((r) => setTimeout(r))
+    made.set({ open: true })
+    const shown = resized(made.grid.el)
+    made.grid.el.hidden = false
+    expect(made.grid.el.clientHeight, 'the box is shown').toBe(240)
+    await shown
+    await frame()
+    expect(made.grid.el.scrollTop, 'the box is back where following left it').toBeCloseTo(top, 0)
+    expect(made.grid.following, 'and nobody scrolled it').toBe(true)
+  })
+
   it("hands Enter to the view's enter when it gives one, and a click still to activate", async () => {
     const enter = vi.fn()
     const { grid, activate } = make(1000, 240, { enter })

@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cdp, page, userEvent } from 'vitest/browser'
+import { cdp, commands, page, userEvent } from 'vitest/browser'
 import type { PaneEvents } from '../../src/pane-chrome'
 import { BOUNDARY_KEY_STEP, type Shares } from '../../src/panel-stack'
 import type { RxmPanels } from '../../src/rxm-pane'
 import { RxmPane } from '../../src/rxm-pane'
+import { DRAG_THRESHOLD } from '../../src/separator'
 import { FACT3, frameOf } from '../node/rxm-fixtures'
 import { chromiumOnly, mousePointerId } from './engine'
 import {
@@ -18,6 +19,7 @@ import {
   region,
   until,
 } from './harness'
+import { expectRows, loadViews, maximise, mount as mountView, VIEWS } from './machine-views'
 
 /**
  * THE BOUNDARIES BETWEEN A VIEW'S REGIONS, AND THE HEADER THAT IS A HANDLE FOR ONE — the view layouts spec §11.2,
@@ -32,7 +34,10 @@ import {
 
 const CONTROLS = controlState(true, 'step 3 of 55')
 
-/** A view of `FACT3` in a host `height` by `width`, on the page, with a frame drawn. */
+/**
+ * A view of `FACT3` in a host `height` by `width`, on the page, with a frame drawn: 800 px wide by default, the rxm
+ * view's medium arrangement (`machine-row.ts`), three regions, the heap's its own.
+ */
 function mount(
   o: { height?: number; width?: number; panels?: RxmPanels; sizes?: Shares; on?: Partial<PaneEvents> } = {},
 ) {
@@ -42,7 +47,7 @@ function mount(
   host.className = 'pane'
   host.dataset.kind = 'rxm'
   host.style.height = `${o.height ?? 900}px`
-  host.style.width = `${o.width ?? 1000}px`
+  host.style.width = `${o.width ?? 800}px`
   document.body.append(host)
   const pane = new RxmPane(host, inertEvents({ panelSizes: sizes, panel, ...o.on }), o.panels ?? {}, o.sizes ?? {})
   pane.setProgram(FACT3)
@@ -80,13 +85,28 @@ const fire = (el: HTMLElement, type: string, y: number): void => {
   )
 }
 
+/** What a frame px is in the top-level page's px, where `commands.mouse` lands: the tests run in a scaled frame. */
+const scale = (): number => (window.frameElement as HTMLElement).getBoundingClientRect().width / innerWidth
+
+/** The frame's point `x`, `y` in the top-level page's px. */
+const pageAt = (x: number, y: number): { x: number; y: number } => {
+  const f = (window.frameElement as HTMLElement).getBoundingClientRect()
+  return { x: f.left + x * scale(), y: f.top + y * scale() }
+}
+
+/**
+ * How far a title case drags: a whole number of the page's px in the scaled frame the tests run in. Playwright's
+ * Firefox moves the mouse by whole page px, so any other distance can land up to a page px off, which in the frame can
+ * be past the ±0.5 px the cases allow.
+ */
+const PULL = 50
+
 /**
  * A finger's press at `el`'s centre, a move of `dy` px and its release, sent through CDP as a real touch: `pressed`
  * looks right after the press, and `moved` a frame after the move.
  */
 async function finger(el: HTMLElement, dy: number, pressed: () => void, moved: () => void): Promise<void> {
   const at = pageCentreOf(el)
-  const scale = (window.frameElement as HTMLElement).getBoundingClientRect().width / innerWidth
   let down = false
   let after = false
   const heard = () => {
@@ -107,7 +127,7 @@ async function finger(el: HTMLElement, dy: number, pressed: () => void, moved: (
     pressed()
     await cdp().send('Input.dispatchTouchEvent', {
       type: 'touchMove',
-      touchPoints: [{ x: at.x, y: at.y + dy * scale }],
+      touchPoints: [{ x: at.x, y: at.y + dy * scale() }],
     })
     await until(() => after, 'the finger’s move')
     await frame()
@@ -120,6 +140,8 @@ async function finger(el: HTMLElement, dy: number, pressed: () => void, moved: (
 }
 
 const middle = (el: HTMLElement): number => el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
+
+loadViews()
 
 // A VIEWPORT AS WIDE AND AS TALL AS A VIEW: a real press aimed past the page's edge lands on nothing.
 beforeAll(async () => {
@@ -483,15 +505,18 @@ describe('a drag of a boundary', () => {
 })
 
 describe('a panel’s header, as the handle for the boundary above it', () => {
-  it('says so with the pointer where a boundary lies above it, and nowhere else', async () => {
+  it('says so with the pointer where a boundary lies above it, on its title too, and nowhere else', async () => {
     const { host } = mount()
     expect(header(host, 'listing').dataset.resizes, 'the first region has no boundary above').toBeUndefined()
     expect(getComputedStyle(header(host, 'listing')).cursor).not.toBe('grab')
+    // A PRESS ON A TITLE WHOSE HEADER IS NO HANDLE IS ONLY EVER A CLICK.
+    expect(getComputedStyle(panelToggle(host, 'listing')).cursor, 'the listing’s title').toBe('pointer')
     for (const name of ['registers', 'stack', 'heap']) {
       expect(header(host, name).dataset.resizes, name).toBe('true')
       expect(getComputedStyle(header(host, name)).cursor, name).toBe('grab')
-      // EACH CONTROL ON THE BAR KEEPS ITS OWN POINTER.
-      expect(getComputedStyle(panelToggle(host, name)).cursor, `${name}’s disclosure`).toBe('pointer')
+      expect(getComputedStyle(panelToggle(host, name)).cursor, `${name}’s title`).toBe('grab')
+      // EVERY OTHER CONTROL ON THE BAR KEEPS ITS OWN POINTER.
+      expect(getComputedStyle(maximise(host, name)).cursor, `${name}’s maximise button`).toBe('pointer')
     }
     // CLOSED, THE HEAP TAKES NO SHARE AND HAS NO BOUNDARY ABOVE IT.
     await userEvent.click(panelToggle(host, 'heap'))
@@ -510,21 +535,286 @@ describe('a panel’s header, as the handle for the boundary above it', () => {
     expect(sizes).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves a press on one of its controls to the control', async () => {
+  it("in a view wide enough for one row, is the heap's too: it drags the boundary above the row", async () => {
+    const { host, sizes } = mount({ width: 1000 })
+    expect(panelOf(host, 'heap').parentElement, 'precondition: the heap is in the row').toBe(region(host, 'machine'))
+    expect(header(host, 'heap').dataset.resizes).toBe('true')
+    expect(getComputedStyle(header(host, 'heap')).cursor).toBe('grab')
+    const before = { listing: height(host, 'listing'), machine: height(host, 'machine') }
+    await drag(host, header(host, 'heap'), -60)
+    expect(height(host, 'machine'), 'the row did not take 60 px').toBeCloseTo(before.machine + 60, 0)
+    expect(height(host, 'listing')).toBeCloseTo(before.listing - 60, 0)
+    expect(Object.keys(last(sizes)).sort()).toEqual(['listing', 'machine'])
+  })
+
+  it('and a double click on it puts the listing and the row back', async () => {
+    // BUILT WITH THE SHARES A DRAG WOULD HAVE STORED, so the double click is the first gesture the header takes.
+    const { host, sizes } = mount({ width: 1000, sizes: { listing: 1, machine: 3, heap: 0.8 } })
+    expect(panelOf(host, 'heap').parentElement, 'precondition: the heap is in the row').toBe(region(host, 'machine'))
+    expect(height(host, 'machine') / height(host, 'listing'), 'precondition: drawn at the stored shares').toBeCloseTo(
+      3,
+      1,
+    )
+    await userEvent.dblClick(header(host, 'heap'))
+    await frame()
+    expect(height(host, 'listing') / height(host, 'machine'), 'the shares they are built with').toBeCloseTo(2, 1)
+    // THE TWO HOLD NO SHARE OF THEIR OWN AGAIN, and the heap's waits for its region's return.
+    expect(last(sizes)).toEqual({ heap: 0.8 })
+  })
+
+  it('leaves a press on its other controls to the control, and a click on its title to the title', async () => {
     const { host, sizes, panel } = mount()
     const before = heights(host)
-    // A REAL CLICK ON THE DISCLOSURE: the panel closes, and nothing was dragged.
+    // A REAL CLICK ON THE TITLE: the panel closes, and nothing was dragged.
     await userEvent.click(panelToggle(host, 'heap'))
     expect(panel).toHaveBeenCalledExactlyOnceWith('heap', false)
     await userEvent.click(panelToggle(host, 'heap'))
     await frame()
-    expect(heights(host), 'a click on the disclosure moved a boundary').toEqual(before)
-    // AND A REAL DRAG THAT STARTS ON IT moves nothing: the press was the button's.
-    const [t, area] = [panelToggle(host, 'heap').getBoundingClientRect(), host.getBoundingClientRect()]
-    const at = { x: t.left - area.left + t.width / 2, y: t.top - area.top + t.height / 2 }
+    expect(heights(host), 'a click on the title moved a boundary').toEqual(before)
+    // A PRESS ON THE MAXIMISE BUTTON THAT MOVES LESS THAN THE THRESHOLD and lets go on it is the button's click. Before
+    // the drag below, whose heights would fail first: a press the filter took at once, as it takes the header's empty
+    // part, would hold the capture and send the click to the header.
+    const button = maximise(host, 'heap')
+    const pressed = button.getAttribute('aria-pressed')
+    await drag(host, button, -2 / scale())
+    expect(button.getAttribute('aria-pressed'), 'a short press did not press the maximise button').not.toBe(pressed)
+    await userEvent.click(button)
+    await frame()
+    expect(heights(host), 'the heap put back from its maximise').toEqual(before)
+    // AND A REAL DRAG THAT STARTS ON THE MAXIMISE BUTTON moves nothing: the press was the button's. It lets go off the
+    // button, so the button's state cannot tell whether its click came.
+    const [m, area] = [button.getBoundingClientRect(), host.getBoundingClientRect()]
+    const at = { x: m.left - area.left + m.width / 2, y: m.top - area.top + m.height / 2 }
     await userEvent.dragAndDrop(host, host, { sourcePosition: { ...at }, targetPosition: { x: at.x, y: at.y - 60 } })
     await frame()
-    expect(heights(host), 'a drag begun on the disclosure moved a boundary').toEqual(before)
+    expect(heights(host), 'a drag begun on the maximise button moved a boundary').toEqual(before)
+    expect(sizes).not.toHaveBeenCalled()
+  })
+
+  it('drags that boundary by a press on its title that moves, and leaves the panel open', async () => {
+    const { host, sizes, panel } = mount()
+    const t = panelToggle(host, 'heap')
+    const before = heights(host)
+    await drag(host, t, -PULL)
+    // THE CLICK FIRST: a release whose click reached the title closes the heap, which the heights would read as a drag
+    // that never began.
+    expect(panel, 'the drag opened or closed the heap').not.toHaveBeenCalled()
+    expect(t.getAttribute('aria-expanded'), 'the heap is drawn closed').toBe('true')
+    const after = heights(host)
+    expect(after.heap, 'the heap did not take the drag').toBeCloseTo(before.heap + PULL, 0)
+    expect(after.machine).toBeCloseTo(before.machine - PULL, 0)
+    expect(after.listing).toBeCloseTo(before.listing, 1)
+    expect(sizes).toHaveBeenCalledTimes(1)
+    const body = panelOf(host, 'heap').querySelector('.rxm-heap') as HTMLElement
+    expect(body.getBoundingClientRect().height, 'the heap’s body').toBeGreaterThan(0)
+  })
+
+  it('takes a press on its title moved 2 whole page px, short of the threshold, for a click, and one moved 3, past it, for a drag', async () => {
+    // WHOLE PAGE PX EITHER SIDE OF THE THRESHOLD, so neither press lands across it in Playwright's Firefox, which moves
+    // the mouse by whole page px.
+    const [short, past] = [2 / scale(), 3 / scale()]
+    expect(short, 'precondition: 2 page px fall short of the threshold').toBeLessThan(DRAG_THRESHOLD)
+    expect(past, 'precondition: 3 page px pass it').toBeGreaterThan(DRAG_THRESHOLD)
+    const { host, sizes, panel } = mount()
+    const t = panelToggle(host, 'heap')
+    const before = heights(host)
+    await drag(host, t, -short)
+    expect(panel, 'a press that moved less than the threshold').toHaveBeenCalledExactlyOnceWith('heap', false)
+    expect(sizes).not.toHaveBeenCalled()
+    await userEvent.click(t)
+    await frame()
+    expect(heights(host), 'the heap opened again').toEqual(before)
+    await drag(host, t, -past)
+    expect(heights(host).heap, 'a press that moved past the threshold').toBeCloseTo(before.heap + past, 0)
+    expect(panel, 'a press that moved past the threshold opened or closed the heap').toHaveBeenCalledTimes(2)
+  })
+
+  it('takes a press on its title slid sideways for a drag that moves nothing, not for a click', async () => {
+    const { host, sizes, panel } = mount()
+    const t = panelToggle(host, 'heap')
+    const box = t.getBoundingClientRect()
+    expect(box.width, 'precondition: the title is wider than the slide').toBeGreaterThan(DRAG_THRESHOLD + 6)
+    const before = heights(host)
+    const y = box.top + box.height / 2
+    const [from, to] = [pageAt(box.left + 3, y), pageAt(box.left + 3 + DRAG_THRESHOLD + 2, y)]
+    await commands.mouse('down', from.x, from.y)
+    await commands.mouse('up', to.x, to.y)
+    await frame()
+    expect(panel, 'a press slid along the title opened or closed the heap').not.toHaveBeenCalled()
+    expect(t.getAttribute('aria-expanded'), 'the heap is drawn closed').toBe('true')
+    expect(heights(host), 'a press slid sideways moved a boundary').toEqual(before)
+    expect(sizes).not.toHaveBeenCalled()
+  })
+
+  it('is held from the moment a press on its title passes the threshold, and not before', async () => {
+    const { host } = mount()
+    const t = panelToggle(host, 'heap')
+    const bar = header(host, 'heap')
+    // WHOLE PAGE PX EITHER SIDE OF THE THRESHOLD, as in the case above: `commands.mouse` takes page px.
+    expect(2 / scale(), 'precondition: 2 page px fall short of the threshold').toBeLessThan(DRAG_THRESHOLD)
+    expect(3 / scale(), 'precondition: 3 page px pass it').toBeGreaterThan(DRAG_THRESHOLD)
+    const at = pageCentreOf(t)
+    let y = at.y
+    await commands.mouse('down', at.x, y)
+    try {
+      y = at.y - 2
+      await commands.mouse('move', at.x, y)
+      expect(bar.dataset.dragging, 'held before the threshold').toBeUndefined()
+      expect(getComputedStyle(t).cursor, 'before the threshold').toBe('grab')
+      y = at.y - 3
+      await commands.mouse('move', at.x, y)
+      expect(bar.dataset.dragging, 'past the threshold').toBe('true')
+      expect(getComputedStyle(t).cursor, 'past the threshold').toBe('grabbing')
+    } finally {
+      await commands.mouse('up', at.x, y)
+    }
+    expect(bar.dataset.dragging, 'after the release').toBeUndefined()
+    expect(getComputedStyle(t).cursor, 'released').toBe('grab')
+    expect(t.getAttribute('aria-expanded'), 'the heap is drawn closed').toBe('true')
+  })
+
+  it('keeps a double click on its title two clicks of the title, and the shares as they are stored', async () => {
+    // THE HEAP IN THE ROW, whose title a close leaves under the pointer for the second click.
+    const { host, sizes, panel } = mount({ width: 1000, sizes: { listing: 1, machine: 3, heap: 0.8 } })
+    expect(panelOf(host, 'heap').parentElement, 'precondition: the heap is in the row').toBe(region(host, 'machine'))
+    expect(height(host, 'machine') / height(host, 'listing'), 'precondition: drawn at the stored shares').toBeCloseTo(
+      3,
+      1,
+    )
+    const before = { listing: height(host, 'listing'), machine: height(host, 'machine') }
+    await userEvent.dblClick(panelToggle(host, 'heap'))
+    await frame()
+    expect(panel.mock.calls).toEqual([
+      ['heap', false],
+      ['heap', true],
+    ])
+    expect(height(host, 'listing'), 'the listing').toBeCloseTo(before.listing, 0)
+    expect(height(host, 'machine'), 'the row').toBeCloseTo(before.machine, 0)
+    expect(sizes).not.toHaveBeenCalled()
+  })
+
+  it('leaves nothing pending after a press on its title whose release lands off its header', async () => {
+    const { host, sizes, panel } = mount()
+    const t = panelToggle(host, 'heap')
+    const bar = header(host, 'heap')
+    const box = t.getBoundingClientRect()
+    const at = pageCentreOf(t)
+    await commands.mouse('down', at.x, at.y)
+    try {
+      // THE HEADER GOES UP FROM UNDER THE PRESS, so the release lands off it.
+      host.style.height = '700px'
+      await frame()
+      const under = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      expect(bar.contains(under), 'precondition: the header is still under the pointer').toBe(false)
+    } finally {
+      await commands.mouse('up', at.x, at.y)
+    }
+    const before = heights(host)
+    await commands.mouse('move', at.x, at.y - 60 * scale())
+    await frame()
+    expect(bar.dataset.dragging, 'a move with no button pressed').toBeUndefined()
+    expect(heights(host), 'a move with no button pressed moved a boundary').toEqual(before)
+    expect(sizes).not.toHaveBeenCalled()
+    expect(panel).not.toHaveBeenCalled()
+  })
+
+  it('leaves a press on its title alone whose view left the page before it passed the threshold', async () => {
+    const { host, sizes } = mount()
+    const t = panelToggle(host, 'heap')
+    const bar = header(host, 'heap')
+    const at = pageCentreOf(t)
+    const to = { x: at.x, y: at.y - 60 * scale() }
+    const thrown: string[] = []
+    const heard = (e: ErrorEvent) => thrown.push(e.message)
+    window.addEventListener('error', heard)
+    try {
+      await commands.mouse('down', at.x, at.y)
+      try {
+        host.remove()
+        await frame()
+        await commands.mouse('move', to.x, to.y)
+        await frame()
+        expect(thrown, 'the move past the threshold threw').toEqual([])
+        expect(bar.dataset.dragging, 'a header off the page is drawn held').toBeUndefined()
+      } finally {
+        await commands.mouse('up', to.x, to.y)
+      }
+    } finally {
+      window.removeEventListener('error', heard)
+    }
+    expect(sizes).not.toHaveBeenCalled()
+  })
+
+  it('ends a press on its title at a move with no button pressed, whose release never reached the page', async () => {
+    const { host, sizes } = mount()
+    const t = panelToggle(host, 'heap')
+    const bar = header(host, 'heap')
+    const at = pageCentreOf(t)
+    await commands.mouse('down', at.x, at.y)
+    // RELEASED PAST THE PAGE'S LEFT EDGE, which Playwright's Firefox never tells the page.
+    await commands.mouse('up', -10, at.y)
+    const before = heights(host)
+    await commands.mouse('move', at.x, at.y - 60 * scale())
+    await frame()
+    expect(bar.dataset.dragging, 'a move with no button pressed').toBeUndefined()
+    expect(heights(host), 'a move with no button pressed moved a boundary').toEqual(before)
+    expect(sizes).not.toHaveBeenCalled()
+  })
+
+  it('ends a press on its title at its release, so a press elsewhere with no move between is not taken for it', async (ctx) => {
+    chromiumOnly(ctx, 'a press with no move before it is CDP’s Input.dispatchMouseEvent, which only Chromium has')
+    // CDP'S MOUSE, NOT PLAYWRIGHT'S, which moves before each press: a move with no button pressed ends a waiting press
+    // by itself, and would hide whether the release did.
+    const { host, sizes, panel } = mount()
+    const t = panelToggle(host, 'heap')
+    const bar = header(host, 'heap')
+    const box = t.getBoundingClientRect()
+    const at = pageCentreOf(t)
+    const to = { x: at.x, y: at.y - 60 * scale() }
+    await cdp().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y, button: 'none', buttons: 0 })
+    await cdp().send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: at.x,
+      y: at.y,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    })
+    await cdp().send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: at.x,
+      y: at.y,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+    })
+    await frame()
+    expect(panel, 'precondition: the click closed the heap').toHaveBeenCalledExactlyOnceWith('heap', false)
+    const under = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+    expect(bar.contains(under), 'precondition: the heap’s header left the pointer').toBe(false)
+    await cdp().send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: at.x,
+      y: at.y,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    })
+    try {
+      await cdp().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: to.x, y: to.y, button: 'left', buttons: 1 })
+      await frame()
+      expect(bar.dataset.dragging, 'a press elsewhere is held by the heap’s header').toBeUndefined()
+    } finally {
+      await cdp().send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: to.x,
+        y: to.y,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+      })
+    }
+    await frame()
     expect(sizes).not.toHaveBeenCalled()
   })
 
@@ -534,6 +824,14 @@ describe('a panel’s header, as the handle for the boundary above it', () => {
     const { host, sizes } = mount()
     const before = heights(host)
     const bar = header(host, 'heap')
+    // ON THE TITLE FIRST, which a mouse's press that moves drags: a finger there is left alone as on the bar.
+    const t = panelToggle(host, 'heap')
+    await finger(
+      t,
+      -60,
+      () => expect(bar.dataset.dragging, 'a finger’s press on the title drew the bar held').toBeUndefined(),
+      () => expect(heights(host), 'a finger on the title dragged').toEqual(before),
+    )
     // ALSO AT THE PRESS: the bar leaves a finger's pan to the browser, which cancels the pointer once the pan
     // starts, so the checks after the move hold only while a move comes before that cancel.
     await finger(
@@ -583,21 +881,116 @@ describe('a panel’s header, as the handle for the boundary above it', () => {
   })
 
   /**
-   * IN A NARROW VIEW THE CALL STACK WRAPS UNDER THE REGISTERS, and its header is then in the middle of the row's
-   * region, not along the boundary above it.
+   * IN A NARROW VIEW THE CALL STACK HAS A REGION OF ITS OWN UNDER THE REGISTERS' (the after-the-try design's G1), a
+   * part of the row's share: its header is the handle of the boundary between the two, and a drag of it stores the
+   * row's share and the call stack's part of it.
    */
-  it('is not a handle on a panel that has wrapped under the one beside it', async () => {
-    const { host } = mount({ width: 420, height: 1100 })
+  it("in a narrow view, is the call stack's: it drags the boundary between the registers and the call stack", async () => {
+    // A WINDOW THAT HOLDS THE WHOLE VIEW: the driver presses only where the window shows.
+    await page.viewport(1280, 1700)
+    try {
+      const { host, sizes } = mount({ width: 420, height: 1600 })
+      await frame()
+      expect(header(host, 'stack').dataset.resizes, 'the call stack’s header').toBe('true')
+      const body = panelOf(host, 'registers').querySelector('.rxm-registers') as HTMLElement
+      const floor = Number.parseFloat(getComputedStyle(body).minHeight)
+      expect(
+        body.getBoundingClientRect().height - floor,
+        'precondition: the registers’ body is over its floor by more than the drag',
+      ).toBeGreaterThan(40)
+      const all = () => ({ ...heights(host), stack: height(host, 'stack') })
+      const before = all()
+      await drag(host, header(host, 'stack'), -40)
+      const after = all()
+      expect(after.machine, 'the registers').toBeCloseTo(before.machine - 40, 0)
+      expect(after.stack, 'the call stack').toBeCloseTo(before.stack + 40, 0)
+      expect(after.listing, 'the listing').toBeCloseTo(before.listing, 0)
+      expect(after.heap, 'the heap').toBeCloseTo(before.heap, 0)
+      const s = last(sizes)
+      expect(Object.keys(s).sort()).toEqual(['machine', 'stack'])
+      expect(s.machine, 'the row keeps its share').toBeCloseTo(1, 2)
+      expect(s.stack, 'the part drawn').toBeCloseTo(after.stack / (after.machine + after.stack), 2)
+    } finally {
+      await page.viewport(1280, 1000)
+    }
+  })
+})
+
+/**
+ * IN A SHORT NARROW VIEW THE CALL STACK'S HEADER MOVES THE BOUNDARY ABOVE IT BOTH WAYS (the after-the-try design's
+ * G1): at 900px tall a floor of five rows would hold the first panel and the call stack both on it, and the boundary
+ * still. In narrow each keeps two.
+ */
+describe.each(VIEWS)('in a short narrow $kind view, the call stack’s header', (view) => {
+  it('drags the boundary above it down to two rows of the call stack and up to two of the first panel', async () => {
+    const { host, draw } = mountView(view, view.medium - 40, { height: 900 })
+    draw({ depth: 12, cells: 1, boxes: 0, rows: { stack: 12, values: 64 } })
     await frame()
-    const [r, s] = [panelOf(host, 'registers'), panelOf(host, 'stack')]
-    expect(s.getBoundingClientRect().top, 'precondition: the call stack is under the registers').toBeGreaterThan(
-      r.getBoundingClientRect().bottom - 1,
-    )
-    expect(header(host, 'registers').dataset.resizes).toBe('true')
-    expect(header(host, 'stack').dataset.resizes, 'the wrapped panel’s header').toBeUndefined()
-    const before = heights(host)
-    await drag(host, header(host, 'stack'), -40)
-    expect(heights(host), 'a drag of the wrapped panel’s header moved a boundary').toEqual(before)
+    await frame()
+    expect(header(host, 'stack').dataset.resizes, 'precondition: the call stack’s header is a handle').toBe('true')
+    const all = () => ({ ...heights(host), stack: height(host, 'stack') })
+    for (const [dy, floor, grows] of [
+      [80, 'stack', 'machine'],
+      [-160, view.values, 'stack'],
+    ] as const) {
+      const before = all()
+      await drag(host, header(host, 'stack'), dy)
+      const after = all()
+      expect(after[grows], `a drag of ${dy} px did not move the boundary`).toBeGreaterThan(before[grows] + 1)
+      expect(after.listing, `a drag of ${dy} px: the listing`).toBeCloseTo(before.listing, 0)
+      expect(after.heap, `a drag of ${dy} px: the heap`).toBeCloseTo(before.heap, 0)
+      expectRows(host, floor, 2, `a drag of ${dy} px`)
+    }
+  })
+})
+
+describe.each(VIEWS)('in a $kind view, the heap’s title', (view) => {
+  it('drags the boundary above the heap, and leaves it open', async () => {
+    const { host, sizes } = mountView(view, view.medium + 40)
+    const t = panelToggle(host, 'heap')
+    expect(getComputedStyle(t).cursor, 'the title').toBe('grab')
+    const before = height(host, 'heap')
+    await drag(host, t, -PULL)
+    expect(height(host, 'heap'), 'the heap did not take the drag').toBeCloseTo(before + PULL, 0)
+    expect(t.getAttribute('aria-expanded'), 'the heap is drawn closed').toBe('true')
+    expect(sizes).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * IN NARROW THE CALL STACK'S TITLE IS A HANDLE FOR THE BOUNDARY BETWEEN THE FIRST PANEL AND THE CALL STACK, a part of
+ * the row's share, so its commit stores the row's share and the call stack's part of it, as a drag of its header does.
+ */
+describe.each(VIEWS)('in a narrow $kind view, the call stack’s title', (view) => {
+  it('drags the boundary between the first panel and the call stack, stores the pair, and leaves it open', async () => {
+    // A WINDOW THAT HOLDS THE WHOLE VIEW: the driver presses only where the window shows.
+    await page.viewport(1280, 1700)
+    try {
+      const { host, sizes } = mountView(view, view.medium - 40, { height: 1600 })
+      await frame()
+      const t = panelToggle(host, 'stack')
+      expect(getComputedStyle(t).cursor, 'the title').toBe('grab')
+      const body = panelOf(host, view.values).querySelector('.rxm-registers') as HTMLElement
+      expect(
+        body.getBoundingClientRect().height - Number.parseFloat(getComputedStyle(body).minHeight),
+        'precondition: the first panel’s body is over its floor by more than the drag',
+      ).toBeGreaterThan(PULL)
+      const all = () => ({ ...heights(host), stack: height(host, 'stack') })
+      const before = all()
+      await drag(host, t, -PULL)
+      expect(t.getAttribute('aria-expanded'), 'the call stack is drawn closed').toBe('true')
+      const after = all()
+      expect(after.stack, 'the call stack did not take the drag').toBeCloseTo(before.stack + PULL, 0)
+      expect(after.machine, 'the first panel').toBeCloseTo(before.machine - PULL, 0)
+      expect(after.listing, 'the listing').toBeCloseTo(before.listing, 0)
+      expect(after.heap, 'the heap').toBeCloseTo(before.heap, 0)
+      expect(sizes).toHaveBeenCalledTimes(1)
+      const s = last(sizes)
+      expect(Object.keys(s).sort()).toEqual(['machine', 'stack'])
+      expect(s.stack, 'the part drawn').toBeCloseTo(after.stack / (after.machine + after.stack), 2)
+    } finally {
+      await page.viewport(1280, 1000)
+    }
   })
 })
 

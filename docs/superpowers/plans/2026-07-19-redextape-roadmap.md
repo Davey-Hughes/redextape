@@ -39156,3 +39156,1065 @@ parentheses: a mark counted anywhere on its line (`a # inside a line`), any back
 | 25, 8, 5; 5481, 656, 656; 37, 11, 8 | the word and the two lines each failing sabotage names | `rg -o 'word [0-9]+ differs.*' $R/logs/24-sabotage.log` |
 | 0.212 to 0.223 | seconds the hook's entry took, five runs, as `docs/development.md` quotes | `sed -n 3,7p $R/logs/36-hook-timing.log` |
 | 0 | the exit status of each check at `db98a55`, in the order above | `tail -qn1 $R/logs/29-*.log $R/logs/3[0-4]-*.log` |
+
+#### THE CLIF AND RXM VIEWS LAY THEIR VALUES OR REGISTERS, CALL STACK AND HEAP OUT IN ONE ROW OF THREE, IN TWO ROWS OR IN A COLUMN BY THE VIEW'S WIDTH, A CLOSED PANEL KEEPS ITS COLUMN, AND A MACHINE PANEL'S HEADER IS ONE LINE (2026-11-21 and 2026-11-22, branch `panels-row`, `2cc48da..24ef8c3`, 51 commits, plus this entry's first writing, `5788121`, the three commits that correct it or bring it up to the branch review's fixes, `8e40675`, `b09b683` and `dbaa7c8`, the one that brings it up to the changes after Davey's try, `a9b75ad`, the two that bring it up to their review's fixes and to a floor of two rows, `efa5988` and `ba09cb8`, the one that brings it up to `2277023`, `c172f94`, the one that brings it up to `d0e3df0`, `906c0bb`, the two that bring it up to `1b5bd9a`, `d54ad71` and `4bfe118`, and the two that bring it up to the review of the whole branch, the first `5112095`)
+
+Davey, trying the CLIF view, saw the values and call stack panels narrow when the listing was maximised, and asked for
+values, call stack and heap on one row where there is room, in the rxm view too. The design is
+`docs/superpowers/specs/2026-11-21-machine-panels-row-design.md`, the range's first 3 commits; its new §11 says where
+the build differs from its text. The plan is `docs/superpowers/plans/2026-11-21-machine-panels-row.md`, committed as
+`72399a4`, with its pre-flight scan's twelve findings taken in `d583e9f`; the build is the 11 commits after that. A
+prototype of the whole design, `$R/proto/prototype.patch`, measured the design's numbers and was read beside each task,
+not pasted. Task 0 took the baselines; Tasks 1 to 6 ran in order, a subagent each with a reviewer after it, Task 1 with
+one fix round, Task 4 with two and Task 5 with one; Task 7 ran the full gate and a pass by hand in Firefox, which needed
+one fix round. The whole-branch review followed this entry: Task 10 made its fixes, the 5 commits
+`8e40675..c6e03ee`, and ran the gate again at `1d53222`, before `c6e03ee` took an empty line out of a doc comment. The
+branch was rebased onto `2cc48da` after Task 6: a SHA in a task report from before then maps to this range by
+`$R/ledger.md`'s 02:05 UTC line, or by its 03:57 UTC line for Task 1's first commit, `44d255e`, and the plan's
+`1b5297b`. `pkg/` and the Rust do not change. The lane's record is `~/temp/redextape-panels-row-record/`, `$R` below;
+its logs, drivers and reports are in `$R/impl/`, `$L` below.
+
+Davey then tried the branch in Firefox and asked for three changes: in narrow a boundary between the values or registers
+and the call stack, the row's panels closer together, and a header's count centred on its buttons. The design is
+`docs/superpowers/specs/2026-11-22-machine-panels-row-after-the-try-design.md`, committed as `5eed000`. The plan is
+`docs/superpowers/plans/2026-11-22-machine-panels-row-after-the-try.md`, committed as `2843713`, with the controller's
+ruling on a reset of the new boundary in `e223cb5` and its pre-flight scan's 16 findings in `af779e2`; the build is the
+4 commits after that. Task 0 took the baselines at `e223cb5`; Tasks 1 to 4 ran in order, a subagent each with a reviewer
+after it and no fix round, Task 2 stopping once to ask; Task 5 ran the full gate and a pass by hand in Firefox at
+`4a8bd6d`, and committed nothing. Task 6 brought this entry up to them, `a9b75ad`, and Task 7 reviewed
+`5eed000..a9b75ad` (`$L2/review.md`). Task 8 made the review's fixes, the 7 commits `a9b75ad..a01463c`, and brought this
+entry up to them and to Task 6's review in `efa5988`; then, by Davey's choice after the review, `05eaa28` gave the first
+panel and the call stack a floor of two rows in narrow, and `ba09cb8` the docs for it. Task 8 ran the full gate and a
+pass by hand in Firefox at `ba09cb8`, and `2277023` then rewords two test comments. That plan's logs, drivers and
+reports are in `$R/impl2/`, `$L2` below, and its rulings in `$R/ledger.md`'s Plan 2 section.
+
+Davey then asked, trying the branch again, that a panel's title drag the boundary above it too: "if you grab onto the
+spot in these places with words, like > values, > callstack, you can't drag". The design is
+`docs/superpowers/specs/2026-11-22-panel-title-drag-design.md`, committed as `0283d85`; its *As built* section says
+where the build differs from its text. The plan is `docs/superpowers/plans/2026-11-22-panel-title-drag.md`, committed as
+`31cf5a9`, with its pre-flight scan's 9 findings in `b807ad8`; the build is the 3 commits after that, Task 1's `c1172f7`
+and its two fix rounds, `ff329c9` and `d0e3df0`. Task 2 ran the full gate and a pass by hand in Firefox at `d0e3df0`,
+and Task 3 brought this entry up to them, `906c0bb`. Task 4 reviewed `0283d85..d0e3df0` (`$L3/review.md`) and made its
+fixes, the 5 commits `906c0bb..1b5bd9a` (`$L3/task-4-report.md`); the gate and the pass by hand ran again at `1b5bd9a`
+(`$L3/task-4-gate-report.md`), and `d54ad71` and `4bfe118` brought this entry up to them. That plan's logs, drivers and
+reports are in `$R/impl3/`, `$L3` below, and its rulings in `$R/ledger.md`'s Plan 3 section.
+
+The review of the whole branch, the three plans read as one change, followed (`$R/final/review.md`). Its fixes are the 2
+commits `4bfe118..24ef8c3`, each a test, `c969f4e` and `24ef8c3`, and the two that bring this entry up to it, the first
+with two of the designs; their logs, the copies their sabotages edited and the fixes' report are in `$R/final/`.
+
+##### WHAT CHANGED FOR A PERSON USING THE VIEWS
+
+**Three arrangements, chosen by the view's width.** A CLIF view's values, call stack and heap, and an rxm view's
+registers, call stack and heap, sit in one row of three where the view has room for them (*wide*), the first two side by
+side over the heap where it has room for two (*medium*, the layout both views had), and in a column below that
+(*narrow*). The width is the view's own box less its padding and border, which only what a person does changes: the
+window's size, a divider's drag, a view added, closed or moved, the layout cycle. A step, a compile, a run's end or a
+scroll bar coming in switches nothing, and nothing is stored, so a workspace and a share link keep their shape.
+
+| View | Least widths of its three columns | Wide from | Medium | Narrow below |
+|---|---|---|---|---|
+| CLIF | 7.375, 14.75 and 14.75rem (118, 236 and 236px) | 606px | 362px up to 606px | 362px |
+| rxm | 18rem each (288px) | 880px | 584px up to 880px | 584px |
+
+The pixels are at a 16px root, with an 8px gap between columns, `var(--space-2)` (`48c3702`), where the gap was 16px and
+the thresholds 622 and 370px for CLIF and 896 and 592px for rxm; a person's larger text moves the thresholds with it.
+Beside the source, a 1280px window gives either view 634px: CLIF is wide there, where it was medium, and rxm medium as
+it was. A 1024px window gives 506px: CLIF is medium, where its values sat over its call stack, and rxm narrow as it was.
+
+**A closed panel keeps its column.** The narrowing Davey saw is gone: each panel keeps its column open or closed in each
+arrangement, so opening, closing or maximising one moves no neighbour sideways, and three closed panels read as three
+bars. CLIF's columns are 1 : 2 : 2, the values the narrowest; rxm's are equal. A maximise works as before, its panel's
+region taking the spare height; in wide that region is the row, and a maximised heap there keeps its column, a third of
+the row in rxm and two fifths in CLIF, where in medium it has the view's width.
+
+**In narrow the call stack has a region of its own** under the values' (the registers' in rxm), so a short call stack
+need not keep half of the two's height (`4a8bd6d`). The boundary between the two is named "resize values and call stack"
+in CLIF ("registers" in rxm); the call stack's header drags it and the keys move it, as with every other boundary. Where
+it is set is stored under `stack`, the call stack's part of the two's share, `machine`, so it goes into workspaces and
+share links and is kept across switches: in medium and wide the row has the height the two had together, so the listing
+and the heap keep theirs but for their parts of the 8px boundary between the two, which narrow draws and medium and wide
+do not, and back in narrow the split is where it was. With nothing stored the two split evenly, so a workspace or a link
+written before this shows the heights it did where the floors of five rows did not bind, but for that boundary's 8px,
+which the four regions now give up between them where the old column's gap sat inside the row's share. Closing either
+gives the other the two's whole share. Enter or a double click on the boundary between them puts the split back to even
+and keeps the listing and the heap where they are; on a boundary beside the two it puts back the region outside them and
+the two's share together, and keeps the split. In narrow the two keep a floor of two rows each, where every other
+machine body keeps five (`05eaa28`, Davey's choice, 2026-11-22), so in a window 896px tall the boundary between them
+moves, but not far: with nothing stored the two open smaller there, the listing and the heap taking the room, and in a
+view 700px tall the boundary has 1.8px each way in CLIF and 9.4px in rxm, while in a 692 by 896px window the Firefox
+pass at `ba09cb8` moved it 5.6px from one floor to the other in CLIF and 6.7px in rxm. The two have more room only once
+a boundary beside them gives it, the listing's above or the heap's below.
+
+**In wide the row is one region.** One boundary parts it from the listing, named "resize listing and values, call stack
+and heap" in CLIF ("registers" in rxm), and the heap's header is a handle for that boundary as the other two headers
+are; no boundary is drawn between the row and the heap. The stored shares keep their names: `machine` is the row, of
+three or of two, and in narrow the values and the call stack together, and `heap` is kept while the heap is in the row
+and applies again when the heap has its own region, so a drag in one arrangement carries into the other.
+
+**On an rxm copy each region begins right under the boundary above it**, across what draws nothing between them: the
+outline under the one that parts it from the row in wide, past the call stack's and the heap's hidden regions, and the
+listing under the one that parts it from the copy's text while the value line between them is empty, where on main it
+began 8px lower (`8bea67c`, `4a8bd6d`). A value line with text keeps its margin, so a value showing moves the listing
+down by the line's height and 16px, where on main it moved it by the line's height and 8px. Main's 8px and both moves
+are read from the style sheet, not measured.
+
+**A machine panel's header is one line at any width.** A header that wrapped as its count grew would move the bodies
+under it on a step. Where the column is too narrow, the count gives way first, cut with "…", then the title; a button
+never does. A count with less room than `3ch` is not drawn. The whole count is the count's tooltip, cut or not. In the
+Instrument style the counts the tests hold read whole at each threshold: rxm's "123,456 frames" and "123,456 cells ·
+1,234 boxes" at 880 and 584px, and CLIF's "2 frames" and "57 cells · 2 boxes" at 606 and 362px and "1,234 frames" at
+634px. The count is centred top to bottom on the header's maximise button, where it sat high (`2634fab`); its box is its
+text's height, 15px in Instrument, where it was the actions', so its tooltip answers over that height alone.
+
+**Focus and gestures across a switch.** The heap's and the call stack's toggles and maximise buttons keep the focus as
+their panels move between the row and their own regions. A focused boundary that a switch takes off the page hands the
+focus to the call stack's toggle where the boundary was above the call stack's region, and to the heap's toggle
+otherwise, as on a switch into narrow, which takes the boundary above the heap away. No switch is made while a boundary
+is being dragged or moved by its keys; the view takes the arrangement its width gives when the gesture ends.
+
+**A panel's title drags the boundary above it.** In the CLIF, rxm, TM and λ views, wherever a panel's header is a handle
+for the boundary above it, a press on the panel's title that moves more than 4px from where it was pressed
+(`DRAG_THRESHOLD`, `separator.ts`) drags that boundary as a press on the header's empty part does, and the panel stays
+open; a press that moves less is the title's click, which opens or closes the panel as before; and the title shows the
+open hand, closed while dragging, where it showed the pointing hand (`c1172f7`). The 4px are read on either axis and the
+boundary moves by the vertical part alone, so a press slid sideways along the title is a drag that moves nothing, never
+a click. The header's other controls, a finger's press, the keys and a double click on the title, two clicks of it, are
+as they were; the source view has no header that is a handle.
+
+**Four fixes beyond the row.** Two were seen in Firefox. A listing drawn by `VirtualGrid` keeps following the run when
+its box is hidden and shown again: in Firefox the CLIF and rxm listings stopped and offered their follow button, with
+nobody having scrolled, when a panel of the wide row was maximised and put back, and on main already when the listing
+was closed and opened again (`30cb2e9`). And a CLIF listing chosen while a link's CLIF position is pending writes the
+link step in the step line at each draw (`173ebcd`), where in a wide CLIF view at 1280px Firefox drew the rows 0.67px
+lower for the frame before the swap. The other two were on main, and the title drag's review found them: a λ term map
+given a share, by its title or its bar, and then closed no longer draws its canvas under its header (`fdd0b12`), where
+its region was 93px tall against 33px for a closed map never resized; and while the readout is in the inspector the
+strip no longer draws an empty 9px band at the page's foot (`5992779`), which the views and the inspector now take.
+
+##### HOW IT IS BUILT
+
+The range changes 11 files under `web/src/` and 21 under `web/tests/`, and `web/vite.config.ts`, whose `SCROLLBAR_FILES`
+gains `machine-row-scrollbars.test.ts`; `separator.ts`, `link-clear.ts`, `state-diagram.ts`, `panel-regions.test.ts`,
+`hidden.test.ts`, `inspector.test.ts` and `inspector-phone.test.ts` among them are the title drag's and its review's
+fixes' alone, its build changing 5 files and its fixes 10.
+
+- **`web/src/machine-row.ts`**, new. `arrangementFor` names the arrangement a width has room for, from three least
+  widths and the gap. `moveInto` moves an element with `moveBefore`, or appends it and gives back the focus it held.
+  `MachineRow` holds a view's row and the call stack's and the heap's own regions, `.machine-stack` and `.machine-heap`,
+  built in narrow with each panel in its own region; it sets each panel's `--column` from the least widths, observes the
+  view's border box, and at a switch moves the call stack and then the heap between the row and their regions, hiding a
+  region while its panel is in the row: the row holds the values in narrow, the call stack too in medium and the heap
+  too in wide (`4a8bd6d`). A focused boundary that a switch takes away hands the focus to the call stack's toggle where
+  it was above the call stack's region, and to the heap's otherwise. `follow` keeps one observer per host, in a module
+  `WeakMap`, since a host outlives its views: the next machine view built into the host disconnects the one before, and
+  a row replaced by another kind of view lets its host go at the host's next change of size, so one such row per host at
+  most is kept until then (`4e28ddf`).
+- **`web/src/panel-stack.ts`.** `place` draws a panel in another region, so that a maximise, a header's handle and a
+  region's open state read where it is now, and has each drawn boundary say its value again (`4a8bd6d`); a region's
+  `label` can be a function, asked again at each `sync`; `whenFree` runs a callback once no gesture is held, at once
+  where none is. A region can be a part of another, `StackRegion.partOf` (`5be4e10`): the two divide the whole's share
+  while both are open, and either open alone, or the whole while its part is hidden, takes all of it; a commit stores
+  the pair's sum under the whole's name and the part, a fraction of the sum, under the part's; a stored part not between
+  0 and 1 reads as the built one; Enter on the boundary between the two deletes the part's name alone, and on a boundary
+  beside them the outside region's and the whole's; and the constructor throws for a part of a region the stack does not
+  hold, and for a part of itself, a part of a part, a second part of one region, a part built with a share not between 0
+  and 1 and a whole built with no share (`1de8781`). The observer of a region built with more than one panel and the
+  check for a header at the top of its region, which served the narrow column alone, are gone (`4a8bd6d`). The handle's
+  press filter answers `'past-threshold'` for a press on the panel's own title, `p.toggle`, and `false` for any other
+  control in the header, for a button other than the main one and for a finger's press; it asks for the region the panel
+  is in at the press, so the title of a panel that a switch has moved is a handle for the boundary above its region now
+  (`c1172f7`).
+- **`web/src/separator.ts`.** `pointerDrag`'s `accept` can answer `'past-threshold'` as well as `true` and `false`
+  (`c1172f7`). Such a press is left to the element, neither prevented nor captured, until the pointer is more than
+  `DRAG_THRESHOLD`, 4px, from where it was pressed on either axis, and `pointerDrag` hears its moves and its release on
+  the document, as one move can leave the header first; a release, a cancel, a move with no button pressed, a header
+  that has left the page or a new press ends it with nothing done (`ff329c9`). Once past the threshold it is the drag a
+  press on the bar is, its frames moving the boundary by the part along the axis alone. A double click resets only where
+  `accept` answers `true`. `DRAG_THRESHOLD` is one constant, which `link-clear.ts` and `state-diagram.ts` import in
+  place of link-clear's own of the same value (`8bebef6`).
+- **`web/src/machine-panels.ts`.** The three panels carry the class `machine-panel`, and `countNote` returns its box and
+  a `show` that sets the count's text and its `title`.
+- **`web/src/style.css`.** The row never wraps, and its panels stand `var(--space-2)` apart (`48c3702`), where they
+  stood `1rem`; a panel of the row takes `flex: var(--column, 1) 1 0`, open or closed; a closed panel is its header's
+  height; the call stack's and the heap's regions are shown by rules guarded with `:not([hidden])`; the header's rules
+  are on `.machine-panel`, and a count is centred on the header's buttons by `align-self: center` and `line-height:
+  normal` on the base `.panel-note` rule (`2634fab`); the rule that sets a region right under the boundary above it
+  reaches across the call stack's and the heap's hidden regions and an empty `.rxm-value` (`8bea67c`, `4a8bd6d`). In
+  narrow the first panel's body and the call stack's keep `min-height: 2lh`, where the machine bodies' rule gives `5lh`
+  (`05eaa28`). The narrow column's rules and the row's `row-gap` went with `4a8bd6d`. A panel's title shows `grab` where
+  its header is a handle and `grabbing` while its header drags (`c1172f7`); `.strip[hidden] { display: none; }` hides
+  the readout's strip as `.step-bar[hidden]` does (`5992779`); and the map body's rule for a resized map,
+  `.panel[data-panel="map"][data-sized] > .term-map-host`, matches an open map alone, `[data-open="true"]`, as the
+  region's rule above it does (`fdd0b12`).
+- **`web/src/rxm-pane.ts` and `web/src/clif-pane.ts`** build a `MachineRow` with their least widths, `[18, 18, 18]` and
+  `[7.375, 14.75, 14.75]`, hand its three regions to their `PanelStack`, and call `follow`.
+- **The tests.** New browser files `panel-stack-place` (27 cases), `hear-loops` (4), `machine-panel-headers` (15),
+  `machine-row` (85) and `machine-row-app` (9), with `tests/browser/machine-views.ts` their fixture and `engine.ts`'s
+  `collect`, moved there from `state-diagram-font-listeners`, for the cases that see a replaced row collected;
+  `machine-row-scrollbars` (3) in the `browser-scrollbars` project; and a node file, `machine-row` (10).
+  `panel-boundaries`, `panel-maximise` and `rxm-pane` mount their rxm views 800px wide, medium, where they mounted them
+  1000px wide; `panel-boundaries` has three cases at 1000px, two for the heap's header in wide and the title drag's C6,
+  a double click on the heap's title, and its case for a header wrapped under the one beside it is now a drag of the
+  call stack's header in narrow (`4a8bd6d`), and two more drag it in a short narrow view, one in each view (`05eaa28`);
+  two `rxm-pane` cases hold a closed panel's column where they held a share of the row; `tm-view-narrow` and
+  `clif-switch-frames` changed as the design's §11 says; `virtual-grid` has two cases for `30cb2e9`. For the title drag,
+  `panel-boundaries.test.ts` holds the title on the rxm view its own `mount` builds, in the plan's C1, the hand, C2, the
+  other controls, C3, a drag let go over the title, C4, a press either side of the threshold, C4b, one slid sideways,
+  C5, the header held from the threshold on, C6, a double click, C8, a finger, and C9, a release off the header, and in
+  the fix rounds' cases for a view that left the page, a move with no button pressed and a release; the heap's title in
+  an rxm and a CLIF view; and, from the review of the whole branch, C2's press on the maximise button short of the
+  threshold (`c969f4e`) and the call stack's title in a narrow rxm and CLIF view, whose drag stores the row's share and
+  the call stack's part of it (`24ef8c3`). `panel-regions.test.ts` holds the TM diagram's title and the λ map's, and
+  resizes the map by its title and closes it; an `inspector.test.ts` case reads the strip's height with the readout in
+  the inspector; `hidden.test.ts` walks every panel again once a key on the map's boundary has given it a share and once
+  the readout is in the inspector; and `inspector-phone.test.ts`'s `HELD_BOXES` for Debugger and Stage at 1280 by 800
+  and 481 by 800 px, open and closed, recorded with the band drawn, give its 9px to `main`, `#views`, the inspector and
+  its body and the Stage's view, and 4.5px to each of Debugger's two rows, the lower starting 4.5px lower.
+
+##### THE DEPARTURES FROM THE PROTOTYPE
+
+The plan named 13 places where the build departs from the prototype's patch, and the build takes each:
+
+1. The header's rules are written once, on the panels' `machine-panel` class, not twice for the children of the row and
+   of the heap's region.
+2. `countNote` returns its box and a `show`, in place of a `showCount` that dug the inner span out with a cast.
+3. A region's label that changes is typed `string | (() => string)` and read through one `#name(a, b)`, which a
+   boundary's creation and `sync` share.
+4. `PanelStack` has `whenFree`, which runs at once where no gesture is held, and no `holding`.
+5. `MachineRow.regions` is a pair built once.
+6. A switch that moved no heap called `sync`, not `place`, until `4a8bd6d`; since then every switch moves the call stack
+   or the heap and calls `place` for it, and a case holds which headers are handles in each arrangement after each
+   switch (N6).
+7. §6.9 is tested where it can fail: the case hides the heap's region while it holds the open heap (N5).
+8. `moveInto`'s refused move has a case, a `moveBefore` that throws (X1).
+9. One fixture module, `machine-views.ts`, for the new browser files; the loop listener is `harness.ts`'s `hearLoops`;
+   the scroll-bar sweep runs both views.
+10. Presses use `userEvent`, not `.click()`.
+11. The focus cases hold the heap's maximise button as well as its toggle, and the first-frame case shows a view parked
+    wide at a narrow width.
+12. The value line that brings a scroll bar in is set through `RxmPane.setScratch`.
+13. The five cases the plan's review focus asked for: a host with padding and a border, a root font size of 20px, a heap
+    stored closed across both switches, an rxm copy in wide, and the app's own views.
+
+The tasks departed further, each for a reason a log holds:
+
+- **`moveInto` has no `isConnected` guard.** With the patch's guard dropped no case failed (N13), and both browsers'
+  `moveBefore` throws for a parent off the page, which the `catch` covers (X1 fails the off-page case).
+- **`MachineRow.follow` has no `isConnected` test and no `|| 16` fallbacks**, which no case could fail; a view that
+  measures 0 wide keeps its arrangement, as in the patch.
+- **A row whose switch waits asks its stack to `sync` at each further change of width** (`3c382b7`), where the patch
+  asked nothing, so that a gesture whose boundary left the page with no commit ends there.
+- **`hearLoops` fails a case for any error the page reports, and waits two frames before the file's teardown**
+  (`a522e82`), where the plan's listener heard loop errors alone and waited for no frame; `hear-loops.test.ts` holds it
+  with cases that must fail.
+- **The case for each arrangement's regions and boundaries runs on a host 1600px tall**, where the row's share is taller
+  than its floors: on one 900px tall N6 failed nothing, because the switch changed the row's box and the stack's own
+  observer, which `4a8bd6d` removed, read the handles again.
+- **The scroll-bar case changes the view's height by a pixel once the bar is in.** Without that step S16v, which reads
+  the row's width once the value line has text, failed nothing: a line of text changes no box, so the row decided
+  nothing while the bar was there.
+- **`tm-view-narrow.test.ts`, `clif-switch-frames.test.ts`, `main.ts` and `virtual-grid.ts`** changed, outside the
+  plan's files, as the design's §11 says.
+- **The plan's text drifted in two places.** Its Task 1 case for a gesture whose boundary has left the page stops the
+  boundary's `blur` before removing it, since the tests' Chromium blurs a boundary still on the page and commits the
+  gesture there; and the rxm copy case stayed in Task 5's `machine-row.test.ts`, where the plan let it move to Task 6.
+
+The changes after Davey's try departed from their plan in these places, each for a reason a log in `$L2` holds:
+
+- **`line-height: normal` beside `align-self: center`** (`2634fab`): with the plan's declaration alone the count's text
+  sat 0.508px high in Chromium, a line 18px tall over 15px of text, its spare height split into whole pixels
+  (`02-sab-C1b.log`); the controller's ruling kept the design's half a pixel and added the declaration.
+- **`PanelStack.place` has each drawn boundary say its value again** (`4a8bd6d`), beyond the plan: with the row built in
+  narrow and switched at once, a view built in medium or wide said narrow's values until its boundaries were focused,
+  `aria-valuenow` 76 where it drew 67 (`04-sab-S1.log`).
+- **The case that gives the row the two's height in medium shortens its host there**: the CLIF view's own header wraps
+  where the view is 322px wide, which leaves the regions 1498px in narrow and 1559px in medium (`04-probe.log`).
+- **`panel-boundaries`' drag of the call stack's header runs in a 1280 by 1700px window**, where in the file's 1280 by
+  1000px one the press missed the header of a view 1600px tall (`04-probe.log`).
+
+The title drag departed from its plan in these places, each for a reason a log in `$L3` holds:
+
+- **The threshold is read on either axis**, the controller's ruling on the pre-flight scan's F7: read up and down alone,
+  a press slid 43.9px along the heap's title and let go on it closed the heap (`preflight.md`), against the design's
+  anti-goal that a drag never opens or closes a panel.
+- **Nothing swallows a click and nothing guards a selection, and C7, the plan's case for a swallow, was not written.**
+  Before anything was built for them, Task 1 measured where the click a drag's release makes lands and whether a drag
+  begun on the title leaves a selection: in Chromium and in Firefox alike the click goes to the header, which holds the
+  capture, and no selection is left (`01-probe-chromium.log`, `01-probe-firefox.log`).
+- **The title cases drag 50px, 36 page px, and C4 and C5 press 2 and 3 page px**, by the controller's rulings: the
+  tests' frame is drawn at 0.72 of the page and Playwright's Firefox moves the mouse by whole page px, so a 60px drag
+  landed there as 61.117px, and 2 and 3 page px fall either side of the threshold's 2.88.
+
+##### WHAT THE REVIEWS AND THE PASS BY HAND CAUGHT
+
+- **Task 1's review.** `hearLoops` as the plan worded it put an error listener on the window, which stops Vitest failing
+  the file's run for an uncaught error, and checked with no wait, so a loop from a case's last write went unheard.
+  `a522e82`.
+- **Task 2 stopped to ask.** `tm-view-narrow.test.ts` asks every header box in Explorer to hide no text, and a one-line
+  header cuts the call stack's count at a phone's width. Ruled for the design, §6.4: the test exempts the count there
+  and asks for its tooltip.
+- **Task 4's review.** The implementer had narrowed `clif-switch-frames.test.ts` to a 1240px window, where the CLIF view
+  stays medium, which left a listing switch in wide unheld; `3d44b2d` runs it at 1280px again. Firefox then failed its
+  link case, which passed at the base, and a trace found the base's order in `chooseClifListing` (`173ebcd`).
+- **Task 5's review.** A row whose switch waited asked its stack nothing, so in Firefox, which sends a removed boundary
+  no `blur`, a gesture whose boundary left the page never ended and the row kept its arrangement at each width from then
+  on. `3c382b7`.
+- **Task 7's pass by hand in Firefox** found the listings' lost following. Three tries at a case through the app did not
+  fail first; the case that did is at the grid's level, red in Firefox at `e5b0fb8` (`30cb2e9`). `lambda-body.ts`, whose
+  observer also hands `Follow` a scroll position, was probed in Firefox and does not lose following.
+- **The whole-branch review** (`$L/review.md`; its fixes, `$L/task-10-report.md`). A machine view replaced in its host
+  left its row observing the host for the rest of the session, keeping the row and its view alive and reading a
+  detached row's width at each resize (`4e28ddf`). On an rxm copy in wide the outline began 8px under the boundary
+  above it, and the search for the class found the base's own gap, the listing under the copy's text while the value
+  line is empty (`8bea67c`). `tm-view-narrow` let a count be cut at 1280px too, where its doc said no text was hidden
+  (`da50c8e`). The entry's rows, the design's §11 and two tests' citations were put right (`1d53222`).
+- **The second plan's pre-flight scan** (`$L2/preflight.md`) found 16 things in its text, among them two cases whose
+  stored shares drew the values or the call stack under their floor of five rows even at 1600px, so their shares were
+  raised and each checks the floor first, and a reset
+  beside the values and the call stack that moved the split, which the ruling on its F4 changed before the build
+  (`af779e2`).
+- **Task 2 stopped to ask** whether to loosen the design's half a pixel or add `line-height: normal`, and the ruling was
+  the declaration (`2634fab`).
+- **Task 4's implementer** found the boundaries' stale values that `place` now says again, and its review kept the fix
+  (`4a8bd6d`).
+- **Task 5's pass by hand in Firefox, at `4a8bd6d`,** moved the new boundary by the call stack's header and by its keys
+  in both views at 1600px tall, and found that at 896px tall it moved nothing, the first panel and the call stack each
+  on a floor of five rows; Davey chose a floor of two rows for the two in narrow (`05eaa28`).
+- **Task 6's review** of this entry's update (`$L2/task-6-review.md`) found it giving the pre-flight scan as the reason
+  the cases for the new boundary mount their view 1600px tall, which the plan had before the scan, and four minor
+  findings; `efa5988` puts them right.
+- **Task 7's review of these commits** (`$L2/review.md`). No case held the design's first anti-goal, that nothing moves
+  on a step: `391b6fd` adds one in both views that draws many call stack rows and then none, then many first panel rows
+  and then none, and holds every region within half a pixel of its height. The review's sabotage for it, `flex: none` on
+  the call stack's region, does not fail it, since a region's content height is its panel's header and its body's floor,
+  never its rows; the case rests on the bodies' rule, which I1c and I1d hold. Of the 14 minor findings the task reviews
+  had deferred, its triage had 10 fixed before merge: the anti-goal's case, a case for the focus on a switch into narrow
+  with `MachineRow`'s comment on the rule (`3f23e8b`), `PanelStack`'s constructor refusing a malformed part (`1de8781`),
+  the part fixture's `hidden` (`efda191`), the count's box held to its text's height (`5d58e43`),
+  `machine-panel-headers` reading the thresholds from `VIEWS` (`316459e`), four comments (`a01463c`) and a sabotage for
+  the call stack's `:not([hidden])` guard (m7). Its I2 asked Davey for the floor.
+- **The review of the floor of two rows** (`$L2/task-8b-review.md`) found this entry saying that the boundary moves at
+  896px tall without saying how little, and two test comments naming whose choice the floor was (`2277023`). The
+  re-review of Task 8's fixes (`$L2/task-8-rereview-1.md`) found a figure row and a line of the design's §11 that the
+  fixes had left stale.
+- **The title drag's pre-flight scan** (`$L3/preflight.md`) found 9 things in its plan's text (`b807ad8`), among them
+  F7, the press slid along the title, which the ruling in the departures above answers.
+- **The title drag's Task 1 review** (`$L3/task-1-review.md`) found that a waiting press whose view had left the page
+  threw from `setPointerCapture` at its next move, which `ff329c9` ends, adding the move with no button pressed and the
+  new press. Its re-review found that the waiting press's own release then changed nothing a case could see, and
+  `d0e3df0` adds a case, through CDP's own mouse in Chromium, that a press elsewhere right after a click on the title is
+  not taken for it.
+- **The title drag's Task 4 review** (`$L3/review.md`; its fixes, `$L3/task-4-report.md`) found the λ map's closed
+  canvas on the title's path: the map body's rule for a resized map, on main since `ef4c9df`, gave the hidden body
+  `display: flex` and `min-height: 60px`, which win over the browser's own rule for `[hidden]` (`fdd0b12`). Its class
+  sibling, the readout's strip, on main since `bc592b6` (#102), drew its band for the same reason (`5992779`). The class
+  search, `style.css`'s 114 selector entries that set a `display` other than `none` read against the 38 `hidden` writes
+  in `web/src` and four static `hidden` attributes in `index.html`, found none left unguarded at `1b5bd9a`. Each new
+  case failed before its fix, in Chromium and in Firefox (`$L3/04-i1-red-*.log`, `04-m2-red-*.log`), but the map's
+  `hidden.test.ts` case, which there failed at its precondition: an earlier form of it that gave the share by a drag
+  listed the map's body (`04-i1-probe2-chromium.log`, `04-i1-red-firefox-2.log`), and its form with the key first failed
+  under S-I1. S-I1 and S-M2, in the table of sabotages below, fail them. The review also had `DRAG_THRESHOLD` made one
+  constant (`8bebef6`), and `0427e8b` and `1b5bd9a` change words alone: the comments give the title's words as what a
+  person aims at on a header, `pointerDrag`'s doc says its filter answers `'past-threshold'` only for a press that
+  starts no selection of its own, `PULL`'s doc keeps its reason without its figures, the test comments that said Firefox
+  moves the mouse by whole page px, or never tells the page of a release past its left edge, name Playwright's Firefox,
+  and C4's name says its presses move 2 and 3 whole page px.
+- **The review of the whole branch** (`$R/final/review.md`) found this entry's sections short of the title drag, whose
+  story the introduction alone told, and the count of two fixes beyond the row where there are four, which the commit
+  after `24ef8c3` moves into the sections; statements that later commits had made stale: in the design's §11, a switch
+  that moves no heap calling `sync`, and CLIF's values and call stack side by side down to 370px; in this entry's
+  departures, that switch and the stack's own observer; and above, a stored workspace's heights without the floors'
+  qualifier. It also found the title drag's design still speaking of a swallowed click; C2's `aria-pressed` assertion,
+  which could not fail, since its drag lets go off the maximise button, and which `c969f4e` replaces with a press on the
+  button short of the threshold and let go on it; and no case pressing a title whose boundary is the pair's, which
+  `24ef8c3` adds for the call stack's title in a narrow view. It answered two items this entry had not looked into:
+  `inspector-phone.test.ts`'s 10 Firefox failures predate the branch (below), and the notice the pass by hand at
+  `1b5bd9a` saw over the header's buttons sits where a notice is designed to, `style.css`'s rule for it fixing it over
+  the header so that it takes no room; the range does not change `notice.ts`.
+
+##### THE SABOTAGES
+
+Each saved the file it edits to `$L/sab/`, made one edit, ran the named test file, restored the file from the copy and
+compared it with `cmp`, which each results file records as equal; a driver in `$L` per round ran them
+(`01-sab-driver.mjs` and so on) and wrote a results file beside it. A case stops at its first failed assertion. The runs
+are in Chromium where the row does not say Firefox. A log's prefix names its round, and the file it ran: `01-`,
+`panel-stack-place.test.ts`, 10 cases; `01f1-`, `hear-loops.test.ts`, 4, 2 of them cases that must fail; `02-`,
+`machine-panel-headers.test.ts`, 8, but T1, `tm-view-narrow.test.ts`, 23; `03-`, the browser `machine-row.test.ts`, 4,
+but S1 and S1m, the node file, 10; `04-`, the browser `machine-row.test.ts`, 24, with `rxm-pane.test.ts` for S7, 53;
+`04f1-` and `04d-`, `clif-switch-frames.test.ts`, 8; `05-`, `machine-row.test.ts`, 43, but S15,
+`panel-boundaries.test.ts`, 27; `05f1-`, `machine-row.test.ts`, 47; `06-`, `machine-panel-headers.test.ts`, 13,
+`machine-row-scrollbars.test.ts` in the `browser-scrollbars` project, 3, or `machine-row-app.test.ts`, 8; `07-fix-`,
+`virtual-grid.test.ts`'s two new cases; `10-`, `machine-row.test.ts`, 51, of which I1's ran the four *lets its host go*
+cases and M1a and M1b the copy case alone (`-t 'on a copy'`), but M7a and M7a-old, `tm-view-narrow.test.ts`'s two
+1280px cases. Ids are the plan's or the round's own, and repeat across rounds.
+
+The rows from A1 on are the changes after Davey's try, their logs in `$L2`: `01-`, `machine-row.test.ts` and
+`machine-panel-headers.test.ts`, 64 cases, but A3, the node file, 10; `02-`, `machine-panel-headers.test.ts`, 15; `03-`,
+`panel-stack-place.test.ts`, 20; `04-`, `machine-row.test.ts`, 77, but M3, with `panel-boundaries.test.ts` and
+`machine-row-app.test.ts`, 113, and M8 and S1, `panel-boundaries.test.ts`, 27. The rows from I1a on are Task 8's, their
+logs in `$L2` too: `08-`, `machine-row.test.ts`, 79, but m1 and m7, 81, the m2 rows and m3-P2,
+`panel-stack-place.test.ts`, 27, and m4-C1b and m5, `machine-panel-headers.test.ts`, 15; `08b-`, `machine-row.test.ts`
+and `panel-boundaries.test.ts`, 114, but F2, `machine-row.test.ts`, 85. The rows S-I1 and S-M2 are the title drag's Task
+4's, their copies in `$L3/sab/` and their logs in `$L3`: `04-i1-red2-`, `hidden.test.ts` and `panel-regions.test.ts`, 13
+cases; `04-m2-sab-`, `hidden.test.ts`, `inspector.test.ts` and `inspector-phone.test.ts`, 56, but in Firefox
+`inspector-phone.test.ts` alone, 45; `$L3/task-4-report.md` records `cmp` equal for each. The rows from S1 to the S16
+its plan wrote, between F2 and S-I1, are the title drag's Task 1's and its fix rounds', their copies in `$L3/sab/` and
+their logs `$L3/01-sab-<id>.log`, each from the last round that ran it: they run `panel-boundaries.test.ts`, with
+`panel-regions.test.ts` for S2 and S7, in Chromium but S19, which ran in Firefox; fix round 1 ran Task 1's 14 again, its
+own S18 and S19 and then S16b, and round 2 S1, S3, S9, S10 and S16b and its own S16; and each file was restored from its
+copy and `cmp` found it equal in each of the 38 runs `$L3/01-sab-results.txt` records. The rows from S-M5 on are the
+review of the whole branch's, run on `panel-boundaries.test.ts`, 40 cases at `c969f4e` and 42 at `24ef8c3`, in a scratch
+worktree that no dev server serves; their copies are in `$R/final/sab/`, their logs in `$R/final/`, and
+`$R/final/sab-results.txt` records `cmp` equal for each.
+
+| Id | Edit | Cases failed | Log, in `$L` where no directory is named |
+|---|---|---|---|
+| S9 | `sync` reads the region as built, `r.panels.includes(max)` | 1, *grows the region a placed panel is in now under its maximise* | `01-sab-S9.log` |
+| N1 | `#syncHandles` reads `r.panels` | 1, *makes a placed panel's header a handle for the boundary above its new region* | `01-sab-N1.log` |
+| N2 | `#isOpen` reads `r.panels` | 2, *reads a region none of whose panels is left as closed* and the handle case | `01-sab-N2.log` |
+| S3 | `sync` writes no label | 1, *names a boundary by its regions' labels, a function's asked again at each sync* | `01-sab-S3.log` |
+| N3 | `#commit` does not call `#free` | 1, *runs once, after a held gesture ends* | `01-sab-N3.log` |
+| N10 | `#reset` does not call `#free` | 1, *runs when the held gesture is dropped by a reset* | `01-sab-N10.log` |
+| N11 | `setSizes` does not call `#free` | 1, *runs when the held gesture is dropped by new sizes* | `01-sab-N11.log` |
+| N12 | `whenFree` commits no gesture whose handle has gone | 1, *counts a gesture whose handle has left the page as over, and runs at once*; none before the case stopped the boundary's `blur` (`01-sab-results-first.txt`) | `01-sab-N12.log` |
+| F1 | the listener keeps loop errors alone | 1, *fails a case in which a timer throws, which Vitest itself no longer does* | `01f1-sab-F1.log` |
+| F2 | no wait for frames before the check | 1, *fails a case whose last write causes a loop, though the case waits for no frame* | `01f1-sab-F2.log` |
+| F3 | the teardown run before the wait | 1, the same case | `01f1-sab-F3.log` |
+| F4 | the teardown not run | 1, *has run the file's teardown by the next case, which the loop is not counted against* | `01f1-sab-F4.log` |
+| F5 | what was heard copied, not taken | 2, *counts an error against the case it came in, and not the next* and the teardown case | `01f1-sab-F5.log` |
+| SB3 | `show` sets no `title` | 2, the tooltip case, both views | `02-sab-SB3.log` |
+| SB4 | the title does not shrink | 4, the give-way case at *then the title gives way* and the one-line case, both views | `02-sab-SB4.log` |
+| SB5 | the count is no container | 8 | `02-sab-SB5.log` |
+| SB6 | no `@container (width < 3ch)` rule | 2, *draws a cut count only where its first character and an ellipsis fit*, both views | `02-sab-SB6.log` |
+| S6 | the header may wrap | 4, the give-way and one-line cases, both views | `02-sab-S6.log` |
+| N4 | the actions may shrink under their buttons | 2, the give-way case at a button's left edge, both views | `02-sab-N4.log` |
+| T1 | `show` sets no `title` | 6 of `tm-view-narrow`'s 23: its four phone cases and two 1280px cases, at a count's tooltip | `02-sab-T1.log` |
+| N13 | `moveInto`'s `isConnected` guard dropped, on the build that had it | **none**: 4 passed, and the guard was taken out | `03-sab-N13.log` |
+| S10 | a plain `append`, no focus given back | 3, the three focus cases | `03-sab-S10.log` |
+| S10, Firefox | the same | 3, the same | `03-sab-S10-firefox.log` |
+| S11 | the fallback gives no focus back | 2, the cases with no `moveBefore` and with one that throws | `03-sab-S11.log` |
+| X1 | the `catch` throws again | 2, the throwing and off-page cases | `03-sab-X1.log` |
+| X1, Firefox | the same | 2, the same | `03-sab-X1-firefox.log` |
+| S1 | `>` for `>=` at the wide threshold | 2 of the node file's 10, at 622 and 896px | `03-sab-S1.log` |
+| S1m | `>` for `>=` at the medium threshold | 2 of 10, at 370 and 592px | `03-sab-S1m.log` |
+| S2 | the heap's region not hidden in wide | 10, the regions and boundaries case among them, both views | `04-sab-S2.log` |
+| S3 | the `machine` label a fixed string | 2, *names the boundary above the row for what the row holds*, both views | `04-sab-S3.log` |
+| S4 | no decision at build, the observer's put off to a frame | 10, the first-frame case among them, both views | `04-sab-S4.log` |
+| S5 | `follow` observes the row | 16, the loop case among them, both views, by `hearLoops` | `04-sab-S5.log` |
+| S7 | `flex: none` on a closed panel in a row | 4 of 53, the closed-panel case, both views, and two `rxm-pane` cases | `04-sab-S7.log` |
+| S8 | a closed panel in the column flexes | 4, the closed-panel case and *gives a maximised panel in narrow all the spare height*, both views | `04-sab-S8.log` |
+| SB1 | CLIF's columns `[11, 11, 11]` | 5, CLIF's columns case and its switch case among them | `04-sab-SB1.log` |
+| SB2 | the stylesheet ignores `--column` | 2, CLIF's columns case and its closed-panel case | `04-sab-SB2.log` |
+| SB7 | rxm's first column 17rem | 5, rxm's columns case and its switch case among them | `04-sab-SB7.log` |
+| N5 | the `:not([hidden])` guard dropped | 2, the regions and boundaries case at *hidden by hand*, both views | `04-sab-N5.log` |
+| N6 | no `sync` on a switch that moves no heap | 2, the regions and boundaries case at *narrow*, both views, on a host 1600px tall; none on one 900px tall (`04-sab-results.txt`) | `04-sab-N6.log` |
+| N7 | the width read as the border box whole | 2, *reads its host's width less its padding and border*, both views | `04-sab-N7.log` |
+| N8 | the root's font size taken as 16px | 2, *takes its thresholds from the root's font size*, both views | `04-sab-N8.log` |
+| F1 | the readout loses its CLIF rows at the press | 1, *keeps the view where it stands while the readout waits for the new run* | `04f1-sab-F1.log` |
+| F2 | the leg emptied at the press | 8 | `04f1-sab-F2.log` |
+| D1 | the link's CLIF position forgotten before the request, the old order | 1, *keeps the line saying the link's CLIF step, and the rows where they stand, until the swap*, at the step lines written | `04d-sab-D1-ch.log` |
+| D1, Firefox | the same | 1, the same case, at its frames | `04d-sab-D1-ff.log` |
+| D2 | the hold never given the link step | 1, the same case | `04d-sab-D2-ch.log` |
+| D3 | the position never forgotten | 1, the same case | `04d-sab-D3-ch.log` |
+| S9 | `stack.place` replaced by `stack.sync()` | 4, the maximise case and the regions and boundaries case, both views | `05-sab-S9.log` |
+| S10 | the switch appends the heap itself | 8, the focus cases with `moveBefore` and with the fallback, both views | `05-sab-S10.log` |
+| S11b | the heap's region shown after the heap moves back | 4, the fallback's focus cases at *out of it* | `05-sab-S11b.log` |
+| S12 | no handoff of a focused boundary | 3, the handoff case, both views, and the copy case | `05-sab-S12.log` |
+| S13 | a switch under a gesture | 2, the gesture case at *under the held key* | `05-sab-S13.log` |
+| S14 | `#commit` keeps open regions' shares alone | 2, the stored-share case at *kept while the heap is in the row* | `05-sab-S14.log` |
+| S15 | `#handle`'s press reads the region as built | 2 of 27, `panel-boundaries`'s two cases at 1000px | `05-sab-S15.log` |
+| S7 | Task 4's, `flex: none` on a closed panel in a row | 4, the closed-panel case and *keeps a closed heap closed across both switches*, both views | `05-sab-S7.log` |
+| X1 | the handoff made whatever became of the boundary | 4, the handoff case and the gesture case, both views | `05-sab-X1.log` |
+| X2 | the waiting callback applies the arrangement first asked for | 2, the gesture case at *after a release at the width it began with* | `05-sab-X2.log` |
+| X3 | no `#waiting` guard | 2, the gesture case at *one wait for the stack at a time* | `05-sab-X3.log` |
+| F1 | no `sync` while a switch waits | 2, *makes a switch that waited once its gesture is over, though nothing ended it*, both views | `05f1-sab-F1-chromium.log` |
+| F1, Firefox | the same | 4, those and *makes a switch that waited when its view left the page under the gesture and came back*, both views | `05f1-sab-F1-firefox.log` |
+| X3 | the waiting branch's `return` removed | 2, the gesture case at *one wait for the stack at a time* | `05f1-sab-X3-chromium.log` |
+| SB1 | CLIF's columns `[11, 11, 11]` | 3 of 13, CLIF's *holds each count whole* at 622, 370 and 634px | `06-sab-SB1.log` |
+| SB1, rxm, Task 6's review | rxm's columns `[27, 9, 18]` | 3 of 13, rxm's tooltip case and its *holds each count whole* at 896 and 592px | `review-6/rxm-cols-27-9-18.log` |
+| S6 | the header may wrap | 4 of 13 | `06-sab-S6.log` |
+| SB5 | the count is no container | 8 of 13 | `06-sab-SB5.log` |
+| S16 | `#width` reads the row's `clientWidth` | 3 of 3, the rxm case in which a value line brings a bar in at its precondition *no bar*, and both sweeps | `06-sab-S16.log` |
+| S16v | the same, once the value line has text | 1 of 3, the same rxm case at *and stays wide*; none with the case's one-pixel step taken out (`06-sab-S16v-without-step.log`) | `06-sab-S16v.log` |
+| N9 | CLIF's columns `[18, 18, 18]` | 4 of 8, CLIF's | `06-sab-N9.log` |
+| S4 | no decision at build, the observer's put off to a frame | **none**: 8 of 8 passed; the app's cases read two frames after a change, and Task 4's cases hold the first frame | `06-sab-S4.log` |
+| X1 | the row's observer disconnected after its first call | 6 of 8 | `06-sab-X1.log` |
+| X2 | the guard for a view with no width removed | 4 of 8, the toggle and Stage cases, both views | `06-sab-X2.log` |
+| S1, Firefox | the guard `clientHeight > 0` made `>= 0` | 2 of 2 | `07-fix-sab-S1.log` |
+| S2, Firefox | the guard on the panel's `isOpen()` in place of the height | 1 of 2, the case with the panel open | `07-fix-sab-S2.log` |
+| I1a | `follow` leaves the host's observer from before connected, no `following.get(host)?.disconnect()` | 2 of 4, *lets its host go to the next view built into it, and is collected*, both views, at *the replaced row* | `10-sab-I1a.log` |
+| I1b | the observer's callback fits the row whether or not it is still in its host, `\|\| true` | 2 of 4, *lets its host go once another kind of view is built into it, at the host's next change of size*, both views, at *the replaced row follows the host no more* | `10-sab-I1b.log` |
+| I1c | the callback keeps its host's entry, no `following.delete(host)` | 2 of 4, the same two, at *the replaced row* | `10-sab-I1c.log` |
+| M1a | the boundary's rule without `.machine-heap[hidden]` | 1, *on a copy, parts the row from the outline in wide, each region meeting the boundary above it*, at `machine\|outline 8` | `10-sab-M1a.log` |
+| M1b | the boundary's rule without `.rxm-value:empty` | 1, the same case, at `text\|listing 8` | `10-sab-M1b.log` |
+| M7a | `max-width: 1ch` on a machine panel's count | 2, `tm-view-narrow`'s two 1280px cases, at the count's scroll width | `10-sab-M7a.log` |
+| M7a-old | M7a, with `tm-view-narrow` as it was before `da50c8e` | **none**: 2 passed | `10-sab-M7a-old.log` |
+| A1 | `.rxm-machine`'s `column-gap: 1rem` again | 12 of 64: in both views `machine-row`'s *switches at each threshold one pixel either side…*, *draws its columns in their parts of the row…*, *reads its host's width less its padding and border* and *takes its thresholds from the root's font size*, and the four *holds each count whole* cases at 880, 584, 606 and 362px | `$L2/01-sab-A1.log` |
+| A2 | `MachineRow` takes the gap as 16px, not the row's | 12 of 64, the same | `$L2/01-sab-A2.log` |
+| A3 | `arrangementFor` adds one gap to the columns, not two | 2 of the node file's 10, at 605.99 and 879px | `$L2/01-sab-A3.log` |
+| C1a | no `align-self: center` on `.panel-note` | 2 of 15, *centres each count on its maximise button, top to bottom…*, both views, by 3.70px | `$L2/02-sab-C1a.log` |
+| C1a, Firefox | the same | 2 of 15, the same | `$L2/02-sab-C1a-ff.log` |
+| C1b | no `line-height: normal` on `.panel-note` | 2 of 15, the same case, both views, by 0.508px | `$L2/02-sab-C1b.log` |
+| C1b, Firefox | the same | **none**: 15 passed | `$L2/02-sab-C1b-ff.log` |
+| P1 | the part's share is its part alone, not the whole's times it | 5 of 20, *divides the share of the region it is a part of by the part it is built with, and by a stored part* among them | `$L2/03-sab-P1.log` |
+| P2 | the whole's share `1 − part` whether the part is open or not | 2, *leaves the whole share to the region it is a part of while it is hidden* and *gives the whole share to either of the two open alone* | `$L2/03-sab-P2.log` |
+| P3 | a commit stores each drawn share under its own name | 4, *stores the sum and the part at a key on the boundary between the two* and *keeps the part’s height at a key on a boundary beside one of the two…* among them | `$L2/03-sab-P3.log` |
+| P4 | no check that a stored part is between 0 and 1 | 1, *reads a stored part that is not between 0 and 1 as the part it is built with* | `$L2/03-sab-P4.log` |
+| P5 | the part takes only its fraction with the whole closed too | 2, *gives the whole share to either of the two open alone* and *puts back the region beside the part and the whole’s share at Enter where the part is open alone…* | `$L2/03-sab-P5.log` |
+| P6 | the whole's name stores `d(W) / (1 − part)` and the stored part is kept | 1, *keeps the part’s height at a key on a boundary beside one of the two…* | `$L2/03-sab-P6.log` |
+| P7 | Enter between the two deletes both names | 1, *puts the split back as built at Enter on that boundary, keeping the whole’s share* | `$L2/03-sab-P7.log` |
+| P8 | with the part open alone, Enter beside it deletes the part's name, not the whole's | 1, *puts back the region beside the part and the whole’s share at Enter where the part is open alone, keeping the stored part* | `$L2/03-sab-P8.log` |
+| P9 | with the whole open, Enter beside the part deletes the part's name with the outside one | 1, *puts back the region beside the part and the whole’s share at Enter on a boundary beside the part, keeping the split* | `$L2/03-sab-P9.log` |
+| M1 | the call stack in the row in every arrangement | 25 of 77, *draws the regions and boundaries of each arrangement* and *switches at each threshold…* among them, both views | `$L2/04-sab-M1.log` |
+| M2 | a removed boundary's focus always to the heap's toggle | 2, *hands a focused boundary above the call stack that a switch takes away to the call stack's toggle*, both views, at *to medium* | `$L2/04-sab-M2.log` |
+| M3 | no `partOf: 'machine'` on the call stack's region | 14 of 113: six `machine-row` cases in each view, `panel-boundaries`' drag of the call stack's header and `machine-row-app`'s case for the rxm view's split, each at the two's heights or shares | `$L2/04-sab-M3.log` |
+| M4a | no `.panel-boundary + .machine-stack` | 3, *begins each region right under the boundary above it, in each arrangement*, both views, and the copy case, at *narrow* | `$L2/04-sab-M4a.log` |
+| M4b | no `.panel-boundary + .machine-stack[hidden] + .machine-heap` | 3, the same, at *medium* | `$L2/04-sab-M4b.log` |
+| M4c | no `.panel-boundary + .machine-stack[hidden] + .machine-heap[hidden] + .panel` | 1, the copy case, at *wide* | `$L2/04-sab-M4c.log` |
+| M5 | the narrow row's label names the call stack too | 2, *names each boundary for the regions either side of it*, both views | `$L2/04-sab-M5.log` |
+| M6 | the heap moved into the row before the call stack | 2, *is drawn in its arrangement from the first frame, built on the page, added to it, or shown*, both views | `$L2/04-sab-M6.log` |
+| M7 | the two `.machine-stack:has(…)` share rules removed | 16 of 77, *splits the values and the call stack evenly with nothing stored…* at *the two the same height* among them, both views | `$L2/04-sab-M7.log` |
+| M8 | the call stack's region built with no panels | 3 of 27, `panel-boundaries`' drag of the call stack's header, at *the call stack’s header*, among them | `$L2/04-sab-M8.log` |
+| M9 | the call stack unmaximised at each switch | 4, *keeps a maximised call stack across a switch out of narrow and back* and *keeps a maximise across a switch…*, both views | `$L2/04-sab-M9.log` |
+| M10 | the call stack moved by `append` | 8, the call stack's toggle and maximise button kept focused across a move, with `moveBefore` and with the fallback, both views, at *into the row* | `$L2/04-sab-M10.log` |
+| S1 | `place` says no boundary's value again | 2 of 27, `panel-boundaries`' *are drawn under each open region…* and *draws each region at the share the workspace holds…*, at `aria-valuenow` 76 for 67 and 50 for 33 | `$L2/04-sab-S1.log` |
+| I1a | `flex: none` on the call stack's region, `.machine-stack`'s share rule, the review's suggestion | 16 of 79, but **not** *moves no region on a step that draws many call stack or first panel rows, or none*: a region's content height is its panel's header and its body's floor, never its rows | `$L2/08-sab-I1a.log` |
+| I1b | the call stack's region's flex basis `auto` | 12 of 79, but **not** that case, for the same reason | `$L2/08-sab-I1b.log` |
+| I1c | the call stack's body as tall as its rows, `.rxm-stack { flex: none }` | 16 of 79, that case among them, both views, at *many call stack rows: the listing*, by 329.5px in rxm and 339.67px in CLIF | `$L2/08-sab-I1c.log` |
+| I1d | the first panel's body as tall as its rows, `.rxm-registers { flex: none }` | 12 of 79, that case among them, both views, at *many registers rows: the listing* by 53.78px and *many values rows: the listing* by 243.67px | `$L2/08-sab-I1d.log` |
+| m1 | a boundary that a switch into narrow takes away gives the focus to the call stack's toggle | 2 of 81, *hands a focused boundary a switch into narrow takes away to the heap's toggle, and one out of it to the toggle under it*, both views, at *into narrow* | `$L2/08-sab-m1.log` |
+| m2a | `PanelStack`'s constructor takes a part of itself | 1 of 27, *throws for a part of itself*, at the part-of-part message, the check it falls to | `$L2/08-sab-m2a.log` |
+| m2b | the constructor takes a part of a part | 1 of 27, *throws for a part of a part* | `$L2/08-sab-m2b.log` |
+| m2c | the constructor takes a second part of one region | 1 of 27, *throws for a second part of one region* | `$L2/08-sab-m2c.log` |
+| m2d | a part's share not checked | 3 of 27, *throws for a part built as nothing*, *for a part built as the whole* and *for a part built with no share* | `$L2/08-sab-m2d.log` |
+| m2e | the constructor takes a whole with no share | 1 of 27, *throws for a whole built with no share* | `$L2/08-sab-m2e.log` |
+| m3-P2 | Task 3's P2 again, on the part fixture whose `hidden` now hides | 2 of 27, *leaves the whole share to the region it is a part of while it is hidden* and *gives the whole share to either of the two open alone* | `$L2/08-sab-m3-P2.log` |
+| m4-C1b | Task 2's C1b again, no `line-height: normal` on `.panel-note` | 2 of 15, *centres each count on its maximise button…*, both views, at the count's line, 18px against at most 15.5 | `$L2/08-sab-m4-C1b.log` |
+| m4-C1b, Firefox | the same | 2 of 15, the same | `$L2/08-sab-m4-C1b-ff.log` |
+| m5 | `VIEWS`' rxm wide threshold 870px | 1 of 15, *holds each count whole in its header 870 px wide*, at its precondition, *wide at 870 px* | `$L2/08-sab-m5.log` |
+| m7 | `.machine-stack`'s `:not([hidden])` guard dropped | 2 of 81, *draws the regions and boundaries of each arrangement*, both views, at *the stack's region hidden by hand* | `$L2/08-sab-m7.log` |
+| F1 | the floor of two rows removed | 4 of 114, the short-view cases, both views, `machine-row`'s by the keys and `panel-boundaries`' by a drag of the call stack's header, at *did not move* | `$L2/08b-sab-F1.log` |
+| F2 | the floor of two rows in medium too | 2 of 85, *keeps the values and the call stack five rows tall at the row's floor in medium*, both views, at 36px for 90 | `$L2/08b-sab-F2.log` |
+| S1 | the title taken at its press | 10, C4's click and C5 among them | `$L3/01-sab-S1.log` |
+| S2 | the title left to itself as a control | 8, C3, C4's drag, C4b, C5 and the four views' title cases | `$L3/01-sab-S2.log` |
+| S3 | ten times the threshold | 3, C4's drag, C4b and C5 | `$L3/01-sab-S3.log` |
+| S4 | the waiting press's moves heard on the header alone | 3, C3 and the rxm and CLIF title cases | `$L3/01-sab-S4.log` |
+| S5 | the capture let go once armed | 6, C3 and C4b at the click among them | `$L3/01-sab-S5.log` |
+| S6 | a double click resetting wherever the filter does not answer `false` | 1, C6 | `$L3/01-sab-S6.log` |
+| S7 | the title's open hand taken out | 6, C1, C5 and the four views' | `$L3/01-sab-S7.log` |
+| S8 | the title's hand in every header | 1, C1 | `$L3/01-sab-S8.log` |
+| S9 | its closed hand taken out | 1, C5 | `$L3/01-sab-S9.log` |
+| S10 | the first frame moving nothing | 4, C3, C4's drag and the rxm and CLIF title cases | `$L3/01-sab-S10.log` |
+| S13 | a finger on the title taken | 1, C8 | `$L3/01-sab-S13.log` |
+| S14 | any control taken for the title | 1, C2 | `$L3/01-sab-S14.log` |
+| S17 | the threshold read along the axis alone | 1, C4b | `$L3/01-sab-S17.log` |
+| S18 | a waiting press whose view left the page kept | 1, its case | `$L3/01-sab-S18.log` |
+| S19, Firefox | a move with no button pressed not ending a waiting press | 4, its case and the base's three drag cases | `$L3/01-sab-S19.log` |
+| S16b | the release heard on the header alone and the test for a move with no button pressed taken out | 1, C9 | `$L3/01-sab-S16b.log` |
+| S16 | the release ending nothing | 1, the case `d0e3df0` adds | `$L3/01-sab-S16.log` |
+| S16, as the plan wrote it | the release heard on the header alone | **none**, in fix round 1: a move with no button pressed now ends a waiting press too | `$L3/fix1-sab-driver.log` |
+| S-I1 | the map body's rule without `[data-open="true"]`, as on main | 2 of 13, `panel-regions`' *closes a map its title gave a share to as far as a map nobody dragged closes*, at *the closed map is taller than one nobody dragged*, 93 against 33, and `hidden.test.ts`'s map case, listing the map's body, `div.term-map-host` | `$L3/04-i1-red2-chromium.log` |
+| S-I1, Firefox | the same | 3 of 13, those two and `panel-regions`' TM text case, which fails at the base | `$L3/04-i1-red2-firefox.log` |
+| S-M2 | `.strip[hidden]` removed, with the new `HELD_BOXES` | 10 of 56, `inspector.test.ts`'s *leaves no band of the strip on the page while it holds the readout*, at *the hidden strip draws a band*, 9, `hidden.test.ts`'s readout case, listing `footer.strip`, and `inspector-phone`'s 8 `HELD_BOXES` cases for Debugger and Stage | `$L3/04-m2-sab-chromium.log` |
+| S-M2, Firefox | the same | 18 of `inspector-phone`'s 45, its 8 `HELD_BOXES` cases and the 10 it fails with the fix | `$L3/04-m2-sab-inspector-phone-firefox.log` |
+| S-M5 | the maximise button's press taken at once, as a press on the header's empty part is, `&& control.getAttribute('aria-pressed') === null` added to the filter's test for a control | 1 of 40, C2, at *a short press did not press the maximise button* | `$R/final/m5-sab-chromium.log` |
+| S-M5, Firefox | the same | 4 of 40, C2 at the same and the base's three drag cases | `$R/final/m5-sab-firefox.log` |
+| S-M7a | the title left to itself as a control, the title drag's S2 | 8 of 42, the two new cases among them, at *the call stack did not take the drag* | `$R/final/m7-sab-S-M7a-chromium.log` |
+| S-M7b | no `partOf: 'machine'` on the call stack's region, the second plan's M3 | 3 of 42, the two new cases, at *the part drawn*, and the drag of the call stack's header in narrow | `$R/final/m7-sab-S-M7b-chromium.log` |
+
+Five sabotages failed nothing: N13, after which the guard went, Task 6's S4, whose cases are Task 4's, M7a-old, whose
+test is `tm-view-narrow` before `da50c8e`: the gap the review named, C1b in Firefox, which centres the count's text
+without `line-height: normal`, where Chromium, the gate, fails C1b, and the title drag's S16 as its plan wrote it, since
+a move with no button pressed ends a waiting press too. I1a and I1b failed other cases and not the one they aimed at,
+*moves no region on a step…*, since no rule on a region can see its body's rows; I1c and I1d, on the bodies, fail it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A root font size changed while a view is open** leaves its arrangement as it was until the view is next resized,
+  since the decision runs on a resize.
+- **Terminal's and Paper's header widths** are this machine's fonts, and no test holds them (design §5.5): the tests
+  hold Instrument's, whose fonts are bundled. And `line-height: normal` (`2634fab`) takes in a face's line gap, so a
+  system face with one would split a leading over a count's text again, which in Chromium can leave the text half a
+  pixel high; no test can hold that either.
+- **In a short window the new boundary moves a few pixels.** With nothing stored, a view 700px tall leaves the boundary
+  between the first panel and the call stack 1.8px each way in CLIF and 9.4px in rxm, and in a 692 by 896px window the
+  Firefox pass at `ba09cb8` moved it 5.6px from one floor of two rows to the other in CLIF and 6.7px in rxm; the two
+  have more room only once a boundary beside them gives it, the listing's above or the heap's below. Whether CLIF wants
+  more there is Davey's call.
+- **The heap keeps its floor of five rows in narrow**, where the first panel and the call stack keep two: Davey answered
+  for the pair (`$R/ledger.md`'s 10:32 UTC line), and the controller's ruling after it kept the heap's floor, its region
+  being shown in medium too.
+- **After a drag the first panel can show the top of a row it cannot show whole**, under its last whole row, a body cut
+  wherever the boundary leaves it: the Firefox pass at `ba09cb8` drew it at 692 by 896 in both views and at 692 by 1600
+  in rxm (`$L2/task-8-gate-report.md`, its concerns).
+- **WebKit is unmeasured** (design §6.6). Safari has no `moveBefore`, and the fallback runs in cases that take
+  `moveBefore` away, in Chromium and Firefox. Nor is it measured where a drag's release click lands there: nothing
+  swallows that click because Chromium and Firefox both send it to the header, which holds the capture, and a WebKit
+  that sent it to the title would open or close a panel whose title drag was let go over the title.
+- **The maximised heap's width in wide** is the designer's call (design §10): a third of the row in rxm and two fifths
+  in CLIF.
+- **A machine view replaced by another kind of view** keeps its row, and the row its view, until the host next changes
+  size, one per host at most (`4e28ddf`); a teardown that `pane-host.ts` calls on the view it replaces would end that.
+- **The three Firefox drag cases of `panel-boundaries.test.ts` that fail at the base** fail the same here.
+- **At a phone's width the call stack's count is cut or not drawn.** In a 390px window, where Explorer gives a view
+  189px, the count is cut with "…", and in a 320px one (154px) it is not drawn, where before the header wrapped and
+  showed it whole; a touch screen has no hover for the tooltip. Open for Davey: the design's §6.4 says one line at
+  every width.
+- **A count with no room is hidden from screen readers too** (the review's M5): the `@container (width < 3ch)` rule
+  hides it with `visibility: hidden`, which takes it out of the accessibility tree, and its `title` is on a `span`
+  with no role. It waits on Davey's answer on phone widths, above.
+- **Firefox fails cases this branch's gates do not run there.** `tm-view-narrow.test.ts` fails 11 of its 23 at the base,
+  the TM view's figures and counts, and the same 11 at `9019354` and with `da50c8e`'s test. 18 cases of `virtual-grid`,
+  `follow-kept`, `lambda-follow`, `scroll-kept` and `tm-follow-clamp`, files no Firefox gate or CI job runs, fail in
+  Firefox at `30cb2e9`: 8, 2, 1, 5 and 2. The 10 outside `virtual-grid` fail the same with `e5b0fb8`'s
+  `virtual-grid.ts`, and `virtual-grid`'s 8 are none of the two cases `30cb2e9` adds. `follow-kept`'s two are not losses
+  of following: each fails on a position read a fraction of a pixel off in the test frame, 189 for 188.833 and 59 for
+  58.833 (`$L/task-7-rereview-1.md`, Out-of-Scope 2).
+- **`web/src/virtual-grid.ts:161`, the scroll handler's own `onResize`, can record a hidden box's 0** (the review's
+  M6), the class of `30cb2e9`, where the view is off the page with its panel open. No app path reaches it, by the
+  review's reading (`$L/review.md`, M6). A follow-up, with a case at the grid's level.
+- **`clif-app.test.ts`'s *lists the program as built* can lose a race under load**, as in the first coverage run at
+  `1d53222`: the case's own `scrollTop` write can meet a draw from a session worker's reply before the write's
+  `scroll` event comes, and the draw writes the followed position back, so the listing stays following and the case
+  waits for rows that are never drawn. Forced, the race fails the same way at `1d53222` and on main's `web/`
+  (`$L/task-10-dbg-report.md`); a remedy, in the test or in `VirtualGrid`'s `draw`, would change main's code.
+- **Outside this branch's files**, the app's header wraps to two lines in 1012px and 692px windows, and the status bar
+  and CLIF's step readout, under its controls, wrap at 692px; the CLIF view's own header wraps where the view is 322px
+  wide.
+- **A Firefox console notice in the passes by hand at `1d53222`, `4a8bd6d` and `ba09cb8`**, *This site appears to use a
+  scroll-linked positioning effect. This may not work well with asynchronous panning*, a performance notice and not an
+  error, which the drive's record at `e5b0fb8` does not have. Not looked into.
+- **The design's §6.1 names a view moved,** and none of this branch's cases moves a machine view through the app's
+  layout cycle; the first-frame cases build a view on the page, add one, show a parked one and, in the app, show one by
+  its toggle and choose its Stage tab.
+- **Not run on this branch:** the whole Firefox tier and the Docker image.
+- **The task reviews' deferred minor findings** are in `$R/ledger.md` and the reviews in `$L`. The whole-branch review's
+  triage left one as a follow-up: no sabotage holds the copy case's lists of boundaries (`$L/task-10-report.md`). The
+  second plan's reviews deferred 14, in the ledger's Plan 2 section and in `$L2/task-*-review.md`; Task 7's review had
+  10 of them fixed in Task 8, one written into this entry and three dropped (`$L2/review.md`, *Deferred findings
+  triage*). A focused boundary that a switch into narrow takes away still hands the focus to the heap's toggle, the
+  plan's rule, by the controller's ruling; the review left the rule itself to Davey.
+- **A boundary beside one that moved says its old value until it is focused** (Task 7's review, m10), as on main:
+  `#commit` and `#reset` say their own boundary's value alone, and `sync` a boundary just drawn. A follow-up.
+- **`web/src/panel-stack.ts:228`, `#share`'s `all === null ? null : …`,** is dead now that a whole must have a share
+  (`1de8781`), and kept for `#own`'s `number | null` type (`$L2/task-8-rereview-1.md`, out of scope).
+- **The case that holds that nothing moves on a step draws no heap rows** (`391b6fd`), so a heap body as tall as its
+  rows would pass it, though the heap's body shares the rule the case rests on (`$L2/task-8-rereview-1.md`, out of
+  scope).
+- **No check runs this entry's figure rows.** At `efa5988` the row for the widths at which the headers' test holds each
+  count whole printed one line of its five, since `316459e` reads the thresholds from `VIEWS`, and the pre-commit hook
+  passed: `check-doc-figures.sh` holds the READMEs' figures and leaves those in `docs/` to the block each entry keeps
+  (its header's point 2).
+- **The title drag's Firefox list fails 35 cases at its base, `b807ad8`, and the same 35 at `d0e3df0` and at `1b5bd9a`**
+  (*Verification*, below); beyond `$L3/dx-report.md`, which finds the files of the 32 outside `panel-boundaries` failing
+  in this machine's Firefox in logs from 2026-11-17 on, not looked into.
+- **`inspector-phone.test.ts` fails 10 of its 45 cases in Firefox**, a file the gate's `FIREFOX` leg does not run, the
+  same 10 by name with `5992779` and under S-M2 (`$L3/04-m2-inspector-phone-firefox.log`,
+  `04-m2-sab-inspector-phone-firefox.log`): 6 cases at a phone's width time out, each running about 10.5s, and 4
+  *stage-strip* cases on a short page find boxes about 1px from where `SHORT_PAGE_BOXES` has them. They predate the
+  branch: the CLIF view lane's Firefox gate, before #190 merged
+  (`~/temp/redextape-clif-view-record/pr2/gate/08-test-firefox.log`), fails the same 10 by name of the file's 45.
+- **The title drag's deferred minor findings** (`$R/ledger.md`'s Plan 3 section and `$L3/review.md`'s triage): C4 holds
+  the threshold only between 2.78 and 4.17px, so a threshold of 5 or 2 fails it and one of 3 does not
+  (`$L3/task-1-rereview-1.md`), which the triage leaves as it is; the buttons check that ends a waiting press is held in
+  Firefox alone, its case passing in Chromium with the check taken out, since Chromium hears the case's release past the
+  page's left edge, which ends the wait anyway, and S19 ran in Firefox, so CI, which runs Chromium alone, cannot see it
+  go (M7); the plan, a record this entry does not copy, says `rg` lists 39 test files that click a panel's title, where
+  it lists 41 at `0283d85` and at `1b5bd9a`, predicts 3 Firefox failures where its own list fails 35 at its base, and
+  its *Verified facts* miss link-clear's `DRAG_THRESHOLD` (M10); and a press on the bar, a boundary or a layout divider,
+  once armed, has no buttons check, so one whose release goes unheard, as a release Playwright's Firefox makes at a
+  negative x does, stays held and follows moves with no button down, on main and outside the plan (M11). Task 4's
+  re-review adds two notes (`$L3/task-4-rereview-1.md`): `hidden.test.ts`'s two new cases use the app its first case
+  mounts, and S-I1 stops at the assertion before the one on the map body's height. No case holds that a new press ends
+  one still waiting, which needs two pointers at once.
+
+##### VERIFICATION
+
+**The gate at `1b5bd9a`**, after the title drag's review's fixes, run from `web/` and the root as Task 2 ran it at
+`d0e3df0` (`$L3/02-gate-run.zsh`), each leg once and each but `FIREFOX` passing (`$L3/04g-gate-run.zsh`, every leg's
+exit in `04g-gate-exits.txt`). `test:coverage` and the two halves of `check-all.sh` each ran in a `systemd-run --user`
+unit with `MemoryMax=16G` and `MemorySwapMax=0`, under the browser lock where they use a browser, and their logs end
+with the unit's exit status. `cargo llvm-cov` and `scripts/check-slow.sh` did not run again, as no Rust changed after
+`d0e3df0`: their row is the gate at `d0e3df0`'s. After the gate, `d54ad71` and `4bfe118` change this entry alone, and
+the review of the whole branch's two test commits have their checks in the table after this one.
+
+| Leg | Result | Log in `$L3` |
+|---|---|---|
+| `pnpm run build:wasm`, `build:lsp-wasm` and `build:clif-wasm` | each package ready to publish | `04g-build-wasm.log`, `04g-build-lsp-wasm.log`, `04g-build-clif-wasm.log` |
+| `pnpm run build:bindings`; `pnpm run typecheck` | the bindings' tests pass; no `error TS` line | `04g-build-bindings.log`, `04g-tsc.log` |
+| `../scripts/check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check | each passes; the same 5644 words | `04g-licences-self-test.log`, `04g-licences.log`, `04g-scan-licence-editions-self-test.log`, `04g-scan-licence-editions.log` |
+| `pnpm exec biome ci --error-on-warnings` | 524 files, no fixes applied | `04g-lint.log` |
+| `pnpm run test:coverage` | exit 0, the first run: 345 files; 3967 tests passed and 2 failed as expected; statements 97.95%, branches 92.28%, functions 98.7%, lines 99.16%, over `web/vite.config.ts`'s floors of 95, 89, 97 and 97 | `04g-coverage.log` |
+| `pnpm run build:app` | built | `04g-build-app.log` |
+| `scripts/check-all.sh --no-browser`, then `--browser-only` | exit 0, each | `04g-check-all-no-browser.log`, `04g-check-all-browser-only.log` |
+| `cargo llvm-cov nextest --workspace --fail-under-lines 90` and `scripts/check-slow.sh`, at `d0e3df0` | exit 0: 2046 passed, 35 skipped; lines 95.55%; and exit 0, slow tier green | `02-llvm-cov.log`, `02-check-slow.log` |
+| the ten scans `.forgejo/workflows/ci.yml` runs, as at `ba09cb8` below, each `--self-test` then the scan | each passes | `04g-scan-*.log` |
+| `FIREFOX` AFFECTED-FF, the plan's 13 files with `clif-switch-frames` | 35 failed, the same 35 by name as at the base, `b807ad8`, 206 passed, 9 skipped | `04g-firefox-affected.log` |
+| `SCROLL`, the `browser-scrollbars` project on `machine-row-scrollbars` and `state-diagram-local-scrollbars` | 2 files, 6 passed | `04g-scrollbars.log` |
+
+The 35 that fail in Firefox, at `1b5bd9a` as at `d0e3df0`, are `divider-drag-focus` 6, `divider-drag-format-on-blur` 2,
+`focus-press` 1, `panel-boundaries` the three drag cases, `panel-regions` 1, `panel-sizes-stored` 2 and `view-keys` 20;
+the 32 outside `panel-boundaries` are in files the gate at `ba09cb8` did not run in Firefox, and `$L3/dx-report.md`
+finds those files failing in this machine's Firefox in logs from 2026-11-17 on. CI runs no Firefox. **The gate at
+`d0e3df0`**, Task 2's, ran every leg the gate at `1b5bd9a` ran and `cargo llvm-cov` and `check-slow.sh` besides, each
+passing but `FIREFOX`, which failed the same 35. Before it, `BROWSER` AFFECTED, the plan's files with
+`clif-switch-frames`, 27, passed 576 cases and failed 2 as expected at `d0e3df0` (`$L3/fix2-affected.log`), against 563
+at the base.
+
+**At `c969f4e` and `24ef8c3`**, the review of the whole branch's two test commits, on the tree each committed, run from
+`web/` as the title drag's plan runs a file (its *Commands*), the browser runs under the browser lock:
+
+| Check | Result | Log in `$R/final` |
+|---|---|---|
+| `panel-boundaries.test.ts` at `c969f4e`, Chromium; Firefox | 40 passed; 3 failed, the base's three drag cases by name, 35 passed, 2 skipped | `m5-green-chromium.log`, `m5-green-firefox.log` |
+| the same at `24ef8c3`, Chromium; Firefox | 42 passed; 3 failed, the same three, 37 passed, 2 skipped | `m7-green-chromium.log`, `m7-green-firefox.log` |
+| `pnpm run typecheck`; `biome ci`; `node scripts/check-comments.mjs`, at `c969f4e` and at `24ef8c3` | no `error TS` line; 524 files, no fixes applied; 18 areas within their budgets, and no history in 33 files changed since `2cc48da` | `m5-tsc.log`, `m5-lint.log`, `m5-comments.log`, `m7-tsc.log`, `m7-lint.log`, `m7-comments.log` |
+
+**By hand in Firefox, at `d0e3df0` and at `1b5bd9a`.** Playwright's Firefox 157.0 drove the app built at `d0e3df0`
+through the mouse in a 1412 by 896 window (`$L3/hand/drive.mjs`, its records `drive.json` and `summary.json`, its log
+`$L3/02-hand.log`): in each of the four views the title showed `grab`, a press moved 60px up showed `grabbing` and moved
+the boundary 60px with the panel open, one slid 6px along the title moved nothing, a click closed the panel and another
+where its title then was opened it with every region as before, and in CLIF and rxm a double click on the call stack's
+title in the row closed and opened it with the heights as before; no page error, and no selection. At `1b5bd9a` the same
+drive (`$L3/hand-4/drive.mjs`, its records `drive.json` and `summary.json`, its log `$L3/04g-hand.log`) found the same
+in each view; the λ map, given 60px by its title and closed, was a region 33px tall over a body 0px tall, as was the map
+closed after a drag of its bar (`$L3/04g-probe-map.log`); and with the readout moved to the inspector by the workspace
+menu the strip was `hidden` and 0px tall, and `main` reached the window's foot at 896px.
+
+**The gate at `ba09cb8`**, after Task 8's fixes and the floor of two rows, run by Task 8 from `web/` and the root as
+Task 5 ran it at `4a8bd6d`, each leg once (`$L2/08g-gate-run.zsh`). `test:coverage` and the two halves of `check-all.sh`
+each ran in a `systemd-run --user` unit with `MemoryMax=16G` and `MemorySwapMax=0`, under the browser lock where they
+use a browser, and their logs end with the unit's exit status; `$L2/08g-gate-exits.txt` records every leg's exit. `cargo
+llvm-cov` and `scripts/check-slow.sh` did not run again, as no Rust changed after `4a8bd6d`: their row is the gate at
+`4a8bd6d`'s. `2277023`, after the gate, rewords two test comments.
+
+| Leg | Result | Log in `$L2` |
+|---|---|---|
+| `pnpm run build:wasm`, `build:lsp-wasm` and `build:clif-wasm` | each package ready to publish | `08g-build-wasm.log`, `08g-build-lsp-wasm.log`, `08g-build-clif-wasm.log` |
+| `pnpm run build:bindings`; `pnpm run typecheck` | the bindings' tests pass; no `error TS` line | `08g-build-bindings.log`, `08g-tsc.log` |
+| `../scripts/check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check | each passes; the same 5644 words | `08g-licences-self-test.log`, `08g-licences.log`, `08g-scan-licence-editions-self-test.log`, `08g-scan-licence-editions.log` |
+| `pnpm exec biome ci --error-on-warnings` | 524 files, no fixes applied | `08g-lint.log` |
+| `pnpm run test:coverage` | exit 0, the first run: 345 files; 3950 tests passed and 2 failed as expected; statements 97.94%, branches 92.27%, functions 98.7%, lines 99.16%, over `web/vite.config.ts`'s floors of 95, 89, 97 and 97 | `08g-coverage.log` |
+| `pnpm run build:app` | built | `08g-build-app.log` |
+| `scripts/check-all.sh --no-browser`, then `--browser-only` | exit 0, each | `08g-check-all-no-browser.log`, `08g-check-all-browser-only.log` |
+| `cargo llvm-cov nextest --workspace --fail-under-lines 90` and `scripts/check-slow.sh` | not run again: the gate at `4a8bd6d`'s, below | `05-llvm-cov.log`, `05-check-slow.log` |
+| the scans `.forgejo/workflows/ci.yml` runs, as at `4a8bd6d`, each `--self-test` then the scan | each passes | `08g-scan-*.log` |
+| `FIREFOX` AFFECTED-FF, the second plan's 13 files | 3 failed, the base's three drag cases, 341 passed, 2 failed as expected, 1 skipped | `08g-firefox-affected.log` |
+| `SCROLL`, the `browser-scrollbars` project on `machine-row-scrollbars` and `state-diagram-local-scrollbars` | 2 files, 6 passed | `08g-scrollbars.log` |
+
+Task 8 ran `BROWSER` AFFECTED, the second plan's 23 files, at `efa5988`, whose code is `a01463c`'s: 417 passed, 2 failed
+as expected (`$L2/08-affected.log`); and at `05eaa28`: 423 passed, 2 failed as expected (`$L2/08b-affected.log`).
+**The gate at `4a8bd6d`**, after the changes after Davey's try, run by that plan's Task 5 from `web/` and the root as
+Task 10 ran it at `1d53222`, with `cargo llvm-cov` and `scripts/check-slow.sh` as well, each leg once. `test:coverage`,
+the two halves of `check-all.sh`, `llvm-cov` and `check-slow.sh` each ran in a `systemd-run --user` unit with
+`MemoryMax=16G` and `MemorySwapMax=0`, under the browser lock where they use a browser, and their logs end with the
+unit's exit status; `$L2/05-gate-exits.txt` records every leg's.
+
+| Leg | Result | Log in `$L2` |
+|---|---|---|
+| `pnpm run build:wasm`, `build:lsp-wasm` and `build:clif-wasm` | each package ready to publish | `05-build-wasm.log`, `05-build-lsp-wasm.log`, `05-build-clif-wasm.log` |
+| `pnpm run build:bindings`; `pnpm run typecheck` | the bindings' tests pass; no `error TS` line | `05-build-bindings.log`, `05-tsc.log` |
+| `../scripts/check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check | each passes; the same 5644 words | `05-licences-self-test.log`, `05-licences.log`, `05-scan-licence-editions-self-test.log`, `05-scan-licence-editions.log` |
+| `pnpm exec biome ci --error-on-warnings` | 524 files, no fixes applied | `05-lint.log` |
+| `pnpm run test:coverage` | exit 0, the first run: 345 files; 3933 tests passed and 2 failed as expected; statements 97.94%, branches 92.24%, functions 98.7%, lines 99.15%, over `web/vite.config.ts`'s floors of 95, 89, 97 and 97 | `05-coverage.log` |
+| `pnpm run build:app` | built | `05-build-app.log` |
+| `scripts/check-all.sh --no-browser`, then `--browser-only` | exit 0, each | `05-check-all-no-browser.log`, `05-check-all-browser-only.log` |
+| `cargo llvm-cov nextest --workspace --fail-under-lines 90` | exit 0: 2046 passed, 35 skipped; lines 95.55% | `05-llvm-cov.log` |
+| `scripts/check-slow.sh` | exit 0, slow tier green | `05-check-slow.log` |
+| the scans `.forgejo/workflows/ci.yml` runs, as at `1d53222` below, each `--self-test` then the scan | each passes | `05-scan-*.log` |
+| `FIREFOX` AFFECTED-FF, the second plan's 13 files | 3 failed, the base's three drag cases, 324 passed, 2 failed as expected, 1 skipped | `05-firefox-affected.log` |
+| `SCROLL`, the `browser-scrollbars` project on `machine-row-scrollbars` and `state-diagram-local-scrollbars` | 2 files, 6 passed | `05-scrollbars.log` |
+
+Task 4 ran `BROWSER` AFFECTED, the second plan's 23 files, before its comment-only trims: 406 passed, 2 failed as
+expected (`$L2/04-affected.log`), and its four G1 files again after them (`$L2/04-final.log`).
+
+**The gate at `1d53222`**, after the branch review's fixes, run by Task 10 from `web/` as Task 7 ran it at `e5b0fb8`,
+with `CARGO_TARGET_DIR` set to the lane's own target directory. `test:coverage` and `check-all.sh` each ran under the
+browser lock where they use a browser, in a `systemd-run --user` unit with `MemoryMax=16G` and `MemorySwapMax=0`, and
+their logs end with the unit's exit status. `llvm-cov` and `check-slow.sh` ran at `e5b0fb8`, in the same units, and not
+again for this gate: no Rust changed after it. `c6e03ee`, after the gate, takes an empty line out of a test's doc
+comment.
+
+| Leg | Result | Log in `$L` |
+|---|---|---|
+| `pnpm run build:wasm`, `build:lsp-wasm` and `build:clif-wasm` | each package ready to publish | `10-gate-build-wasm.log`, `10-gate-build-lsp-wasm.log`, `10-gate-build-clif-wasm.log` |
+| `pnpm run build:bindings`; `pnpm run typecheck` | the bindings' tests pass; no `error TS` line | `10-gate-build-bindings.log`, `10-gate-tsc.log` |
+| `../scripts/check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check | each passes; the same 5644 words | `10-gate-licences-self-test.log`, `10-gate-licences.log`, `10-gate-licence-editions-self-test.log`, `10-gate-licence-editions.log` |
+| `pnpm exec biome ci --error-on-warnings` | 524 files, no fixes applied | `10-gate-lint.log` |
+| `pnpm run test:coverage`, the second run | exit 0: 345 files; 3894 tests passed and 2 failed as expected; statements 97.94%, branches 92.29%, functions 98.7%, lines 99.15%, over `web/vite.config.ts`'s floors of 95, 89, 97 and 97 | `10-gate-coverage-2.log` |
+| `pnpm run test:coverage`, the first run | exit 1: 1 file failed, `clif-app`, which this branch does not change, at a case that lost the race *what this did not close* names; alone the file passes its 6 tests | `10-gate-coverage.log`, `10-gate-coverage-1-clif-app-alone.log` |
+| `pnpm run build:app` | built | `10-gate-build-app.log` |
+| `scripts/check-all.sh --no-browser`, then `--browser-only` | exit 0, each | `10-gate-check-all-no-browser.log`, `10-gate-check-all-browser-only.log` |
+| `cargo llvm-cov nextest --workspace --fail-under-lines 90`, at `e5b0fb8` | exit 0: 2046 passed, 35 skipped; lines 95.55% | `07-llvm-cov.log` |
+| `scripts/check-slow.sh`, at `e5b0fb8` | exit 0, slow tier green | `07-check-slow.log` |
+| the scans `.forgejo/workflows/ci.yml` runs: `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`, `check-shared-docs`, `check-colours`, `check-grammar-wasm`, `check-lua` and `check-comments.mjs`, each `--self-test` then the scan | each passes | `10-gate-scan-*.log` |
+| `FIREFOX` AFFECTED-FF, with `clif-switch-frames`, `hear-loops` and `state-diagram-font-listeners` | 14 files: 3 failed, the base's three drag cases, 286 passed, 2 failed as expected, 1 skipped | `10-gate-firefox-affected.log` |
+| `SCROLL`, the `browser-scrollbars` project on `machine-row-scrollbars` and `state-diagram-local-scrollbars` | 2 files, 6 passed | `10-gate-scrollbars.log` |
+
+**At `30cb2e9`**, the fix round's checks, on the tree it committed.
+
+| Check | Result | Log in `$L` |
+|---|---|---|
+| `virtual-grid.test.ts -t 'keeps following when its box is hidden'` in Firefox, `e5b0fb8`'s `virtual-grid.ts` swapped in | 2 failed, at *and nobody scrolled it* | `07-fix-sab-RED-ff.log` |
+| the same in Chromium | 2 passed: Chromium sends no `scroll` there | `07-fix-sab-RED-ch.log` |
+| the same at `30cb2e9`, in Firefox and in Chromium | 2 passed in each | `07-fix-green-final-firefox.log`, `07-fix-green-final-chromium.log` |
+| `BROWSER` AFFECTED; then `hear-loops` and `clif-switch-frames` | 21 files, 353 passed; 2 files, 10 passed and 2 failed as expected | `07-fix-affected.log`, `07-fix-affected-extra.log` |
+| `FIREFOX` AFFECTED-FF; then the same two | 11 files: 3 failed, the base's three drag cases, 271 passed, 1 skipped; 2 files, 10 passed and 2 failed as expected | `07-fix-firefox-affected.log`, `07-fix-firefox-affected-extra.log` |
+| `virtual-grid`, `follow-kept`, `tm-follow-clamp`, `lambda-follow` and `scroll-kept`, Chromium; Firefox | 5 files, 60 passed; 18 failed, 41 passed, 1 skipped | `07-fix-follow-files-chromium.log`, `07-fix-follow-files-firefox.log` |
+| the four besides `virtual-grid`, Firefox, `e5b0fb8`'s `virtual-grid.ts` swapped in | 10 failed, the cases that fail at `30cb2e9` | `07-fix-follow-files-firefox-head.log` |
+| `pnpm run typecheck`; `biome ci`; `node scripts/check-comments.mjs` | no `error TS` line; 524 files, no fixes applied; 18 areas within their budgets, and no history in 24 files changed since `2cc48da` | `07-fix-tsc.log`, `07-fix-lint.log`, `07-fix-comments.log` |
+
+**The base.** Task 0 ran `FIREFOX` AFFECTED-FF at the plan's commit before the rebase, `1b5297b`, now `72399a4`, whose
+code is `1ac4fc4`'s (`00-base-firefox.log`): 7 files, the same three drag cases failed, 191 passed, 1 skipped. Task 2
+ran `tm-view-narrow.test.ts` in Firefox with `machine-panels.ts`, `style.css` and the test written back to the base's
+text (`02-firefox-base-tm-view-narrow.log`).
+
+The second plan's Task 0 took its baselines at `e223cb5`, whose code is `c6e03ee`'s: `BROWSER` AFFECTED, 23 files, 367
+passed and 2 failed as expected; `SCROLL` on `machine-row-scrollbars`, 3 passed; the node file, 10 passed; `FIREFOX`
+AFFECTED-FF, 13 files, the same three drag cases failed, 285 passed, 2 failed as expected, 1 skipped
+(`$L2/00-base-affected.log`, `00-base-scrollbars.log`, `00-base-node.log`, `00-base-firefox.log`).
+
+**By hand in Firefox, at `e5b0fb8`.** `$L/hand/drive.mjs` drove Playwright's Firefox 157.0 through the mouse and the
+window's size on the app `build:app` built, the source beside the CLIF view and then beside the rxm view: a resize
+across both thresholds both ways, a maximise of the listing and of the heap in each arrangement, and the focus on the
+heap's toggle across a switch each way. Its record is `$L/hand/drive.json`, its log `07-hand.log`, its screenshots
+`$L/hand/*.png`. `$L/hand/follow-probe3.mjs` then read whether the CLIF listing still followed after each of the view's
+toggles and maximises, at the base `2cc48da`, at `e5b0fb8`, with the fix in a scratch build and at `30cb2e9`
+(`07-hand-follow-probe3.log`, `07-fix-follow-probe3.log`). At the base 2 of its 9 readings had stopped following, both
+after the listing's own toggle; at `e5b0fb8`, 10 of 18; with the fix, none of 18 in the scratch build and none of 18 at
+`30cb2e9`. At `1d53222` Task 10 ran both scripts again on its own build (`$L/hand-10/`, `10-gate-hand.log`,
+`10-gate-hand-follow-probe3.log`), in Firefox 157.0: the drive's record has every field equal to Task 7's, and one
+entry more, a Firefox console notice of a scroll-linked positioning effect; none of the probe's 18 readings had
+stopped following.
+
+**By hand in Firefox, at `4a8bd6d`.** `$L2/hand/drive.mjs`, the drive of `$L/hand/` with a pass for the new boundary
+added, drove Playwright's Firefox 157.0 through the mouse and the keys on the app built at `4a8bd6d`. With the CLIF view
+narrow beside the source in a 692 by 1600px window and the rxm view in a 1012 by 1600px one, a drag of the call stack's
+header 40px up moved the new boundary 36.8px in CLIF, where the values stopped on their floor, and 40px in rxm;
+Shift+Tab from the call stack's toggle reached the boundary and ArrowDown moved it; a switch to medium then handed the
+focus from the boundary to the call stack's toggle; and back in narrow every region had the height it had before. The
+first pass's checks, at 896px tall, read as Task 10's but where these commits change them, and where the drive's new
+pass left the focus, on the call stack's toggle in the resize steps: in narrow the row's
+`flex-direction` is `row` and the boundaries have their new names, some counts are up to 6.4px wider, and the values and
+the call stack sit on their 123px floor. The drive's `oneLine`, which compares the tops of a header's buttons and count,
+reads false for each call stack's and heap's header now that the count is centred; those headers are 33px tall, as at
+`1d53222`. Its record is `$L2/hand/drive.json`, its log `$L2/05-hand.log`, its 42 screenshots `$L2/hand/*.png`.
+`follow-probe3.mjs` found none of its 18 readings stopped following (`$L2/05-hand-follow-probe3.log`).
+
+**By hand in Firefox, at `ba09cb8`.** `$L2/hand-8/drive.mjs`, the drive of `$L2/hand/` with the pass for the new
+boundary run in each view at 692 by 896 and at 692 by 1600, narrow at both, drove Playwright's Firefox 157.0 on the app
+built at `ba09cb8`: a drag of the call stack's header 40px up and then 40px down, Shift+Tab to the boundary and
+ArrowDown, a switch to medium and back. At 692 by 1600 each drag moved the boundary 40px in both views, and ArrowDown
+25.6px in CLIF and 25.7px in rxm; at 692 by 896 the drag up moved it 2.8px in CLIF and 3.4px in rxm, where the first
+panel stopped on its floor of two rows, 69px, the drag down 5.6px and 6.7px, where the call stack stopped on its own,
+and ArrowDown then nothing. Medium handed the focus to the call stack's toggle, and back in narrow every region had the
+height and the share it had before. The first pass's checks read as Task 5's but for the drawn shares the new pass
+leaves and the two narrow resize entries, where the call stack sits on its 69px floor. Its record is
+`$L2/hand-8/drive.json`, its log `$L2/08g-hand.log`, its 56 screenshots `$L2/hand-8/*.png`, and `follow-probe3.mjs`
+found none of its 18 readings stopped following (`$L2/08g-hand-follow-probe3.log`).
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-panels-row-record`, `L=$R/impl`, `L2=$R/impl2` and `L3=$R/impl3`. A figure from a log names the
+commit the log ran at in its row: the gate's rows read Task 8's logs at `ba09cb8`, Task 5's at `4a8bd6d` and Task 10's
+at `1d53222`, and `llvm-cov`'s and `check-slow.sh`'s read Task 5's at `4a8bd6d`, which the gate at `ba09cb8` did not run
+again, and Task 7's at `e5b0fb8`; the title drag's gate rows read the logs of its gate at `1b5bd9a`, and `llvm-cov`'s
+and `check-slow.sh`'s its Task 2's at `d0e3df0`, which the gate at `1b5bd9a` did not run again; and the review of the
+whole branch's rows read its logs in `$R/final/`, at `c969f4e` and `24ef8c3`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 51 | commits in the range, less this entry's first writing and the ten commits that correct it or bring it up to later commits, `5788121`, `8e40675`, `b09b683`, `dbaa7c8`, `a9b75ad`, `efa5988`, `ba09cb8`, `c172f94`, `906c0bb`, `d54ad71` and `4bfe118` | `git rev-list 2cc48da..24ef8c3 \| rg -cv '^(5788121\|8e40675\|b09b683\|dbaa7c8\|a9b75ad\|efa5988\|ba09cb8\|c172f94\|906c0bb\|d54ad71\|4bfe118)'` |
+| 3; 2; 11; 5 | the design's commits; the plan's; the build's; the branch review's fixes | `git rev-list --count 2cc48da..1480901; git rev-list --count 1480901..d583e9f; git rev-list --count d583e9f..30cb2e9; git rev-list --count 8e40675..c6e03ee` |
+| 1; 3; 4 | the after-the-try design's commits; its plan's; its build's | `git rev-list --count dbaa7c8..5eed000; git rev-list --count 5eed000..af779e2; git rev-list --count af779e2..4a8bd6d` |
+| 7; 1; 1 | Task 8's commits of the review's fixes; of the floor of two rows; after its gate | `git rev-list --count a9b75ad..a01463c; git rev-list --count efa5988..05eaa28; git rev-list --count ba09cb8..2277023` |
+| 1; 2; 3; 5; 2 | the title drag's design commits; its plan's; its build's; its review's fixes'; the review of the whole branch's fixes, before the commits that bring this entry up to them | `git rev-list --count c172f94..0283d85; git rev-list --count 0283d85..b807ad8; git rev-list --count b807ad8..d0e3df0; git rev-list --count 906c0bb..1b5bd9a; git rev-list --count 4bfe118..24ef8c3` |
+| `5eed000..a9b75ad` | the commits Task 7 reviewed | `rg -o '^# Task 7 review: .*' $L2/review.md` |
+| 16 | the findings of the second plan's pre-flight scan | `rg -o 'pre-flight \(impl2/preflight.md\): [0-9]+ rows, [0-9]+ findings' $R/ledger.md` |
+| 4; none: prints nothing | the second plan's build tasks whose review was clean with no fix round; those with one | `rg -c 'Plan2 Task [0-9]: complete \(commits [0-9a-f.]+, review clean\)' $R/ledger.md; rg -c 'Plan2 Task [0-9]: complete .*fix round' $R/ledger.md` |
+| `e223cb5` | the commit the second plan's pre-flight scan read and its Task 0 took the baselines at, in the same file | `rg -o '^# Pre-flight: .*\(plan at [0-9a-f]+\)\|^- Tree clean at .[0-9a-f]+., no commit' $L2/preflight.md` |
+| twelve | the pre-flight scan's findings the plan took | `git log -1 --format=%s d583e9f \| rg -o 'twelve findings'` |
+| 1; 2; 1; 1 | the fix rounds of Tasks 1, 4, 5 and 7 | `rg -o '^- Task [0-9]: complete \(commits [0-9a-f.]+, review clean after [0-9] fix rounds?\)' $R/ledger.md` |
+| 02:05 UTC | the ledger's line that records the rebase onto `2cc48da` | `rg -o '^- 02:05 UTC: REBASED panels-row onto origin/main 2cc48da' $R/ledger.md` |
+| 03:57 UTC; `44d255e->71f7b2b`, `1b5297b->72399a4`; none: prints nothing | the ledger's line that maps Task 1's first commit and the plan's from before the rebase; its two pairs; those two SHAs in the 02:05 UTC line | `rg -o '^- 03:57 UTC: Task 8 review' $R/ledger.md; rg '^- 03:57 UTC' $R/ledger.md \| rg -o '(44d255e\|1b5297b)->[0-9a-f]+'; rg -c '^- 02:05 UTC.*(44d255e\|1b5297b)' $R/ledger.md` |
+| 11; 21; 8; 0 | the files the range changes under `web/src/`; under `web/tests/`; elsewhere, the three designs, the three plans, this roadmap and `web/vite.config.ts`; in Rust | `git diff --name-only 2cc48da..24ef8c3 \| rg -c '^web/src/'; git diff --name-only 2cc48da..24ef8c3 \| rg -c '^web/tests/'; git diff --name-only 2cc48da..24ef8c3 \| rg -v '^web/(src\|tests)/'; git diff --name-only 2cc48da..24ef8c3 \| grep -c '\.rs$'` |
+| 7.375, 14.75, 14.75; 18, 18, 18 | CLIF's least widths in rem; rxm's | `rg -o 'columns: \[[0-9., ]+\]' web/src/clif-pane.ts web/src/rxm-pane.ts` |
+| 118, 236, 236; 288; 8 | the same in px at a 16px root; the gap between columns | `rg -o '^const (CLIF\|RXM\|GAP) = .*' web/tests/node/machine-row.test.ts` |
+| 606, 362; 880, 584 | CLIF's thresholds; rxm's, each held one step either side | `rg -o "view: '(CLIF\|rxm)', columns: [A-Z]+, width: [0-9.]+, is: '[a-z]+'" web/tests/node/machine-row.test.ts` |
+| 622, 370; 896, 592 | the same at `c6e03ee`, before the gap was 8px | `git show c6e03ee:web/tests/node/machine-row.test.ts \| rg -o "view: '(CLIF\|rxm)', columns: [A-Z]+, width: [0-9.]+, is: '[a-z]+'"` |
+| `var(--space-2)`, 0.5rem; 1rem | the gap between columns, and that token's value; the gap at `c6e03ee` | `rg -A3 '^\.rxm-machine \{' web/src/style.css \| rg -o 'column-gap: [^;]+'; rg -o -- '--space-2: [0-9.]+rem' web/src/style.css; git show c6e03ee:web/src/style.css \| rg -A3 '^\.rxm-machine \{' \| rg -o 'column-gap: [^;]+'` |
+| 634; 506 | the width inside a view beside the source in a 1280px window; in a 1024px one, at `ba09cb8` | `rg -a -o '(clif\|rxm) view beside the source in a [0-9]+ px window is [0-9]+ px wide inside' $L2/08g-coverage.log` |
+| a third; two fifths | a maximised heap's part of the row in wide, rxm's and CLIF's | `awk 'BEGIN { print 18 / (18 + 18 + 18), 14.75 / (7.375 + 14.75 + 14.75) }'` |
+| values; registers | the name of the boundary above the row in wide, in CLIF; in rxm | `rg -o 'resize listing and \$\{view.values\}, call stack and heap' web/tests/browser/machine-row.test.ts; rg -o "values: '(values\|registers)'" web/tests/browser/machine-views.ts` |
+| values; registers | the name of the boundary between the first panel and the call stack in narrow, in CLIF; in rxm, as the pass by hand read it | `rg -o 'resize (values\|registers) and call stack' $L2/hand/drive.json \| sort -u` |
+| `stack`; 0.5; `machine` | the call stack's region's name; its part as built; the region it is a part of | `rg -o "name: 'stack'\|share: 0.5\|partOf: 'machine'" web/src/machine-row.ts` |
+| `2lh`; `5lh` | the floor of the first panel's and the call stack's bodies in narrow; the machine bodies' rule | `rg -U -o '\.machine-stack \.rxm-stack \{\n  min-height: 2lh\|\.rxm-heap \{\n  flex: 1 1 0;\n  min-height: 5lh' web/src/style.css` |
+| 9.4; 1.8 | how far each of the two bodies stands over its floor of two rows in narrow, with nothing stored, in a view 700px tall, rxm's and CLIF's, as Task 8's probe read it | `rg -a -o 'PROBE \{.*\}' $L2/08b-green.log \| cut -c7- \| jq -r 'select(.H == 700) \| "\(.kind) \((.stackBody[0] - (.stackBody[1] \| rtrimstr("px") \| tonumber)) * 10 \| round / 10)"'` |
+| 29; 27 | `panel-boundaries`' cases at `ba09cb8`; at `4a8bd6d` | `sed 's/\x1b\[[0-9;]*m//g' $L2/08g-coverage.log $L2/05-coverage.log \| rg -o 'tests/browser/panel-boundaries\.test\.ts \([0-9]+ tests\)'` |
+| 1600 | the height the cases for the new boundary mount their view at | `rg -o 'A G1 case mounts its view 1600px tall' docs/superpowers/plans/2026-11-22-machine-panels-row-after-the-try.md` |
+| 3ch | a count's least room to be drawn | `rg -o '@container \(width < 3ch\)' web/src/style.css` |
+| 15 | a count's box in Instrument, now its text's height, in Chromium | `rg -o 'Chromium \\| instrument \(Inter\) \\| [0-9.]+ \\| 15 / 15' $L2/task-2-report.md` |
+| 0.508; 18, 15 | how high the count's text sat in Chromium with `align-self: center` alone; its line's and its text's height | `rg -o "Chromium's text sits 0.508px high \(18px line, 15px text" $R/ledger.md` |
+| 3.70; 0.508 | how far C1a and C1b put the text off the button's middle, in Chromium | `sed 's/\x1b\[[0-9;]*m//g' $L2/02-sab-C1a.log $L2/02-sab-C1b.log \| rg -a -o 'expected [0-9.]+ to be less than or equal to 0.5' \| sort -u` |
+| 1/128px | the margin by which the count's case fails C1b in Chromium | `rg -o 'only by 1/128px' $R/ledger.md` |
+| 880, 584; 606, 634, 362 | the widths at which the headers' test holds rxm's counts whole; CLIF's, with the counts: each view's thresholds in `VIEWS`, which the test reads through `from`, and 634px | `rg -o "kind: '[a-z]+'\|^    (wide\|medium): [0-9]+" web/tests/browser/machine-views.ts; rg -o "width: (from\('[a-z]+', '[a-z]+'\)\|[0-9]+), arrangement: .[a-z]+., depth: [0-9]+, cells: [0-9]+, boxes: [0-9]+" web/tests/browser/machine-panel-headers.test.ts` |
+| 0.67px | how much lower Firefox drew the rows for the frame before the swap | `rg -o 'rows stood 0.67 px lower' $L/task-4-report.md` |
+| 322; 1498, 1559 | the CLIF view's width at which its own header wraps; the regions' height in narrow and in medium in that case's host | `rg -o 'header wraps at the narrow width \(322px\)\|the regions get 1498px in narrow and 1559px in medium' $L2/task-4-report.md` |
+| 1280 by 1700; 1280 by 1000 | the window of `panel-boundaries`' drag of the call stack's header; the file's own | `rg -o 'sets the window to 1280×1700 and puts it back to 1280×1000' $L2/task-4-report.md` |
+| 76 for 67, 50 for 33 | the boundaries' `aria-valuenow` S1 read, against those drawn | `sed 's/\x1b\[[0-9;]*m//g' $L2/04-sab-S1.log \| rg -a -o "expected '[0-9]+' to be '[0-9]+'" \| sort -u` |
+| 8; 8 | how far under the boundary above it a copy's outline began in wide, with M1a's rule; the listing, with M1b's | `sed 's/\x1b\[[0-9;]*m//g' $L/10-sab-M1a.log $L/10-sab-M1b.log \| rg -a -o '(machine\|text).(outline\|listing) [1-9][0-9]*' \| sort -u` |
+| 16px; 8px | how far a copy's listing moves past the value line's height when a value shows, now; at the base; both read from the style sheet, not measured | `rg -o 'moves the line.s height plus 16px, against plus 8px on the base' $L/review-fix-rereview.md` |
+| 27, 4, 15, 85, 9, 3; 10 | the new browser files' cases, at `ba09cb8`; the node file's | `sed 's/\x1b\[[0-9;]*m//g' $L2/08g-coverage.log \| rg -o 'tests/(browser\|node)/(panel-stack-place\|hear-loops\|machine-panel-headers\|machine-row\|machine-row-app\|machine-row-scrollbars)\.test\.ts \([0-9]+ tests\)'` |
+| 800; 3 | the width of the rxm fixtures in three files; `panel-boundaries`' cases at 1000px, two for the heap's header in wide and the title drag's C6 | `rg -o "(width \?\? 800\|'800px'\|width = 800)" web/tests/browser/panel-boundaries.test.ts web/tests/browser/panel-maximise.test.ts web/tests/browser/rxm-pane.test.ts; rg -c 'mount\(\{ width: 1000' web/tests/browser/panel-boundaries.test.ts` |
+| 20px; two; 1240px | the root font size the case uses; the `rxm-pane` cases that hold a column; the window `clif-switch-frames` was narrowed to in `df598e6` | `git log -1 --format=%s df598e6 \| rg -o 'a root font size of 20px\|two closed-panel cases hold a column\|narrows its window to 1240px'` |
+| 13 | the departures the plan names | `awk '/^## Departures from the prototype/{f=1; next} /^## /{f=0} f' docs/superpowers/plans/2026-11-21-machine-panels-row.md \| rg -c '^[0-9]+\. '` |
+| 900; 1600 | N6's host heights, where it failed nothing; where it fired | `rg -o 'a view 900 px tall\|a 1600 px host' $L/task-4-report.md \| sort -u` |
+| a pixel | the scroll-bar case's change of height once the bar is in | `rg -o "changes the view's height by a pixel" $L/task-6-report.md` |
+| two | the frames `hearLoops` waits before a file's teardown | `git log -1 --format=%s a522e82 \| rg -o 'waits two frames'` |
+| three | Task 7's tries at a case through the app | `rg -o 'Three tries at a Firefox case' $L/task-7-report.md` |
+| each case's tally | the cases each sabotage failed, in the order of the table, log by log | `cd $L && for f in 01-sab-{S9,N1,N2,S3,N3,N10,N11,N12} 01f1-sab-F{1,2,3,4,5} 02-sab-{SB3,SB4,SB5,SB6,S6,N4,T1} 03-sab-{N13,S10,S10-firefox,S11,X1,X1-firefox,S1,S1m} 04-sab-{S2,S3,S4,S5,S7,S8,SB1,SB2,SB7,N5,N6,N7,N8} 04f1-sab-F{1,2} 04d-sab-{D1-ch,D1-ff,D2-ch,D3-ch} 05-sab-{S9,S10,S11b,S12,S13,S14,S15,S7,X1,X2,X3} 05f1-sab-{F1-chromium,F1-firefox,X3-chromium} 06-sab-SB1 review-6/rxm-cols-27-9-18 06-sab-{S6,SB5,S16,S16v,N9,S4,X1,X2} 07-fix-sab-{S1,S2} 10-sab-{I1a,I1b,I1c,M1a,M1b,M7a,M7a-old}; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a '^      Tests  ' \| tr -s ' '; done` |
+| each case's tally | the same for the second plan, from A1 on | `cd $L2 && for f in 01-sab-A{1,2,3} 02-sab-{C1a,C1a-ff,C1b,C1b-ff} 03-sab-P{1,2,3,4,5,6,7,8,9} 04-sab-{M1,M2,M3,M4a,M4b,M4c,M5,M6,M7,M8,M9,M10,S1}; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a '^      Tests  ' \| tr -s ' '; done` |
+| each case's tally | the same for Task 8, from I1a on | `cd $L2 && for f in 08-sab-{I1a,I1b,I1c,I1d,m1,m2a,m2b,m2c,m2d,m2e,m3-P2,m4-C1b,m4-C1b-ff,m5,m7} 08b-sab-F{1,2}; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a '^      Tests  ' \| tr -s ' '; done` |
+| 605.99, 879 | the widths A3 failed at | `sed 's/\x1b\[[0-9;]*m//g' $L2/01-sab-A3.log \| rg -a -o 'columns in [0-9.]+ px' \| sort -u` |
+| 329.5, 339.67; 53.78, 243.67 | how far the listing moved at the case's first failed step under I1c, rxm's and CLIF's; under I1d | `sed 's/\x1b\[[0-9;]*m//g' $L2/08-sab-I1c.log $L2/08-sab-I1d.log \| rg -a -A1 "> the '(rxm\|clif)' view > moves no region" \| rg -a -o "the '(rxm\|clif)' view\|many [a-z ]+ rows: the listing: expected [0-9.]+"` |
+| 18, 15.5; 36, 90 | the count's line under m4-C1b and the most the case allows it, in px; a body's height under F2 and the five rows the case asks for | `sed 's/\x1b\[[0-9;]*m//g' $L2/08-sab-m4-C1b.log $L2/08b-sab-F2.log \| rg -a -o 'expected [0-9]+ to be (less than or equal to\|close to) [0-9.]+' \| sort -u` |
+| 870 | m5's rxm wide threshold | `rg -o 'wide: 870' $L2/08-sabotages.json` |
+| [11, 11, 11], [17, 18, 18], [18, 18, 18] | SB1's, SB7's and N9's columns | `rg -o "(SB1\|SB7\|N9): \['[a-z-]+\.ts', 'columns: \[[0-9., ]+\],', 'columns: \[[0-9., ]+\],'" $L/04-sab-driver.mjs $L/06-sab-driver.mjs` |
+| 2, 2, 2 | T1's failures at 1280, 320 and 390px | `sed 's/\x1b\[[0-9;]*m//g' $L/02-sab-T1.log \| rg -a -o '^ FAIL .*' \| sort -u \| rg -o 'at [0-9]+ (by\|px)' \| sort \| uniq -c` |
+| 622, 896; 370, 592 | the widths S1 failed at; S1m | `for f in S1 S1m; do sed 's/\x1b\[[0-9;]*m//g' $L/03-sab-$f.log \| rg -a -o '^ FAIL .*columns in [0-9]+ px' \| sort -u \| rg -o '[0-9]+ px' \| tr '\n' ' '; echo; done` |
+| none of 10; none of 24 | what N12 failed before the case stopped the boundary's `blur`; N6 on a host 900px tall | `rg '^N12' $L/01-sab-results-first.txt; rg -m1 '^N6' $L/04-sab-results.txt` |
+| 3 passed, none failed | what S16v failed with the case's one-pixel step taken out | `sed 's/\x1b\[[0-9;]*m//g' $L/06-sab-S16v-without-step.log \| rg '^      Tests  '` |
+| 119, 0; 4; 11, 11 | the lines of the results files with an exit status that say the file was restored and `cmp` equal; those that do not; `07-fix-sab-results.txt`'s runs restored; the runs in Task 10's three results files, and those restored and `cmp` equal | `cat $L/0[1-6]*-sab-results*.txt \| rg 'exit [0-9]' \| rg -c 'restored, cmp equal'; cat $L/0[1-6]*-sab-results*.txt \| rg 'exit [0-9]' \| awk '!/restored, cmp equal/' \| wc -l; rg -c '"restored": true' $L/07-fix-sab-results.txt; cat $L/10-sab-results-*.txt \| rg -c '"id"'; cat $L/10-sab-results-*.txt \| rg -c '"restored": true'` |
+| 29, 0 | the lines of the second plan's results files with an exit status that say the file was restored and `cmp` equal; those that do not | `cat $L2/0[1-4]-sab-results.txt \| rg 'exit [0-9]' \| rg -c 'restored, cmp equal'; cat $L2/0[1-4]-sab-results.txt \| rg 'exit [0-9]' \| awk '!/restored, cmp equal/' \| wc -l` |
+| 15, 0; 2 | the lines of Task 8's results file with an exit status that say the file was restored and `cmp` equal; those that do not; the lines of the floor's driver log that say F1's and F2's file was restored and `cmp` agreed | `rg 'exit [0-9]' $L2/08-sab-results.txt \| rg -c 'restored, cmp equal'; rg 'exit [0-9]' $L2/08-sab-results.txt \| awk '!/restored, cmp equal/' \| wc -l; rg -c 'restored, cmp ok' $L2/08b-sab-driver.log` |
+| 16G, 0 | the memory cap of the gates' units, at `e5b0fb8`, at `1d53222`, at `4a8bd6d`, at `ba09cb8` and at `1b5bd9a`; their swap | `rg -U -o -m1 'MemoryMax=16G -p\s+MemorySwapMax=0' $L/task-7-report.md $L/task-10-gate-report.md $L2/task-5-report.md $L2/task-8-gate-report.md $L3/task-4-gate-report.md` |
+| 345; 3894, 2; 97.94, 92.29, 98.7, 99.15 | the second coverage run at `1d53222`: files; tests passed and failed as expected; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-coverage-2.log \| rg 'Test Files\|      Tests\|All files'` |
+| 345; 3933, 2; 97.94, 92.24, 98.7, 99.15 | the coverage run at `4a8bd6d`: files; tests passed and failed as expected; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $L2/05-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| 345; 3950, 2; 97.94, 92.27, 98.7, 99.16 | the coverage run at `ba09cb8`: files; tests passed and failed as expected; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $L2/08g-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| 95, 89, 97, 97 | the coverage floors | `rg -o '(statements\|branches\|functions\|lines): [0-9]+' web/vite.config.ts` |
+| 1 of 345; none of 345 | the first coverage run's failed files at `1d53222`; the second's | `sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-coverage.log $L/10-gate-coverage-2.log \| rg 'Test Files'` |
+| `clif-app` | that file | `sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-coverage.log \| rg -o '^ FAIL .*tests/browser/[a-z-]+\.test\.ts' \| sort -u` |
+| 6, none failed | `clif-app`'s tests alone | `sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-coverage-1-clif-app-alone.log \| rg '      Tests'` |
+| 2 failed, 2 passed; 2 failed, 2 passed | the forced race's four cases at `1d53222`, the two with a draw failing; on main's `web/` | `sed 's/\x1b\[[0-9;]*m//g' $L/10-dbg-race-head-1.log $L/10-dbg-race-base-1.log \| rg '      Tests'` |
+| 0, three times; 0, twice; 1 | the exit statuses at `1d53222` of the second coverage run and the two halves of `check-all.sh`; at `e5b0fb8` of `llvm-cov` and `check-slow.sh`; at `1d53222` of the first coverage run | `tail -qn1 $L/10-gate-coverage-2.log $L/10-gate-check-all-no-browser.log $L/10-gate-check-all-browser-only.log; tail -qn1 $L/07-llvm-cov.log $L/07-check-slow.log; tail -qn1 $L/10-gate-coverage.log` |
+| 0, five times | the exit statuses at `4a8bd6d` of the coverage run, the two halves of `check-all.sh`, `llvm-cov` and `check-slow.sh` | `tail -qn1 $L2/05-coverage.log $L2/05-check-all-no-browser.log $L2/05-check-all-browser-only.log $L2/05-llvm-cov.log $L2/05-check-slow.log` |
+| 0, three times | the exit statuses at `ba09cb8` of the coverage run and the two halves of `check-all.sh` | `tail -qn1 $L2/08g-coverage.log $L2/08g-check-all-no-browser.log $L2/08g-check-all-browser-only.log` |
+| 2046, 35; 95.55% | `llvm-cov`'s tests passed and skipped at `e5b0fb8`, no Rust changed after it; its lines | `rg -a -o '[0-9]+ tests run: [0-9]+ passed, [0-9]+ skipped' $L/07-llvm-cov.log; rg -a '^TOTAL' $L/07-llvm-cov.log \| rg -o '[0-9.]+%' \| sed -n 3p` |
+| 2046, 35; 95.55% | `llvm-cov`'s tests passed and skipped at `4a8bd6d`; its lines | `rg -a -o '[0-9]+ tests run: [0-9]+ passed( \([0-9]+ slow\))?, [0-9]+ skipped' $L2/05-llvm-cov.log; rg -a '^TOTAL' $L2/05-llvm-cov.log \| rg -o '[0-9.]+%' \| sed -n 3p` |
+| 0 | the files `e5b0fb8..c6e03ee` changes outside `web/` and `docs/` | `git diff --name-only e5b0fb8..c6e03ee \| rg -v '^(web\|docs)/' \| wc -l` |
+| 524; 524; 524; 524; 524 | the files `biome ci` checked at `30cb2e9`; at `1d53222`; at `4a8bd6d`; at `ba09cb8`; at `1b5bd9a` | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-lint.log $L/10-gate-lint.log $L2/05-lint.log $L2/08g-lint.log $L3/04g-lint.log \| rg -o 'Checked [0-9]+ files'` |
+| 5644; 5644; 5644; 5644 | the words `check-licence-editions.sh` counts in each file, at `1d53222`; at `4a8bd6d`; at `ba09cb8`; at `1b5bd9a` | `rg -o 'same [0-9]+ words' $L/10-gate-licence-editions.log $L2/05-scan-licence-editions.log $L2/08g-scan-licence-editions.log $L3/04g-scan-licence-editions.log` |
+| 18; 18 | the scans' logs at `1d53222`, a self-test and a scan each for nine scans; the runs `10-gate-exits.txt` records for them as exit 0 | `ls $L/10-gate-scan-*.log \| wc -l; rg -c '^scan-[a-z-]+ exit 0 ' $L/10-gate-exits.txt` |
+| 20; 20 | the scans' logs at `4a8bd6d`, a self-test and a scan each for the nine and `check-licence-editions`; the runs `05-gate-exits.txt` records for them as exit 0 | `ls $L2/05-scan-*.log \| wc -l; rg -c '^scan-[a-z-]+ exit 0 ' $L2/05-gate-exits.txt` |
+| 20; 20 | the scans' logs at `ba09cb8`, a self-test and a scan each for the same ten; the runs `08g-gate-exits.txt` records for them as exit 0 | `ls $L2/08g-scan-*.log \| wc -l; rg -c '^scan-[a-z-]+ exit 0 ' $L2/08g-gate-exits.txt` |
+| none: prints nothing | `error TS` lines at `30cb2e9`, at `1d53222`, at `4a8bd6d`, at `ba09cb8` and at `1b5bd9a` | `rg -c 'error TS' $L/07-fix-tsc.log $L/10-gate-tsc.log $L2/05-tsc.log $L2/08g-tsc.log $L3/04g-tsc.log` |
+| none: prints nothing | the two new `virtual-grid` cases among Firefox's failures | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-follow-files-firefox.log \| rg -a -c '^ FAIL .*keeps following when its box is hidden'` |
+| 14; 3, 286, 2, 1 | AFFECTED-FF at `1d53222`: files; tests failed, passed, failed as expected and skipped | `sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-firefox-affected.log \| rg 'Test Files\|      Tests'` |
+| 13; 3, 324, 2, 1 | AFFECTED-FF at `4a8bd6d`: files; tests failed, passed, failed as expected and skipped | `sed 's/\x1b\[[0-9;]*m//g' $L2/05-firefox-affected.log \| rg 'Test Files\|      Tests'` |
+| 13; 3, 341, 2, 1 | AFFECTED-FF at `ba09cb8`: files; tests failed, passed, failed as expected and skipped | `sed 's/\x1b\[[0-9;]*m//g' $L2/08g-firefox-affected.log \| rg 'Test Files\|      Tests'` |
+| 23; 406, 2 | AFFECTED at `4a8bd6d`, Task 4's: files; tests passed and failed as expected | `sed 's/\x1b\[[0-9;]*m//g' $L2/04-affected.log \| rg 'Test Files\|      Tests'` |
+| 23; 417, 2; 23; 423, 2 | AFFECTED at `efa5988`, Task 8's: files; tests passed and failed as expected; the same at `05eaa28` | `sed 's/\x1b\[[0-9;]*m//g' $L2/08-affected.log $L2/08b-affected.log \| rg 'Test Files\|      Tests'` |
+| 2, 6; 2, 6; 2, 6; 2, 6 | SCROLL at `1d53222`: files; tests passed; at `4a8bd6d`; at `ba09cb8`; at `1b5bd9a` | `sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-scrollbars.log $L2/05-scrollbars.log $L2/08g-scrollbars.log $L3/04g-scrollbars.log \| rg 'Test Files\|      Tests'` |
+| 21, 353; 2, 10, 2 | AFFECTED at `30cb2e9`; then `hear-loops` and `clif-switch-frames` | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-affected.log $L/07-fix-affected-extra.log \| rg 'Test Files\|      Tests'` |
+| 11; 3, 271, 1; 2, 10, 2 | AFFECTED-FF at `30cb2e9`: files; failed, passed, skipped; then the same two | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-firefox-affected.log $L/07-fix-firefox-affected-extra.log \| rg 'Test Files\|      Tests'` |
+| same; same; 3 | the drag cases that fail in Firefox at the base against those at `30cb2e9`; against those at `1d53222`; how many | `for f in 07-fix-firefox-affected 10-gate-firefox-affected; do diff <(sed 's/\x1b\[[0-9;]*m//g' $L/00-base-firefox.log \| rg -a -o 'a drag of a boundary > .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L/$f.log \| rg -a -o 'a drag of a boundary > .*' \| sort -u) && echo same; done; sed 's/\x1b\[[0-9;]*m//g' $L/10-gate-firefox-affected.log \| rg -a -o 'a drag of a boundary > .*' \| sort -u \| wc -l` |
+| same; same | the drag cases that fail in Firefox at `4a8bd6d` against those at the first base; against those at the second plan's, `e223cb5` | `for b in $L/00-base-firefox.log $L2/00-base-firefox.log; do diff <(sed 's/\x1b\[[0-9;]*m//g' $b \| rg -a -o 'a drag of a boundary > .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L2/05-firefox-affected.log \| rg -a -o 'a drag of a boundary > .*' \| sort -u) && echo same; done` |
+| same; same | the drag cases that fail in Firefox at `ba09cb8` against those at the first base; against those at `e223cb5` | `for b in $L/00-base-firefox.log $L2/00-base-firefox.log; do diff <(sed 's/\x1b\[[0-9;]*m//g' $b \| rg -a -o 'a drag of a boundary > .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L2/08g-firefox-affected.log \| rg -a -o 'a drag of a boundary > .*' \| sort -u) && echo same; done` |
+| 7; 3, 191, 1 | AFFECTED-FF at the base: files; failed, passed, skipped | `sed 's/\x1b\[[0-9;]*m//g' $L/00-base-firefox.log \| rg 'Test Files\|      Tests'` |
+| 23; 367, 2; 3; 10; 13; 3, 285, 2, 1 | the second plan's baselines at `e223cb5`: AFFECTED's files; its tests passed and failed as expected; SCROLL's passed; the node file's; AFFECTED-FF's files; its tests failed, passed, failed as expected and skipped | `sed 's/\x1b\[[0-9;]*m//g' $L2/00-base-affected.log $L2/00-base-scrollbars.log $L2/00-base-node.log $L2/00-base-firefox.log \| rg 'Test Files\|      Tests'` |
+| 2; 2; 2, 2 | the new `virtual-grid` cases failed in Firefox with `e5b0fb8`'s grid; passed in Chromium with it; passed at `30cb2e9` in Firefox and in Chromium | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-sab-RED-ff.log $L/07-fix-sab-RED-ch.log $L/07-fix-green-final-firefox.log $L/07-fix-green-final-chromium.log \| rg '      Tests'` |
+| 60; 18, 41, 1 | the five follow files' tests in Chromium at `30cb2e9`; in Firefox, failed, passed and skipped | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-follow-files-chromium.log $L/07-fix-follow-files-firefox.log \| rg '      Tests'` |
+| 2, 1, 5, 2, 8 | Firefox's failures by file: `follow-kept`, `lambda-follow`, `scroll-kept`, `tm-follow-clamp`, `virtual-grid` | `sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-follow-files-firefox.log \| rg -a -o '^ FAIL .*tests/browser/[a-z-]+\.test\.ts' \| sed 's/.*tests.browser.//' \| sort \| uniq -c` |
+| 10, the same | the four outside `virtual-grid` with `e5b0fb8`'s grid: failures; their names against `30cb2e9`'s | `diff <(sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-follow-files-firefox.log \| rg -a -o 'tests/browser/(follow-kept\|lambda-follow\|scroll-kept\|tm-follow-clamp)\.test\.ts > .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-follow-files-firefox-head.log \| rg -a -o 'tests/browser/(follow-kept\|lambda-follow\|scroll-kept\|tm-follow-clamp)\.test\.ts > .*' \| sort -u) && echo same; sed 's/\x1b\[[0-9;]*m//g' $L/07-fix-follow-files-firefox-head.log \| rg '      Tests'` |
+| 189 for 188.833, 59 for 58.833 | `follow-kept`'s two positions in Firefox | `rg -o '189 for 188.833, 59 for 58.833' $L/task-7-rereview-1.md` |
+| 11 of 23; the same 11 | `tm-view-narrow` in Firefox at the base; at `9019354`, whose list is the base's and the three drag cases | `sed 's/\x1b\[[0-9;]*m//g' $L/02-firefox-base-tm-view-narrow.log \| rg '      Tests'; diff $L/02-ff-base.txt $L/02-ff-now.txt` |
+| 11 of 23; same | `tm-view-narrow` in Firefox with `da50c8e`'s test; its failures' names against the test before it | `sed 's/\x1b\[[0-9;]*m//g' $L/10-m7-green-firefox.log \| rg '      Tests'; diff <(sed 's/\x1b\[[0-9;]*m//g' $L/10-sab-M7-ff-head.log \| rg -a -o '× .*' \| sed 's/ [0-9]*ms$//' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L/10-m7-green-firefox.log \| rg -a -o '× .*' \| sed 's/ [0-9]*ms$//' \| sort -u) && echo same` |
+| 154, 189; 320, 390 | the view's width on a phone; the window's | `rg -U -o '154 px in a 320 px window, 189 px in a 390 px\s+one' $L/task-2-report.md` |
+| not drawn; cut | the call stack's count at 154px; at 189px, at `9019354` | `rg -a -o 'PROBE [a-z]+ (154\|189) stack "[^"]+" room [0-9.]+ (NOT DRAWN\|cut\|whole)' $L/02-probe-phone.log \| cut -d' ' -f3,7- \| sort -u` |
+| 1012, 692; 692 | the windows in which the app's header wraps to two lines; in which CLIF's step readout wraps | `rg -U -o "header wraps to two lines at 1012 and\s+692 px, and CLIF's step readout wraps under its controls at 692 px" $L/task-7-report.md` |
+| 692 | the window in which the status bar wraps, at `4a8bd6d` | `rg -o 'the status bar at 692px' $L2/task-5-report.md` |
+| 157.0; 157.0; 157.0 | the Firefox the pass by hand drove, at `e5b0fb8`; at `1d53222`; at `4a8bd6d` | `rg -o '"firefox":"[0-9.]+"' $L/07-hand.log $L/10-gate-hand.log; rg -o -m1 '"firefox":"[0-9.]+"' $L2/05-hand.log` |
+| 2 of 9; 10 of 18; none of 18; none of 18; none of 18 | the probe's readings of a listing that stopped following: at the base, both after the listing's own toggle; at `e5b0fb8`; with the fix in a scratch build; at `30cb2e9`; at `1d53222` | `for l in base branch fix; do rg '"label":"'$l'"' $L/07-hand-follow-probe3.log \| rg -o '"detached":(true\|false)' \| sort \| uniq -c; done; rg '"label":"base"' $L/07-hand-follow-probe3.log \| rg -o '"[a-z0-9-]+":\{"arrangement":"[a-z/]+","detached":true'; rg -o '"detached":(true\|false)' $L/07-fix-follow-probe3.log \| sort \| uniq -c; rg -o '"detached":(true\|false)' $L/10-gate-hand-follow-probe3.log \| sort \| uniq -c` |
+| none of 18 | the probe's readings of a listing that stopped following, at `4a8bd6d` | `rg -o '"detached":(true\|false)' $L2/05-hand-follow-probe3.log \| sort \| uniq -c` |
+| none of 18 | the probe's readings of a listing that stopped following, at `ba09cb8` | `rg -o '"detached":(true\|false)' $L2/08g-hand-follow-probe3.log \| sort \| uniq -c` |
+| 692 by 1600, 1012 by 1600; 40 | the windows of the pass by hand for the new boundary, CLIF's and rxm's, at `4a8bd6d`; how far up it dragged the call stack's header | `rg -o 'CLIF narrow at 692 x 1600\|rxm narrow at 1012 x 1600\|call stack.s header, 40px up' $L2/task-5-report.md \| sort -u` |
+| 36.8; 40 | how far that drag moved the boundary in CLIF, the values stopping on their floor; in rxm | `rg -o 'values -36.8, call stack \+36.8\|values -40, call stack \+40' $L2/task-5-report.md` |
+| 896; 123, 123; 123, 123; 36.8 | the window's height at which the boundary moved nothing at `4a8bd6d`; the values' and the call stack's heights there in CLIF, in a 692px window; in rxm, in a 1012px one; the room CLIF's values had over their floor at 1600px | `rg -U -o 'CLIF at 692 x 896: listing 205.4, values 123, call stack 123\|rxm\s+at 1012 x 896: 284.5, 123, 123\|only 36.8px above its floor' $L2/task-5-report.md` |
+| 6.4; 33 | how much wider some counts were in the first pass's checks at `4a8bd6d`; every call stack's and heap's header's height there | `rg -o 'up to 6.4px wider\|33px in all 44 call stack and heap entries' $L2/task-5-report.md` |
+| 42 | the pass's screenshots at `4a8bd6d` | `ls $L2/hand/*.png \| wc -l` |
+| 692 by 896, 692 by 1600; 40 | the windows of the pass for the new boundary at `ba09cb8`, both views' each; how far it dragged the call stack's header each way | `rg -U -o '\*\*692 x 896\*\* and at \*\*692 x\s+1600\*\*\|dragging the call stack.s header 40px up and\s+then 40px down' $L2/task-8-gate-report.md` |
+| 2.8, 3.4; 5.6, 6.7; 69 | how far the drag up moved the boundary at 692 by 896, in CLIF and in rxm; the drag down; the floor of two rows each body stopped on | `rg -o '\*\*-2.8, \+2.8\*\*\|\*\*-3.4, \+3.3\*\*\|\*\*\+5.6, -5.6\*\*\|\*\*\+6.7, -6.7\*\*\|(first panel\|call stack) stops on its floor, 69' $L2/task-8-gate-report.md` |
+| 40; 25.6, 25.7 | how far each drag moved the boundary at 692 by 1600, in both views; ArrowDown, in CLIF and in rxm | `rg -o '[\|] -40, [+]40 [\|]\|[\|] [+]25.6, -25.6 [\|]\|[+]25.7, -25.6' $L2/task-8-gate-report.md \| sort -u` |
+| 157.0; 56 | the Firefox the pass drove at `ba09cb8`; its screenshots | `rg -o -m1 '"firefox":"[0-9.]+"' $L2/08g-hand.log; ls $L2/hand-8/*.png \| wc -l` |
+| 1; none: prints nothing; 1; 1 | the Firefox console notices of a scroll-linked positioning effect in the drive's record at `1d53222`; at `e5b0fb8`; at `4a8bd6d`; at `ba09cb8` | `rg -c 'scroll-linked positioning' $L/hand-10/drive.json; rg -c 'scroll-linked positioning' $L/hand/drive.json; rg -c 'scroll-linked positioning' $L2/hand/drive.json; rg -c 'scroll-linked positioning' $L2/hand-8/drive.json` |
+| every field equal | the drive's record at `1d53222` against Task 7's, as the gate report records it | `rg -U -o 'every field\s+equal' $L/task-10-gate-report.md` |
+| 18; 24 | the comment check's areas within budget; the files changed since `2cc48da` it read | `cat $L/07-fix-comments.log` |
+| 2, 3, 5, 4 | the minor findings the second plan's reviews of Tasks 1 to 4 deferred, 14 in all | `rg -o 'Plan2 Task [0-9]: minor \(deferred\): [0-9]+' $R/ledger.md` |
+| 10; 1; 3 | of those, the findings Task 7's triage had fixed before merge; written into this entry; dropped | `rg -c '^[\|] Task [0-9] M(inor )?[0-9][^\|]*[\|] Fix ' $L2/review.md; rg -c '^[\|] Task [0-9] M(inor )?[0-9][^\|]*[\|] Fold ' $L2/review.md; rg -c '^[\|] Task [0-9] M(inor )?[0-9][^\|]*[\|] Drop ' $L2/review.md` |
+| 4 | the minor findings of Task 6's review | `rg -o 'Plan2 Task 6 review .*\+ [0-9]+ Minor' $R/ledger.md \| rg -o '[0-9]+ Minor'` |
+| four | the comments `a01463c` rewords | `git log -1 --format=%s a01463c \| rg -o '^Four of PanelStack.s comments'` |
+| 10:32 UTC | the ledger's line that records Davey's answer on the floor | `rg -o '^- 10:32 UTC: Davey chose option 2' $R/ledger.md` |
+| 228 | the line of `#share`'s dead branch | `rg -n 'all === null \? null' web/src/panel-stack.ts \| cut -d: -f1` |
+| 1; 5 | the lines the command of the headers' widths row above prints at `efa5988`; at `a9b75ad` | `for c in efa5988 a9b75ad; do git show ${c}:web/tests/browser/machine-panel-headers.test.ts \| rg -c 'width: [0-9]+, arrangement: .[a-z]+., depth: [0-9]+, cells: [0-9]+, boxes: [0-9]+'; done` |
+| two | the title drag's fix rounds of Task 1 | `rg -o 'Plan3 Task 1: complete \(commits [0-9a-f.]+, review clean after [0-9] fix rounds?\)' $R/ledger.md` |
+| 9 | the findings of the title drag's pre-flight scan | `rg -o 'pre-flight \(impl3/preflight.md\): [0-9]+ findings' $R/ledger.md` |
+| 4 | `DRAG_THRESHOLD`, in CSS px | `rg -o 'export const DRAG_THRESHOLD = [0-9]+' web/src/separator.ts` |
+| 43.9 | how far along the heap's title the pre-flight's probe slid a press that, let go there, closed the heap | `rg -U -o 'slid 43.9px\s+along the heap.s title' $L3/preflight.md` |
+| 0.72; 61.117 | the scale of the tests' frame, in Chromium and in Firefox; what a 60px drag landed as in Firefox | `rg -a -o 'PROBE scale [0-9.]+' $L3/01-probe-chromium-scale.log $L3/01-probe-firefox-scale.log; rg -o '61.117 = 44 / 0.72' $L3/task-1-report.md` |
+| 50, 36; 2, 3; 2.88 | the title cases' drag in frame px and in page px; C4's and C5's presses in page px; the threshold in page px | `rg -o '^const PULL = [0-9]+' web/tests/browser/panel-boundaries.test.ts; rg -o '[23] / scale\(\)\|at\.y - [23]' web/tests/browser/panel-boundaries.test.ts \| sort -u; awk 'BEGIN { print 50 * 0.72, 4 * 0.72 }'` |
+| C1 to C9, C4b; C7 | the plan's names of the title cases; the one written only where a swallow is built | `rg -o '^  - \*\*C[0-9]b?\*\*' docs/superpowers/plans/2026-11-22-panel-title-drag.md` |
+| 14; S18 and S19, then S16b; S1, S3, S9, S10, S16b and S16 | the sabotages Task 1 ran, which fix round 1 ran again; those fix round 1 ran first; round 2's | `for f in 01-sab-driver.log fix1-sab-driver.log fix1-sab-driver-S16b.log fix2-sab-driver.log fix2-sab-S16-driver.log; do rg 'exit [0-9]' $L3/$f \| cut -d' ' -f1 \| paste -sd' '; done; rg -c 'exit [0-9]' $L3/01-sab-driver.log` |
+| each case's tally | the cases the title drag's sabotages failed, in the order of the table, log by log | `cd $L3 && for f in 01-sab-{S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S13,S14,S17,S18,S19,S16b,S16}; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a '^      Tests  ' \| tr -s ' '; done` |
+| ten times | S3's threshold | `rg -o 'DRAG_THRESHOLD \* [0-9]+' $L3/01-sabotages.json` |
+| nothing | what S16 as the plan wrote it failed in fix round 1 | `rg -o '^S16 \(.*\): exit [0-9]; Tests +[0-9]+ passed \([0-9]+\)' $L3/fix1-sab-driver.log` |
+| 38, 0 | the lines of the title drag's results file with an exit status that say the file was restored and `cmp` equal; those that do not | `rg 'exit [0-9]' $L3/01-sab-results.txt \| rg -c 'restored, cmp equal'; rg 'exit [0-9]' $L3/01-sab-results.txt \| awk '!/restored, cmp equal/' \| wc -l` |
+| 27; 576, 2; 563 | AFFECTED at `d0e3df0`: files; tests passed and failed as expected; passed at the base `b807ad8` | `sed 's/\x1b\[[0-9;]*m//g' $L3/fix2-affected.log $L3/00-base-affected.log \| rg 'Test Files\|      Tests'` |
+| 345; 3967, 2; 97.95, 92.28, 98.7, 99.16 | the coverage run at `1b5bd9a`: files; tests passed and failed as expected; statements, branches, functions and lines | `sed 's/\x1b\[[0-9;]*m//g' $L3/04g-coverage.log \| rg 'Test Files\|      Tests\|All files'` |
+| 0, three times; 0, twice | the exit statuses at `1b5bd9a` of the coverage run and the two halves of `check-all.sh`; those at `d0e3df0` of `llvm-cov` and `check-slow.sh`, which the gate at `1b5bd9a` did not run again | `tail -qn1 $L3/04g-coverage.log $L3/04g-check-all-no-browser.log $L3/04g-check-all-browser-only.log; tail -qn1 $L3/02-llvm-cov.log $L3/02-check-slow.log` |
+| 2046, 35; 95.55% | `llvm-cov`'s tests passed and skipped at `d0e3df0`; its lines | `rg -a -o '[0-9]+ tests run: [0-9]+ passed( \([0-9]+ slow\))?, [0-9]+ skipped' $L3/02-llvm-cov.log; rg -a '^TOTAL' $L3/02-llvm-cov.log \| rg -o '[0-9.]+%' \| sed -n 3p` |
+| 20; 20 | the scans' logs at `1b5bd9a`, a self-test and a scan each for ten scans; the runs `04g-gate-exits.txt` records for them as exit 0 | `ls $L3/04g-scan-*.log \| wc -l; rg -c '^scan-[a-z-]+ exit 0 ' $L3/04g-gate-exits.txt` |
+| 14; 35, 206, 9; 14; 35, 205, 9; 14; 35, 193, 8 | AFFECTED-FF at `1b5bd9a`: files; tests failed, passed and skipped; the same at `d0e3df0`; and at the base `b807ad8` | `sed 's/\x1b\[[0-9;]*m//g' $L3/04g-firefox-affected.log $L3/02-firefox-affected.log $L3/00-base-firefox.log \| rg 'Test Files\|      Tests'` |
+| same, same; 35 | the cases that fail in Firefox at `1b5bd9a`, and at `d0e3df0`, against those at the base `b807ad8`; how many | `for g in 04g 02; do diff <(sed 's/\x1b\[[0-9;]*m//g' $L3/00-base-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L3/$g-firefox-affected.log \| rg -a -o '^ FAIL .*' \| sort -u) && echo same; done; sed 's/\x1b\[[0-9;]*m//g' $L3/04g-firefox-affected.log \| rg -a -o '^ FAIL .*' \| sort -u \| wc -l` |
+| 6, 2, 1, 3, 1, 2, 20 | those cases by file: `divider-drag-focus`, `divider-drag-format-on-blur`, `focus-press`, `panel-boundaries`, `panel-regions`, `panel-sizes-stored`, `view-keys` | `sed 's/\x1b\[[0-9;]*m//g' $L3/04g-firefox-affected.log \| rg -a -o '^ FAIL .*' \| sort -u \| rg -o 'tests/browser/[a-z-]+\.test\.ts' \| sort \| uniq -c` |
+| 32; `ba09cb8` | the cases outside `panel-boundaries` among them; the gate whose Firefox list did not hold their files | `sed 's/\x1b\[[0-9;]*m//g' $L3/04g-firefox-affected.log \| rg -a -o '^ FAIL .*' \| sort -u \| rg -vc 'panel-boundaries'; rg -o 'All 32 extra failures are in files the gate never ran in Firefox' $L3/dx-report.md; rg -o '08g gate' $L3/dx-report.md \| sort -u` |
+| 2026-11-17 | the earliest of the dates of the logs in which `dx-report.md` finds those files failing in this machine's Firefox | `rg -o '\(2026-[0-9]+-[0-9]+\)' $L3/dx-report.md` |
+| 157.0; 1412 by 896; 6 | the Firefox the pass by hand drove at `d0e3df0`; its window; how far it slid a press along each title | `rg -o -m1 '"firefox":"[0-9.]+"' $L3/02-hand.log; rg -o 'a \*\*1412 x 896\*\* window\|Slid 6px along the title' $L3/task-2-report.md` |
+| grab, grabbing, 60; none | per view: the title's cursor, at rest and held; how far its drag moved the boundary; with the panel open, the slide moving nothing, the click and the double click leaving the heights as before; its page errors | `jq -r '.[] \| "\(.view) \(.cursor) \(.drag.heldCursor) \(.drag.moved \| [.[] \| if . < 0 then -. else . end] \| max) open=\(.drag.open) slid-nothing=\(.slid.nothingMoved) click-as-before=\(.click.boundaryAsBefore) dblclick-as-before=\(.dblclick.heightsAsBefore // "-") errors=\(.errors \| length)"' $L3/hand/summary.json` |
+| 157.0; 1412 by 896 | the Firefox the pass by hand drove at `1b5bd9a`; its window | `rg -o -m1 '"firefox":"[0-9.]+"' $L3/04g-hand.log; rg -o 'a \*\*1412 x 896\*\* window' $L3/task-4-gate-report.md` |
+| grab, grabbing, 60; none | the same per view at `1b5bd9a` | `jq -r '.[] \| select(.drag) \| "\(.view) \(.cursor) \(.drag.heldCursor) \(.drag.moved \| [.[] \| if . < 0 then -. else . end] \| max) open=\(.drag.open) slid-nothing=\(.slid.nothingMoved) click-as-before=\(.click.boundaryAsBefore) dblclick-as-before=\(.dblclick.heightsAsBefore // "-") errors=\(.errors \| length)"' $L3/hand-4/summary.json` |
+| 60; 33, 0; 33, 0 | at `1b5bd9a`, how far the λ map's title drag moved its boundary; the map's region and body, closed after it; closed after a drag of its bar | `jq -r '.[] \| select(.view == "lambda") \| "moved \(.drag.moved.map), closed: region \(.mapBody.closed.panelHeight), body \(.mapBody.closed.bodyHeight)"' $L3/hand-4/summary.json; jq -r 'select(.tag == "closed after the bar drag") \| "\(.tag): region \(.region), body \(.bodyHeight)"' $L3/04g-probe-map.log` |
+| `hidden`, 0; 896, 896 | at `1b5bd9a`, with the readout moved to the inspector: the strip's `hidden` and height; `main`'s bottom and the window's height | `jq -r '.[] \| select(.view == "inspector") \| "hidden=\(.strip.after.hidden) height=\(.strip.after.height) main=\(.mainBottom[1]) window=\(.innerHeight)"' $L3/hand-4/summary.json` |
+| 60; 93, 33 | at `d0e3df0`, the closed map's canvas after a drag of the bar; its region then; a closed map's that was never dragged | `jq -r 'select(.open == "false") \| "\(.tag): region \(.region), body \(.bodyHeight)"' $L3/02-probe-map.log` |
+| `ef4c9df` | the commit that added the map's rule for a resized map | `git log -S'.panel[data-panel="map"][data-sized] > .term-map-host' --format=%h -- web/src/style.css \| tail -1` |
+| 2.78, 4.17; 5, 2; 3 | the thresholds C4 holds between; two it fails; one it does not | `rg -o 'allows a threshold only in \[2.78, 4.17\) px. That catches a threshold of 5 \(or 2\), but not 3' $L3/task-1-rereview-1.md` |
+| `link-clear.ts`, `separator.ts`, `state-diagram.ts`, `hidden.test.ts`, `inspector-phone.test.ts`, `inspector.test.ts`, `panel-regions.test.ts`; 5; 10 | the files under `web/` the range changes and `2cc48da..2277023` does not; the files the title drag's build changes; those its review's fixes change | `comm -13 <(git diff --name-only 2cc48da..2277023) <(git diff --name-only 2cc48da..24ef8c3) \| rg '^web/'; git diff --name-only b807ad8..d0e3df0 \| wc -l; git diff --name-only 906c0bb..1b5bd9a \| wc -l` |
+| `fdd0b12`, `5992779`, `8bebef6`, `0427e8b`, `1b5bd9a` | the title drag's review's fixes, oldest first | `git log --reverse --format=%h 906c0bb..1b5bd9a` |
+| `display: flex`, `min-height: 60px` | what the map body's rule for a resized map set at `d0e3df0` | `git show d0e3df0:web/src/style.css \| rg -A8 '^\.panel\[data-panel="map"\]\[data-sized\] > \.term-map-host \{' \| rg -o 'display: flex\|min-height: 60px'` |
+| `.strip[hidden]`, `display: none`; `.step-bar[hidden]`; the map body's rule | at `1b5bd9a`, the strip's rule for `[hidden]` and what it sets; the step bar's; the map body's for a resized map | `rg -A1 '^\.strip\[hidden\]' web/src/style.css; rg -o '^\.step-bar\[hidden\]' web/src/style.css; rg -o '^\.panel\[data-panel="map"\]\[data-open="true"\]\[data-sized\] > \.term-map-host' web/src/style.css` |
+| `bc592b6`, #102 | the commit that first hid the strip, and its pull request | `git log -S'strip.hidden' --format=%h -- web/src/main.ts \| tail -1; git log -1 --format=%s bc592b6 \| rg -o '\(#[0-9]+\)$'` |
+| 93, 33; 9 | before `fdd0b12` and `5992779`, in Chromium and in Firefox: the closed map's region against one never resized; the hidden strip's height | `for f in 04-i1-red-chromium 04-i1-red-firefox 04-m2-red-chromium 04-m2-red-firefox; do sed 's/\x1b\[[0-9;]*m//g' $L3/$f.log \| rg -a -o 'the closed map is taller than one nobody dragged: expected [0-9]+ to be close to [0-9]+\|the hidden strip draws a band: expected [0-9]+' \| sort -u; done` |
+| 32 by 9; 8 by 4.5; 8 by 4.5, 4.5 lower | the boxes of `inspector-phone.test.ts`'s `HELD_BOXES` that `5992779` changes, by how much taller each is and how much lower it starts: Debugger's and Stage's `main`, `views` and inspector, the inspector's body in their open cases, and Stage's view; Debugger's upper row; its lower row | `git diff -U0 906c0bb..1b5bd9a -- web/tests/browser/inspector-phone.test.ts \| rg '^[-+] ' \| awk -F'[][,]' '/^-/{a[++n]=$5; t[n]=$3} /^\+/{b[++m]=$5; u[m]=$3} END{for(i=1;i<=n;i++) print "lower", u[i]-t[i], "taller", b[i]-a[i]}' \| sort \| uniq -c; git diff -U0 906c0bb..1b5bd9a -- web/tests/browser/inspector-phone.test.ts \| rg -o "^\+ +'?[a-z0-9-]+'?:" \| sort \| uniq -c` |
+| 8: Debugger and Stage, 1280 by 800 and 481 by 800, open and closed | the `HELD_BOXES` cases S-M2 fails | `sed 's/\x1b\[[0-9;]*m//g' $L3/04-m2-sab-chromium.log \| rg -a -o '^ FAIL .*HELD_BOXES.*' \| sort -u \| rg -o 'in (debugger\|stage) > at [0-9]+×800 px, (open\|closed)'` |
+| 114; 38; four; none left | the class search at `1b5bd9a`: `style.css`'s selector entries that set a `display` other than `none`; the `hidden` writes in `web/src`; the static `hidden` attributes in `index.html`; what it found unguarded | `rg -o '114 selector entries\|38 .hidden. writes in .web/src.\|four static .hidden. attributes\|Result: none left' $L3/task-4-report.md` |
+| `separator.ts`; `link-clear.ts`, `state-diagram.ts` | where `DRAG_THRESHOLD` is defined at `1b5bd9a`; the files that import it | `git grep -n 'DRAG_THRESHOLD' -- web/src \| rg 'export const\|import'` |
+| 2, 3 | the whole page px C4's name says its presses move | `rg -o 'takes a press on its title moved 2 whole page px, short of the threshold, for a click, and one moved 3, past it, for a drag' web/tests/browser/panel-boundaries.test.ts` |
+| 2 of 13; 3 of 13; 10 of 56; 18 of 45; 2 | the cases S-I1 failed in Chromium and in Firefox, and S-M2 in Chromium and in Firefox; the sabotages `task-4-report.md` records `cmp` equal for | `cd $L3 && for f in 04-i1-red2-chromium 04-i1-red2-firefox 04-m2-sab-chromium 04-m2-sab-inspector-phone-firefox; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a '^      Tests  ' \| tr -s ' '; done; rg -c '^  - .cmp. equal\.$' $L3/task-4-report.md` |
+| each run's files | the test files of S-I1's runs, of S-M2's in Chromium and of S-M2's in Firefox | `cd $L3 && for f in 04-i1-red2-chromium 04-i1-red2-firefox 04-m2-sab-chromium 04-m2-sab-inspector-phone-firefox; do sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a -o 'tests/browser/[a-z-]+\.test\.ts' \| sort -u \| paste -sd' '; done` |
+| the precondition, twice; `div.term-map-host`, twice | where the map's `hidden.test.ts` case failed before `fdd0b12`, in Chromium and in Firefox; what its form with a drag listed, in each | `cd $L3 && for f in 04-i1-red-chromium 04-i1-red-firefox; do sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a -o 'precondition: the drag gave the map a share' \| sort -u; done; for f in 04-i1-probe2-chromium 04-i1-red-firefox-2; do sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a -o 'div\.term-map-host, the map with a share, one toggle on' \| sort -u; done` |
+| 93, 33; 9, `footer.strip`; `div.term-map-host` | what S-I1's `panel-regions` case failed at, and S-M2's `inspector.test.ts` and `hidden.test.ts` cases; what the `hidden.test.ts` case listed under S-I1 | `cd $L3 && sed 's/\x1b\[[0-9;]*m//g' 04-i1-red2-chromium.log 04-m2-sab-chromium.log \| rg -a -o 'the closed map is taller than one nobody dragged: expected [0-9]+ to be close to [0-9]+\|the hidden strip draws a band: expected [0-9]+\|expected \[ .footer\.strip.\|div\.term-map-host, the map with a share, one toggle on' \| sort -u` |
+| the TM text case | what S-I1 failed in Firefox that the base also fails | `comm -12 <(sed 's/\x1b\[[0-9;]*m//g' $L3/00-base-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L3/04-i1-red2-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u)` |
+| 10 of 45; 18; 10 | the cases `inspector-phone.test.ts` fails in Firefox with `5992779`; under S-M2; those of the first among the second | `cd $L3 && sed 's/\x1b\[[0-9;]*m//g' 04-m2-inspector-phone-firefox.log 04-m2-sab-inspector-phone-firefox.log \| rg -a '^      Tests  '; comm -12 <(sed 's/\x1b\[[0-9;]*m//g' 04-m2-inspector-phone-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' 04-m2-sab-inspector-phone-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u) \| wc -l` |
+| 6, 4; about 10.5; about 1 | those 10, at a phone's width and in *stage-strip*; how long each of the 6 ran, in s; how far the 4's boxes are from `SHORT_PAGE_BOXES`, in px | `cd $L3 && sed 's/\x1b\[[0-9;]*m//g' 04-m2-inspector-phone-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u \| rg -o 'at a phone’s width\|stage-strip' \| sort \| uniq -c; sed 's/\x1b\[[0-9;]*m//g' 04-m2-inspector-phone-firefox.log \| rg -a -o '× at [0-9×]+ px [0-9]+ms'; sed 's/\x1b\[[0-9;]*m//g' 04-m2-inspector-phone-firefox.log \| rg -a -o 'AssertionError: [a-z0-9-]+: .*' \| sort -u` |
+| 0 | the lines naming `inspector-phone` in the gate's `FIREFOX` log at `1b5bd9a` | `sed 's/\x1b\[[0-9;]*m//g' $L3/04g-firefox-affected.log \| rg -a 'inspector-phone' \| wc -l` |
+| the notice; 0 | what the pass by hand at `1b5bd9a` saw over the header's buttons after the readout's switch; the lines of the range's diff of `web/src` that name a notice | `rg -U -o 'the notice "custom —\s+step controls in each view, tiles, inspector" where share, appearance, about and settings sit' $L3/task-4-gate-report.md; git diff 2cc48da..1b5bd9a -- web/src \| rg -i '^[-+].*notice' \| wc -l` |
+| M7, M10, M11; Drop | the review's findings this entry leaves open; its triage of C4's range | `rg -o '^\*\*M(7\|10\|11)\.' $L3/review.md; rg -o 'threshold in \[3, 6\)"\.\*\* \*\*Drop\.\*\*' $L3/review.md` |
+| 39; 41, 41; 3; 35 | the test files the plan says `rg` lists that click a panel's title; what lists at `0283d85` and at `1b5bd9a`; the Firefox failures the plan predicts at its base; those its list fails there | `rg -o 'lists 39 test files\|predicts as the 3 .panel-boundaries. cases' docs/superpowers/plans/2026-11-22-panel-title-drag.md; for c in 0283d85 1b5bd9a; do git grep -l -E 'panelToggle\(\|\.panel-toggle' $c -- web/tests/browser \| wc -l; done; sed 's/\x1b\[[0-9;]*m//g' $L3/00-base-firefox.log \| rg -a -o '^ FAIL .*' \| sort -u \| wc -l` |
+| two | the minor notes of Task 4's re-review | `rg -o 'Two Minor notes, neither needing action before merge' $L3/task-4-rereview-1.md` |
+| `firefox-affected` | the one leg of the gate at `d0e3df0` whose exit was not 0 | `rg 'exit [1-9]' $L3/02-gate-exits.txt \| cut -d' ' -f1` |
+| 40; 3, 35, 2; 42; 3, 37, 2 | `panel-boundaries.test.ts` at `c969f4e`: passed in Chromium; failed, passed and skipped in Firefox; the same at `24ef8c3` | `sed 's/\x1b\[[0-9;]*m//g' $R/final/m5-green-chromium.log $R/final/m5-green-firefox.log $R/final/m7-green-chromium.log $R/final/m7-green-firefox.log \| rg '      Tests'` |
+| same; same | the cases that fail in Firefox at `c969f4e` and at `24ef8c3`, against those of `panel-boundaries` at the base, `b807ad8` | `for f in m5-green-firefox m7-green-firefox; do diff <(sed 's/\x1b\[[0-9;]*m//g' $L3/00-base-firefox.log \| rg -a -o '^ FAIL .*panel-boundaries.*' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $R/final/$f.log \| rg -a -o '^ FAIL .*' \| sort -u) && echo same; done` |
+| each case's tally | the cases the review of the whole branch's sabotages failed, in the order of the table, log by log | `cd $R/final && for f in m5-sab-chromium m5-sab-firefox m7-sab-S-M7a-chromium m7-sab-S-M7b-chromium; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a '^      Tests  ' \| tr -s ' '; done` |
+| 1; 1; 2; 2 | the failures at the assertion the table names: S-M5's in Chromium; in Firefox; S-M7a's; S-M7b's | `cd $R/final && for f in m5-sab-chromium m5-sab-firefox m7-sab-S-M7a-chromium m7-sab-S-M7b-chromium; do printf '%s ' $f; sed 's/\x1b\[[0-9;]*m//g' $f.log \| rg -a -c 'AssertionError: (a short press did not press the maximise button\|the call stack did not take the drag\|the part drawn)'; done` |
+| 3, 0 | the lines of the review's results file with an exit status that say the file was restored and `cmp` equal; those that do not | `rg 'exit [0-9]' $R/final/sab-results.txt \| rg -c 'restored, cmp equal'; rg 'exit [0-9]' $R/final/sab-results.txt \| awk '!/restored, cmp equal/' \| wc -l` |
+| none: prints nothing; 524, 524; 18, 33 | `error TS` lines at `c969f4e` and at `24ef8c3`; the files `biome ci` checked at each; the comment check's areas within budget and the files changed since `2cc48da` it read, at each | `rg -c 'error TS' $R/final/m5-tsc.log $R/final/m7-tsc.log; sed 's/\x1b\[[0-9;]*m//g' $R/final/m5-lint.log $R/final/m7-lint.log \| rg -o 'Checked [0-9]+ files'; cat $R/final/m5-comments.log $R/final/m7-comments.log` |
+| 45, 10; same | `inspector-phone.test.ts`'s cases and failures in the CLIF view lane's Firefox gate before #190 merged; its failing cases there against those with `5992779` | `sed 's/\x1b\[[0-9;]*m//g' ~/temp/redextape-clif-view-record/pr2/gate/08-test-firefox.log \| rg -a -o 'inspector-phone.test.ts .[0-9]+ tests . [0-9]+ failed.'; diff <(sed 's/\x1b\[[0-9;]*m//g' ~/temp/redextape-clif-view-record/pr2/gate/08-test-firefox.log \| rg -a -o '^ FAIL .*inspector-phone.test.ts > .*' \| sed 's/^.*inspector-phone/inspector-phone/' \| sort -u) <(sed 's/\x1b\[[0-9;]*m//g' $L3/04-m2-inspector-phone-firefox.log \| rg -a -o '^ FAIL .*inspector-phone.test.ts > .*' \| sed 's/^.*inspector-phone/inspector-phone/' \| sort -u) && echo same` |
