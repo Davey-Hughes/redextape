@@ -1,20 +1,15 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page } from 'vitest/browser'
 import { clickWorkspaceItem, host, mounted, SHELL, selectedTab, stateIdle, tabLeaves, until } from './harness'
 
 /**
- * **THE GESTURES THAT CHANGE WHICH VIEWS EXIST, PERFORMED ON THE STAGE.** `stage.test.ts` drives the
- * switch and the tabs; this file drives `✕` and `+ view` while the stage is up, because those two name a
- * leaf through `pane-host.ts`'s `focusPane` and the stage mounts only one host — so a leaf they name may
- * not be on the page at all.
+ * **A VIEW CLOSED WHILE THE STAGE IS UP.** `stage.test.ts` drives the switch and the tabs; this file drives `✕`,
+ * because it names a leaf through `pane-host.ts`'s `focusPane` and the stage mounts only one host — so a leaf it
+ * names may not be on the page at all.
  */
 
-describe('the stage, under the gestures that add and remove views', () => {
+describe('the stage, under the gesture that closes a view', () => {
   beforeAll(async () => {
-    // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-    // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
-    await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
@@ -52,25 +47,5 @@ describe('the stage, under the gestures that add and remove views', () => {
       host(selectedTab() as string)?.contains(document.activeElement),
       'focus is not inside the view the stage now shows',
     ).toBe(true)
-  })
-
-  /**
-   * §5: "`+ view` adds the pick beside the focused view … so in Stage the new tab sits after the focused
-   * one". The `⋯` menu's split items are removed there, so a `+ view` whose result is invisible would
-   * leave the stage with no working way to add a view beside the focused one.
-   */
-  it('shows the view that + view creates', () => {
-    const before = tabLeaves()
-    document.querySelector<HTMLButtonElement>('#new-view')?.click()
-    const item = document.querySelector<HTMLButtonElement>('#new-view-menu button')
-    expect(item, '+ view offered nothing to pick').not.toBeNull()
-    item?.click()
-    const menu = document.querySelector<HTMLElement>('#new-view-menu')
-    if (menu?.matches(':popover-open')) menu.hidePopover()
-
-    expect(tabLeaves().length, '+ view added no tab').toBe(before.length + 1)
-    const created = tabLeaves().find((id) => !before.includes(id)) as string
-    expect(selectedTab(), 'the created view is not the one the stage shows').toBe(created)
-    expect(mounted(), 'the created view is not the host on the page').toEqual([created])
   })
 })

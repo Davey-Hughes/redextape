@@ -14,17 +14,16 @@ import {
   stateIdle,
   storedLayoutText,
   until,
-  views,
   workspaceMenu,
   workspaceNameText,
 } from './harness'
-import { plusView, resetOffered, userPickInWorkspaceMenu } from './user-event-fixture'
+import { resetOffered, userPickInWorkspaceMenu, userSplit } from './user-event-fixture'
 
 /**
- * **THE 64-VIEW BOUND IS ON EVERY LIVE VIEW, AND `+ VIEW` IS HELD TO IT** — the view layouts spec §5.6. A view a
+ * **THE 64-VIEW BOUND IS ON EVERY LIVE VIEW, AND A SPLIT IS HELD TO IT** — the view layouts spec §5.6. A view a
  * remembered arrangement holds is live: it is kept off the page, or after a reload built when its arrangement is
  * entered. `parseWorkspace` refuses a stored workspace whose tree and remembered arrangements name more than 64 ids
- * between them. So an add is refused at 64 live views, however few of them the tree on screen holds: the app never
+ * between them. So a split is refused at 64 live views, however few of them the tree on screen holds: the app never
  * stores a workspace its own loader refuses.
  *
  * The page opens on a stored workspace of 63: the four views on screen, and 59 λ views in the arrangement remembered
@@ -32,7 +31,7 @@ import { plusView, resetOffered, userPickInWorkspaceMenu } from './user-event-fi
  * `add-view-floor.test.ts` stores its own. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before
  * left, and each asserts that state first.
  *
- * **BOTH SIDES OF THE BOUND**: the add at 63 goes through and the add at 64 does not. With 64 as the only case, a
+ * **BOTH SIDES OF THE BOUND**: the split at 63 goes through and the split at 64 does not. With 64 as the only case, a
  * bound a view lower (`>= MAX_TREE_LEAVES - 1` in `pane-host.ts`'s `admit`) would pass.
  *
  * **AND THE NOTICE IS HELD TO WHAT IS TRUE WHERE IT IS SHOWN.** A `✕` on a kind's last view leaves the tree before it
@@ -58,6 +57,14 @@ const REMEDY_CUSTOM = 'close one to add another, or choose a preset and reset pr
 const full = (off: number, remedy = REMEDY): string =>
   `the workspace holds 64 views, ${off} of them not on screen, the most it can keep — ${remedy}`
 
+/**
+ * Put the focus in the view `id` by script, before a split of it that must change nothing: the split's `⋯` click
+ * moves the focus there, and a focus move is stored, so with the focus elsewhere the workspace stored before the split
+ * would differ from the one after a refusal that changed nothing.
+ */
+const focusView = (id: string): void =>
+  (document.querySelector(`#views [data-leaf="${id}"] button.view-title`) as HTMLElement).focus()
+
 /** A view's `✕`, pressed with the pointer, after which the focus is somewhere in the page (spec §14 item 19). */
 const close = async (id: string): Promise<void> => {
   await userEvent.click(document.querySelector(`#views [data-leaf="${id}"] button.view-close`) as HTMLElement)
@@ -75,16 +82,15 @@ beforeAll(async () => {
   await until(stateIdle, 'the first compile')
 })
 
-describe('+ view, with four views on screen and 59 more remembered', () => {
+describe('a split, with four views on screen and 59 more remembered', () => {
   it('adds a view at 63 live views, which makes 64', async () => {
     // A STORED WORKSPACE THE LOADER REFUSED WOULD HAVE OPENED ON THE DEFAULT, the source beside the TM view.
     expect(mounted(), 'precondition: the page opened on the stored workspace').toEqual(FOUR)
     const opened = parseWorkspace(storedLayoutText())
     expect(Object.keys(opened?.arrangements ?? {}), 'precondition: one arrangement is remembered').toEqual(['lambda'])
     expect(liveViewCount(), 'precondition: the live views are one short of the bound').toBe(MAX_TREE_LEAVES - 1)
-    expect(opened?.focused, 'precondition: + view adds beside the λ view').toBe('lambda-0')
 
-    await plusView('λ · program', '+ view’s λ · program')
+    await userSplit('lambda-0', 'same')
     expect(mounted(), 'the add at 63 live views was refused').toEqual(['source', 'lambda-0', ADDED, 'rxm-0', 'tm-0'])
     expect(liveViewCount()).toBe(MAX_TREE_LEAVES)
   })
@@ -96,13 +102,16 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
    */
   it('refuses the next at 64, counting the views not on screen, and changes nothing', async () => {
     expect(liveViewCount(), 'precondition: the live views are exactly the bound').toBe(MAX_TREE_LEAVES)
-    // ROOM IS NOT WHAT REFUSES IT: a fourth view in the λ view's row leaves each an equal share over the floor.
-    const share = (views().getBoundingClientRect().width - 3 * DIVIDER_PX) / 4
-    expect(share, 'precondition: a fourth view in the row keeps the floor').toBeGreaterThanOrEqual(MIN_VIEW_PX)
+    // ROOM IS NOT WHAT REFUSES IT: the rxm view's halves would each keep the floor.
+    const rxm = (document.querySelector('#views [data-leaf="rxm-0"]') as HTMLElement).getBoundingClientRect().width
+    expect(rxm, 'precondition: a split right of the rxm view keeps the floor').toBeGreaterThanOrEqual(
+      2 * MIN_VIEW_PX + DIVIDER_PX,
+    )
 
+    focusView('rxm-0')
     const before = { mounted: mounted(), stored: storedLayoutText() }
-    await plusView('λ · program', '+ view’s λ · program')
-    await focusInPage('+ view’s λ · program, refused at 64 live views')
+    await userSplit('rxm-0', 'same')
+    await focusInPage('the rxm view’s split, refused at 64 live views')
     expect.soft(noticeText(), 'the add was not refused as a full workspace is').toBe(full(59))
     expect.soft(mounted(), 'the refused add changed the views on the page').toEqual(before.mounted)
     expect.soft(storedLayoutText() === before.stored, 'the refused add stored another workspace').toBe(true)
@@ -112,8 +121,7 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
     expect(mounted(), 'precondition: two λ views on screen').toEqual(['source', 'lambda-0', ADDED, 'rxm-0', 'tm-0'])
     await close(ADDED)
     expect(liveViewCount(), 'precondition: the close took a live view away').toBe(MAX_TREE_LEAVES - 1)
-    document.querySelector<HTMLElement>('#views [data-leaf="lambda-0"] button.view-title')?.focus()
-    await plusView('λ · program', '+ view’s λ · program')
+    await userSplit('lambda-0', 'same')
     expect(noticeText(), 'the add after a close that made room was refused').toBe('view added — λ · program')
     expect(mounted()).toEqual(['source', 'lambda-0', AGAIN, 'rxm-0', 'tm-0'])
     expect(liveViewCount()).toBe(MAX_TREE_LEAVES)
@@ -125,11 +133,11 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
     expect(liveViewCount(), 'precondition: the tree before the ✕ is remembered, and still names the closed view').toBe(
       MAX_TREE_LEAVES,
     )
-    // BESIDE THE λ VIEW AGAIN, where the row has room: the ✕ moved the focus to the view before the closed one.
-    document.querySelector<HTMLElement>('#views [data-leaf="lambda-0"] button.view-title')?.focus()
+    // NO `focusView`: the ✕ handed the focus to the view before the closed one.
+    expect(parseWorkspace(storedLayoutText())?.focused, 'precondition: the focus is in the rxm view').toBe('rxm-0')
     const before = { mounted: mounted(), stored: storedLayoutText() }
-    await plusView('λ · program', '+ view’s λ · program')
-    await focusInPage('+ view’s λ · program, refused after a ✕ that made no room')
+    await userSplit('rxm-0', 'same')
+    await focusInPage('the rxm view’s split, refused after a ✕ that made no room')
     expect.soft(noticeText(), 'the notice does not count the view the ✕ closed').toBe(full(60))
     expect.soft(mounted(), 'the refused add changed the views on the page').toEqual(before.mounted)
     expect.soft(storedLayoutText() === before.stored, 'the refused add stored another workspace').toBe(true)
@@ -137,36 +145,16 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
 
   /**
    * The source view's id is `source` wherever it is, so adding it where an arrangement still holds it adds no view
-   * to the workspace: an `admit` that asked only how many were live would refuse it.
+   * to the workspace. **`split` TELLS `admit` THE ID ITS LEAF TAKES FOR THAT REASON**: an `admit` that asked only how
+   * many were live would refuse it.
    */
-  it('adds the source view at 64, where a remembered arrangement holds it already', async () => {
-    await close('source')
-    expect(mounted(), 'precondition: the source view is closed').toEqual(['lambda-0', AGAIN, 'rxm-0'])
-    expect(liveViewCount(), 'precondition: the workspace is still at the bound, the source view among the 64').toBe(
-      MAX_TREE_LEAVES,
-    )
-    await plusView('source', '+ view’s source')
-    expect(mounted(), 'the source view was refused').toContain('source')
-    expect(mounted()).toHaveLength(4)
-    expect(liveViewCount(), 'the source view was counted as a 65th').toBe(MAX_TREE_LEAVES)
-  })
-
-  /**
-   * **A SPLIT ADDS THE SOURCE VIEW THERE TOO.** `split` tells `admit` the id its leaf takes as `addView` does; with
-   * that left out, a split's *source* would be refused at 64 where `+ view`'s is added.
-   */
-  it('adds the source view at 64 from a split as well', async () => {
+  it('adds the source view at 64 from a split, where a remembered arrangement holds it already', async () => {
     await close('source')
     expect(mounted(), 'precondition: the source view is closed').toEqual(['lambda-0', AGAIN, 'rxm-0'])
     expect(liveViewCount(), 'precondition: the workspace is at the bound, the source view among the 64').toBe(
       MAX_TREE_LEAVES,
     )
-    const more = document.querySelector<HTMLElement>('#views [data-leaf="lambda-0"] button.view-more') as HTMLElement
-    await userEvent.click(more)
-    const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
-    await userEvent.click(menu.querySelector('button.view-split[data-dir="row"]') as HTMLElement)
-    await until(() => menu.querySelector('button[data-source]') !== null, 'the split’s source item')
-    await userEvent.click(menu.querySelector('button[data-source]') as HTMLElement)
+    await userSplit('lambda-0', 'source')
     expect(noticeText(), 'the split’s source view was refused').toBe('view added — source')
     expect(mounted()).toEqual(['lambda-0', 'source', AGAIN, 'rxm-0'])
     expect(liveViewCount(), 'the source view was counted as a 65th').toBe(MAX_TREE_LEAVES)
@@ -184,9 +172,10 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
     await userPickInWorkspaceMenu('[data-switch="readout"][data-value="inspector"]')
     expect(workspaceNameText(), 'precondition: the workspace is custom').toBe('custom ▾')
     expect(await resetOffered(), 'a custom workspace’s menu holds reset preset').toBe(false)
+    focusView('rxm-0')
     const before = { mounted: mounted(), stored: storedLayoutText() }
-    await plusView('λ · program', '+ view’s λ · program')
-    await focusInPage('+ view’s λ · program, refused in a custom workspace')
+    await userSplit('rxm-0', 'same')
+    await focusInPage('the rxm view’s split, refused in a custom workspace')
     expect.soft(noticeText()).toBe(full(60, REMEDY_CUSTOM))
     expect.soft(mounted(), 'the refused add changed the views on the page').toEqual(before.mounted)
     expect.soft(storedLayoutText() === before.stored, 'the refused add stored another workspace').toBe(true)
@@ -203,8 +192,8 @@ describe('+ view, with four views on screen and 59 more remembered', () => {
     await userEvent.click(workspaceMenu().querySelector('[data-preset="explorer"]') as HTMLElement)
     await userEvent.click(workspaceMenu().querySelector('#reset-preset') as HTMLElement)
     expect(mounted(), 'precondition: the reset shows the source beside the TM view').toEqual(['source', 'tm-0'])
-    await plusView('λ · program', '+ view’s λ · program')
+    await userSplit('tm-0', 'same')
     expect(mounted(), 'the add after the reset was refused').toHaveLength(3)
-    expect(noticeText()).toBe('view added — λ · program')
+    expect(noticeText()).toBe('view added — TM · program')
   })
 })

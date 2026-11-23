@@ -33,8 +33,9 @@ const SOURCE = 'let x = 40;\nx + 2'
 
 let view: EditorView
 
-/** Whether the header's `views` group is hidden, as `main.ts` hides it in a narrow window. */
-const togglesHidden = (): boolean => (document.querySelector('#views-shown') as HTMLElement).hidden === true
+/** Whether the `views` toggles' group is in the workspace menu, where `main.ts` puts it in a narrow window. */
+const togglesInMenu = (): boolean =>
+  (document.querySelector('#views-shown') as HTMLElement).parentElement === document.querySelector('#workspace-menu')
 
 /** Choose a preset in the workspace menu, as a user does. */
 async function preset(name: 'explorer' | 'stage'): Promise<void> {
@@ -53,7 +54,7 @@ async function start(): Promise<void> {
   view.focus()
   await until(() => view.hasFocus, 'the source editor to take the focus')
   expect(mounted(), 'precondition: all four views').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
-  expect(togglesHidden(), 'precondition: the toggles are shown').toBe(false)
+  expect(togglesInMenu(), 'precondition: the toggles are in the header').toBe(false)
   expect(armed(), 'precondition: the mode is not armed').toBe(false)
 }
 
@@ -135,19 +136,22 @@ describe('the focus after a view key', () => {
       expect(notice()).toBe(REASON)
     })
 
-    /** In a window 40rem wide or narrower the toggles are hidden (spec §6.1), and a hidden control holds no focus. */
-    it('goes to + view when the window is narrowed past 40rem, and is there when it is widened again', async () => {
+    /**
+     * In a window 40rem wide or narrower the toggles are in the workspace menu (spec §6.1), which is shut, so a toggle
+     * there holds no focus; the menu's button is the control that opens them again.
+     */
+    it('goes to the workspace menu’s button when the window is narrowed past 40rem, and is there when it is widened again', async () => {
       await start()
       const lambda = toggle('lambda')
-      const add = document.querySelector('#new-view') as HTMLElement
+      const workspace = document.querySelector('#workspace') as HTMLElement
       lambda.focus()
       expect(document.activeElement, 'precondition: the λ toggle has the focus').toBe(lambda)
       await page.viewport(600, 896)
-      await until(togglesHidden, 'the toggles to be hidden')
-      await holdsFocus(add, 'the focus is not on + view in the narrow window')
+      await until(togglesInMenu, 'the toggles to move into the workspace menu')
+      await holdsFocus(workspace, 'the focus is not on the workspace menu’s button in the narrow window')
       await page.viewport(1280, 896)
-      await until(() => !togglesHidden(), 'the toggles to be shown')
-      await holdsFocus(add, 'the focus is not on + view in the window widened again')
+      await until(() => !togglesInMenu(), 'the toggles to come back to the header')
+      await holdsFocus(workspace, 'the focus is not on the workspace menu’s button in the window widened again')
     })
 
     it('leaves the focus alone when the window is narrowed with the focus elsewhere', async () => {
@@ -155,7 +159,7 @@ describe('the focus after a view key', () => {
       const share = document.querySelector('#share') as HTMLElement
       share.focus()
       await page.viewport(600, 896)
-      await until(togglesHidden, 'the toggles to be hidden')
+      await until(togglesInMenu, 'the toggles to move into the workspace menu')
       await holdsFocus(share, 'narrowing the window moved a focus that was not on a toggle')
       await page.viewport(1280, 896)
     })

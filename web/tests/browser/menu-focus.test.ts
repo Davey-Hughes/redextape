@@ -1,7 +1,9 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
+import { bindingKey } from '../../src/view-header'
 import { frames, resetToFourViews, SHELL, stateIdle, until } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * **A MENU ITEM NEVER LEAVES THE FOCUS ON `<body>`** — spec §11's categorical rule, accessibility item 1,
@@ -71,8 +73,8 @@ const label = (b: HTMLButtonElement): string => (b.textContent ?? '').replace(/\
 let view: EditorView
 
 beforeAll(async () => {
-  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  // WIDE ENOUGH FOR ITS SPLITS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split that
+  // leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
@@ -91,7 +93,7 @@ beforeEach(async () => {
   )
   // **A KNOWN STARTING POINT INSIDE A VIEW — the file doc has the argument.** `<body>` (what the reset above
   // leaves when its own fix is removed) makes every later case report `<body>` whatever its gesture did. A
-  // header control (`#new-view`) makes every case report a pass, because the header is outside `<main>` and
+  // header control (`#share`) makes every case report a pass, because the header is outside `<main>` and
   // no rebuild touches it. A control inside a view is the only baseline that discriminates.
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
   expect(where(), 'the baseline focus did not take').toBe('button.view-title')
@@ -136,7 +138,7 @@ describe('a menu item hands the focus on', () => {
       'the copy',
     )
     // A SECOND λ VIEW, STILL ON THE PROGRAM — the one that can pick the copy.
-    await throughMenu('#new-view', (i) => i.find((b) => label(b) === 'λ · program'), 'a second λ view')
+    await userSplit('lambda-0', bindingKey('lambda', 'source'))
     const onProgram = [...document.querySelectorAll<HTMLElement>('[data-leaf]')].find(
       (l) => (l.querySelector('.view-title')?.textContent ?? '').replace(/\s+/g, ' ').trim() === 'λ · program',
     )
@@ -154,8 +156,12 @@ describe('a menu item hands the focus on', () => {
     expect(where(), 'reset preset stranded the focus').not.toBe('<body>')
   })
 
-  it('+ view, adding a view', async () => {
-    await throughMenu('#new-view', (i) => i.find((b) => label(b).startsWith('TM')), 'adding a view')
+  it("a view's split, adding a view", async () => {
+    expect(
+      await userSplit('lambda-0', bindingKey('tm', 'source')),
+      'precondition: the split added a view',
+    ).not.toBeNull()
+    await frames()
     expect(where(), 'adding a view stranded the focus').not.toBe('<body>')
   })
 })

@@ -1,8 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
+import { bindingKey } from '../../src/view-header'
 import { parseWorkspace, type Workspace } from '../../src/workspace'
 import { drawn, mountAt, sourcePane, toggle } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * THE SOURCE VIEW'S OWN `✕` IS A WRITE OF THE TREE LIKE ANY OTHER — the view layouts spec §4.3: it goes through
@@ -39,15 +41,10 @@ describe('the source view’s own ✕', () => {
   it('remembers the tree it leaves, drops the one it enters, and its toggle brings the tree back', async () => {
     // A THIRD VIEW, SO THE TREE THE `✕` LEAVES IS NOT ITS COMBINATION'S DEFAULT: the toggle could build that from
     // nothing.
-    await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-    const item = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-      (b) => b.textContent === 'λ · program',
-    )
-    if (item === undefined) throw new Error('+ view offers no λ · program')
-    await userEvent.click(item)
+    await userSplit('tm-0', bindingKey('lambda', 'source'))
     const before = drawn()
-    expect(before).toBe('row[33 33](source tm-0 pane-1)')
-    expect(remembered('after + view')).toEqual(['source+tm'])
+    expect(before).toBe('row[50](source row[50](tm-0 pane-1))')
+    expect(remembered('after the split')).toEqual(['source+tm'])
 
     // THE COMBINATION WITHOUT THE SOURCE VIEW IS VISITED AND LEFT, so the workspace remembers an arrangement for it.
     await userEvent.click(toggle('source'))

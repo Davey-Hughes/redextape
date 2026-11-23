@@ -261,7 +261,7 @@ describe('a notice floats over the page', () => {
     { width: 1600, height: 900, preset: 'explorer', where: 'run' },
     { width: 1920, height: 1080, preset: 'explorer', where: 'run' },
     { width: 375, height: 800, preset: 'explorer', where: 'end' },
-    { width: 900, height: 800, preset: 'explorer', where: 'band' },
+    { width: 836, height: 800, preset: 'explorer', where: 'band' },
     { width: 365, height: 800, preset: 'stage', where: 'band' },
   ] as const)(
     'floats at the place it fits at $width×$height in $preset ($where), and moves nothing',
@@ -321,7 +321,7 @@ describe('a notice floats over the page', () => {
       { width: 1600, height: 900, preset: 'explorer', where: 'end' },
       { width: 1920, height: 1080, preset: 'explorer', where: 'run' },
       { width: 1920, height: 1080, preset: 'debugger', where: 'run' },
-      { width: 940, height: 800, preset: 'debugger', where: 'band' },
+      { width: 848, height: 800, preset: 'debugger', where: 'band' },
       { width: 375, height: 800, preset: 'explorer', where: 'end' },
       { width: 365, height: 800, preset: 'stage', where: 'band' },
       { width: 1280, height: 800, preset: 'debugger', where: 'end' },

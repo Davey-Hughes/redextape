@@ -4,7 +4,6 @@ import { EditorState } from '@codemirror/state'
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import init, { captureClasses, encodings, fieldWidths, tokenClasses } from '../../pkg/redextape_wasm.js'
 import {
-  addViewItems,
   exampleItems,
   NARROW_WINDOW,
   presetName,
@@ -59,7 +58,7 @@ import { KeymapSetting, keymapSlot } from './editor-keymap'
 import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
 import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples'
 import { createFocusDraw } from './focus-draw'
-import { handOff, nearest } from './focus-handoff'
+import { focusHolder, handOff } from './focus-handoff'
 import { declineMark, focusMark, linkMark } from './highlight'
 import { icon } from './icons'
 import { LambdaTrees } from './lambda-trees'
@@ -196,7 +195,7 @@ function seedLeafCounter(ids: Iterable<LeafId>): void {
 }
 
 /**
- * The id minted for a new leaf: by a split, by `+ view`, and by a switch for a leaf it enters under a new id
+ * The id minted for a new leaf: by a split, and by a switch for a leaf it enters under a new id
  * (`arrangements.ts`'s `reidentified`).
  *
  * `pane-${n}`, NOT `${leg}-${n}`. A leaf minted as `lambda-3` that later rendered a δ-table would carry a name
@@ -246,8 +245,6 @@ async function main(): Promise<EditorView> {
   const workspaceButton = document.querySelector<HTMLButtonElement>('#workspace')
   const workspaceMenu = document.querySelector<HTMLElement>('#workspace-menu')
   const resetPresetButton = document.querySelector<HTMLButtonElement>('#reset-preset')
-  const addViewButton = document.querySelector<HTMLButtonElement>('#new-view')
-  const addViewMenu = document.querySelector<HTMLElement>('#new-view-menu')
   const settingsButton = document.querySelector<HTMLButtonElement>('#settings')
   const settingsMenu = document.querySelector<HTMLElement>('#settings-menu')
   const appearanceChoice = document.querySelector<HTMLSelectElement>('#appearance-choice')
@@ -298,8 +295,6 @@ async function main(): Promise<EditorView> {
     !workspaceButton ||
     !workspaceMenu ||
     !resetPresetButton ||
-    !addViewButton ||
-    !addViewMenu ||
     !settingsButton ||
     !settingsMenu ||
     !appearanceChoice ||
@@ -1081,7 +1076,7 @@ async function main(): Promise<EditorView> {
    * `hosts` and come back intact the moment the leaf does. `reset preset`
    * (`tests/browser/two-lambda-panes.test.ts`'s "keeps the program" test) brings it back at the cost of
    * every other pane on the page; a split from any other view's menu (`tests/browser/pane-picker.test.ts`)
-   * brings it back at no cost, and `+ view` and the header's `source` toggle bring it back too.
+   * brings it back at no cost, and the header's `source` toggle brings it back too.
    *
    * A SEPARATE `viewMenu` INSTANCE, NOT ROUTED THROUGH `paneEvents`, BECAUSE THE SOURCE PANE HAS
    * NO `PaneSlot`. `paneEvents` is built for a `(LeafId, PaneSlot<K>)` pair — `applyLayout`'s own `if
@@ -1097,8 +1092,8 @@ async function main(): Promise<EditorView> {
    * compute for `canSplit` that isn't already known at every call site.
    */
   /**
-   * A LAYOUT CHANGE, SAID AS A NOTICE (Plan 7 part 2 spec §11) — `pane-host.ts` reports a split, a close, a
-   * switch and `+ view`; the source view's own close, below, reports through this too.
+   * A LAYOUT CHANGE, SAID AS A NOTICE (Plan 7 part 2 spec §11) — `pane-host.ts` reports a split, a close and a
+   * switch; the source view's own close, below, reports through this too.
    */
   const layoutChanged = (e: LayoutEvent): void => {
     const say = (c: PaneChoice): string =>
@@ -1145,8 +1140,7 @@ async function main(): Promise<EditorView> {
     // THE REMEDY NAMES THE AXIS THAT RAN OUT, NOT THE ONE THE ADD DIVIDES: a split down of a view under 160 px wide is
     // refused as narrow, and only a wider window lets it through.
     const remedy = r.why === 'short' ? 'make the window taller' : 'widen the window'
-    const what = r.gesture === 'view' ? `no room for another view beside ${title}` : `no room to split ${title}`
-    notices.notify(`${what} — close a view or ${remedy}`)
+    notices.notify(`no room to split ${title} — close a view or ${remedy}`)
   }
   const sourceMenu = viewMenu(sourceHeader.actions, {
     // The source view always has its editor, so unlike a copy's this never comes and goes —
@@ -1397,7 +1391,7 @@ async function main(): Promise<EditorView> {
   /**
    * PUT `next` ON SCREEN — the one place a gesture writes the tree (the view layouts spec §4.3): `arrangements.ts`'s
    * `enter`, which remembers the tree left under its own combination where `next` shows another. A divider, a
-   * split, `+ view`, a title pick and `✕` reach it through `pane-host.ts`'s `setTree`; the source view's own `✕` and
+   * split, a title pick and `✕` reach it through `pane-host.ts`'s `setTree`; the source view's own `✕` and
    * a switch call it here.
    *
    * **NOT *RESET PRESET* AND NOT AN OPENED LINK**: each replaces the workspace whole, what it remembers included, and
@@ -1519,14 +1513,9 @@ async function main(): Promise<EditorView> {
     liveLeaves: () => liveLeaves(tree, ws.arrangements),
     applied: () => {
       viewsToggles.sync(combinationOf(tree), viewsOfKind)
-      // **THE CLIF LEG FOLLOWS THE TREE**, so a CLIF view shown or hidden by any road, a toggle, a key, a `✕`,
-      // `+ view`, a workspace or a link, is told to the session worker here.
+      // **THE CLIF LEG FOLLOWS THE TREE**, so a CLIF view shown or hidden by any road, a toggle, a key, a `✕`, a
+      // workspace or a link, is told to the session worker here.
       clifSync.want(clifWanted())
-      // **`+ view`'S MENU, OPEN WHILE THE TREE CHANGES UNDER IT, IS FILLED AGAIN**, as the workspace menu is at a pick
-      // (`applySwitches`). It lists `source` while no view shows it, and a menu opened then stays open while the source
-      // view comes back by another road: its toggle, reached with `Shift+Tab` and pressed with `Enter`. Left unfilled,
-      // it would still offer `source`, and choosing it would throw `the tree already has a source leaf`.
-      if (addViewMenu.matches(':popover-open')) fillAddViewMenu()
     },
     // NO EDITOR FORMATS AT THE BLUR THIS REBUILD SENDS IT (`focusKept`'s doc).
     rebuilding: (rebuild) => {
@@ -1689,7 +1678,7 @@ async function main(): Promise<EditorView> {
   const fillWorkspaceMenu = (): void => {
     workspaceItems(
       workspaceMenu,
-      { switches: ws.switches, reset: resetPresetButton },
+      { switches: ws.switches, reset: resetPresetButton, views: viewsShown },
       {
         preset: (p) => setSwitches(PRESETS[p]),
         // THE ONE NARROWING. A `SwitchRow` option's `value` is `string` (`SWITCH_ROWS`' doc); this is where
@@ -1827,28 +1816,40 @@ async function main(): Promise<EditorView> {
   }
 
   // THE `views` TOGGLES — spec §6. `pane-host.ts`'s `applied` brings them up to the tree each time one is rendered,
-  // so a `✕`, a `+ view` and an opened link move them as a press does.
+  // so a `✕` and an opened link move them as a press does.
   const viewsToggles = viewToggles(viewsShown, toggleView)
   // **`pkg-clif` IS FETCHED ON INTENT** (CLIF view design §6, *Loading*): the pointer resting on the CLIF toggle, or
   // the focus reaching it, loads the package before the press, and nothing else does until a CLIF view is shown. Only
   // from `idle` or `failed`, since a load asked for or in needs no other. `viewToggles` has thrown already where the
   // page has no CLIF toggle.
   watchIntent(viewsShown.querySelector('button.view-toggle[data-shows="clif"]') as HTMLElement, askClifLoad)
-  // **HIDDEN IN A WINDOW 40rem WIDE OR NARROWER**, which is `app-header.ts`'s `NARROW_WINDOW` (`style.css` has what
-  // they cost the header there, and a rule of the same width). A view key, a view's `✕` and `+ view` still choose the
-  // views; what a narrow window goes without is the header's one press.
+  // **IN A WINDOW 40rem WIDE OR NARROWER THE TOGGLES ARE FIRST IN THE WORKSPACE MENU**, by `app-header.ts`'s
+  // `NARROW_WINDOW` (`style.css` has what they would cost the header there). Moved, not hidden, so that a pointer on a
+  // phone keeps them, and the same buttons, so that a press, the pressed state and the CLIF intent listener go too.
   //
-  // **A TOGGLE WITH THE FOCUS HANDS IT ON BEFORE IT IS HIDDEN**, to the nearest control left in the header, which is
-  // `+ view` (`focus-handoff.ts`). Hidden with the focus, it would leave the focus on `<body>`, and there it would stay
-  // when the window was widened again. A hidden toggle holds no focus, so the same call does nothing where the window
-  // is widened.
+  // **A TOGGLE WITH THE FOCUS HANDS IT TO THE WORKSPACE MENU'S BUTTON AS THE WINDOW NARROWS**, since the menu it moves
+  // into is shut and that button opens it (`focus-handoff.ts`). **ONE WITH THE FOCUS IN THE MENU IS GIVEN IT BACK IN
+  // THE HEADER AS THE WINDOW WIDENS**: moving an element takes the focus off it, in Chromium and Firefox both.
   const narrowWindow = matchMedia(NARROW_WINDOW)
   const placeToggles = (): void => {
-    const header = viewsShown.parentElement
-    if (header !== null) handOff(viewsShown, nearest(header, viewsShown))
-    viewsShown.hidden = narrowWindow.matches
+    if (narrowWindow.matches) {
+      handOff(viewsShown, [workspaceButton])
+      workspaceMenu.prepend(viewsShown)
+    } else {
+      const held = focusHolder()
+      workspaceMenu.after(viewsShown)
+      if (held instanceof HTMLElement && viewsShown.contains(held)) held.focus()
+    }
   }
   narrowWindow.addEventListener('change', placeToggles)
+  // **A FOCUS THE STYLESHEET TAKES FIRST GOES TO THE SAME BUTTON.** `style.css` keeps a group still in the header off
+  // the page in a narrow window, and Firefox applies that rule to a new width, hiding and blurring a toggle, before the
+  // width-change event reaches `placeToggles`, which then finds no focus to hand on. A focus lost to nothing in a
+  // narrow window while the group is still in the header was lost that way.
+  viewsShown.addEventListener('focusout', (e) => {
+    if (e.relatedTarget === null && narrowWindow.matches && viewsShown.parentElement !== workspaceMenu)
+      workspaceButton.focus()
+  })
   placeToggles()
 
   /**
@@ -2017,20 +2018,6 @@ async function main(): Promise<EditorView> {
     notices.notify(`${presetName(preset)} reset — the default views are back`)
   })
 
-  // `+ view` — spec §5, §6: beside the focused view, which may be the source view. Filled on each open, and again
-  // where the tree changes while it is open (`applied`, above).
-  const fillAddViewMenu = (): void =>
-    addViewItems(
-      addViewMenu,
-      { options: sessions.pairs(), sourceAvailable: !leaves(tree).some((l) => l.pane === 'source'), current: null },
-      (choice) => {
-        const beside = focusedLeaf()
-        // SAID BY `layoutChanged`'s `added` event, which `addView` reports.
-        paneHost.addView(choice, beside)
-      },
-    )
-  wireMenu(addViewButton, addViewMenu, fillAddViewMenu)
-
   /**
    * Put `program` in the source editor: its encoding into the picker, its width into `fieldWidth`, its listing into
    * `clifListing`, and its text in one dispatch, whose update listener clears the link state and schedules the compile
@@ -2192,7 +2179,7 @@ async function main(): Promise<EditorView> {
     })
   }
 
-  // `examples ▾` — spec §4.2: built on each open, as `+ view`'s menu is, from the manifest.
+  // `examples ▾` — spec §4.2: built on each open, from the manifest.
   wireMenu(examplesButton, examplesMenu, () => exampleItems(examplesMenu, EXAMPLES, openExample))
 
   /**

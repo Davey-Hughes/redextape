@@ -11,7 +11,6 @@ describe('SHELL', () => {
       '#appearance',
       '#workspace',
       '#reset-preset',
-      '#new-view',
       '#buffers',
       '#examples',
       '#examples-menu',
@@ -30,11 +29,10 @@ describe('SHELL', () => {
       '#inspector',
       '#appearance-choice',
       '#workspace-menu',
-      '#new-view-menu',
       '#settings-menu',
     ]) {
-      // `id="…"`, NOT THE BARE WORD: a substring test is satisfied by a NEIGHBOUR's id — `#new-view` by
-      // `id="new-view-menu"`, `#settings` by `id="settings-menu"`, `#appearance` by the settings label's
+      // `id="…"`, NOT THE BARE WORD: a substring test is satisfied by a NEIGHBOUR's id — `#share` by
+      // `id="share-menu"`, `#settings` by `id="settings-menu"`, `#appearance` by the settings label's
       // own text — so deleting the element this list is about would leave it green.
       expect(SHELL).toContain(`id="${sel.slice(1)}"`)
     }

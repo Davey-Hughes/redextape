@@ -17,7 +17,6 @@ import {
   closeLeaf,
   defaultArrangement,
   HEADER_ORDER,
-  insertBeside,
   KIND_ORDER,
   type LayoutNode,
   leaves,
@@ -25,6 +24,7 @@ import {
   parseTree,
   resize,
   setLeafKind,
+  splitLeaf,
 } from '../../src/layout'
 import type { LeafId, PaneKind } from '../../src/panes'
 import { defaultFocus, defaultWorkspace, parseWorkspace, serializeWorkspace } from '../../src/workspace'
@@ -55,7 +55,7 @@ describe('a combination and its key', () => {
   it('reads a tree’s kinds in KIND_ORDER, each once', () => {
     expect(combinationOf(FOUR)).toEqual(['source', 'lambda', 'rxm', 'tm'])
     expect(combinationOf(of('tm', 'source'))).toEqual(['source', 'tm'])
-    const twoLambdas = insertBeside(of('source', 'lambda'), 'lambda-0', 'row', 'pane-1', 'lambda')
+    const twoLambdas = splitLeaf(of('source', 'lambda'), 'lambda-0', 'row', 'pane-1', 'lambda')
     expect(combinationOf(twoLambdas)).toEqual(['source', 'lambda'])
   })
 
@@ -112,7 +112,7 @@ describe('enter', () => {
     const next = enter(start, dragged)
     expect(next.tree).toEqual(dragged)
     expect(next.arrangements).toBe(start.arrangements)
-    const second = insertBeside(start.tree, 'tm-0', 'row', 'pane-1', 'tm')
+    const second = splitLeaf(start.tree, 'tm-0', 'row', 'pane-1', 'tm')
     expect(enter(start, second).arrangements).toBe(start.arrangements)
   })
 
@@ -197,7 +197,7 @@ describe('enter', () => {
  * — spec §14 item 2.
  *
  * Each sequence draws 60 gestures from a seeded generator and makes those its state allows: a toggle, a cycle key, a
- * `✕`, `+ view`, a pick in a view's title that changes its kind, and a divider drag. A switch is made by `entering`
+ * `✕`, a split, a pick in a view's title that changes its kind, and a divider drag. A switch is made by `entering`
  * below, which is this file's copy of `main.ts`'s `switchTo`; an edit is `layout.ts`'s own function and then `enter`.
  * After every gesture made:
  *
@@ -398,10 +398,12 @@ describe('enter, over generated sequences of switches and edits', () => {
           if (shown.length > 1) made = enter(now, closeLeaf(now.tree, pick(shown).id))
           break
         case 'add': {
-          // HELD TO THE BOUND AS `pane-host.ts`'s `admit` HOLDS IT, the source view's id counted where it is live
-          // already, and to one source view a tree.
+          // A SPLIT OF A VIEW THAT IS NOT THE SOURCE VIEW, HELD TO THE BOUND AS `pane-host.ts`'s `admit` HOLDS IT, the
+          // source view's id counted where it is live already, and to one source view a tree.
           const kind = pick(KIND_ORDER)
           if (kind === 'source' && shown.some((l) => l.pane === 'source')) break
+          const subjects = shown.filter((l) => l.pane !== 'source')
+          if (subjects.length === 0) break
           const live = liveLeaves(now.tree, now.arrangements)
           const adds = kind !== 'source' || !live.has('source')
           if (adds && live.size >= MAX_TREE_LEAVES) {
@@ -409,7 +411,7 @@ describe('enter, over generated sequences of switches and edits', () => {
             break
           }
           const id = kind === 'source' ? 'source' : mint()
-          made = enter(now, insertBeside(now.tree, pick(shown).id, pick(['row', 'column'] as const), id, kind))
+          made = enter(now, splitLeaf(now.tree, pick(subjects).id, pick(['row', 'column'] as const), id, kind))
           break
         }
         case 'pick': {

@@ -2,15 +2,16 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { drawn, focusInPage, live, mountAt, notice, sourcePane, toggle } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * WHAT A `views` TOGGLE SAYS WHERE THE PAGE SHOWS TWO VIEWS OF ITS KIND — the view layouts spec §6. A toggle shows or
  * hides every view of its kind, so its tooltip, and the sentence that says why the last one stays, count them:
  * *hide the 2 TM views*, *the 2 TM views are the only ones shown — one kind of view stays*.
  *
- * **A FIRST LOAD AND `+ view` ARE ALL IT TAKES**: the source beside the TM view, then a second TM view. Were each
- * sentence written for one view, the TM toggle would say *hide the TM view* and hide both, and with the source view
- * closed it would say *the TM view is the only one shown* of two.
+ * **A FIRST LOAD AND A SPLIT ARE ALL IT TAKES**: the source beside the TM view, then a second TM view split off it.
+ * Were each sentence written for one view, the TM toggle would say *hide the TM view* and hide both, and with the
+ * source view closed it would say *the TM view is the only one shown* of two.
  *
  * The cases run in order, each from the page the one before left.
  */
@@ -31,14 +32,9 @@ describe('the views toggles, with two views of one kind on screen', () => {
     expect(drawn(), 'precondition: the page opened on the first load’s views').toBe('row[50](source tm-0)')
   })
 
-  it('says hide the 2 TM views once + view has added a second, and says the source view as it did', async () => {
+  it('says hide the 2 TM views once a split has added a second, and says the source view as it did', async () => {
     expect(toggle('tm').title, 'precondition: one TM view is said as one').toBe('hide the TM view')
-    await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-    const item = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-      (b) => b.textContent === 'TM · program',
-    )
-    if (item === undefined) throw new Error('+ view offers no TM · program')
-    await userEvent.click(item)
+    await userSplit('tm-0', 'same')
     expect(kinds()).toEqual(['source', 'tm', 'tm'])
     expect(toggle('tm').title).toBe('hide the 2 TM views')
     expect(toggle('source').title).toBe('hide the source view')

@@ -3,6 +3,7 @@ import { userEvent } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
 import { clifSteps, clifStopped, hearSessionWorkers, repliesOf, requestsOf } from './clif-fixture'
 import { focusProgram, host, mountAt, PREFIX, resultsText, stateIdle, toggle, until } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * **THE CLIF LEG RECORDS ONLY WHILE A CLIF VIEW IS SHOWN** (CLIF view design §6, *Recording while shown*), heard
@@ -120,7 +121,7 @@ describe('a CLIF view shown and hidden', () => {
     )
   })
 
-  it("+ view's CLIF item shows and records it", async () => {
+  it("a split's clif item shows and records it", async () => {
     await start()
     // A RUN WITH NO CLIF VIEW FIRST, so that the leg this view shows is the one such a run leaves, and not one an
     // earlier case's run left available.
@@ -130,10 +131,7 @@ describe('a CLIF view shown and hidden', () => {
     await until(() => repliesOf(ear.heard.slice(typed), 'compiled').length > 0 && stateIdle(), "the keystroke's run")
     expect(requestsOf(ear.heard.slice(typed), 'run')[0]?.clif, 'precondition: the run carried no listing').toBeNull()
     const mark = ear.heard.length
-    await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-    await userEvent.click(
-      document.querySelector(`#new-view-menu button[data-binding="${bindingKey('clif', 'source')}"]`) as HTMLElement,
-    )
+    await userSplit('lambda-0', bindingKey('clif', 'source'))
     expect(clifShown(), 'precondition: the item showed a CLIF view').toBe(true)
     const shown = await nextClif(mark, 'the clif request the item posts')
     expect(shown.listing).toBe('as-built')

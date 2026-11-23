@@ -10,6 +10,7 @@ import {
   pressShownToggle,
   resetToFourViews,
   SHELL,
+  splitVia,
   stateIdle,
   termEditorsIn,
   titleText,
@@ -56,7 +57,7 @@ const LEGS: readonly Leg[] = [
 
 /** What a case holds once `leg`'s view shows a copy of its own. */
 type Copied = {
-  /** The copy's name in the copies menu, and its key in a title menu and in `+ view`'s. */
+  /** The copy's name in the copies menu, and its key in a title menu and in a split's. */
   readonly copy: string
   readonly binding: string
   /** A view's title while it shows the copy. */
@@ -121,11 +122,11 @@ for (const leg of LEGS) {
         'source',
         kept.view,
       ])
+      // SPLIT OFF THE OTHER VIEW ON SCREEN: the source view cannot be split.
       const before = new Set(mounted())
-      document.querySelector<HTMLButtonElement>('#new-view')?.click()
-      document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${binding}"]`)?.click()
+      splitVia(kept.view, 'row', binding)
       const second = mounted().find((id) => !before.has(id))
-      if (second === undefined) throw new Error('+ view added no second view of the copy')
+      if (second === undefined) throw new Error('the split added no second view of the copy')
       await until(() => titleText(second) === onCopy, 'the second view of the copy')
       host(second)?.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
       await until(() => editorsOf(second) === 1, 'the editor to move to the view on screen')

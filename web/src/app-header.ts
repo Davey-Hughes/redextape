@@ -1,15 +1,14 @@
 import type { Example } from './examples'
 import { HEADER_ORDER, KIND_WORD } from './layout'
-import type { PaneChoice, SplitChoices } from './pane-chrome'
 import type { PaneKind } from './panes'
-import { bindingKey, pairLabel } from './view-header'
 import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
 
 /**
- * THE APP HEADER'S MENUS — the workspace menu, `+ view` and settings (Plan 7 part 2 spec §6), `examples ▾` (part 6a
+ * THE APP HEADER'S MENUS — the workspace menu and settings (Plan 7 part 2 spec §6), `examples ▾` (part 6a
  * spec §4.2) and `about ▾` (the about pages design §5). Each is a native popover beside the button that opens
  * it, declared in `index.html` so the pre-paint script and the skin selects need no change; this module wires
- * what markup cannot. The `views` toggles (the view layouts spec §6) are the header's one group that is not a menu.
+ * what markup cannot. The `views` toggles (the view layouts spec §6) are the header's one group that is not a menu, and
+ * a narrow window puts them in the workspace menu (`main.ts`'s `placeToggles`).
  */
 
 /**
@@ -33,36 +32,6 @@ export function wireMenu(button: HTMLButtonElement, menu: HTMLElement, onOpen?: 
 export function presetName(p: Preset | null): string {
   if (p === null) return 'custom'
   return { explorer: 'Explorer', debugger: 'Debugger', stage: 'Stage' }[p]
-}
-
-/**
- * Fill `+ view`'s menu: every pair, then `source` while no view shows it — the split menu's list without its
- * first entry, because `+ view` has no "this view" to offer another view of.
- */
-export function addViewItems(menu: HTMLElement, choices: SplitChoices, pick: (c: PaneChoice) => void): void {
-  const items = choices.options.map((o) => {
-    const b = document.createElement('button')
-    b.type = 'button'
-    b.textContent = pairLabel(o)
-    b.dataset.binding = bindingKey(o.leg, o.id)
-    b.addEventListener('click', () => {
-      menu.hidePopover()
-      pick({ kind: o.leg, session: o.id })
-    })
-    return b
-  })
-  if (choices.sourceAvailable) {
-    const b = document.createElement('button')
-    b.type = 'button'
-    b.textContent = 'source'
-    b.dataset.source = ''
-    b.addEventListener('click', () => {
-      menu.hidePopover()
-      pick({ kind: 'source' })
-    })
-    items.push(b)
-  }
-  menu.replaceChildren(...items)
 }
 
 /**
@@ -156,11 +125,11 @@ export const SWITCH_ROWS: readonly SwitchRow[] = [
  * a durable name for a button across a rebuild, exactly as `layout-view.ts`'s divider rescue uses
  * `data-path`/`data-index` across `replaceChildren`.
  *
- * **WHEN THE IDENTITY IS GONE, THE FIRST ITEM TAKES IT** — spec §11's fourth rule, reached here by *reset
- * preset* being removed by a pick that made the workspace custom. `focus-handoff.ts`'s `nearest` is NOT what
- * answers it: this rebuild replaces every item, so there is no "remaining control" near the departing one to
- * walk to — every candidate `nearest` could name was detached by the same `replaceChildren`. The first item
- * of the rebuilt menu is the honest answer, and it is the one `wireMenu` already autofocuses on open.
+ * **WHEN THE IDENTITY IS GONE, THE FIRST ITEM TAKES IT** — spec §11's fourth rule, reached here by *reset preset* being
+ * removed by a pick that made the workspace custom. `focus-handoff.ts`'s `nearest`, which walks to a remaining control
+ * near the departing one, is NOT what answers it: the rebuild remakes every item near *reset preset*, and leaves only
+ * the toggles' group a narrow window puts first, at the menu's other end. The first item is the honest answer, the one
+ * `wireMenu` autofocuses on open.
  *
  * **`reset` IS THE CALLER'S OWN ELEMENT, NOT ONE BUILT HERE**: `main.ts` holds `#reset-preset` from the markup
  * and wired its click handler once. Rebuilding it per open would need the handler rewired per open, and a menu
@@ -168,15 +137,16 @@ export const SWITCH_ROWS: readonly SwitchRow[] = [
  */
 export function workspaceItems(
   menu: HTMLElement,
-  state: { readonly switches: Switches; readonly reset: HTMLButtonElement },
+  state: { readonly switches: Switches; readonly reset: HTMLButtonElement; readonly views: HTMLElement },
   on: {
     preset(p: Preset): void
     flip(key: keyof Switches, value: string): void
   },
 ): void {
   const held = document.activeElement
+  // A FOCUS ON A TOGGLE IN `views` IS LEFT WHERE IT IS: the rebuild below does not touch it.
   const identity =
-    held instanceof HTMLElement && menu.contains(held)
+    held instanceof HTMLElement && menu.contains(held) && !state.views.contains(held)
       ? { preset: held.dataset.preset, key: held.dataset.switch, value: held.dataset.value, id: held.id }
       : null
 
@@ -228,7 +198,12 @@ export function workspaceItems(
     ),
   )
 
-  menu.replaceChildren(presets, ...switches)
+  // **`views`, THE `views` TOGGLES' GROUP, IS NEVER REBUILT**, and stays first where a narrow window has put it in this
+  // menu: its buttons are the header's own, and a rebuild would cost them their listeners, the CLIF toggle's intent
+  // listener among them, their state and a focus a press left on one. Nor is it put in the menu here, where it is not:
+  // `main.ts`'s `placeToggles` places it by the window's width.
+  for (const node of [...menu.childNodes]) if (node !== state.views) node.remove()
+  menu.append(presets, ...switches)
   // **REMOVED, NOT DISABLED, WHILE THE WORKSPACE IS CUSTOM** (umbrella §4 rule 4): there is no preset for
   // it to restore, so it can never apply in this state — choosing a preset is the way back.
   if (now !== null) menu.append(state.reset)
@@ -247,14 +222,15 @@ export function workspaceItems(
 }
 
 /**
- * The window too narrow for the `views` toggles, as the media query that says so: 40rem wide or narrower, which is
- * 640 px at a browser's default text size (the view layouts spec §6.1).
+ * The window too narrow for the `views` toggles in the header, as the media query that says so: 40rem wide or
+ * narrower, which is 640 px at a browser's default text size (the view layouts spec §6.1). There they are in the
+ * workspace menu.
  *
- * **THREE PLACES SAY THIS WIDTH, AND NONE CAN READ ANOTHER.** `main.ts` sets the group's `hidden` attribute from this
- * query. `style.css` has a media rule of the same width, for the paint before `main.ts` runs, and a stylesheet
- * imports nothing. `help.html` tells a reader the width in pixels. `tests/node/app-header.test.ts` reads the rule
- * and the page and holds each to this, and `tests/browser/view-toggles-narrow.test.ts` holds the attribute and the
- * rule to the same last pixel.
+ * **THREE PLACES SAY THIS WIDTH, AND NONE CAN READ ANOTHER.** `main.ts` places the group by this query, in the header
+ * or first in the workspace menu. `style.css` has a media rule of the same width that keeps a group still in the
+ * header off the page, for the paint before `main.ts` runs, and a stylesheet imports nothing. `help.html` tells a
+ * reader the width in pixels. `tests/node/app-header.test.ts` reads the rule and the page and holds each to this, and
+ * `tests/browser/view-toggles-narrow.test.ts` holds the group's place and the rule to the same last pixel.
  */
 export const NARROW_WINDOW_REM = 40
 export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
@@ -269,9 +245,9 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  * page with no view built yet.
  *
  * **THE NAME IS THE LABEL, AND THE TOOLTIP SAYS WHAT A PRESS DOES** (umbrella §4 rule 1). `source`, `λ`, `rxm`, `TM`
- * and `clif` are words a reader says, so each button is named by its own text, in a group named `views`, and `aria-pressed`
- * carries its state. The tooltip is `toggleTitle`'s: what a press does, *hide the TM view*, *show the TM view*, or with
- * `count` saying two views of the kind, *hide the 2 TM views*, and for rxm and CLIF a line saying what the view is.
+ * and `clif` are words a reader says, so each is its button's name, in a group named `show`, and `aria-pressed` carries
+ * its state. The tooltip is `toggleTitle`'s: what a press does, *hide the TM view*, *show the TM view*, or with `count`
+ * saying two views of the kind, *hide the 2 TM views*, and for rxm and CLIF a line saying what the view is.
  *
  * **THE LAST PRESSED BUTTON IS DISABLED, AND ITS TOOLTIP IS THE REASON** (rule 4): it could apply and cannot now,
  * since one view stays, or one kind of view where it stands for several (`toggleSentence`). `aria-description` says

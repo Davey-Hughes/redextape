@@ -3,7 +3,8 @@ import { cdp, userEvent } from 'vitest/browser'
 import { KIND_GLOSS } from '../../src/app-header'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { chromiumOnly } from './engine'
-import { box, mountAt, mounted, pressed, storedLayout, token, until } from './harness'
+import { box, mountAt, mounted, pressed, selectedTab, storedLayout, token, until } from './harness'
+import { chooseFromWorkspace } from './user-event-fixture'
 
 /**
  * WHAT A FIRST VISIT SHOWS — the view layouts spec §8: the source beside the TM view, the focus on the TM view, and
@@ -153,15 +154,15 @@ describe('a first load, in a window wider than it is tall', () => {
     chromiumOnly(ctx, 'forced colours are CDP’s Emulation.setEmulatedMedia, which only Chromium has')
     // **THE POINTER STAYS WHERE THE FILE BEFORE THIS ONE LEFT IT**, and forced colours edge a button under it in
     // `Highlight`, so the edges read below are the resting ones only once it is off every button they name.
-    const read = [...toggles(), document.querySelector('#new-view') as HTMLElement]
+    const read = [...toggles(), document.querySelector('#buffers') as HTMLElement]
     await userEvent.unhover(read[0] as HTMLElement)
-    await until(() => !read.some((b) => b.matches(':hover')), 'the pointer off the toggles and + view')
+    await until(() => !read.some((b) => b.matches(':hover')), 'the pointer off the toggles and copies')
     await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] })
     try {
       expect(matchMedia('(forced-colors: active)').matches, 'precondition: forced colours').toBe(true)
       expect(getComputedStyle(toggles()[0] as HTMLButtonElement).boxShadow, 'precondition: no underline').toBe('none')
       const highlight = token('Highlight')
-      const button = getComputedStyle(document.querySelector('#new-view') as HTMLElement).borderTopColor
+      const button = getComputedStyle(document.querySelector('#buffers') as HTMLElement).borderTopColor
       expect(highlight, 'precondition: Highlight is not the edge forced colours give a header button').not.toBe(button)
       const names = { [highlight]: 'Highlight', [button]: 'a button’s' }
       expect(toggles().map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), edges(b, names)])).toEqual([
@@ -184,18 +185,14 @@ describe('a first load, in a window wider than it is tall', () => {
   /**
    * **THE FOCUS ON THE TM VIEW IS THE WORKSPACE'S RECORD, AND THIS IS WHAT IT DOES ON THE PAGE.** A load takes no
    * keyboard focus (`document.activeElement` is `<body>` here) and the app marks no view as the focused one, so the
-   * record is seen where it is used: `+ view` adds beside the focused view. Beside the source it would add between the
-   * two. Last in the file, since it changes the views.
+   * record is seen where it is used: the Stage shows the focused view, and its tab is the one selected. On the source
+   * it would show the source. Last in the file, since it leaves the page on the Stage.
    */
-  it('adds the next view beside the TM view, which is where the focus is', async () => {
+  it('shows the TM view on the Stage, which is where the focus is', async () => {
     expect(document.activeElement, 'precondition: the load took no keyboard focus').toBe(document.body)
-    document.querySelector<HTMLButtonElement>('#new-view')?.click()
-    const item = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-      (b) => b.textContent === 'λ · program',
-    )
-    if (item === undefined) throw new Error('+ view offers no λ · program')
-    item.click()
-    await until(() => mounted().length === 3, 'the view + view adds')
-    expect(mounted()).toEqual(['source', 'tm-0', 'pane-1'])
+    await chooseFromWorkspace('[data-preset="stage"]')
+    await until(() => selectedTab() !== undefined, 'the Stage')
+    expect(selectedTab()).toBe('tm-0')
+    expect(mounted()).toEqual(['tm-0'])
   })
 })

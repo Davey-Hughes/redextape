@@ -10,10 +10,9 @@ import { viewKey } from './user-event-fixture'
  * opens its popover with a real press, asserts it is open, and then reads four things after the key: what is open, what
  * the popover's button says of it, where the focus is, and the views.
  *
- * **AND THE TWO MENUS THAT OFFER `source` DO NOT OFFER IT ONCE A VIEW SHOWS IT**, by a road that is not a view key:
- * the source toggle, pressed from the keyboard with the menu still open. `+ view`'s menu is filled again when the tree
- * changes under it, and a view's `⋯` menu is closed, with its events, before its view's host is detached
- * (`pane-host.ts`'s `applyLayout`).
+ * **AND A VIEW'S SPLIT LIST DOES NOT OFFER `source` ONCE A VIEW SHOWS IT**, by a road that is not a view key: the
+ * source toggle, pressed from the keyboard with the list still open. A view's `⋯` menu is closed, with its events,
+ * before its view's host is detached (`pane-host.ts`'s `applyLayout`).
  *
  * **NO CASE FOR THE ENCODING SELECT'S LIST.** While it is open the browser gives the keys to the list, and the page is
  * sent no `keydown` for the prefix or for the key after it in this Chromium: the mode does not arm, nothing switches,
@@ -76,7 +75,6 @@ describe('view keys under an open popover', () => {
   /** The header's popovers: each is beside its button, outside the views, and no rebuild touches it. */
   it.each([
     ['the workspace menu', '#workspace'],
-    ['+ view', '#new-view'],
     ['copies', '#buffers'],
     ['examples', '#examples'],
     ['share', '#share'],
@@ -86,7 +84,7 @@ describe('view keys under an open popover', () => {
     await start()
     const button = document.querySelector(selector) as HTMLElement
     const menu = await press(button)
-    // SO THAT THERE IS A FOCUS TO HAND BACK. Six of the seven take the focus as they open; the copies menu with no copy
+    // SO THAT THERE IS A FOCUS TO HAND BACK. Five of the six take the focus as they open; the copies menu with no copy
     // leaves it on its button, where this case would pass with nothing handed anywhere, and `Tab` goes into it.
     if (!menu.contains(document.activeElement)) await userEvent.keyboard('{Tab}')
     expect(menu.contains(document.activeElement), 'precondition: the focus is inside the popover').toBe(true)
@@ -180,46 +178,9 @@ describe('view keys under an open popover', () => {
     })
   })
 
-  /** The two menus that offer `source` while no view shows it: `+ view`'s, and the list a view's split opens. */
+  /** The menu that offers `source` while no view shows it: the list a view's split opens. */
   describe('a menu that offers source', () => {
     const sourceItem = (menu: HTMLElement): HTMLElement | null => menu.querySelector('button[data-source]')
-
-    it('closes + view when a key shows the source view, and it opens again without the item', async () => {
-      await start()
-      await userEvent.click(toggle('source'))
-      expect(mounted()).toEqual(['lambda-0', 'rxm-0', 'tm-0'])
-      const add = document.querySelector('#new-view') as HTMLElement
-      const menu = await press(add)
-      expect(sourceItem(menu), 'precondition: + view offers source').not.toBeNull()
-      await viewKey('1', UNARMED)
-      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
-      expect(open(), '+ view stayed open').toEqual([])
-      await press(add)
-      expect(sourceItem(menu), '+ view offers a source view the page has').toBeNull()
-      expect(errors).toEqual([])
-    })
-
-    /**
-     * NO VIEW KEY IN THIS ONE. A popover stays open while `Shift+Tab` walks out of it, so the source toggle can be
-     * pressed with `+ view` open: back from the menu's first item to `+ view`, then the five toggles from CLIF's to
-     * the source's.
-     */
-    it('takes source out of + view, still open, when the source toggle is pressed from the keyboard', async () => {
-      await start()
-      await userEvent.click(toggle('source'))
-      const menu = await press(document.querySelector('#new-view') as HTMLElement)
-      expect(sourceItem(menu), 'precondition: + view offers source').not.toBeNull()
-      const others = menu.querySelectorAll('button').length - 1
-      for (let i = 0; i < 6; i++) await userEvent.keyboard('{Shift>}{Tab}{/Shift}')
-      expect(document.activeElement, 'precondition: Shift+Tab reached the source toggle').toBe(toggle('source'))
-      expect(open(), 'precondition: + view is still open').toEqual([menu.id])
-      await userEvent.keyboard('{Enter}')
-      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
-      expect(open(), 'the menu closed').toEqual([menu.id])
-      expect(sourceItem(menu), '+ view still offers a source view the page has').toBeNull()
-      expect(menu.querySelectorAll('button').length, 'the menu lost its other items').toBe(others)
-      expect(errors).toEqual([])
-    })
 
     it('closes a view’s split list when the source toggle is pressed from the keyboard, and ⋯ opens on its items', async () => {
       await start()

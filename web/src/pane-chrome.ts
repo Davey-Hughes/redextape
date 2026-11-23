@@ -313,9 +313,9 @@ export type PaneChoice = { kind: 'source' } | { kind: Leg; session: SessionId }
  * whether the tree is currently without a source leaf, and which pair the pane doing the asking already
  * shows.
  *
- * NAMED, RATHER THAN INLINED AT EVERY SIGNATURE THAT CARRIES IT — `view-header.ts`'s `viewMenu`,
- * `app-header.ts`'s `addViewItems`, and `PaneView.setLayoutControls` (`sessions.ts`), which is the
- * per-frame push that fills it in: a shape crossing a module boundary is worth a single spelling.
+ * NAMED, RATHER THAN INLINED AT EVERY SIGNATURE THAT CARRIES IT — `view-header.ts`'s `viewMenu` and
+ * `PaneView.setLayoutControls` (`sessions.ts`), which is the per-frame push that fills it in: a shape crossing a
+ * module boundary is worth a single spelling.
  *
  * **`current` IS NULLABLE AND THE OTHER TWO ARE NOT, WHICH IS A STATEMENT ABOUT A PANE THAT HAS NEVER
  * BEEN PAINTED.** Each pane class holds its latest `SplitChoices` in a field and hands `viewMenu`

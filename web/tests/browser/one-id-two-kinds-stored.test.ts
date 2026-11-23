@@ -11,7 +11,6 @@ import {
   hostKind,
   leafOf,
   mounted,
-  newLambdaViewItem,
   noticeText,
   pressed,
   rowOfLeaves,
@@ -22,6 +21,7 @@ import {
   toggle,
   until,
 } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * A STORED WORKSPACE THAT ALREADY HOLDS ONE ID UNDER TWO KINDS — the view layouts spec §5.4. A pick in a view's title
@@ -173,15 +173,13 @@ describe('a stored workspace with rxm-0 and tm-0 each under two kinds', () => {
   /**
    * **A REFUSED SWITCH MINTS NO ID**, as a refused add mints none (`pane-host.ts`'s `admit`): `main.ts`'s `switchTo`
    * asks the bound of the tree with ids that are not minted. The first switch here took `pane-61`. *Reset preset*
-   * forgets every arrangement, which makes room for an add, and the view added takes the number after it.
+   * forgets every arrangement, which makes room for a split, and the view it adds takes the number after it.
    */
-  it('left the leaf counter where it was: after reset preset, the view + view adds is pane-62', async () => {
+  it('left the leaf counter where it was: after reset preset, the view a split adds is pane-62', async () => {
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     expect(mounted(), 'precondition: the reset shows the source beside the TM view').toEqual(['source', 'tm-0'])
     expect(storedTrees().live, 'precondition: the reset forgot every arrangement').toBe(2)
-    await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
-    await userEvent.click(newLambdaViewItem() as HTMLButtonElement)
+    await userSplit('tm-0', 'same')
     expect(
       mounted().filter((id) => id !== 'source' && id !== 'tm-0'),
       'the refused switch minted an id',

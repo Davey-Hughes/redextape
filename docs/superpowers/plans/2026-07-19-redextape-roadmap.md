@@ -40640,3 +40640,540 @@ optimised, is printed at Cranelift's bare indent, so the listing row case builds
 | `e.target instanceof Element`; `part.textContent ?? ''` | the tests on `cut-text.ts`'s lines 41 and 58 at `3d1c520` | `sed -n '41p;58p' web/src/cut-text.ts` |
 | 100, 88.23, 100, 100 and `41,58` | `cut-text.ts`'s statements, branches, functions and lines in a coverage run of its three test files alone, and its lines with a branch no test takes | `strip $L/06-coverage-cut-text.log \| grep -a ' cut-text.ts '` |
 | 16 GB | the memory cap of the coverage run's unit | `grep -o 'MemoryMax=[^ ]*' $L/07-gate-run.zsh` |
+
+#### `+ view` IS GONE FROM THE APP HEADER, AND IN A WINDOW `40rem` WIDE OR NARROWER THE VIEW TOGGLES ARE THE WORKSPACE MENU'S FIRST ROW, NAMED `show` (2026-11-23, branch `remove-plus-view` on `b32af3d`, rebased onto it from `798fa38`: the design and the plan in `fad9f1d`, `adbf097` and `9ad44d9`, then `9ad44d9..26b8e34`, 10 commits, this entry in `910f4b9`, the whole-branch review's fixes in `910f4b9..11fa301`, 11 commits, this entry brought up to them in `2cc1107`, a second round after their review in `2cc1107..d1e77e4`, 3 commits, this entry brought up again in `6e55ef9`, a third round, `a636436`, this entry brought up to it in `4c26ce4`, and this entry brought up to the rebase)
+
+Davey said of the app header's `+ view` on 2026-11-21: "I'm also not sure if we need the + view button, I know it
+provides functionality to keep adding duplicate views but this feels unnecessary", and then "yes + view should be
+removed". The design is `docs/superpowers/specs/2026-11-23-remove-plus-view-design.md`, resting on a survey of
+`798fa38`, `$R/survey.md`. Without `+ view`, in a window 40rem wide or narrower, where the toggles were hidden, a
+pointer user left with the source view alone would have had only *reset preset* to bring views back. On 2026-11-23 Davey
+chose the design's approach B, the toggles moved into the workspace menu there, over A, which accepted that, and
+approved the design.
+
+The plan is `docs/superpowers/plans/2026-11-23-remove-plus-view.md`. `fad9f1d` committed the two, `adbf097` took Davey's
+decisions after the plan was written, and `9ad44d9` the rulings on the plan's pre-flight scan. The build is the 10
+commits after that: Tasks 1 to 8 in order, a subagent each with a reviewer after it. Task 1 moved the toggles while
+`+ view` still stood; Tasks 2 to 5 moved the tests that pressed `+ view` onto a split, a toggle or a preset, or deleted
+those that held only what `+ view` did (*THE TESTS*); Task 6 removed `+ view` and the code only it used; Task 7 put
+right the words left in test comments and in the view-layouts spec; and Task 8 ran the full gate and a pass by hand in
+Firefox, and fixed the one test file it found the narrower header had broken. Task 1 had one fix round after its review,
+`c139510`, and Task 3 one on a ruling before its review, `6048a45`. No Rust changes. The lane's record is
+`~/temp/redextape-remove-plus-view-record/`, `$R` below; its logs, sabotage drivers, saved copies and task reports,
+`task-1-report.md` to `task-8-report.md` and `task-11-report.md`, are in `$R/impl/`, `$L` below.
+
+After this entry, `910f4b9`, a review of the whole branch, `b32af3d..910f4b9`, in `$L/review.md`, found no critical
+finding, 1 important and 7 minor of its own, and judged 11 of the minors the task reviews had deferred must-fix. Task 11
+fixed the important one, I1, every minor it marked must-fix and the should-fix m3, each in a commit of its own,
+`910f4b9..11fa301`, 11 commits, 9 of them under `web/`, and brought this entry up to them (*THE REVIEW'S FIXES*). The
+fixes' review found I1's class in two more places, which a second round, `2cc1107..d1e77e4`, 3 commits, 2 of them under
+`web/`, put right; a third, `a636436`, points `MIN_VIEW_PX`'s doc at where its reason is recorded.
+
+**The rebase.** After the third round `main` moved to `b32af3d`, #194, which gives a text cut short in the TM, rxm and
+clif views its whole text in a tooltip, and the branch was rebased onto it from `798fa38`. Two files conflicted: this
+roadmap, rebuilt as `main`'s file with this entry appended whole, and `web/help.html`, whose sentence on the views keeps
+#194's clause on the tooltip and this branch's on the `show` row, wrapped again. `main.ts` and the node
+`app-header.test.ts` merged without a conflict: #194 adds its watcher's import and one call to the first and its clause
+to the help page's case in the second. None of the files #194 changed under `web/` names a symbol this branch removes,
+and none of its code reaches the header's `+ view` or the toggles' place. A commit of this branch that this entry names
+is named by its SHA after the rebase; a run, a log or a task report from before the rebase ran at, or names, the commit
+it was rebased from, and `$R/rebase-1/sha-map.tsv` pairs the two. The rebase's logs are in `$R/rebase-1/`.
+
+##### WHAT CHANGED FOR A PERSON
+
+- **`+ view` and its menu are gone from the header.** It added a view of any kind, on the program or on a warm copy,
+  beside the focused view. A view's `⋯` menu still splits it, the toggles and the view keys still show and hide views,
+  and a view's title still chooses what it shows.
+- **In a window 40rem wide or narrower the view toggles are the workspace menu's first row, named `show`**, above its
+  preset, step controls, `views` and readout rows and *reset preset*; before, they were hidden there. They are the
+  header's own buttons, moved, so a press, the pressed look, the tooltip, `aria-disabled` and the clif package's load on
+  intent, when the pointer rests on the clif toggle or the focus reaches it, go with them. In a wider window they are in
+  the header and the menu does not show them. The group's one name is `show`, in the header too, where a screen reader
+  says it; the menu's `tiles`/`stage` row keeps `views`. `web/help.html` says that in a narrow window the workspace menu
+  holds the buttons, "in its **show** row".
+- **A press on a toggle in the menu leaves the menu open**, as a pick of a preset or a switch does, and `Enter` on a
+  focused toggle there does the same and keeps the focus on it. *Reset preset*, which rebuilds the page, is the one item
+  that closes the menu. When the menu opens in a narrow window the focus goes to its first button, the `source` toggle,
+  since `wireMenu` gives the menu's first button `autofocus`.
+- **The focus follows the toggles across 40rem.** A toggle holding the focus as the window narrows hands it to the
+  workspace menu's button, `Explorer ▾` under the Explorer preset, where before it went to `+ view`. A toggle holding
+  the focus in the menu as the window widens keeps it, back in the header. Both hold in Chromium and in Firefox.
+- **Links, stored workspaces and remembered arrangements** that hold two views of a kind, or `+ view`'s row of equal
+  shares, load as they did. Nothing in the parse changed, and two new node cases read such a tree and such a workspace
+  back as stored.
+
+##### WHAT IT COST
+
+**What only `+ view` did, which nothing replaces** (the design's non-goals):
+
+- a second view of a kind on the Stage, which offers no split;
+- a copy's view as an extra Stage tab: on the Stage a copy is shown by switching a tab's title to it;
+- a view added beside the source view, which has no split;
+- the add that gave each view of a row an equal share. A split halves the view it is chosen on.
+
+**The code that existed only for it went**: `app-header.ts`'s `addViewItems`; in `main.ts`, the wiring of the button and
+its menu and the menu's refill in `applied`; `pane-host.ts`'s `PaneHost.addView` and the `'view'` member of
+`AddRefused.gesture`, so that `refused`'s notice says only a split's words, `no room to split …`; `layout.ts`'s
+`insertBeside`, and `insert`'s `share` parameter and equal-share branch; `#new-view`'s markup and CSS; the browser
+tests' `plusView`, `newLambdaViewItem` and `pressedLayout`; and, after the review, `admit`'s line that let an add
+through on the Stage without asking `addRefusal`, which only `+ view` reached, since the Stage offers no split. What it
+shared with a split and the other menus stays: `admit`, `addRefusal` and `holdsMostLeaves`, the `view added` notice,
+`wireMenu`, `SplitChoices`, `splitLeaf`, `MAX_TREE_LEAVES` and `DIVIDER_PX`. At `a636436` no file under `web/` or
+`scripts/` names a removed symbol, where 42 did at `b32af3d`, and no file under `web/` says `+ view`, where 46 did.
+
+To `a636436`, `web/src` gained 158 lines and lost 268, in 7 files. The figures take in Task 1's new code and Task 11's
+fixes as well as what went:
+
+| File | Added | Deleted |
+|---|---|---|
+| `web/src/app-header.ts` | 28 | 52 |
+| `web/src/draw.ts` | 4 | 4 |
+| `web/src/layout.ts` | 44 | 87 |
+| `web/src/main.ts` | 34 | 47 |
+| `web/src/pane-chrome.ts` | 3 | 3 |
+| `web/src/pane-host.ts` | 23 | 50 |
+| `web/src/style.css` | 22 | 25 |
+| `web/index.html` | 1 | 3 |
+| `web/help.html` | 3 | 3 |
+
+##### HOW IT IS BUILT
+
+- **One set of buttons, moved.** `main.ts`'s `placeToggles` runs at start and on each `change` of
+  `matchMedia(NARROW_WINDOW)`, `app-header.ts`'s `(max-width: 40rem)`. In a narrow window it hands a focus inside the
+  group to `#workspace` (`handOff`) and puts the group first in `#workspace-menu`; in a wider one it notes the focus,
+  puts the group back after the menu, and focuses the toggle again if one held the focus.
+- **`workspaceItems` rebuilds the menu around the group.** It removes every child but the group and appends the presets,
+  the switches and *reset preset* after it, so a pick that repaints the open menu leaves the group first, and a focus
+  inside the group where it was.
+- **A focus lost to nothing goes to `#workspace` too.** Firefox applies the stylesheet's narrow rule to a new width,
+  hiding and blurring a focused toggle, before the width's `change` reaches `placeToggles`, which then has no focus to
+  hand on. A `focusout` listener on the group gives the focus to `#workspace` when it goes to nothing in a narrow window
+  with the group still in the header.
+- **`style.css`**: `.bar > .views-shown` is `display: none` at 40rem or narrower, so the group does not draw in the
+  header before `main.ts` moves it; `#workspace-menu > .views-shown` is drawn as the menu's other rows are, its label
+  from its `aria-label` by `::before`, and wraps. The `hidden` attribute that hid the group is no longer set or styled.
+  `index.html` names the group `show`.
+
+##### DECISIONS
+
+**Davey's**: `+ view` removed (2026-11-21); approach B (2026-11-23); the group named `show` and the menu's
+`tiles`/`stage` row kept as `views`, so that the narrow menu has no two rows of one name; and the plan's calls that a
+press on a toggle leaves the menu open and that a Stage test builds its second view with a split in tiles, confirmed on
+2026-11-23.
+
+**The plan's rulings** (its *Global Constraints*, on what the design left to the builder):
+
+- **One set of buttons, moved**, not a second set kept in step: the design's "They act exactly as the header's toggles
+  do" holds because they are the header's toggles, and the clif intent listener goes with its button.
+- **First in the menu**, above the presets, as the group follows the workspace button in the header. `wireMenu` then
+  gives the `source` toggle the focus when the menu opens in a narrow window.
+- **A press leaves the menu open**; *reset preset*, which rebuilds the page, is the one item that closes it.
+- **A toggle holding the focus in the menu as the window widens keeps it**, given back explicitly. The plan's reason,
+  that Chromium blurs an element as it is moved and Firefox does not, is not what the sabotages found: without the
+  re-focus M6 fails at `<body>` in both engines (1-S3 and 1-S3ff), so the move takes the focus off the button in each.
+- **A Stage test that needs a second view of a kind, or a copy's view as a second tab, builds it with a split in tiles
+  and then switches to the Stage**, by a preset or the `views` switch. A toggle cannot build either: it shows its
+  combination's remembered arrangement, or one view of a kind.
+- **`admit`'s Stage line stays**, since `admit` is shared with the split. The whole-branch review disagreed, I1: `admit`
+  is shared, its Stage line is not, since `admit`'s one caller, `split`, is never offered on the Stage; the controller
+  ruled it removed, and Task 11 removed it. **`insert` stays `splitLeaf`'s body**, without its `share` parameter and
+  without the subject check `splitLeaf` makes before calling it.
+- **The other specs that name `+ view` are records and stay as written.** The view-layouts spec gained §20, which says
+  what went and which of its own lines describe the app before the removal.
+
+**The controller's rulings during the build**, from the task reports:
+
+- **Task 1.** `.bar > .views-shown` keeps the narrow rule to a group in the header. Its sabotage S6, the `.bar >` taken
+  out, cannot fire, since the menu's rule for the group, with an id in its selector, outranks it; S6b, which also takes
+  the group out of the menu row's `display: flex`, is the sabotage of M1, the case it was for. And the `focusout`
+  listener above, which the plan did not have: without it F1, the focus as the window narrows, fails in Firefox at
+  `<body>` (1-S12).
+- **Task 2: the S1 ruling.** S1, `admit` refusing a view later than the bound, fails `live-views-bound`'s 64-view case
+  and not `add-view-floor`'s *refuses a 65th view in the cap’s words, from a split*. That case's tree has all 64 views
+  on screen, so in tiles `addRefusal`'s `holdsMostLeaves` refuses the 65th as `admit` does: the two hold the case
+  together. Its Stage half, where `admit` held it alone, went with the Stage add. S1b, with both a view later, fires the
+  case at its notice.
+- **Task 3.** `share-open-hashchange`'s window is 1700 px wide. 1652 px, the narrowest at which its split of the link's
+  λ view is admitted, left the split no margin over the floor; and the case asserts that the split was not refused
+  before it asks for the view's id, so a refusal fails it under its own name.
+- **After the whole-branch review.** I1 accepted, as above, and with it the comments that described an add on the Stage
+  put right; the minors the review marked must-fix and the should-fix m3 fixed; its other deferred minors left, each
+  where *WHAT THIS DID NOT CLOSE* has it.
+
+**Two calls the implementers made, which their reviews left to this entry.** Task 4 took `stage-gestures`' wide viewport
+out with the one case that needed it: its remaining case, which drives `✕` on the Stage, runs in the runner's default
+window, 414 px wide, below 40rem. Task 6 moved three of `edge-spacing`'s scans, which *THE TESTS* gives.
+
+**The comment budget** (`scripts/comment-budget.json`), each change the value `check-comments.mjs` printed: `web/tests`
+from 0.2641 to 0.2317 in `35ae404`, after the deleted cases took their comments with them, then to 0.2318 in `5bcdc2b`,
+whose deleted cases were mostly code; `web/src` from 0.4696 to 0.4642 in `5bcdc2b`.
+
+##### THE TESTS
+
+At `798fa38` the survey read 50 cases in 24 browser files that pressed `+ view`, 11 more that rested on it through a
+`beforeAll`, 26 that named `#new-view` without pressing it, and 19 node cases on `insertBeside` or `pressedLayout`. The
+diff to `26b8e34` takes 36 case declarations out of `web/tests` and puts 24 in; `$L/09-case-lines.txt` holds the 60
+lines, each tagged by this entry's reading of the task reports as deleted, kept or new.
+
+- **Deleted: 40 cases**, 23 declarations and 17 generated cases. The 12 browser declarations: `add-view-floor`'s equal
+  share, its sixth press, its two refusals of `+ view` and its add on the Stage; `app-header`'s add beside the focused
+  view and its source in `+ view`'s menu; `view-keys-popovers`' two cases on `+ view`'s open menu; and one each in
+  `copy-editor-mount`, whose split case holds the same, `live-views-bound`, the source added by `+ view` at the bound,
+  and `stage-gestures`, the view `+ view` made on the Stage. The 11 node declarations, all in `layout.test.ts`: 2 of
+  `insertBeside`'s 3, the equal share's 5, 3 of *the floor on an add*'s 7 and the bound's case on a tree built as
+  `+ view` built them. The generated ones: `edge-spacing`'s 16, `+ view`'s menu measured in each style and window and
+  its row of the gutter scans, and `view-keys-popovers`' row for `+ view`. Of the survey's 50, the 12 browser
+  declarations and that row are 13.
+- **Moved: the survey's other 37**, and the 11 resting on `share-open-hashchange`'s `beforeAll`. Each now adds its view
+  with a split: by the new `userSplit` in `user-event-fixture.ts`, which presses through the view's `⋯` menu with the
+  pointer, or by the harness's `splitVia`, as each file had pressed `+ view`, and in tiles before a switch to the Stage
+  where the case runs on the Stage. The one that does not is `first-load-views`' case of the focused TM view, which now
+  reads the record where the Stage shows it. The diff adds 27 lines that call `userSplit` or `splitVia`, in 19 files.
+- **Kept under a new name or in a new place: 13 declarations** the diff takes out and puts back. 11 are renamed where
+  the name said `+ view` or what changed; `add-view-floor`'s split-right case comes back under its own name, with the
+  divider measurement moved into it; and `layout.test.ts`'s placement case moved from `insertBeside`'s describe to
+  `splitLeaf`'s.
+- **Rewritten for the new behaviour**, in their places: `view-toggles-narrow`'s E1, the group at 40rem and one pixel
+  past it, each way; `view-keys-focus`'s F1, the focus to the workspace menu's button as the window narrows;
+  `view-toggles-first-paint`'s P1, the toggles in the menu and not the header in a narrow window; `controls-gate`'s G1,
+  the walk through the open workspace menu in Explorer, Debugger, Stage and a custom workspace; `edge-spacing`'s R1, the
+  header's menus without `+ view`'s; and the node `app-header.test.ts`, the media query and the help page's sentence.
+- **New: 11 cases.** `view-toggles-narrow`'s M1 to M7 and W1: the group first in the menu, named and drawn inside it
+  (M1); a press and `Enter` that leave the menu open (M2); views brought back to a page left with the source view alone
+  (M3) and the Stage's tabs chosen (M4); the group first after a pick repaints the menu (M5); a toggle's focus kept as
+  the window widens (M6); the group following the window across 40rem with the menu open (M7); and `workspaceItems`
+  rebuilding around the group (W1). `clif-fetch-menu.test.ts`'s C1, a new file: the clif toggle in the menu fetches the
+  package on the pointer's rest. `layout.test.ts`'s R2 and R3: a tree with a row of the source and two λ views at a
+  third each over the rxm and TM views, and a workspace whose tree and remembered arrangement hold it, read back as
+  stored.
+- **The tallies.** The Chromium runs of each task's files went from 563 to 572 in Task 1, 17 to 11, 49 to 48, 17 to
+  16, 71 to 66, and 410 to 394 in Task 6, 20 fewer in all, which is the 12 browser declarations and 17 generated cases
+  deleted less the 9 new; the node tier from 1748 to 1739, the 11 deleted less the 2 new. Coverage after the rebase, at
+  `4c26ce4`, ran 3972 tests and 2 that fail as expected.
+- **Cases moved because the header narrowed.** Without `+ view` the buttons after it sit further left and the header
+  wraps at a narrower width. Task 6 moved three of `edge-spacing`'s scans to the widths where each menu now opens near
+  the window's edge: settings from 330-450 px to 240-360, about from 296-316 to 200-220 and buffers from 392-416 to
+  306-330. Task 8 found `notice-float`'s two cases where `share` begins a row of its own failing at their precondition,
+  a file no task's list had run since Task 6, and moved them from 900 and 940 px to 836 and 848, the middle of the
+  widths where a probe found both engines put `share` there: 806 to 867 under Explorer and 817 to 879 under Debugger.
+
+##### THE SABOTAGES
+
+Each saved the file it edits to `$L/sab/`, made the one edit, ran the named test files, restored the file from its copy
+and compared it with `cmp`. A driver in `$L` per task ran them, `01-sab-driver.mjs` to `06-sab-driver.mjs` and
+`03-fix1-sab-driver.mjs` for Task 3's fix round, and each task's results file, `01-sab-results.txt` to
+`06-sab-results.txt`, records `cmp` equal for each of its runs, 45 in all. Task 11's, `11-sab-driver.mjs`, ran 7 more,
+in `11-sab-results.txt`, each `cmp` equal: two of them, marked *pre*, against a case before its fix, to show it passing
+with what it holds taken away, and one a probe. A case stops at its first failed hard assertion, and a run is read for
+the assertion each case failed at. The runs are in Chromium, but 1-S3ff and 1-S12, in Firefox, and 6-S2 to 6-S4, in the
+node tier. An id is the task's number and the task's own id; *from its doc* marks an edit the implementer chose to take
+away what the case's doc says it holds.
+
+| Id | The one edit | Cases failed, of the run's, and where | Log in `$L` |
+|---|---|---|---|
+| 1-S1 | `placeToggles` hides the group in a narrow window, as before, rather than moving it | 13 of 37: E1 at 640 px and M1 to M7 at their waits for the group to move, C1 at its precondition, G1 in all four workspaces at the walk | `01-sab-S1.log` |
+| 1-S2 | the narrowing hands the focus to the next control by `nearest`, not to `#workspace` | 1 of 15: F1 at *the focus is not on the workspace menu’s button in the narrow window, at once* | `01-sab-S2.log` |
+| 1-S3 | the widening does not focus the toggle again | 1 of 11: M6 at *the λ toggle lost the focus as the window widened, at once*, `<body>` | `01-sab-S3.log` |
+| 1-S3ff | the same, in Firefox | the same | `01-sab-S3ff.log` |
+| 1-S4 | `workspaceItems` replaces every child, the group too | 7 of 11: M1, M5 and W1 at the group not first in the menu, M2 to M4 and M6 at a toggle not found | `01-sab-S4.log` |
+| 1-S5 | `workspaceItems` takes the focus's identity from inside the group too | 1 of 11: W1 at *the rebuild moved the focus* | `01-sab-S5.log` |
+| 1-S6 | the narrow rule's `.bar >` taken out | none: 11 passed (*DECISIONS*) | `01-sab-S6.log` |
+| 1-S6b | S6, and the group taken out of the menu row's `display: flex` | 6 of 11: M1 and M7 at *the source toggle's width*, 0, M2 to M4 at their clicks' timeouts, M6 at its precondition | `01-sab-S6b.log` |
+| 1-S7 | the narrow media rule removed | 2 of 17: P1 at *the group is drawn in a narrow window*, E1 at 640 px at *the stylesheet’s rule* | `01-sab-S7.log` |
+| 1-S8 | the group's `::before` label removed | 1 of 11: M1 at *the row’s label as drawn*, `none` for `"show"` | `01-sab-S8.log` |
+| 1-S9 | the group appended to the menu, not put first | 1 of 11: M7 at *the group is not the open menu’s first* | `01-sab-S9.log` |
+| 1-S10 | a press on a toggle hides the menu | 3 of 11: M2 at *the press shut the menu*, M3 and M4 at their clicks' timeouts | `01-sab-S10.log` |
+| 1-S11 | the group's row in the menu does not wrap | 1 of 29: `header-menus-narrow`'s case at 320 px, at *clif's right*, 336 for at most 304 | `01-sab-S11.log` |
+| 1-S12 | the `focusout` listener removed, in Firefox | 5 of 15: F1 at the narrow window's focus, `<body>`; the other 4 are the file's two copy caret cases and its precondition race, each in a Step 0 Firefox run, and its Stage caret case, which fails in Firefox at times (*WHAT THIS DID NOT CLOSE*) | `01-sab-S12.log` |
+| 2-S1 | `admit` refuses at `MAX_TREE_LEAVES + 1` | 6 of 11, all in `live-views-bound`: *refuses the next at 64* at its notice, `view added — rxm · program`, the rest at preconditions; `add-view-floor`'s 65th-view case passed (*DECISIONS*) | `02-sab-S1.log` |
+| 2-S1b | S1, and `holdsMostLeaves` at `MAX_TREE_LEAVES + 1` | 1 of 4: the 65th-view case at its notice | `02-sab-S1b.log` |
+| 2-S2 | `admit` refuses at `MAX_TREE_LEAVES - 1` | 7 of 7: *adds a view at 63* at `mounted()`, the rest at preconditions | `02-sab-S2.log` |
+| 2-S3 | `addRefusal` reads the floor as `MIN_VIEW_PX - 20` | 2 of 4: split right and split down at their notices | `02-sab-S3.log` |
+| 2-S4 | `DIVIDER_PX` 13 | 1 of 4: split right at the moved divider measurement, 12 for 13 | `02-sab-S4.log` |
+| 2-S5 | `split` hands `admit` no id for the source | 3 of 7: the source case at its notice, 2 at preconditions | `02-sab-S5.log` |
+| 2-S6 | `customWorkspace` answers `false` | 1 of 7: *names choosing a preset first* at its notice | `02-sab-S6.log` |
+| 3-S1 | `reseedingSlots` passes over a view off the page | 6 of 6 in `parked-copy-editor` at *the parked view still holds the editor of the copy it left* | `03-sab-S1.log` |
+| 3-S2 | from its doc: `applyLayout` does not mount the editor in a view back from a remembered arrangement | 1 of 1 in `parked-copy-editor-mount` at *the view came back showing a copy with no editor* | `03-sab-S2.log` |
+| 3-S3 | `moveBack` answers `[]` | 7 of 18: `parked-copy-undo`'s 6 at the copy's view back, `share-open-hashchange`'s *puts back … on undo* at the copy's view | `03-sab-S3.log` |
+| 3-S4 | the keep rule without `remembered.get(p.id) === p.kind` | 2 of 4: `parked-view-replaced`'s and `one-id-two-kinds`' moved cases at *a view no tree holds still counts as a view of its copy* | `03-sab-S4.log` |
+| 3-S5 | `switchTo`'s trial mints with `nextLeafId` | 2 of 5: the moved case at *the refused switch minted an id*, `pane-64` for `pane-62`, and *enters the tree…* at its id | `03-sab-S5.log` |
+| 3-S6 | from its doc: `applyLayout` does not write the bindings | 5 of 5 in `bindings-stored`, the moved case at *a reload would put the added view on the program* | `03-sab-S6.log` |
+| 3-S7 | from its doc: `giveScrollBack` writes to elements no longer in the host | 1 of 1 in `scroll-kept-moved-editor` at *the second view scrolled an editor it no longer holds* | `03-sab-S7.log` |
+| 3-S8 | `showWorkspace` does not seed the leaf counter | 1 of 12 in `share-open-hashchange`: *adds a view beside a link's views…* at *the split added no view under an id of its own* | `03-sab-S8.log` |
+| 3-S8fix | the same, after the refusal check came in | the same | `03-sab-S8fix.log` |
+| 3-S9fix | the window 1651 px wide | 1 of 12: the same case at *the split of the link’s λ view was refused* | `03-sab-S9fix.log` |
+| 4-S1 | from its doc: `shown` answers the λ view last focused off the page too | 1 of 9: `stage`'s *takes the λ half…* at its two-λ step, *the λ view on the page did not answer* | `04-sab-S1.log` |
+| 4-S2 | `reseedingSlots` as 3-S1 | 6 of 6 in `stage-copy-editor` at *the hidden view still holds the editor of the copy it left* | `04-sab-S2.log` |
+| 5-S1 | `split` does not focus the view it made | 2 of 5 in `menu-focus`: *a view's split, adding a view* at *adding a view stranded the focus*, and the title menu's case | `05-sab-S1.log` |
+| 5-S2 | the toggles' forced-colours rules removed | 1 of 11 in `first-load-views`: the forced-colours case at its edges | `05-sab-S2.log` |
+| 5-S3 | `defaultFocus` answers the source's leaf | 2 of 11: *shows the TM view on the Stage* at `selectedTab()`, and *records the TM view as the focused one* | `05-sab-S3.log` |
+| 5-S4 | `applied` does not ask for the clif package | 3 of 3 in `clif-shown`: the split case at *the clif request the item posts* | `05-sab-S4.log` |
+| 5-S5 | `keepScroll(fresh)` removed | 5 of 7 in `scroll-kept`: *is kept when a view is added* at *splitting the rxm view reset the TM view’s own scroll box* | `05-sab-S5.log` |
+| 5-S6 | from its doc: the `added` notice withdraws the open's offer | 2 of 17 in `share-positions`: *stops at 15,695 after the tenth…* at its `undo`, and the case after it | `05-sab-S6.log` |
+| 5-S7 | `enter` remembers no arrangement | 1 of 1 in `source-close-remembered` at `remembered('after the split')` | `05-sab-S7.log` |
+| 5-S8 | `viewsOfKind` answers 1 | 3 of 3 in `view-toggles-two-of-a-kind` at *hide the 2 TM views* | `05-sab-S8.log` |
+| 6-S1 | `#new-view` and its menu back in `index.html` and `SHELL` | 2 of 101 in `edge-spacing`: R1 at *the header’s popover buttons, by id*, and buffers' gutter scan, whose button `+ view` moves | `06-sab-S1.log` |
+| 6-S2 | `parseTree` refuses two leaves of one kind | 7 of 95 in `layout.test.ts`: R2 and R3 at their `toEqual`, and 5 other cases whose trees hold two views of a kind | `06-sab-S2.log` |
+| 6-S3 | `insert` puts the new leaf before its subject | 3 of 95: the moved *puts the new leaf right after its subject…* and `splitLeaf`'s two other placement cases | `06-sab-S3.log` |
+| 6-S4 | `splitLeaf`'s subject check removed | 1 of 95: *throws on an unknown leaf…* at `toThrow(/nope/)` | `06-sab-S4.log` |
+| 11-I1-S1 | `draw.ts` offers a split on the Stage too, `!stage()` read as `true` | 4 of 34: `stage`'s *removes the split items when the stage is chosen* and *leaves the focus on the gesture that chose the stage…* at the split item still there, and `controls-gate`'s split-submenu case under the Stage and custom at *the stage must offer no split* | `11-sab-I1-S1.log` |
+| 11-m2-S2pre | opening the workspace menu asks for the clif package, before C1's fix | none: C1 passed | `11-sab-m2-S2pre.log` |
+| 11-m2-S2 | the same, after it | 1 of 1: C1 at *precondition: opening the menu fetched nothing* | `11-sab-m2-S2.log` |
+| 11-m2-S1 | the clif toggle's `watchIntent` call removed | 1 of 1: C1 at `clifFetched()`, *timed out after 10000ms waiting for a pkg-clif request* | `11-sab-m2-S1.log` |
+| 11-m7-S1pre | `MIN_VIEW_PX` 100,000, so that every split is refused, before `menu-focus`'s fix | 1 of 5: the title menu's case at *no λ view on the program to pick the copy from*, its split refused; *a view's split, adding a view* passed | `11-sab-m7-S1pre.log` |
+| 11-m7-S1 | the same, after it | 2 of 5: *a view's split, adding a view* at *precondition: the split added a view*, and the title menu's case | `11-sab-m7-S1.log` |
+| 11-T5-2-probe | `app-header.test.ts`'s 1280 px viewport removed, a probe | none: 6 passed at 414 px (*THE REVIEW'S FIXES*) | `11-sab-T5-2-probe.log` |
+
+`$L/01-sab-S13.log` is a Firefox run of `view-keys-focus.test.ts` from Task 1, in which F1 fails at `<body>`, and it is
+in neither Task 1's report nor its results file, so its edit is not recorded.
+
+##### THE REVIEW'S FIXES
+
+The review is `$L/review.md`; Task 11's report is `$L/task-11-report.md`. Each finding was read against the code or the
+logs before it was acted on, each fix is a commit of its own, a fix that adds a check has a sabotage (*THE SABOTAGES*,
+the rows from 11-I1-S1), and each finding's class was searched for siblings.
+
+| Finding | The fix | Commit |
+|---|---|---|
+| I1: `admit` let an add through on the Stage without asking `addRefusal`, a line only `+ view` reached, and comments described an add on the Stage | the line removed; `admit`'s, `holdsMostLeaves`', `MIN_VIEW_PX`'s, `leafExtents`' and `addRefusal`'s docs say the floor is asked in tiles alone, `MIN_VIEW_PX`'s without its dated clauses. 11-I1-S1 shows the tests hold that the Stage offers no split, and the 35 browser files that split or run on the Stage passed in Chromium without the line, 225 tests | `306cbca` |
+| I1, the view-layouts spec | §20 names the line among what went, and §5.6's sentence on what an add on the Stage met among the lines that describe the app before the removal | `ec3de1a` |
+| T6-1: `MAX_TREE_LEAVES`' doc | "a tree of hundreds of views is slow to open" | `aa197c0` |
+| m1: the reason given for the focus put back as the window widens | `placeToggles`' comment, the view-layouts spec's §6.1 and *DECISIONS* say that moving the button takes the focus off it in Chromium and Firefox both, as 1-S3 and 1-S3ff show | `1177023` |
+| T1-5: two comment lines over 120 columns | wrapped; `viewToggles`' doc keeps four lines by saying each word is its button's name | `d9decbd` |
+| m5, T1-2: `workspaceItems`' doc | `nearest` does not answer because the rebuild remakes every item near *reset preset* and leaves only the toggles' group, at the menu's other end | `a22ada5` |
+| m2, T1-4: C1 read that nothing was fetched only before the menu opened | it reads it after the open too: 11-m2-S2pre passes C1 with the open asking for the package, 11-m2-S2 fails it at the new check, and 11-m2-S1 at its last assertion | `baef0f2` |
+| m7, T5-1: `menu-focus`'s split case did not read what the split made | it asserts that the split added a view: 11-m7-S1pre passes the case with every split refused, and 11-m7-S1 fails it at that assertion | `c83f423` |
+| T5-2: `app-header.test.ts`'s viewport comment gave a reason a `.click()` does not have | the 1280 px viewport and its comment went: 11-T5-2-probe passed the file's 6 cases at the runner's 414 px, and they pass there in Chromium and Firefox | `b7fdb18` |
+| m3: `help.html` bolded `views` for the toggles, the label the narrow menu draws for its `tiles`/`stage` row | "The view buttons in the header", and a node case, which failed on the old sentence and passes on the new, holds that sentence free of that row's label | `b7bd10b` |
+| T7-1: the view-layouts spec's §6.1 said a user on the Stage would have had only *reset preset* | it says so of a user with the source view alone | `11fa301` |
+| I1, found again by the fixes' review: `resize`'s doc in `layout.ts` said tiles can build a row of 11 equal views in an area 1,880 px wide, and the Stage at any width | it says a stored layout can hold one | `1d56a3a` |
+| `MIN_VIEW_PX`'s doc, its dated clauses gone in `306cbca` | it points at the view-layouts spec's §2.7 for its 160 px floor | `be01c0f` |
+| the same pointer, found by the second round's review: §2.7 only restates the value | it points at `docs/superpowers/notes/2026-10-17-code-history-web-src.md`, under `MIN_VIEW_PX`, where its reason is recorded | `a636436` |
+| I1, found again: the view-layouts spec's §2.7 said the Stage is held to the leaf bound alone | §20 lists that clause among the lines that describe the app before the removal | `d1e77e4` |
+| m4, T9-1, T9-3, T9-4, T9-5: this entry | the autofocus probe's answer; Tasks 2 to 5 moved or deleted the tests; the legs at `cc7207d` named; the Stage caret case under *WHAT THIS DID NOT CLOSE*; "one of the two" | this entry's update |
+
+The fixes take no case declaration out of `web/tests` and put 1 in, the node case on the help page; they add one check
+each to `clif-fetch-menu`'s C1 and `menu-focus`'s split case, and take `app-header.test.ts`'s viewport out. In `web/src`
+they change `admit`'s one line and comments; `help.html` changes in one line.
+
+**The searches for siblings.** I1's first search, for comments on an add on the Stage, found the view-layouts spec's
+§5.6 and §20, which `ec3de1a` changes, and missed `resize`'s doc in `layout.ts` and the spec's §2.7, which the fixes'
+review found and `1d56a3a` and `d1e77e4` change; a second search, for what only `+ view`'s equal share could build and
+for what the Stage met, found nothing more in `web/src`, and in the spec §9.2's likening and §17's row on the Stage's
+add, both of which §20 lists as records. m1's found the claim only in the plan's *Global Constraints*, a record left as
+written; the design says only that Firefox fires no `blur` on a removal, which holds. m2's found
+`clif-fetch-focus.test.ts`, which this branch did not change (*WHAT THIS DID NOT CLOSE*). m3's found no other page that
+calls the toggles `views`. T1-5's found, among the other lines over 120 columns the branch adds, a test's name in
+`view-keys-focus.test.ts` and a template string in the node `app-header.test.ts`: code, which the rule on comments does
+not reach. T5-2's found no other comment that gives a shut menu as a viewport's reason.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The records.** 6 other specs and 10 other plans say `+ view` and stay as written. The view-layouts spec's §20 names
+  its own lines that describe the app before the removal, §2.2, §4.5, §5.6 and §12, and those that are records of their
+  time, §6's first build, §9.2, §16.2 and §17. Its §1, §4.1 and §6 give four toggles, asm among them, which was out of
+  date at `798fa38`, before this branch: the toggles are source, λ, TM, rxm and clif.
+- **The plan's *Open, for Davey*** holds nothing unanswered.
+- **The view-layouts spec's §16.3**: this branch answers its first point and closes its third. The second was answered
+  on 2026-10-12, and the fourth decided that day as left as built, with a change wanted later; the fifth, sixth and
+  seventh stand as written.
+- **The Firefox failures this branch did not add** (*VERIFICATION*). `controls-gate`'s *walks every toggle, each named
+  by its own word* fails at `798fa38` too, at the same assertion; at `26b8e34` the walk runs before the group is back in
+  the header, since its `beforeAll` widens the window and does not wait for the move. `view-keys.test.ts`'s caret
+  failures move from case to case between runs on either tree. Firefox is not in CI.
+- **`clif-app`'s known race**, a follow draw of `VirtualGrid` writing an old scroll position over the test's, failed the
+  second coverage run here, as the panels-row lane found it can on main; the third run passed.
+- **Widths measured on this machine.** `notice-float`'s 836 and 848 px, and `edge-spacing`'s about scan of 200 to 220
+  px, where Task 6's probe found the widths that scan needs at 208 to 211 px in both engines, and at 303 to 305 px in
+  Chromium alone. CI's fonts may move either band; each case's precondition fails where its band has moved, as
+  `notice-float`'s did at 900.
+- **`stage-gestures`' remaining case runs at 414 px**, where the toggles are in the workspace menu; it drives `✕` alone.
+- **`view-keys-focus`'s Stage caret case**, *leaves the caret in the source editor, and the key chooses the tabs*,
+  fails in Firefox at times: in 1-S12's run and in Task 6's green run (`06-green-firefox.log`), and it passed in Task
+  6's rerun (`06-ff-rerun1.log`) and in Task 8's run (`08-firefox.log`). After the rebase it failed in the gate's
+  Firefox run and in 2 of 3 runs of its file alone, `$R/rebase-1/ff-view-keys-focus-1.log` to `-3.log`, each time at
+  *the caret is not where it was*, as in 1-S12's run and Task 6's green run.
+- **What the task reviews and the whole-branch review deferred**, each standing at `11fa301`; the ones Task 11 fixed are
+  in *THE REVIEW'S FIXES*:
+  - `app-header.ts`'s `wireMenu` leaves `autofocus` on the `source` toggle after a narrow menu opens, where
+    `view-header.ts` clears a stale one for the same reason. The review's probe, `$L/review-probe-autofocus.mjs` with
+    its log beside it, found that it takes no focus on a later widening in Chromium or Firefox: with the menu opened at
+    390 px and shut by a click elsewhere, the focus stayed on `<body>` through 1280, 600 and 1280 px, the attribute
+    still on the toggle; shut by `Escape`, the focus stayed on `#workspace`.
+  - `view-keys-focus.test.ts`'s `start` widens the window and asserts its precondition without waiting for the group to
+    come back to the header, the race in 1-S12's run; `controls-gate`'s wide describe reads the header in the same way
+    (*The Firefox failures this branch did not add*).
+  - `userSplit` repeats `add-view-floor`'s `openSplit`, and its casts fail as a bare null dereference rather than a
+    named throw; `add-view-floor`'s `choosePreset` keeps a `'stage'` no caller passes, its snapshot's `tabs` is always
+    empty, and `dragTopDivider`'s doc says "these cases" of one.
+  - `share-open-hashchange`'s `pane-2` count, after the id assertion, cannot fail alone and has no message.
+  - `scroll-kept-moved-editor`'s and `scroll-kept`'s moved setups are checked in Chromium alone: Firefox fails both
+    files at arming, before the split, at their Step 0 too.
+  - `stage.test.ts`'s press on the made view's tab may change nothing, the split having focused that view already.
+  - `app-header.test.ts`'s λ press in the reset case leaves its precondition true without making it so.
+  - `copy-editor-mount.test.ts`'s doc has a "one" whose antecedent is unclear.
+  - The design's *Today* says a user on the Stage would have had only *reset preset*; there the `views` switch to tiles
+    and a split bring views back too. The design is the approved record and stays as written.
+  - `clif-fetch-focus.test.ts`, which this branch did not change, reads that nothing was fetched before `Tab` walks
+    through the other toggles to the clif one, and not after: the class of m2, found by Task 11's search for its
+    siblings.
+  - `tm-view-narrow.test.ts` prints a `console.error` count on every run, on main too.
+
+- **Not run in Firefox**: the browser files outside Task 8's list. Davey has not tried the branch. At 390 px Firefox
+  sizes the workspace menu to its `20rem` minimum and the `show` row wraps `clif` under its label, as the preset, step
+  controls and *reset preset* rows wrap (`$L/hand/narrow-2-menu-open.png`), which `style.css`'s comment on
+  `#workspace-menu` allows for.
+
+##### VERIFICATION
+
+**The gate after the rebase, at `4c26ce4`**, by `$R/rebase-1/gate-run.zsh`, Task 11's script writing its logs to
+`$R/rebase-1/`, each leg's exit in `$R/rebase-1/gate-exits.txt`: the wasm, lsp-wasm, clif-wasm and bindings builds, the
+licences check, `biome ci`, 530 files, `pnpm run typecheck`, the ten scans CI runs, each `--self-test` then the scan,
+`check-comments.mjs --base b32af3d`, coverage under the lock in a capped unit, `build:app`, and Firefox on
+`$R/rebase-1/firefox-files.txt`'s 77 paths, a copy of the list Task 8 ran, `$L/08-firefox-files.txt`. 31 legs exited 0,
+and Firefox exited 1. Coverage ran 350 files: 3972 tests passed and 2 failed as expected; statements 97.93%, branches
+92.25%, functions 98.7%, lines 99.15%. In Firefox 9 files failed and 67 passed; 43 tests failed, 648 passed and 10 were
+skipped. 42 of the 43 failed by name in a baseline, `08-firefox.log`, a Step 0 Firefox run or Task 11's Firefox runs;
+the other is `view-keys-focus`'s Stage caret case, which fails in Firefox at times (*WHAT THIS DID NOT CLOSE*). The Rust
+legs and the pass by hand were not run again: no Rust changed, and of the lines this branch adds the rebase changed only
+the help page's sentence, wrapped again.
+
+**The gate at `26b8e34`**, Task 8's, run from `web/` and the root by `$L/08-gate-run.zsh`, each leg's exit and time in
+`$L/08-gate-exits.txt`. Coverage, the two halves of `check-all.sh`, `cargo llvm-cov` and `check-slow.sh` ran in
+`systemd-run --user` units with `MemoryMax=16G` and `MemorySwapMax=0`, their logs ending with the unit's exit; coverage,
+Firefox and the browser half of `check-all.sh` ran under the browser lock, after the wait for port 63315. At `26b8e34`
+35 legs exited 0 and 2 exited 1, the second coverage run and Firefox, below. The web legs and the scans ran at `cc7207d`
+too, before the fix, and each exited 0 but the first coverage run, below.
+
+| Leg | Result | Log in `$L` |
+|---|---|---|
+| `pnpm run build:wasm`, `build:lsp-wasm`, `build:clif-wasm` and `build:bindings` | exit 0, each | `08-build-wasm.log`, `08-build-lsp-wasm.log`, `08-build-clif-wasm.log`, `08-build-bindings.log` |
+| `../scripts/check-licences.sh`, `--self-test` then the check | exit 0, each | `08-licences-self-test.log`, `08-licences.log` |
+| `pnpm exec biome ci --error-on-warnings` | 526 files, no fixes applied | `08-lint.log` |
+| `pnpm run typecheck` | exit 0 | `08-tsc.log` |
+| the ten scans CI runs, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm, lua, licence-editions and comments, each `--self-test` then the scan | exit 0, each | `08-scan-*.log` |
+| `node scripts/check-comments.mjs --base 798fa38` | exit 0 | `08-comments-base.log` |
+| `pnpm run test:coverage`, the first run, at `cc7207d` | 5 failed, all in `notice-float.test.ts`, which `26b8e34` mends (*THE TESTS*) | `08-coverage-run1.log` |
+| the second run, at `26b8e34` | 1 failed: `clif-app.test.ts`'s *lists the program as built…*, the known race (*WHAT THIS DID NOT CLOSE*) | `08-coverage-run2.log` |
+| the third run, at `26b8e34` | exit 0: 347 files; 3943 tests passed and 2 failed as expected; statements 97.92%, branches 92.25%, functions 98.7%, lines 99.14% | `08-coverage.log` |
+| `pnpm run build:app` | exit 0 | `08-build-app.log` |
+| `scripts/check-all.sh --no-browser`, then `--browser-only` | exit 0, each | `08-check-all-no-browser.log`, `08-check-all-browser-only.log` |
+| `cargo llvm-cov nextest --workspace --fail-under-lines 90` | exit 0: 2046 passed, 35 skipped; lines 95.55% | `08-llvm-cov.log` |
+| `scripts/check-slow.sh` | exit 0, slow tier green | `08-check-slow.log` |
+| `FIREFOX` on `08-firefox-files.txt`'s 77 paths: every browser test file the branch edited or created, and Task 1's affected list | exit 1, as expected: below | `08-firefox.log` |
+
+**Firefox.** Of the 77 paths, 76 ran: `record-cost.test.ts` is a probe, which no project collects without
+`REDEXTAPE_PROBE`. 9 files failed and 67 passed; 42 tests failed, 649 passed and 10 were skipped. By file: `view-keys`
+18, `inspector-phone` 10, `scroll-kept` 5, `focus-scroll` 2, `follow-kept` 2, `view-keys-focus` 2, `controls-gate` 1,
+`header-menus-narrow` 1 and `scroll-kept-moved-editor` 1. 34 of the 42 failed by name in Task 1's Step 0 run at
+`9ad44d9`, whose `web/` was `798fa38`'s, and 40 in one of the Step 0 Firefox runs, Tasks 1, 3, 5 and 6, each at its
+task's start. The other 2 are `view-keys.test.ts`'s *ends on a key it does not know…* and *a key held down › lets a key
+held since before the prefix repeat into the editor…*. Task 8 ran that file alone in Firefox five times in a tree
+exported from `798fa38`, since deleted, and five times at `26b8e34`, in turn: one of the two failed in each of four of
+the five runs at `798fa38`, and neither in any run at `26b8e34`. No case of `view-toggles-narrow` failed, nor F1 or the
+other case on a toggle in `view-keys-focus`.
+
+**By hand in Firefox, at `26b8e34`** (`$L/08-hand.zsh`, `$L/hand/drive.mjs`, its record `$L/hand/drive.json`, its log
+`$L/08-hand.log`, its screenshots in `$L/hand/`): the app built by `vite build` and served by `vite preview`, driven by
+Playwright's Firefox with touch, each tap at an element's centre. At 390 by 844: no `+ view`; the toggles in the
+workspace menu and none drawn in the header; the menu's first row the group, its label drawn as `show`, every toggle on
+screen, and one row each named `show` and `views`; a tap on `TM` hid TM and left the menu open; with the source view
+left alone, a tap on `TM` brought TM back; on the Stage preset a tap on `λ` added its tab and one on `TM` took TM's
+away, the menu open throughout. At 1280 by 896: the toggles in the header, and the opened menu holding none. With the λ
+toggle focused by `Tab` there, the window narrowed to 600: the focus on `Explorer ▾`, its ring drawn, and the toggles in
+the menu. No page error, and no console error or warning. 29 checks, none failed.
+
+**The web legs at `11fa301`**, Task 11's, by `$L/11-gate-run.zsh`, Task 8's script writing `11-` logs, each leg's exit
+in `$L/11-gate-exits.txt`: the wasm and bindings builds, the licences check, `biome ci`, `pnpm run typecheck`, the scans
+CI runs and `check-comments.mjs --base 798fa38`, coverage under the lock in a capped unit, `build:app`, and Firefox on
+`$L/11-firefox-files.txt`'s 35 paths, the browser files that split or run on the Stage and the three test files Task 11
+edited. 31 legs exited 0, and Firefox exited 1. Coverage ran 347 files: 3944 tests passed and 2 failed as expected;
+statements 97.93%, branches 92.26%, functions 98.7%, lines 99.14%. In Firefox 4 files failed and 31 passed, 18 tests
+failed and 207 passed, and each of the 18 failed by name in a baseline: `08-firefox.log`, at `26b8e34`, whose `web/` is
+`910f4b9`'s, or, for the 4 files outside its list, a run at `910f4b9` before Task 11's first edit,
+`11-base-firefox-extra.log`, in which `tm-view-narrow` failed 11. By file: `controls-gate` 1, `scroll-kept-moved-editor`
+1, `scroll-kept` 5 and `tm-view-narrow` 11. The Rust legs and the pass by hand were not run again: no Rust changed, and
+the app changed in `admit`'s one line and the help page's sentence.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-remove-plus-view-record` and `L=$R/impl`, after the rebase, at `4c26ce4`, whose code is `a636436`'s,
+by `$R/rebase-1/figures.zsh`, whose output, each command above what it printed, is `$R/rebase-1/figures.log`. Its rows
+but the last 8 are `$L/11-figures.zsh`'s, which ran at `a636436` before the rebase into `$L/11-figures.log`, with each
+SHA its SHA after the rebase and the base `b32af3d`, and they printed each value that log printed. `11-figures.zsh` is
+Task 9's `09-figures.zsh` with the rows on the whole branch taken to `a636436`, the rows on the build still at
+`26b8e34`, and Task 11's rows added after them, those on its first round at `11fa301`; `$L/11-figures-round1.log` and
+`11-figures-round2.log` are its earlier forms' output at `11fa301` and at `d1e77e4`. Of the last 8 rows, the first 7
+read the rebase's logs in `$R/rebase-1/`, and the last runs `git grep` at `4c26ce4`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 13; 10; 3 | commits on `b32af3d` to `26b8e34`; in the build, `9ad44d9..26b8e34`; before it, the design and the plan | `git rev-list --count b32af3d..26b8e34; git rev-list --count 9ad44d9..26b8e34; git rev-list --count b32af3d..9ad44d9` |
+| 2026-11-23 | every commit's date, in UTC | `TZ=UTC git log --date=format-local:%F --format=%ad b32af3d..a636436 \| sort -u` |
+| 0; 10 | files outside `docs/` that the three commits before the build change; commits that change `web/` | `git diff --name-only b32af3d 9ad44d9 \| grep -vc '^docs/'; git rev-list --count b32af3d..26b8e34 -- web` |
+| 0 | files the branch changes under `crates/` or `grammars/`, or `Cargo.toml` and `Cargo.lock` | `git diff --name-only b32af3d a636436 -- crates grammars Cargo.toml Cargo.lock \| wc -l` |
+| 7, 158, 268 | `web/src`: files changed, lines added, lines deleted | `git diff --numstat b32af3d a636436 -- web/src \| awk '{n++; a+=$1; d+=$2} END {print n, a, d}'` |
+| 3 3; 1 3; 28 52; 4 4; 44 87; 34 47; 3 3; 23 50; 22 25 | lines added and deleted in `help.html`, `index.html`, `app-header.ts`, `draw.ts`, `layout.ts`, `main.ts`, `pane-chrome.ts`, `pane-host.ts` and `style.css` | `git diff --numstat b32af3d a636436 -- web/src web/index.html web/help.html` |
+| 0; 42 | files under `web/` and `scripts/` that name a removed symbol, at `a636436`; at `b32af3d` | `rg -l 'new-view\|addViewItems\|addViewButton\|addViewMenu\|fillAddViewMenu\|\baddView\b\|insertBeside\|pressedLayout\|newLambdaViewItem\|plusView' web scripts \| wc -l; git grep -lP 'new-view\|addViewItems\|addViewButton\|addViewMenu\|fillAddViewMenu\|\baddView\b\|insertBeside\|pressedLayout\|newLambdaViewItem\|plusView' b32af3d -- web scripts \| wc -l` |
+| 0; 46 | files under `web/` that say `+ view`, at `a636436`; at `b32af3d` | `rg -lP '\+ (view\|VIEW)(?![\w.])' web \| wc -l; git grep -lP '\+ (view\|VIEW)(?![\w.])' b32af3d -- web \| wc -l` |
+| 0.4696, 0.2641; 0.4696, 0.2317; 0.4642, 0.2318 | the comment budgets of `web/src` and `web/tests` at `b32af3d`; at `35ae404`; at `5bcdc2b` | `for c in b32af3d 35ae404 5bcdc2b; do git show ${c}:scripts/comment-budget.json \| grep -E '"web/(src\|tests)"'; done` |
+| 36; 24 | case declarations the diff takes out of `web/tests`; puts in | `git diff -U0 b32af3d 26b8e34 -- web/tests \| grep -cE '^-\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('; git diff -U0 b32af3d 26b8e34 -- web/tests \| grep -cE '^\+\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('` |
+| 0 | lines by which the 60 in `$L/09-case-lines.txt`, each tagged deleted, kept or new, differ from those the diff has | `diff <(cut -f3- $L/09-case-lines.txt) <(git diff -U0 b32af3d 26b8e34 -- web/tests \| awk '/^\+\+\+ /{f=substr($2,3)} /^[-+][ \t]*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\(/{print f "\t" $0}') \| wc -l` |
+| 12, 11; 11, 2; 9, 2 | the tags: deleted, in browser and node files; kept, each the line taken out and the one put back; new | `awk -F'\t' '{print $1, $2, substr($4,1,1)}' $L/09-case-lines.txt \| sort \| uniq -c` |
+| 563, 572; 17, 11; 49, 48; 17, 16; 71, 66; 410, 394; 1748, 1739 | the Chromium runs of Tasks 1 to 6's files, at each task's start and end; the node tier, at Task 6's | `for f in 01-base-chromium 01-affected 02-base-chromium 02-wip2-chromium 03-base-chromium 03-green-chromium 04-base-chromium 04-wip1-chromium 05-base-chromium 05-green-chromium 06-base-chromium 06-green-chromium 06-base-node 06-green-node; do print -r -- "$f $(sed 's/\x1b\[[0-9;]*m//g' $L/$f.log \| grep -aE '^ +Tests ')"; done` |
+| 8, 4; 0 | browser case declarations `35ae404` takes out and puts in; that `5bcdc2b` takes out or puts in | `git diff -U0 b7b0f18 35ae404 -- web/tests/browser \| grep -cE '^-\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('; git diff -U0 b7b0f18 35ae404 -- web/tests/browser \| grep -cE '^\+\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('; git diff -U0 35ae404 5bcdc2b -- web/tests/browser \| grep -cE '^[-+]\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('` |
+| 3 | the lines that made `+ view`'s generated cases: its entries in `HEADER_MENUS` and `GUTTER_SCANS`, and `view-keys-popovers`' row | `git diff b32af3d 26b8e34 -- web/tests/browser/edge-spacing.test.ts web/tests/browser/view-keys-popovers.test.ts \| grep -E "^-.*'(new-view\|\+ view)'"` |
+| 50, 24, 11; 26; 19 (16 in `layout.test.ts`: 3, 5, 7 and 1) | the survey's cases that pressed `+ view`, their files, and the cases resting on it through a `beforeAll`; that named `#new-view`; node cases on `insertBeside` or `pressedLayout`, by describe | `grep -E '^\*\*[ABD]\. ' $R/survey.md` |
+| 27; 19 | lines the diff adds that call `userSplit` or `splitVia`; their files | `git diff -U0 b32af3d 26b8e34 -- web/tests/browser \| grep -E '^\+.*(userSplit\|splitVia)\(' \| grep -vc 'function '; git diff -U0 b32af3d 26b8e34 -- web/tests/browser \| awk '/^\+\+\+ /{f=$2} /^\+.*(userSplit\|splitVia)\(/ && !/function /{print f}' \| sort -u \| wc -l` |
+| 14, 7, 10, 2, 8, 4; 45 | sabotage runs in Tasks 1 to 6's results files; runs restored and `cmp` equal | `grep -c '^S' $L/0[1-6]-sab-results.txt; cat $L/0[1-6]-sab-results.txt \| grep -c 'restored, cmp equal'` |
+| exit 0, 11 passed; exit 1, 6 failed of 11; exit 1, 1 failed of 4; 0; 0 | 1-S6; 2-S1; 2-S1b; 2-S1's failures in `add-view-floor`'s describe; Task 1's results lines for an S13 | `grep -h '^S6:' $L/01-sab-results.txt; grep -hE '^S1b?:' $L/02-sab-results.txt; sed -n '/^S1:/,/^S2:/p' $L/02-sab-results.txt \| grep -c '    the splits, at 1280'; grep -c '^S13' $L/01-sab-results.txt` |
+| 35; coverage, firefox; `cc7207d`, `26b8e34`, `26b8e34` | the legs at `26b8e34` that exited 0; that exited 1; the commit of each coverage run | `sed -n '/=== after 21c4ce9/,$p' $L/08-gate-exits.txt \| grep -c ' exit 0 '; sed -n '/=== after 21c4ce9/,$p' $L/08-gate-exits.txt \| grep ' exit 1 ' \| cut -d' ' -f1; grep '^start coverage' $L/08-gate-exits.txt \| cut -d' ' -f5` |
+| 346 and 1, 3938 and 5 and 2; 346 and 1, 3942 and 1 and 2; 347, 3943 and 2; 97.92, 92.25, 98.7, 99.14 | the coverage runs' files passed and failed, and tests passed, failed and failing as expected, first, second and third; the third's statements, branches, functions and lines | `for f in 08-coverage-run1 08-coverage-run2 08-coverage; do sed 's/\x1b\[[0-9;]*m//g' $L/$f.log \| grep -aE '^ +(Test Files\|Tests) \|^All files'; done` |
+| 5; 1 | the first run's failed cases, each in `notice-float.test.ts`; the second's, in `clif-app.test.ts` | `for f in 08-coverage-run1 08-coverage-run2; do sed 's/\x1b\[[0-9;]*m//g' $L/$f.log \| grep -a '^ FAIL ' \| cut -c1-110; done` |
+| 2046, 35; 95.55% | `cargo llvm-cov nextest`: tests passed, skipped; lines | `sed 's/\x1b\[[0-9;]*m//g' $L/08-llvm-cov.log \| grep -aE 'Summary \['; sed 's/\x1b\[[0-9;]*m//g' $L/08-llvm-cov.log \| grep -a '^TOTAL' \| awk '{print $10}'` |
+| green; 0, 0, 0 | `check-slow.sh`; its unit's exit, and those of `check-all.sh`'s two halves | `tail -2 $L/08-check-slow.log; tail -qn1 $L/08-check-all-no-browser.log $L/08-check-all-browser-only.log` |
+| 526; 1 | the files `biome ci` checked; its "No fixes applied" | `grep -ao 'Checked [0-9]* files' $L/08-lint.log; grep -ac 'No fixes applied' $L/08-lint.log` |
+| 9, 67; 42, 649, 10; 77 | Firefox: files failed, passed; tests failed, passed, skipped; the paths listed | `sed 's/\x1b\[[0-9;]*m//g' $L/08-firefox.log \| grep -aE '^ +(Test Files\|Tests) '; wc -l < $L/08-firefox-files.txt` |
+| 42; 40; 2 | the tests failed in Firefox, by name; of them, in a Step 0 Firefox run; not | `sed 's/\x1b\[[0-9;]*m//g' $L/08-firefox.log \| grep -a '^ FAIL ' \| sed -E 's/^ FAIL +\\|[^\|]*\\| //' \| sort -u >\| $L/09-ff.fails; for f in 01 03 05 06; do sed 's/\x1b\[[0-9;]*m//g' $L/$f-base-firefox.log \| grep -a '^ FAIL ' \| sed -E 's/^ FAIL +\\|[^\|]*\\| //'; done \| sort -u >\| $L/09-ff-base.fails; wc -l < $L/09-ff.fails; comm -12 $L/09-ff.fails $L/09-ff-base.fails \| wc -l; comm -23 $L/09-ff.fails $L/09-ff-base.fails` |
+| 18, 10, 5, 2, 2, 2, 1, 1, 1 | the 42 by file | `cut -d'>' -f1 $L/09-ff.fails \| sort \| uniq -c` |
+| 34 | of the 42, failed in Task 1's Step 0 run at `9ad44d9` | `comm -12 $L/09-ff.fails <(sed 's/\x1b\[[0-9;]*m//g' $L/01-base-firefox.log \| grep -a '^ FAIL ' \| sed -E 's/^ FAIL +\\|[^\|]*\\| //' \| sort -u) \| wc -l` |
+| 1, 0, 1, 1, 1; 0, 0, 0, 0, 0 | the two `view-keys.test.ts` cases' failures in each of the file's runs alone at `798fa38`; at `26b8e34` | `for f in $L/08-base-ff-viewkeys-{1..5}.log $L/08-ff-viewkeys-{1..5}.log; do sed 's/\x1b\[[0-9;]*m//g' $f \| grep -a '^ FAIL ' \| grep -cE 'ends on a key it does not know\|lets a key held since before the prefix'; done` |
+| 0 | failures in Firefox of `view-toggles-narrow` or of `view-keys-focus`'s cases on a toggle | `grep -cE 'view-toggles-narrow\|on a views toggle' $L/09-ff.fails` |
+| 1 failed, 24 passed; 1 | `controls-gate.test.ts` in Firefox at `798fa38`; its failures at *the walk skipped the source toggle* | `sed 's/\x1b\[[0-9;]*m//g' $L/08-base-ff-controls-gate.log \| grep -aE '^ +Tests '; grep -ac 'the walk skipped the source toggle' $L/08-base-ff-controls-gate.log` |
+| 10 | the scans at `26b8e34` whose self-test exited 0 | `sed -n '/=== after 21c4ce9/,$p' $L/08-gate-exits.txt \| grep -c '^scan-.*-self-test exit 0 '` |
+| 29; 0 | the pass by hand's checks; failed | `grep -c '"check"' $L/08-hand.log; grep -c '"ok":false' $L/08-hand.log` |
+| 3, 9, 1 | its records at 1280 by 896, 390 by 844 and 600 by 896 | `grep -o '"window":\[[0-9]*,[0-9]*\]' $L/08-hand.log \| sort \| uniq -c` |
+| 900, 836; 940, 848 | `notice-float`'s band cases, Explorer and Debugger, before and after `26b8e34` | `git show 26b8e34 -- web/tests/browser/notice-float.test.ts \| grep -oE '^[-+] +\{ width: [0-9]+' \| tr -s ' '` |
+| 603-640, 806-878; 614-640, 817-889; 600-640, 796-867; 609-640, 808-879 | the band probe, Explorer and Debugger in Chromium; in Firefox | `grep -ah 'PROBE .* band' $L/08-probe-band-ch.log $L/08-probe-band-ff.log \| cut -d' ' -f7-` |
+| 330-450, 240-360; 296-316, 200-220; 392-416, 306-330 | `edge-spacing`'s scans for settings, about and buffers, before and after `5bcdc2b` | `git diff 35ae404 5bcdc2b -- web/tests/browser/edge-spacing.test.ts \| grep -E "^[-+](const RIGHTWARD_SCAN\|  \['(about\|buffers)')"` |
+| 208-211 and 303-305; 208-211 | the widths about's scan needs, in Task 6's probe, Chromium; Firefox | `grep -ah 'PROBE gutter run about' $L/06-probe-edge-ch3.log $L/06-probe-edge-ff3.log \| cut -d' ' -f7-` |
+| 1 | `share-open-hashchange`'s 1700 px window | `git show 26b8e34:web/tests/browser/share-open-hashchange.test.ts \| grep -c 'viewport(1700, 896)'` |
+| 1651, 1652 | the widths at which Task 3's probe saw the split of the link's λ view refused; admitted | `grep -ah 'PROBE at 165' $L/03-probe-width.log \| cut -d' ' -f7-` |
+| 0; 414 | `stage-gestures`' viewport lines at `26b8e34`; the runner's default width | `git show 26b8e34:web/tests/browser/stage-gestures.test.ts \| grep -c viewport; grep -rhoE 'viewport\.width \?\?= [0-9]+' web/node_modules/vitest/dist/chunks` |
+| 64; 160 | `MAX_TREE_LEAVES`; `MIN_VIEW_PX` | `grep -hE 'export const (MAX_TREE_LEAVES\|MIN_VIEW_PX) ' web/src/layout.ts` |
+| 6; 10 | the other specs that say `+ view`; the other plans, the roadmap aside | `rg -lP '\+ (view\|VIEW)(?![\w.])' docs/superpowers/specs \| grep -vcE 'view-layouts-design\|remove-plus-view-design'; rg -lP '\+ (view\|VIEW)(?![\w.])' docs/superpowers/plans \| grep -vcE 'redextape-roadmap\|remove-plus-view'` |
+| nothing printed | the widths of the lines over 120 columns this branch adds to `web/src`, at `a636436` | `git diff -U0 b32af3d a636436 -- web/src \| grep '^+[^+]' \| cut -c2- \| awk 'length > 120 {print length}'` |
+| the 45 lines | each sabotage run's exit and tests failed and run, in *THE SABOTAGES*' order within each task | `grep -h '^S' $L/0[1-6]-sab-results.txt \| cut -d';' -f1-2` |
+| 11; 9 | the review's fixes, `910f4b9..11fa301`: commits; of them, those that change `web/` | `git rev-list --count 910f4b9..11fa301; git rev-list --count 910f4b9..11fa301 -- web` |
+| 1 1; 8 8; 10 12; 3 3; 1 6 | the fixes' lines added and deleted in `help.html`, `app-header.ts`, `layout.ts`, `main.ts` and `pane-host.ts` | `git diff --numstat 910f4b9 11fa301 -- web/src web/index.html web/help.html` |
+| 0; 1 | case declarations the fixes take out of `web/tests`; put in | `git diff -U0 910f4b9 11fa301 -- web/tests \| grep -cE '^-\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('; git diff -U0 910f4b9 11fa301 -- web/tests \| grep -cE '^\+\s*(it\|test)(\.[a-zA-Z]+(\([^)]*\))?)*\('` |
+| 0, 1, 7; 11 | the review's own findings, critical, important and minor; the deferred minors it marked must fix | `grep -o 'Critical 0, Important 1, Minor 7' $L/review.md; grep -c '\| \*\*must fix' $L/review.md` |
+| the 7 lines; 7 | Task 11's sabotage runs, each with its exit and tests; restored and `cmp` equal | `grep -h '^[A-Za-z0-9-]*: exit' $L/11-sab-results.txt \| cut -d';' -f1-2; grep -c 'restored, cmp equal' $L/11-sab-results.txt` |
+| the 9 lines | the cases those runs failed, each with the assertion it failed at | `grep -h '^    ' $L/11-sab-results.txt \| sed 's/ :: /\t/' \| cut -c1-200` |
+| 35, 225; 35 | the Chromium run with `admit`'s line gone: files and tests passed; the paths in `11-firefox-files.txt`, the same list | `sed 's/\x1b\[[0-9;]*m//g' $L/11-I1-chromium.log \| grep -aE '^ +(Test Files\|Tests) '; wc -l < $L/11-firefox-files.txt` |
+| 1 failed and 10 passed; 11 passed | the node `app-header.test.ts` before the help page's fix; after it | `for f in 11-m3-red-node 11-m3-green-node; do sed 's/\x1b\[[0-9;]*m//g' $L/$f.log \| grep -aE '^ +Tests '; done` |
+| 31; firefox; `11fa301` | Task 11's legs that exited 0; that exited 1; the commit its coverage ran at | `grep -c ' exit 0 ' $L/11-gate-exits.txt; grep ' exit 1 ' $L/11-gate-exits.txt \| cut -d' ' -f1; grep '^start coverage' $L/11-gate-exits.txt \| cut -d' ' -f5` |
+| 347; 3944 and 2; 97.93, 92.26, 98.7, 99.14 | Task 11's coverage: files passed; tests passed and failing as expected; statements, branches, functions, lines | `sed 's/\x1b\[[0-9;]*m//g' $L/11-coverage.log \| grep -aE '^ +(Test Files\|Tests) \|^All files'` |
+| 4, 31; 18, 207; 18; 18; 0; 1, 1, 5, 11 | Task 11's Firefox: files failed, passed; tests failed, passed; the failures by name; of them, in a baseline; not; by file, `controls-gate`, `scroll-kept-moved-editor`, `scroll-kept` and `tm-view-narrow` | `sed 's/\x1b\[[0-9;]*m//g' $L/11-firefox.log \| grep -aE '^ +(Test Files\|Tests) '; wc -l < $L/11-ff.fails; comm -12 $L/11-ff.fails $L/11-ff-base.fails \| wc -l; comm -23 $L/11-ff.fails $L/11-ff-base.fails \| wc -l; cut -d'>' -f1 $L/11-ff.fails \| sort \| uniq -c` |
+| 1, 3; 11, 26 | the Firefox baseline at `910f4b9` of the 4 files outside `08-firefox-files.txt`: files failed, passed; tests failed, passed | `sed 's/\x1b\[[0-9;]*m//g' $L/11-base-firefox-extra.log \| grep -aE '^ +(Test Files\|Tests) '` |
+| 1; 1; 5; 5; 6; 6 | the three test files Task 11 edited, `clif-fetch-menu`, `menu-focus` and `app-header`, each in Chromium and then Firefox: tests passed | `for f in m2-chromium m2-firefox m7-chromium m7-firefox T5-2-chromium T5-2-firefox; do print -r -- "$f $(sed 's/\x1b\[[0-9;]*m//g' $L/11-$f.log \| grep -aE '^ +Tests ')"; done` |
+| 1, 1, 0, 0 | failures of `view-keys-focus`'s Stage caret case in 1-S12's run, Task 6's green run and its rerun, and Task 8's run | `for f in $L/01-sab-S12.log $L/06-green-firefox.log $L/06-ff-rerun1.log $L/08-firefox.log; do print -r -- "${f:t} $(sed 's/\x1b\[[0-9;]*m//g' $f \| grep -a '^ FAIL ' \| grep -c 'leaves the caret in the source editor, and the key chooses the tabs')"; done` |
+| 3; 2; 6 7 | the second round, `2cc1107..d1e77e4`: commits; of them, those that change `web/`; its lines added and deleted in `layout.ts` | `git rev-list --count 2cc1107..d1e77e4; git rev-list --count 2cc1107..d1e77e4 -- web; git diff --numstat 2cc1107 d1e77e4 -- web/src` |
+| 1; 2 2 | the third round, `6e55ef9..a636436`: commits; its lines added and deleted in `layout.ts` | `git rev-list --count 6e55ef9..a636436; git diff --numstat 6e55ef9 a636436 -- web/src` |
+| 31; firefox; `4c26ce4` | the legs after the rebase that exited 0; that exited 1; the commit its coverage ran at | `grep -c ' exit 0 ' $R/rebase-1/gate-exits.txt; grep ' exit 1 ' $R/rebase-1/gate-exits.txt \| cut -d' ' -f1; grep '^start coverage' $R/rebase-1/gate-exits.txt \| cut -d' ' -f5` |
+| 350; 3972 and 2; 97.93, 92.25, 98.7, 99.15 | coverage after the rebase: files passed; tests passed and failing as expected; statements, branches, functions, lines | `sed 's/\x1b\[[0-9;]*m//g' $R/rebase-1/coverage.log \| grep -aE '^ +(Test Files\|Tests) \|^All files'` |
+| 530; 1 | the files `biome ci` checked after the rebase; its "No fixes applied" | `grep -ao 'Checked [0-9]* files' $R/rebase-1/lint.log; grep -ac 'No fixes applied' $R/rebase-1/lint.log` |
+| 9, 67; 43, 648, 10; 43; 42; 1 | Firefox after the rebase: files failed, passed; tests failed, passed, skipped; the failures by name; of them, in a baseline; not | `sed 's/\x1b\[[0-9;]*m//g' $R/rebase-1/firefox.log \| grep -aE '^ +(Test Files\|Tests) '; sed 's/\x1b\[[0-9;]*m//g' $R/rebase-1/firefox.log \| grep -a '^ FAIL ' \| sed -E 's/^ FAIL +\\|[^\|]*\\| //' \| sort -u >\| $R/rebase-1/ff.fails; wc -l < $R/rebase-1/ff.fails; sort -u $L/09-ff.fails $L/09-ff-base.fails $L/11-ff.fails $L/11-ff-base.fails >\| $R/rebase-1/ff-baseline.fails; comm -12 $R/rebase-1/ff.fails $R/rebase-1/ff-baseline.fails \| wc -l; comm -23 $R/rebase-1/ff.fails $R/rebase-1/ff-baseline.fails \| wc -l` |
+| 18, 10, 5, 3, 2, 2, 1, 1, 1 | the 43 by file | `cut -d'>' -f1 $R/rebase-1/ff.fails \| sort \| uniq -c` |
+| 1, 0, 1, 1 | failures of `view-keys-focus`'s Stage caret case in the gate's Firefox run after the rebase and in the three runs of its file alone | `for f in $R/rebase-1/firefox.log $R/rebase-1/ff-view-keys-focus-{1..3}.log; do sed 's/\x1b\[[0-9;]*m//g' $f \| grep -a '^ FAIL ' \| grep -c 'leaves the caret in the source editor, and the key chooses the tabs'; done` |
+| 2 | the files that conflict when `main` at `b32af3d` and the branch before the rebase are merged | `grep -c '^CONFLICT' $R/rebase-1/merge-tree.log` |
+| 0 | the files #194 changed under `web/` that name a removed symbol, at `4c26ce4` | `git grep -lP 'new-view\|addViewItems\|addViewButton\|addViewMenu\|fillAddViewMenu\|\baddView\b\|insertBeside\|pressedLayout\|newLambdaViewItem\|plusView' 4c26ce4 -- $(git diff --name-only 798fa38 b32af3d -- web) \| wc -l` |

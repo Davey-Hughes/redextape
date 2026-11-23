@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
 import { claim, host, mountAt, toggle, until } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * A VIEW THAT COMES BACK TO THE PAGE SCROLLS ONLY WHAT IT STILL HOLDS — the view layouts spec §5.2.
@@ -15,8 +16,6 @@ import { claim, host, mountAt, toggle, until } from './harness'
  * the combination without the rxm view, visited for the first time, has the first λ view and not the second.
  */
 
-const leaves = (): string[] =>
-  [...document.querySelectorAll<HTMLElement>('#views .pane[data-leaf]')].map((p) => p.dataset.leaf ?? '')
 const shows = (leaf: string): string | undefined =>
   host(leaf)?.querySelector<HTMLElement>('.view-title')?.dataset.binding
 /** The sideways scroller of the copy's editor, where `leaf`'s view holds it: CodeMirror's own, which moves with it. */
@@ -33,12 +32,8 @@ describe('a copy’s editor that another view took while its view was off the pa
     // ITS EDITOR MOUNTED BEFORE THE SECOND VIEW EXISTS: a view built while the copy has no editor anywhere mounts one
     // itself, and would hold the editor with nothing having moved.
     await until(() => editorIn('lambda-0') !== null, 'the copy’s editor to mount in the first view')
-    const copy = shows('lambda-0') as string
-    const before = new Set(leaves())
-    await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-    await userEvent.click(document.querySelector(`#new-view-menu button[data-binding="${copy}"]`) as HTMLElement)
-    await until(() => leaves().some((l) => !before.has(l)), 'the second view of the copy')
-    const second = leaves().find((l) => !before.has(l)) as string
+    const second = await userSplit('lambda-0', 'same')
+    if (second === null) throw new Error('the split added no second view of the copy')
     await until(() => claim(second) !== null, 'the second view to offer the editor')
     claim(second)?.click()
     await until(() => editorIn(second) !== null, 'the editor to move to the second view')

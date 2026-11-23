@@ -8,7 +8,6 @@ import {
   addRefusal,
   closeLeaf,
   type Dir,
-  insertBeside,
   type LayoutNode,
   leaves,
   MAX_TREE_LEAVES,
@@ -125,13 +124,6 @@ export type PaneHost = {
    * is where its view is and the view does not offer *move the editor here* for an editor that was there.
    */
   moveBack(leaves: readonly LeafId[], from: SessionId, to: SessionId): LeafId[]
-  /**
-   * Add a view showing `choice` beside `beside` — `+ view` (spec §5, §6). `insertBeside`, not `splitLeaf`: the
-   * view beside which it lands may be the source view. Records what the new leaf starts on, as `split` does,
-   * applies the layout, focuses what it created, and returns its id — or, where `admit` refuses it, changes nothing,
-   * reports the refusal, and returns `null`.
-   */
-  addView(choice: PaneChoice, beside: LeafId): LeafId | null
   /** Tell `entry`'s view what `session` holds for it, as `SEED` does every view this module moves or builds. */
   seedPane(entry: PaneEntry<Leg>, session: SessionId): void
 }
@@ -145,11 +137,10 @@ export type LayoutEvent =
   | { readonly kind: 'closed'; readonly leaf: LeafId; readonly showed: PaneChoice }
 
 /**
- * An add the tree had no room for, or no leaf left for — `main.ts` words it on the notice line (the user's decision,
- * 2026-10-04): `leaf` is the view `+ view` was pressed beside or the split was chosen on, `gesture` which add it was
- * (`'view'`, or the split's direction), and `why` is `layout.ts`'s `addRefusal`.
+ * A split the tree had no room for, or no leaf left for — `main.ts` words it on the notice line: `leaf` is the view
+ * the split was chosen on, `gesture` the split's direction, and `why` is `layout.ts`'s `addRefusal`.
  */
-export type AddRefused = { readonly leaf: LeafId; readonly gesture: 'view' | Dir; readonly why: AddRefusal }
+export type AddRefused = { readonly leaf: LeafId; readonly gesture: Dir; readonly why: AddRefusal }
 
 /** The class of a view on each leg: what `SEED`'s entries are handed. */
 type LegPane = { lambda: LambdaPane; rxm: RxmPane; tm: TmPane; clif: ClifPane }
@@ -438,15 +429,15 @@ export function createPaneHost(deps: {
    * gate returns before either whenever any view holds the session's editor — the pane this is called for
    * included.
    *
-   * **EVERY VIEW, ON EVERY LEG, THAT COMES TO SHOW A COPY WHOSE EDITOR IS MOUNTED NOWHERE.** Without this, a TM
-   * or rxm view's editor would come only from a build that landed, so a copy whose stored text does not build
-   * would come back after a reload as a view with no editor and no way to one — the plainest case an rxm copy
-   * with a jump before its label — and a view picked onto a copy from another leg, split onto it, added with
-   * `+ view` or brought back by undo would show it the same way. Each of those routes calls this (the creation
-   * pass, `moveBack`), and so do the two ways a copy's editor comes down while another view shows it: the view
-   * holding it closing or changing leg (the drop pass) and moving to another session (the same-leg rebind
-   * arm), through `mountOnViewOf` below. A view showing a copy whose editor another view holds gets nothing
-   * here, and offers *move the editor here* (`showEditor` below): one editor per copy, in one view.
+   * **EVERY VIEW, ON EVERY LEG, THAT COMES TO SHOW A COPY WHOSE EDITOR IS MOUNTED NOWHERE.** Without this, a TM or rxm
+   * view's editor would come only from a build that landed, so a copy whose stored text does not build would come back
+   * after a reload as a view with no editor and no way to one — the plainest case an rxm copy with a jump before its
+   * label — and a view picked onto a copy from another leg, split onto it or brought back by undo would show it the
+   * same way. Each of those routes calls this (the creation pass, `moveBack`), and so do the two ways a copy's editor
+   * comes down while another view shows it: the view holding it closing or changing leg (the drop pass) and moving to
+   * another session (the same-leg rebind arm), through `mountOnViewOf` below. A view showing a copy whose editor
+   * another view holds gets nothing here, and offers *move the editor here* (`showEditor` below): one editor per copy,
+   * in one view.
    */
   const mountScratchEditor = (leaf: LeafId, pane: EditablePane, session: SessionId): void => {
     if (custody.hasEditor(session)) return
@@ -629,8 +620,8 @@ export function createPaneHost(deps: {
    * The session a leaf with no pane yet should be bound to, consulted once by `applyLayout`'s
    * pane-creation loop and then discarded.
    *
-   * **THE GESTURES THAT ASK THIS ASK THE SAME THING**: a SPLIT or an ADD (`addView`), about an id that did
-   * not exist a statement ago, and a cross-leg REBIND, about an id that did — the leaf survives a kind
+   * **THE GESTURES THAT ASK THIS ASK THE SAME THING**: a SPLIT, about an id that did not exist a statement
+   * ago, and a cross-leg REBIND, about an id that did — the leaf survives a kind
    * change, but its `PaneEntry` does not (`applyLayout`'s pass 1), so pass 2 reaches a leaf with no pane
    * and no way to know which pair the user picked. Without an entry here the rebind would land on
    * `SOURCE_SESSION`, which is the session the user was on only by coincidence.
@@ -741,11 +732,7 @@ export function createPaneHost(deps: {
 
   /**
    * Whether the add `build` makes may go ahead: `true`, or `false` with the refusal reported and nothing changed — the
-   * first statement of `split` and of `addView`.
-   *
-   * **THE STAGE IS NOT HELD TO THE FLOOR** (the user's decision, 2026-10-04): a view added there is a tab, and nothing
-   * on screen shrinks, so the floor has nothing to protect. Switching to tiles afterwards can show views under the
-   * floor. What holds there is the bound on live views alone, which every add is held to, in tiles too.
+   * first statement of `split`, and so asked in tiles alone, since the Stage offers no split (`draw.ts`).
    *
    * **THE TREE ON SCREEN IS NOT COUNTED APART FROM THE LIVE VIEWS.** Every leaf of it is a live view, so a tree of 64
    * leaves is 64 live views or more and is refused by the first line. The one add that line lets through at the
@@ -760,7 +747,7 @@ export function createPaneHost(deps: {
    * a node test can hold.
    *
    * **EVERY ADD IS HELD TO THE FLOOR ON WIDTH, AND `'column'`, A SPLIT DOWN, ON HEIGHT TOO** (`addRefusal`'s doc): a
-   * split down makes a view as narrow as the one it halves, which the user's floor is about, and is the one add that
+   * split down makes a view as narrow as the one it halves, which the floor is about, and is the one add that
    * makes a view shorter.
    *
    * **A REFUSAL CHANGES NOTHING BUT THE NOTICE LINE**: the tree, storage, the focused view and the leaf counter are as
@@ -783,7 +770,6 @@ export function createPaneHost(deps: {
     const live = liveLeaves()
     const adds = takes === null || !live.has(takes)
     if (adds && live.size >= MAX_TREE_LEAVES) why = 'full'
-    else if (stage()) why = null
     else {
       const area = root.getBoundingClientRect()
       const divides = gesture === 'column' ? 'height' : 'width'
@@ -909,7 +895,7 @@ export function createPaneHost(deps: {
       // **AND IT PUTS THE FOCUS BACK.** `renderLayout`'s `root.replaceChildren()` detaches every child of
       // `root`, and detaching the subtree holding `document.activeElement` drops focus to `<body>`; its one
       // rescue matches `.layout-divider` by `data-path`/`data-index`, which no control inside a host has.
-      // That is why `split`, `close`, the cross-leg rebind arm, `addView` and `main.ts`'s source-view close
+      // That is why `split`, `close`, the cross-leg rebind arm and `main.ts`'s source-view close
       // all end by moving the focus into a view (`focusPane`, or `focusView`, which ends in it). Spec §11's
       // "Focus never falls to `<body>`" is categorical. *Edit a copy* needs no such call: it never calls
       // `applyLayout` (`transport.ts`'s `detach` rebinds and calls `draw()`).
@@ -1194,8 +1180,8 @@ export function createPaneHost(deps: {
    * workspace never catches up either.
    *
    * **IT EXISTS SO THE ORDER CANNOT BE GOT WRONG.** A rule written at each gesture is a rule with a chance to
-   * be forgotten at each. `tests/browser/stage-gestures.test.ts` drives two of them: a close of the shown
-   * view and `+ view`.
+   * be forgotten at each. `tests/browser/stage-gestures.test.ts` drives one of them, a close of the shown
+   * view.
    */
   const focusView = (id: LeafId | null): void => {
     if (id !== null) setFocused(id)
@@ -1462,8 +1448,7 @@ export function createPaneHost(deps: {
    *    `renderLayout`, then `giveScrollBack`; §5.2). The render takes every host off the page and puts back the ones
    *    it shows, every one the tree names in tiles and the focused view's alone on the Stage, and an element that
    *    leaves the document comes back at its start. A host in `fresh` is not recorded.
-   * 10. **`applied()` tells `main.ts` the tree is on the page**, where the header's toggles and an open `+ view` menu
-   *     are brought up to it.
+   * 10. **`applied()` tells `main.ts` the tree is on the page**, where the header's toggles are brought up to it.
    * 11. **The workspace is stored** (`persist`), **and then which view shows which copy** (`persistBindings`), which
    *     is read off `panes` as the passes left it, so the bindings stored are true of the tree stored with them.
    * 12. **`draw()`**, once the panes and the tree agree and every box is scrolled where it will be shown: a grid
@@ -1686,9 +1671,9 @@ export function createPaneHost(deps: {
       // in a title, a pause and a delete, they would leave a view of a copy closed with `✕` bound in storage; the
       // view its toggle or *reset preset* built under that id next would be on the program; and a reload, which
       // takes any stored binding whose leaf the stored tree holds on the same leg, would put that view on the closed
-      // view's copy. A view `+ view` added on a copy would be stored on the program the same way.
-      // `tests/browser/bindings-stored.test.ts` holds a `✕`, a *reset preset*, `+ view` and a pick onto another leg
-      // to it.
+      // view's copy. A view a split added on a copy would be stored on the program the same way.
+      // `tests/browser/bindings-stored.test.ts` holds a `✕`, a *reset preset*, a split and a pick onto another leg to
+      // it.
       //
       // **A PARKED VIEW'S BINDING IS WRITTEN WITH THE REST**: its entry is in `panes`. The tree stored beside it does
       // not hold its leaf, so a reload does not read it back, and the view comes back on the program (the view
@@ -1813,18 +1798,6 @@ export function createPaneHost(deps: {
         custody.reconcile()
       }
       return moved
-    },
-    addView(choice: PaneChoice, beside: LeafId): LeafId | null {
-      const kind = choice.kind
-      // AN EQUAL SHARE UNDER THE FLOOR, OR A 65TH LIVE VIEW, IS REFUSED BEFORE AN ID IS MINTED — `admit`'s doc.
-      const takes = kind === 'source' ? SOURCE_LEAF : null
-      if (!admit(beside, 'view', (newId) => insertBeside(getTree(), beside, 'row', newId, kind), takes)) return null
-      const created = takes ?? nextLeafId()
-      if (choice.kind !== 'source') pendingBinding.set(created, choice.session)
-      setTree(insertBeside(getTree(), beside, 'row', created, kind))
-      focusView(created)
-      layoutChanged({ kind: 'added', leaf: created, shows: choice })
-      return created
     },
   }
 }

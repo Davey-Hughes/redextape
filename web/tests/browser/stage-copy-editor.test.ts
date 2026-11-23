@@ -13,6 +13,7 @@ import {
   resetToFourViews,
   SHELL,
   shutCopiesMenu,
+  splitVia,
   stateIdle,
   tabLeaves,
   termEditorsIn,
@@ -42,9 +43,9 @@ import {
  * `parked-copy-editor.test.ts` drives the same thing for a view a switch parked.
  *
  * **A DELETE, ITS *UNDO*, A PAUSE AND A RESUME ARE PRESSED WITH THE POINTER** (`press`), as a user presses them: the
- * copies button, then the row's control; the notice's *undo* where the pointer finds it. The copy, its second view,
- * the editor's move and the tabs selected to look at a view are arranged with `.click()`, and so is the page put back
- * before each case.
+ * copies button, then the row's control; the notice's *undo* where the pointer finds it. The presets, the copy, the
+ * split that makes its second view, the editor's move and the tabs selected to look at a view are arranged with
+ * `.click()`, and so is the page put back before each case.
  */
 
 const errors: string[] = []
@@ -75,11 +76,12 @@ type Hidden = {
 }
 
 /**
- * Make a copy in `leg`'s view, add a second view of it, move the copy's editor onto the second, and select the first
- * view's tab: the second, holding the editor, is then a tab that is not selected.
+ * Make a copy in `leg`'s view and split a second view of it off in tiles, since the Stage offers no split; move the
+ * copy's editor onto the second; then pick the Stage again and select the first view's tab: the second, holding the
+ * editor, is then a tab that is not selected.
  */
 async function hideTheHolder(leg: Leg): Promise<Hidden> {
-  tab(leg.view)
+  clickWorkspaceItem('[data-preset="explorer"]')
   expect(titleText(leg.view), 'precondition: the view starts on the program').toBe(`${leg.name} · program`)
   host(leg.view)?.querySelector<HTMLButtonElement>('button.detach')?.click()
   await until(() => / · copy \d+$/.test(titleText(leg.view)) && editorsOf(leg.view) === 1, 'the copy and its editor')
@@ -89,19 +91,19 @@ async function hideTheHolder(leg: Leg): Promise<Hidden> {
   const onCopy = `${leg.name} · copy ${number}`
   expect(titleText(leg.view), 'precondition: the view shows the copy its title names').toBe(onCopy)
 
-  // A SECOND VIEW OF THE COPY, WHICH THE STAGE SHOWS, AND THE EDITOR MOVED ONTO IT.
-  const before = new Set(tabLeaves())
-  document.querySelector<HTMLButtonElement>('#new-view')?.click()
-  document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${binding}"]`)?.click()
-  const second = tabLeaves().find((id) => !before.has(id))
-  if (second === undefined) throw new Error('+ view added no second view of the copy')
-  await until(() => host(second) !== null && titleText(second) === onCopy, 'the second view, shown')
+  // A SECOND VIEW OF THE COPY, SPLIT OFF BESIDE IT, AND THE EDITOR MOVED ONTO IT.
+  const before = new Set(mounted())
+  splitVia(leg.view, 'row', 'same')
+  const second = mounted().find((id) => !before.has(id))
+  if (second === undefined) throw new Error('the split added no second view of the copy')
+  await until(() => titleText(second) === onCopy, 'the second view of the copy')
   const holder = host(second)
   if (holder === null) throw new Error('the second view has no host')
   holder.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
   await until(() => termEditorsIn(holder) === 1, 'the editor to move to the second view')
 
-  // THE FIRST VIEW'S TAB: the second, holding the editor, is now a tab that is not selected.
+  // THE STAGE, ON THE FIRST VIEW'S TAB: the second, holding the editor, is now a tab that is not selected.
+  clickWorkspaceItem('[data-preset="stage"]')
   tab(leg.view)
   expect(mounted(), 'precondition: the holder is off the page').toEqual([leg.view])
   expect(holder.isConnected, 'precondition: the holder’s host is out of the document').toBe(false)
@@ -117,14 +119,15 @@ beforeAll(async () => {
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(stateIdle, 'the first compile')
-  clickWorkspaceItem('[data-preset="stage"]')
 })
 afterAll(() => window.removeEventListener('error', onError))
 
-// **ONE PAGE FOR THE FILE, SO EACH CASE PUTS IT BACK FIRST**: no copies, and the four views on the program, with
-// nothing a case before it added. A case that failed half way leaves the next one where every case starts.
+// **ONE PAGE FOR THE FILE, SO EACH CASE PUTS IT BACK FIRST**: no copies, the Stage, and the four views on the program,
+// with nothing a case before it added. A case that failed half way, in tiles or on the Stage, leaves the next one where
+// every case starts.
 beforeEach(async () => {
   deleteEveryCopy()
+  clickWorkspaceItem('[data-preset="stage"]')
   await resetToFourViews()
   expect(tabLeaves(), 'precondition: the four views, as tabs').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
   errors.length = 0

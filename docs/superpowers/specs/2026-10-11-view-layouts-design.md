@@ -16,6 +16,9 @@ what he decided with the pull request open.
 **§11 is as amended on 2026-10-12 too**, after its own prototype was built and the user tried it: §18 lists what he
 decided with it open, what it found, and which of its rulings are the design's own and not his.
 
+**§20 says what changed when `+ view` was removed on 2026-11-23**: §16.3's first point answered and its third closed,
+and which lines here describe the app before the removal.
+
 ## §1 Scope
 
 In:
@@ -182,7 +185,7 @@ resizing's details (§11); four pull requests (§1).
 - A combination's **key** is its kinds in `KIND_ORDER`, joined by `+`: `source+tm`, `source+lambda+asm+tm`.
 - An **arrangement** is a tree. Its combination is the set of its leaves' kinds.
 
-A user meets none of these words. The header's group is named `views`.
+A user meets none of these words. The header's group is named `show`.
 
 The two orders are two decisions: where a view sits in the default grid, and where its toggle sits in the header. A
 test holds `HEADER_ORDER` to the kinds of `KIND_ORDER`, each once.
@@ -476,8 +479,8 @@ choose a preset first. A switch past the bound has a notice of its own (§4.5).
 
 ## §6 The toggles
 
-A group named `views` sits in the header after the workspace menu's button and before `+ view`. It holds four
-buttons in `HEADER_ORDER`, a small gap apart: `source`, `asm`, `λ`, `TM`.
+A group named `show` sits in the header after the workspace menu's button and before `copies ▾`. It holds four buttons
+in `HEADER_ORDER`, a small gap apart: `source`, `asm`, `λ`, `TM`.
 
 - A button is pressed where the tree on screen holds a view of its kind, and `aria-pressed` says so. A pressed button
   is edged and underlined in the accent, and one that is not has the rule's edge and dim text: never colour alone. In
@@ -503,9 +506,8 @@ buttons in `HEADER_ORDER`, a small gap apart: `source`, `asm`, `λ`, `TM`.
 - The toggle that has the focus is drawn over its neighbours, so its ring is whole where it reaches over a
   neighbour's edge: under a root font smaller than 16px the gap is narrower than the ring's reach.
 
-`+ view`, `✕` and the split items keep their behaviour. They edit the arrangement on screen (§4.3). `+ view`'s menu
-is filled again where the tree changes while it is open, and a rebuild closes a view's `⋯` menu and its title's with
-their events, so neither menu offers `source` once a view shows it.
+`✕` and the split items keep their behaviour. They edit the arrangement on screen (§4.3). A rebuild closes a view's `⋯`
+menu and its title's with their events, so neither menu offers `source` once a view shows it.
 
 In Stage the toggles choose which tabs there are.
 
@@ -529,24 +531,36 @@ machine's figures; a test holds the gap and not the row it buys. Above 85rem the
 In each style there is a band of window widths, as wide as the toggles and one 16 px gap, so 164 to 170 px, where the
 header fitted one row without the toggles and takes two with them; in Terminal the half gap takes 88 px off it.
 
-**In a window 40rem wide or narrower the toggles are hidden**, by a `hidden` attribute `main.ts` sets from that media
-query. The query is `app-header.ts`'s `NARROW_WINDOW`; the stylesheet's rule and the help page, which gives the width
-as about 640 px, cannot read it, and a node test holds each to it. At 390 px the toggles cost the header a row,
-181 px where `style.css` records 136 without them, and at 320 × 568 the page no longer fits its window; at 481 px
-they cost it a row too, which `inspector-phone.test.ts` measures. A view's
-`✕`, `+ view` and the view keys still choose the views there. A toggle that has the focus when the window is narrowed
-hands it to `+ view`, the nearest control left in the header. `style.css` has a media rule of the same width beside
-the attribute, for the paint before `main.ts` runs: with the buttons in the markup and no rule, a 390 px header was
-181 px until then and 136 after. The attribute as well as the rule, so that `controls-gate.test.ts` does not walk a
-control no one can reach.
+**In a window 40rem wide or narrower the toggles are the workspace menu's first row**, above the presets. `main.ts`'s
+`placeToggles` moves the group there from that media query, and back into the header after the menu's button where the
+window is wider. The query is `app-header.ts`'s `NARROW_WINDOW`; the stylesheet's rule and the help page, which gives
+the width as about 640 px, cannot read it, and a node test holds each to it. At 390 px the toggles cost the header a
+row, 181 px where `style.css` records 136 without them, and at 320 × 568 the page no longer fits its window; at 481 px
+they cost it a row too, which `inspector-phone.test.ts` measures. The buttons moved are the header's own, so a press,
+the pressed state, the tooltips and the clif toggle's intent load of its package are the same in the menu, and the menu
+fills its presets and switches again around the group without building it again. The menu draws a row's label from its
+group's name, so the row reads `show`, apart from the menu's `views` row, the `tiles`/`stage` switch; a group has one
+name, so it is `show` in the header too. A press on a toggle in the menu leaves the menu open, as a pick of a preset or
+a switch does; *reset preset*, which builds the page again, is the one item that closes it. A view's `✕` and the view
+keys choose the views there as well.
+
+A toggle that has the focus when the window is narrowed hands it to the workspace menu's button, `#workspace`, since the
+menu the group moves into is shut and that button opens it. One that has the focus in the menu when the window widens is
+given it back in the header: moving the button takes the focus off it, in Chromium and Firefox both, so `placeToggles`
+puts the focus back on it. `style.css` has a media rule of the same width that keeps the group off the page while it is
+still in the header, for the paint before `main.ts` runs: with the buttons in the markup and no rule, a 390 px header
+was 181 px until then and 136 after. In Firefox that rule hides and blurs a focused toggle at a new width before
+`placeToggles` hears of the change, so a focus the group loses to nothing in a narrow window while it is still in the
+header goes to `#workspace` too.
 
 **Left as it is:** `main.ts` fills the `encoding` select and `#appearance` late, as on `main`, so `share`, `about` and
 `settings` move left when they arrive, and in a window narrow enough that the filled header needs a row more than
 the markup alone, the header grows as the page loads. In Terminal at 1280 px that was 46 px to 91; with the half gap
 it is 46 px before and after.
 
-**OPEN:** hiding them is the prototype's choice. The other is to move the group into the workspace menu at that width,
-which keeps the toggles within reach of a pointer on a phone for a little more code.
+**OPEN, answered by the user on 2026-11-23: moved into the workspace menu.** Hiding them was the prototype's choice.
+Moved, they stay within reach of a pointer on a phone, where with `+ view` gone (§20) a user with the source view alone
+would otherwise have only *reset preset* to bring views back.
 
 ## §7 View keys
 
@@ -1024,10 +1038,13 @@ A visual check in the three presets, light and dark, as each part's roadmap entr
 
 ### §16.3 Still the user's to decide
 
-1. **A narrow window's toggles (§6.1):** hidden, as the prototype has them, or moved into the workspace menu.
+1. **A narrow window's toggles (§6.1):** hidden, as the prototype has them, or moved into the workspace menu. **Answered
+   by the user on 2026-11-23: moved into the workspace menu** (§20).
 2. **The toggle keys (§7.3):** answered on 2026-10-12. In the user's own browser `Ctrl+.` then `2`, with `Ctrl` held,
    toggled the asm view and switched no tab.
 3. **`+ view` in a layout of columns (§12):** halving the focused view, as today's rule gives, or adding a column.
+   **Closed on 2026-11-23 by `+ view`'s removal** (§20): a split still halves its view, and there is no other add to
+   place.
 4. **The keys on another keyboard layout (§7.2, §7.3):** on AZERTY `.` is typed with Shift, and the prefix is refused
    with Shift down; on a Mac's layouts that type `[` and `]` with Option, a table key is refused with Alt down, and so
    it is on Windows where AltGr types them, since AltGr reports `Ctrl` and `Alt` both down. Read from the layouts and
@@ -1163,3 +1180,36 @@ cost to observe; and two of the nine failed on their own setup first, and on the
 | §11.3 | an outline asks for its symbols at its disclosure and at an edit | and when a maximise draws it open or shows it again | the review: a closed outline, maximised, listed the program it last showed |
 | §11.4 | the source view's `✕` drops what is stored for it | and puts its elements back as they are built | the review, of a leftover the roadmap entry had listed: the outline stayed open and its boundary where it was dragged, and the next drag wrote the dropped shares back |
 | §11.2 | the headers' handles and every share written again at each change of a two-panel region's size | the handles alone, and a share only where it changes | the review. No cost was found to measure: two changes of a view's width wrote no region's style before the change or after it |
+
+## §20 `+ view` removed (2026-11-23)
+
+The app header's `+ view` and its menu are gone, by the design `2026-11-23-remove-plus-view-design.md`: the user asked
+for it on 2026-11-21, and on 2026-11-23 chose its approach B, the toggles moved into the workspace menu in a narrow
+window. With them went the code that existed only for them: `app-header.ts`'s `addViewItems`, `pane-host.ts`'s
+`PaneHost.addView`, the `'view'` member of `AddRefused.gesture` and its notice, `layout.ts`'s `insertBeside` and
+`insert`'s equal share, their CSS, and `admit`'s line that let an add through on the Stage without asking about the
+floor, which only `+ view` reached, since the Stage offers no split. What they shared with a split and the other menus
+stays: `admit` and the 64-view bound, `splitLeaf`, `wireMenu` and the `view added` notice.
+
+What went with it, and is not replaced:
+
+- a second view of a kind on the Stage, which offers no split;
+- a copy's view as an extra Stage tab: on the Stage a copy is shown by switching a tab's title to it;
+- a view added beside the source view, which has no split;
+- the add that gave every view of a row an equal share. A split still halves its view.
+
+Splits, the view keys, the toggles in a wide window, a view's title menu and `copies ▾` are as they were. Share links,
+stored workspaces and remembered arrangements that hold two views of a kind, or a row of equal shares, load as they did.
+A test that needs a second view of a kind on the Stage, or a copy's view as a second tab, builds it with a split in
+tiles and then switches to the Stage.
+
+In a window 40rem wide or narrower, where the toggles were hidden and `+ view` was one of the ways left to choose views,
+the toggles are the workspace menu's first row, named `show` (§6.1). That answers §16.3's first point, and the removal
+closes its third.
+
+**These lines describe the app before the removal and stay as written:** §2.2's `+ view` row; §2.7's last clause, that
+the Stage is held to the leaf bound alone, which held of `+ view`'s adds there; §4.5's list of the focuses the app
+moves, which names `+ view`'s; §5.6, which names `+ view` beside a split as refused at the bound and says what an add on
+the Stage met; and §12's `+ view` and its **OPEN**. §6's account of the toggles' first build, which names `+ view` among
+the controls they moved, §9.2's likening of a move's equal share to `insertBeside`'s, and the findings in §16.2 and §17
+are records of their time.

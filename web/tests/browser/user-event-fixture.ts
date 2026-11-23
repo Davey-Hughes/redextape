@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
 import { userEvent } from 'vitest/browser'
-import { armed, controlledMenu, PREFIX, toggle, until, workspaceMenu } from './harness'
+import { armed, controlledMenu, mounted, PREFIX, toggle, until, workspaceMenu } from './harness'
 
 /**
  * Browser-tier helpers that act through `vitest/browser`'s `userEvent` and are imported at the top of the file. They
@@ -31,15 +31,33 @@ export const userPickWorkspace = async (sel: string): Promise<void> => {
 }
 
 /**
- * Press `+ view` and pick `label`, with the pointer. The view is added beside the focused view. `what` is the message
- * of the wait for the item.
+ * Split `leaf` through its `⋯` menu with the pointer: `dir` is the direction, and `pick` the pair, `'same'` (another
+ * view of this), `'source'`, or a `bindingKey(leg, session)`. It answers the id of the view the split made, or `null`
+ * where it made none, a split refused.
+ *
+ * **IT THROWS WHERE THE MENU OFFERS NO `pick`, NAMING THE PAIRS IT OFFERS**: a click on an item that is not there is
+ * no gesture, and every assertion after it would describe a page nothing happened on (`splitVia`'s doc).
  */
-export async function plusView(label = 'λ · program', what = `+ view's ${label}`): Promise<void> {
-  await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-  const item = () =>
-    [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find((b) => b.textContent === label)
-  await until(() => item() !== undefined, what)
-  await userEvent.click(item() as HTMLButtonElement)
+export async function userSplit(leaf: string, pick: string, dir: 'row' | 'column' = 'row'): Promise<string | null> {
+  const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
+  if (more === null) throw new Error(`no view menu on [data-leaf="${leaf}"]`)
+  const before = new Set(mounted())
+  await userEvent.click(more)
+  const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
+  await until(() => menu.matches(':popover-open'), `${leaf}'s view menu`)
+  await userEvent.click(menu.querySelector(`button.view-split[data-dir="${dir}"]`) as HTMLButtonElement)
+  const pairs = () => [...menu.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button')]
+  await until(() => pairs().length > 0, `${leaf}'s split pairs`)
+  const which = pick === 'same' ? '[data-same]' : pick === 'source' ? '[data-source]' : `[data-binding="${pick}"]`
+  const item = menu.querySelector<HTMLButtonElement>(`.view-menu-pairs button${which}`)
+  if (item === null) {
+    const offered = pairs().map((b) => b.textContent)
+    throw new Error(`[data-leaf="${leaf}"] offers no ${pick} to split into — offered: ${offered.join(' | ')}`)
+  }
+  await userEvent.click(item)
+  // THE PICK SHUTS THE MENU BEFORE IT SPLITS, so a shut menu says the click reached the item.
+  await until(() => !menu.matches(':popover-open'), `${leaf}'s split of ${pick}`)
+  return mounted().find((id) => !before.has(id)) ?? null
 }
 
 /** A click with the pointer on the toggle that shows and hides the `kind` views. */

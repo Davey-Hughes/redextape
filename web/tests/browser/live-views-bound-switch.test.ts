@@ -24,7 +24,7 @@ import { resetOffered, userPickInWorkspaceMenu } from './user-event-fixture'
  * **A SWITCH IS REFUSED WHERE ITS VIEWS WOULD TAKE THE LIVE ONES PAST 64** — the view layouts spec §4.5 and §5.6. A
  * combination's first visit shows its default arrangement, whose leaves are the default ids, and the arrangement left
  * is remembered, so its views stay live. Where the workspace does not hold those ids already, the switch adds views:
- * it is held to the bound as `+ view` is, and a refused one changes nothing.
+ * it is held to the bound as a split is, and a refused one changes nothing.
  *
  * The page opens on a stored tree of 62 λ views, `pane-1` to `pane-62`, with no source view on screen and the source
  * view alone remembered: 63 live views. **THE CASES RUN IN ORDER ON ONE PAGE**, each from the state the one before
@@ -40,7 +40,7 @@ import { resetOffered, userPickInWorkspaceMenu } from './user-event-fixture'
  * **THE NOTICE SAYS THE THREE NUMBERS.** A switch can be refused short of the bound, as the first one here is at 63,
  * where "the workspace holds 64 views" would be untrue.
  *
- * `live-views-bound.test.ts` holds the bound for `+ view`. Storage is read once, at the mount, so each stores its
+ * `live-views-bound.test.ts` holds the bound for a split. Storage is read once, at the mount, so each stores its
  * own workspace before it and each is a file.
  */
 

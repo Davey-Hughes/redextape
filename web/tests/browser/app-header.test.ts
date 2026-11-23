@@ -1,15 +1,11 @@
 import type { EditorView } from '@codemirror/view'
 import { computeAccessibleName } from 'dom-accessibility-api'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { mainLeafIds, SHELL, showFourViews, stateIdle, until } from './harness'
+import { mainLeafIds, SHELL, showFourViews, stateIdle, toggle, until } from './harness'
 
 beforeAll(async () => {
-  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
-  await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
@@ -25,26 +21,11 @@ describe('the app header', () => {
     expect(computeAccessibleName(button)).toBe('Explorer')
   })
 
-  it('adds a view beside the focused one, focuses it, and says so', async () => {
-    document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
-    document.querySelector<HTMLButtonElement>('#new-view')?.click()
-    const items = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')]
-    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'rxm · program', 'TM · program', 'clif · program'])
-    // BY ITS LABEL, NOT ITS INDEX: the rxm pair sits second, so `items[1]` adds an rxm view.
-    items.find((b) => b.textContent === 'TM · program')?.click()
-    await until(() => mainLeafIds().length === 5, 'a fifth view')
-    expect(mainLeafIds()).toEqual(['source', 'lambda-0', 'pane-1', 'rxm-0', 'tm-0'])
-    expect(document.querySelector('[data-leaf="pane-1"]')?.contains(document.activeElement)).toBe(true)
-    expect(document.querySelector('#notice .notice-text')?.textContent).toBe('view added — TM · program')
-    // **BESIDE MEANS TO ITS RIGHT** (spec §5). `leaves()` walks a row split and a column split in the
-    // same order, so the leaf order above cannot tell them apart; the split's own direction can.
-    expect(document.querySelector('[data-leaf="pane-1"]')?.closest('.layout-split')?.getAttribute('data-dir')).toBe(
-      'row',
-    )
-  })
-
   it('resets the preset: the default views back, and says so', async () => {
-    // THE PRECONDITION, SINCE THE DEFAULT IS A SUBSET OF WHAT IS HERE: more views than the default's two.
+    // THE PRECONDITION, SINCE THE DEFAULT IS A SUBSET OF WHAT IS HERE: more views than the default's two. A press
+    // makes the tree the reset replaces, as a user's would: three of the four the setup stores, λ's hidden.
+    toggle('lambda').click()
+    await until(() => !mainLeafIds().includes('lambda-0'), 'the λ toggle to hide the λ view')
     expect(mainLeafIds().length).toBeGreaterThan(2)
     document.querySelector<HTMLButtonElement>('#reset-preset')?.click()
     await until(() => mainLeafIds().length === 2, 'the default views')
@@ -61,23 +42,6 @@ describe('the app header', () => {
     // THE FOUR VIEWS THE CASES BELOW ARE WRITTEN AGAINST.
     await showFourViews()
     await until(() => mainLeafIds().length === 4, 'all four views')
-  })
-
-  it('offers source to + view only while no view shows it', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="source"] button.view-close')?.click()
-    await until(() => !mainLeafIds().includes('source'), 'the source view to close')
-    document.querySelector<HTMLButtonElement>('#new-view')?.click()
-    expect([...document.querySelectorAll('#new-view-menu button')].map((b) => b.textContent)).toContain('source')
-    // **AND IT BRINGS IT BACK** — a route to a closed source view besides its toggle and *reset preset*, and the
-    // one `addView` path that reuses a literal leaf id rather than minting one, so the editor returns to
-    // the host `main.ts` seeded rather than to an empty section.
-    const source = [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-      (b) => b.textContent === 'source',
-    )
-    source?.click()
-    await until(() => document.querySelector('[data-leaf="source"] .cm-content') !== null, 'the source view')
-    expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toContain('let x = 40')
-    expect(document.querySelector('#notice .notice-text')?.textContent).toBe('view added — source')
   })
 
   /**

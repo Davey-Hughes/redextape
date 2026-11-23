@@ -3,7 +3,7 @@ import { afterEach, expect, vi } from 'vitest'
 import html from '../../index.html?raw'
 import type { ControlState, LegView } from '../../src/controls'
 import type { LambdaBody } from '../../src/lambda-body'
-import { insertBeside, LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
+import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
 import type { PaneEvents } from '../../src/pane-chrome'
 import type { PaneKind } from '../../src/panes'
 import { PREPAINT } from '../../src/prepaint'
@@ -43,11 +43,9 @@ export const SHELL = `
     <div id="workspace-menu" class="header-menu" popover>
       <button type="button" id="reset-preset">reset preset — restores the default views</button>
     </div>
-    <div id="views-shown" class="views-shown" role="group" aria-label="views">
+    <div id="views-shown" class="views-shown" role="group" aria-label="show">
       ${viewToggleButtons()}
     </div>
-    <button type="button" id="new-view" aria-haspopup="menu" aria-controls="new-view-menu" aria-expanded="false">+ view</button>
-    <div id="new-view-menu" class="header-menu" popover></div>
     <button type="button" id="buffers">copies <span aria-hidden="true">▾</span></button>
     <button type="button" id="examples" aria-haspopup="menu" aria-controls="examples-menu" aria-expanded="false">examples <span aria-hidden="true">▾</span></button>
     <div id="examples-menu" class="header-menu" popover></div>
@@ -1178,12 +1176,6 @@ export const liveViewCount = (): number => {
 /** A layout leaf: the view `id`, of the kind `pane`. */
 export const leafOf = (id: string, pane: PaneKind): LayoutNode => ({ kind: 'leaf', id, pane })
 
-/** The *λ · program* item of the `+ view` menu, or `undefined` where the menu holds none. */
-export const newLambdaViewItem = (): HTMLButtonElement | undefined =>
-  [...document.querySelectorAll<HTMLButtonElement>('#new-view-menu button')].find(
-    (b) => b.textContent === 'λ · program',
-  )
-
 /**
  * `n` λ views in one row, `pane-1` to `pane-n`, each an equal share of it: one split deep, so only the leaf bound is in
  * play.
@@ -1194,17 +1186,6 @@ export const rowOfLeaves = (n: number): LayoutNode => ({
   sizes: Array.from({ length: n }, () => 1 / n),
   children: Array.from({ length: n }, (_, i) => ({ kind: 'leaf', id: `pane-${i + 1}`, pane: 'lambda' }) as const),
 })
-
-/** `+ view` pressed `presses` times in a row: each adds a λ view beside the view the last one added and focused. */
-export const pressedLayout = (presses: number): LayoutNode => {
-  let tree = fourViews()
-  let focused = 'lambda-0'
-  for (let k = 1; k <= presses; k++) {
-    tree = insertBeside(tree, focused, 'row', `pane-${k}`, 'lambda')
-    focused = `pane-${k}`
-  }
-  return tree
-}
 
 /** The source beside one other view, the view `id` of the kind `pane`: a split in `dir`, sized `sizes`. */
 export const sourceBeside = (
@@ -1341,10 +1322,9 @@ export async function resetToFourViews(): Promise<void> {
  *
  * **THE TOGGLES ARE PRESSED IN A WINDOW TALLER THAN IT IS WIDE, WHICH IS THEN PUT BACK.** A combination's first visit
  * shows its default, and the default of all four in a wide window is two COLUMNS of two (`layout.ts`'s
- * `defaultArrangement`, the user's decision of 2026-10-11); in a tall one it is two rows of two, which is
- * `fourViews()`, the tree these files measure. The arrangement is remembered once it is on screen, so the window's
- * size afterwards does not change it. The toggles are hidden in a window this narrow and `.click()` reaches them all
- * the same.
+ * `defaultArrangement`); in a tall one it is two rows of two, which is `fourViews()`, the tree these files measure.
+ * The arrangement is remembered once it is on screen, so the window's size afterwards does not change it. The toggles
+ * are in the workspace menu in a window this narrow, and `.click()` reaches them there all the same.
  *
  * **IT THROWS UNLESS THE PAGE ENDS ON `fourViews()`**, naming the arrangement it found, read off the page: a
  * combination visited before shows the arrangement it remembers and not its default, so on a page that remembers one
@@ -1359,7 +1339,7 @@ export async function resetToFourViews(): Promise<void> {
  * `docs/superpowers/notes/2026-10-17-code-history-web-tests.md`'s entry above `showFourViews` gives.
  *
  * **THE FOCUS ENDS IN THE λ VIEW**, on its first control: several files' cases start from "the λ view is the focused
- * view", and `+ view` adds beside it.
+ * view".
  */
 export async function showFourViews(): Promise<void> {
   const { page } = await import('vitest/browser')

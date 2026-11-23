@@ -86,8 +86,8 @@ describe('the view menu', () => {
   /**
    * **THE NEGATIVE DIRECTION OF `sourceAvailable`.** The split submenu offers *source* only when the
    * tree has no source leaf; `CHOICES` hardcodes `sourceAvailable: true`, so the test above pins only
-   * the positive. A source view offered twice is a tree with two source leaves, which `insertBeside` and
-   * `splitLeaf` both assume cannot happen.
+   * the positive. A source view offered twice is a tree with two source leaves, which `splitLeaf`
+   * assumes cannot happen.
    */
   it('does not offer source to split into when the tree already has one', () => {
     const { actions, menu } = build({ choices: () => ({ ...CHOICES, sourceAvailable: false }) })

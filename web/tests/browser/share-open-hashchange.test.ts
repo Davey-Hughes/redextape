@@ -21,6 +21,7 @@ import {
   until,
 } from './harness'
 import { workspaceName } from './share-open-hashchange-fixture'
+import { userSplit } from './user-event-fixture'
 
 /**
  * **A LINK PASTED INTO AN OPEN PAGE, AND ITS UNDO** — Plan 7 part 6a spec §5.3 and §5.5, heard as `hashchange`. The
@@ -72,10 +73,11 @@ async function paste(fragment: string, until_: () => boolean, what: string): Pro
 }
 
 beforeAll(async () => {
-  // WIDE ENOUGH TO ADD A THIRD VIEW TO HALF OF THE LINK'S ROW: the app refuses a `+ view` that leaves a view under
-  // `MIN_VIEW_PX` (`layout.ts`), and the link's λ shares half its row with `pane-2` beside the Debugger preset's
-  // inspector, where a third view was refused at 1280 and is not at 1600. The runner's default 896 px height is kept.
-  await page.viewport(1600, 896)
+  // WIDE ENOUGH TO SPLIT THE LINK'S λ VIEW: a split halves the view, the app refuses one that leaves a view under
+  // `MIN_VIEW_PX` (`layout.ts`), and the link's λ view shares half its row with `pane-2`. The width leaves the halves
+  // some room over that floor, so a page that gives the views a little less room still admits the split. The runner's
+  // default 896 px height is kept.
+  await page.viewport(1700, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => stateIdle() && readout() === 3, 'the first compile')
@@ -83,13 +85,8 @@ beforeAll(async () => {
   document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
   await until(() => shows('lambda-0') !== bindingKey('lambda', 'source'), 'the copy')
   copy = shows('lambda-0')
-  const before = new Set(leaves())
-  await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-  await userEvent.click(
-    document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${copy}"]`) as HTMLButtonElement,
-  )
-  await until(() => leaves().some((l) => !before.has(l)), 'the view of the copy')
-  copyLeaf = leaves().find((l) => !before.has(l)) ?? ''
+  copyLeaf = (await userSplit('lambda-0', 'same')) ?? ''
+  expect(noticeText(), 'the split of the λ view was refused').toBe('view added — λ · copy 1')
   await userEvent.click(
     document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-title') as HTMLButtonElement,
   )
@@ -166,14 +163,9 @@ describe('a whole link pasted into an open page', () => {
     // open put `pane-2` on the page already, so a wait on it would let this open land in the middle of the gesture.
     expect(view.state.doc.toString()).toBe(OTHER)
     await paste(await encodeLink(LINK), () => view.state.doc.toString() === LINKED, 'the open')
-    const before = new Set(leaves())
-    await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    await userEvent.click(
-      document.querySelector<HTMLButtonElement>(
-        `#new-view-menu button[data-binding="${bindingKey('lambda', 'source')}"]`,
-      ) as HTMLButtonElement,
-    )
-    await until(() => leaves().some((l) => !before.has(l)), 'the view')
+    const added = await userSplit('lambda-0', bindingKey('lambda', 'source'))
+    expect(noticeText(), 'the split of the link’s λ view was refused').not.toMatch(/^no room to split /)
+    expect(added, 'the split added no view under an id of its own').not.toBeNull()
     expect(leaves().filter((l) => l === 'pane-2')).toHaveLength(1)
   })
 

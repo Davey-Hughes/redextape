@@ -15,8 +15,8 @@ function splitVia(leaf: string, dir: 'row' | 'column', pick: string): void {
 }
 
 beforeAll(async () => {
-  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split that
+  // leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready

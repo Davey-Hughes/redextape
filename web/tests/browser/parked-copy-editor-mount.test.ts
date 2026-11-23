@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { claim, editorsOf, focusInPage, host, mountAt, mounted, titleText, until } from './harness'
-import { clickToggle } from './user-event-fixture'
+import { clickToggle, userSplit } from './user-event-fixture'
 
 /**
  * A PARKED VIEW THAT COMES BACK SHOWING A COPY NO VIEW HOLDS AN EDITOR FOR — the view layouts spec §5.5.
@@ -19,7 +19,7 @@ import { clickToggle } from './user-event-fixture'
  * **A FILE OF ITS OWN**, beside `parked-copy-editor.test.ts`, which holds §5.5's other defect: this scenario starts
  * from all four views on the program, with nothing remembered.
  *
- * The toggles, `+ view` and `✕` are pressed with `userEvent`, as a user presses them; *edit a copy* is `.click()`,
+ * The toggles, the split and `✕` are pressed with `userEvent`, as a user presses them; *edit a copy* is `.click()`,
  * since its item is in a menu the case does not open.
  */
 
@@ -53,14 +53,8 @@ describe('a parked view of a TM copy whose other view, holding the editor, was c
     await clickToggle('lambda')
     await clickToggle('rxm')
     expect(mounted(), 'precondition: the source beside the TM view').toEqual(['source', 'tm-0'])
-    host('tm-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
-    await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    const item = (): HTMLButtonElement | null =>
-      document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${copy}"]`)
-    await until(() => item() !== null, '+ view’s item for the copy')
-    await userEvent.click(item() as HTMLButtonElement)
-    const second = mounted().find((id) => id !== 'source' && id !== 'tm-0')
-    if (second === undefined) throw new Error('+ view added no second view of the copy')
+    const second = await userSplit('tm-0', 'same')
+    if (second === null) throw new Error('the split added no second view of the copy')
     await until(() => titleText(second) === 'TM · copy 1', 'the second view of the copy')
     expect(editorsOf('tm-0'), 'precondition: the editor stays in the first view').toBe(1)
     expect(editorsOf(second), 'precondition: the second view holds no editor').toBe(0)

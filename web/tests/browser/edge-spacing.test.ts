@@ -426,7 +426,7 @@ describe('a panel header’s rules', () => {
  * Every header button that opens a popover, by id: the menus `index.html` declares, and `copies ▾`'s list, which
  * `buffer-list.ts` builds beside its button.
  */
-const HEADER_MENUS = ['workspace', 'new-view', 'buffers', 'examples', 'share', 'about', 'settings'] as const
+const HEADER_MENUS = ['workspace', 'buffers', 'examples', 'share', 'about', 'settings'] as const
 
 /** `HEADER_MENUS` is kept by hand, so a menu added to the header later would go unmeasured unless held to the header. */
 describe('the header menus measured', () => {
@@ -549,7 +549,7 @@ async function settingsFillsRightward(): Promise<boolean> {
 }
 
 /** The window widths scanned for settings opening rightward, and the step between them. */
-const RIGHTWARD_SCAN = { from: 330, to: 450, step: 2 } as const
+const RIGHTWARD_SCAN = { from: 240, to: 360, step: 2 } as const
 
 /**
  * SETTINGS OPENED RIGHTWARD, its button wrapped too far left to open leftward, in Instrument: its text is in Inter,
@@ -610,9 +610,8 @@ async function gapBesideButtonWithoutGutter(id: string): Promise<number | null> 
 
 /** Each menu that takes a gutter on the side it grows towards, and the window widths scanned for it, 1 px apart. */
 const GUTTER_SCANS = [
-  ['about', 296, 316],
-  ['new-view', 392, 416],
-  ['buffers', 392, 416],
+  ['about', 200, 220],
+  ['buffers', 306, 330],
 ] as const
 
 /**

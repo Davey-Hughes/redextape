@@ -11,6 +11,7 @@ import {
   mounted,
   SHELL,
   selectedTab,
+  splitVia,
   stageTab,
   stateIdle,
   until,
@@ -28,8 +29,8 @@ describe('stage', () => {
   let treeBeforeStage: unknown
 
   beforeAll(async () => {
-    // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-    // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+    // WIDE ENOUGH FOR ITS SPLIT: in the runner's default 414 px window a split of a view leaves halves under
+    // `MIN_VIEW_PX` (`layout.ts`), which the app refuses. The default's 896 px height is kept.
     await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     const view: EditorView = await (await import('../../src/main')).ready
@@ -255,19 +256,18 @@ describe('stage', () => {
     await until(() => lambdaMark('linked') !== null, 'x + 2 marked')
     expect(linkStatus()).not.toContain('λ')
 
-    // TWO λ VIEWS: `+ view` shows the one it creates, and the focus moving into its term marks it active;
-    // then the stage goes back to `lambda-0`, and the active view is the one off the page.
-    const binding = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.dataset.binding
-    expect(binding, 'lambda-0 names no binding to duplicate').toBeDefined()
+    // TWO λ VIEWS: the second is split off `lambda-0` in tiles, since the Stage offers no split, and its tab is
+    // selected back on the Stage; the focus moving into its term marks it active. Then the stage goes back to
+    // `lambda-0`, and the active view is the one off the page.
     const before = tabs().map((t) => t.dataset.leaf)
-    document.querySelector<HTMLButtonElement>('#new-view')?.click()
-    const item = document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${binding}"]`)
-    expect(item, '+ view offers no second view of the program’s λ leg').not.toBeNull()
-    item?.click()
+    clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
+    splitVia('lambda-0', 'row', 'same')
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
     const created = tabs()
       .map((t) => t.dataset.leaf)
       .find((id) => !before.includes(id))
-    expect(created, '+ view added no tab').toBeDefined()
+    expect(created, 'the split added no tab').toBeDefined()
+    stageTab(created as string).click()
     expect(mounted()).toEqual([created])
     document.querySelector<HTMLElement>(`[data-leaf="${created}"] .term`)?.focus()
     expect(

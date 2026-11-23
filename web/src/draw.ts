@@ -274,10 +274,10 @@ export function createDraw(deps: {
       // pane's own pair, which the split menu puts first; it is read here rather than remembered by the
       // pane for `PaneCollection`'s reason for reading bindings through the slot on every call — a
       // copy is a second place to be wrong.
-      // `!stage()` IS THE SPLIT REFUSAL: in Stage a split can never apply, because the stage draws ONE view over a
-      // tab strip and a split of it would be invisible — umbrella §4 rule 4's "removed where it can never apply in
-      // that view". `+ view` is what adds a view there (Plan 7 part 2 spec §5), in the app header. The source view,
-      // one editor with nothing to duplicate into (`splitLeaf`'s own doc), has no entry here: `applyLayout` refuses it.
+      // `!stage()` IS THE SPLIT REFUSAL: in Stage a split can never apply, because the stage draws ONE view over a tab
+      // strip and a split of it would be invisible — umbrella §4 rule 4's "removed where it can never apply in that
+      // view". On the Stage the toggles choose the tabs, and nothing adds a view beside the focused one. The source
+      // view, one editor with nothing to duplicate into (`splitLeaf`'s doc), has no entry: `applyLayout` refuses it.
       p.pane.setLayoutControls(leaves() > 1, !stage(), {
         options: pairs,
         sourceAvailable: canCreateSource,

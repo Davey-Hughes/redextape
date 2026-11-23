@@ -3,6 +3,7 @@ import {
   KIND_GLOSS,
   NARROW_WINDOW,
   NARROW_WINDOW_REM,
+  SWITCH_ROWS,
   shownSentence,
   toggleSentence,
   toggleTitle,
@@ -73,6 +74,16 @@ describe('the help page', () => {
     for (const clause of String(KIND_GLOSS.rxm).split(': ')) expect(help).toContain(clause)
   })
 
+  /** The workspace menu draws its `tiles`/`stage` row under that row's label, so a bold label sends a reader to it. */
+  it('names the toggles without the label of the workspace menu’s views row', () => {
+    const help = readRelative('../../help.html').replace(/\s+/g, ' ')
+    const sentence = help.match(/[^.]*choose which views are shown[^.]*/)?.[0] ?? ''
+    expect(sentence, 'the sentence that lists the toggles').toContain('<strong>clif</strong>')
+    const label = SWITCH_ROWS.find((r) => r.key === 'views')?.label
+    expect(label).toBe('views')
+    expect(sentence).not.toContain(`<strong>${label}</strong>`)
+  })
+
   it('holds each clause of the CLIF tooltip’s gloss', () => {
     const help = readRelative('../../help.html').replace(/\s+/g, ' ')
     expect(KIND_GLOSS.clif).not.toBeNull()
@@ -90,24 +101,25 @@ describe('shownSentence', () => {
 })
 
 /**
- * **THE WIDTH THAT HIDES THE TOGGLES IS WRITTEN THREE TIMES**, in a module, a stylesheet and a page, and neither of
+ * **THE WIDTH THAT MOVES THE TOGGLES IS WRITTEN THREE TIMES**, in a module, a stylesheet and a page, and neither of
  * the last two can import the first (`NARROW_WINDOW`'s doc). The last two are read as text here.
  */
 describe('the window too narrow for the views toggles', () => {
-  it('is one query in main.ts’s attribute and in the stylesheet’s rule', () => {
+  /** The rule keeps a group still in the header off the page, before `main.ts` has moved it into the workspace menu. */
+  it('is one query in main.ts and in the stylesheet’s rule', () => {
     expect(NARROW_WINDOW).toBe(`(max-width: ${NARROW_WINDOW_REM}rem)`)
     const rules = [
       ...readRelative('../../src/style.css').matchAll(
-        /@media ([^{]+?) \{\s*\.views-shown \{\s*display: none;\s*\}\s*\}/g,
+        /@media ([^{]+?) \{\s*\.bar > \.views-shown \{\s*display: none;\s*\}\s*\}/g,
       ),
     ].map(([, query]) => query)
-    expect(rules, 'the media rule that hides .views-shown').toEqual([NARROW_WINDOW])
+    expect(rules, 'the media rule that keeps a .views-shown still in the header off the page').toEqual([NARROW_WINDOW])
   })
 
   /** A rem is 16 px at a browser's default text size, which is the size the page gives the width at. */
   it('is the width the help page gives a reader, in pixels', () => {
     expect(readRelative('../../help.html').replace(/\s+/g, ' ')).toContain(
-      `A window about ${NARROW_WINDOW_REM * 16} px wide or narrower, at the browser's usual text size, has no room for the buttons;`,
+      `A window about ${NARROW_WINDOW_REM * 16} px wide or narrower, at the browser's usual text size, has no room for the buttons; the workspace menu holds them there, in its <strong>show</strong> row.`,
     )
   })
 })

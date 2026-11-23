@@ -72,8 +72,8 @@ describe('rebinding a forked λ pane through the binding selector', () => {
   // ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: ES module imports are cached, so
   // `main()` runs once per page and Vitest gives each test FILE its own page.
   beforeAll(async () => {
-    // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-    // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+    // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split that
+    // leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
     await page.viewport(1280, 896)
     document.body.innerHTML = SHELL
     view = await (await import('../../src/main')).ready

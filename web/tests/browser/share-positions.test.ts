@@ -4,9 +4,9 @@ import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import { encodeLink, type Positions } from '../../src/share-link'
 import { MAX_LINK_CONTINUES } from '../../src/share-positions'
-import { bindingKey } from '../../src/view-header'
 import { serializeWorkspace } from '../../src/workspace'
 import { fourViewWorkspace, noticeText, pressable, SHELL, stateIdle, stepTextOf, undoButton, until } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * **A LINK'S POSITIONS, IN THE APP** — Plan 7 part 6a spec §5.4 and §8's positions row, on the real session worker:
@@ -103,8 +103,8 @@ async function open(
 }
 
 beforeAll(async () => {
-  // WIDE ENOUGH FOR ITS ADDS: at the runner's default 414 px a view is 201 px wide, and the app refuses a split or a
-  // `+ view` that leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
+  // WIDE ENOUGH FOR ITS SPLIT: at the runner's default 414 px a view is 201 px wide, and the app refuses a split that
+  // leaves a view under `MIN_VIEW_PX` (`layout.ts`). The default's 896 px height is kept.
   await page.viewport(1280, 896)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
@@ -206,12 +206,7 @@ describe("fact(12)'s λ at 17,000", () => {
     expect(stepTextOf('lambda-0')).toContain('— going to step 17,000 from the link')
     // ANOTHER GESTURE'S NOTICE TAKES THE OPEN'S OFF THE LINE, WITHDRAWING NOTHING.
     if (n === 3) {
-      await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-      await userEvent.click(
-        document.querySelector<HTMLButtonElement>(
-          `#new-view-menu button[data-binding="${bindingKey('rxm', 'source')}"]`,
-        ) as HTMLButtonElement,
-      )
+      await userSplit('rxm-0', 'same')
       await until(() => noticeText().startsWith('view added'), 'the view')
       expect(undoButton()).toBeNull()
     }

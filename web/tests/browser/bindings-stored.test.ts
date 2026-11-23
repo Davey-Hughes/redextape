@@ -16,6 +16,7 @@ import {
   titleText,
   until,
 } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * WHICH VIEW SHOWS WHICH COPY, AS STORAGE HAS IT, AFTER A GESTURE THAT BUILDS OR DROPS A VIEW.
@@ -33,9 +34,9 @@ import {
  * **A RELOAD IS NOT DRIVEN HERE**: a file has one mount (`buffer-restore.test.ts` has why), and what a reload reads is
  * the stored value these cases hold.
  *
- * **THE GESTURE EACH CASE IS ABOUT IS MADE WITH THE POINTER**: a `✕`, a toggle, *reset preset*, `+ view` and a pick in
- * a title, each a press as a user makes one (`press`). The copy a case starts from, and the page put back before
- * each, are arranged with `.click()`.
+ * **THE GESTURE EACH CASE IS ABOUT IS MADE WITH THE POINTER**: a `✕`, a toggle, *reset preset*, a split and a pick in
+ * a title, each a press as a user makes one (`press`, and `userSplit` for the split). The copy a case starts from,
+ * and the page put back before each, are arranged with `.click()`.
  */
 
 const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
@@ -133,15 +134,11 @@ describe('the stored bindings', () => {
     expect(storedBindings(), 'a reload would put the new view on the parked view’s copy').toEqual({})
   })
 
-  it('gain a view that `+ view` adds on a copy', async () => {
+  it('gain a view that a split adds on a copy', async () => {
     const { session, onCopy } = await copyIn('lambda-0')
 
-    host('lambda-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
-    const before = new Set(mounted())
-    await press('#new-view')
-    await press(`#new-view-menu button[data-binding="${bindingKey('lambda', session)}"]`)
-    const second = mounted().find((id) => !before.has(id))
-    if (second === undefined) throw new Error('+ view added no second view of the copy')
+    const second = await userSplit('lambda-0', 'same')
+    if (second === null) throw new Error('the split added no second view of the copy')
     expect(titleText(second), 'precondition: the new view shows the copy').toBe(onCopy)
     expect(storedBindings(), 'a reload would put the added view on the program').toEqual({
       'lambda-0': session,

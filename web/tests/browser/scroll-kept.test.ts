@@ -17,7 +17,7 @@ import {
   until,
   workspaceNameText,
 } from './harness'
-import { userPickWorkspace } from './user-event-fixture'
+import { userPickWorkspace, userSplit } from './user-event-fixture'
 
 /**
  * A REBUILD OF THE LAYOUT KEEPS WHERE EVERY VIEW WAS SCROLLED TO — the view layouts spec §5.2.
@@ -25,7 +25,7 @@ import { userPickWorkspace } from './user-event-fixture'
  * `layout-view.ts`'s `renderLayout` and `renderStage` take every view's host off the page and put back the ones they
  * show, which in tiles is every one the tree names and on the Stage the focused view's alone, and an element that
  * leaves the document comes back scrolled to its start. So without a hold, closing ONE view would reset the scroll
- * of every other, and so would a split, `+ view` and a preset. `pane-host.ts` records each scrolled element before a
+ * of every other, and so would a split and a preset. `pane-host.ts` records each scrolled element before a
  * rebuild and puts it back after.
  *
  * **THREE SCROLLERS ARE HELD TO IT, EACH ONE OF A KIND**: the TM view's rule table, a box inside a view, with the
@@ -156,10 +156,11 @@ describe('a view’s scroll position, across a rebuild made by another view', ()
   it('is kept when a view is added', async () => {
     await armTiles()
     const before = document.querySelectorAll('#views [data-leaf]').length
-    await userEvent.click(document.querySelector('#new-view') as HTMLElement)
-    await userEvent.click(document.querySelector('#new-view-menu button') as HTMLElement)
-    expect(document.querySelectorAll('#views [data-leaf]').length, '+ view added nothing').toBe(before + 1)
-    heldTiles('adding a view')
+    await userSplit('rxm-0', 'same')
+    expect(document.querySelectorAll('#views [data-leaf]').length, 'the split of the rxm view added nothing').toBe(
+      before + 1,
+    )
+    heldTiles('splitting the rxm view')
   })
 
   // THE TABLE AND THE EDITOR ALONE: the Debugger preset draws the views narrower and shorter, and the TM view's own

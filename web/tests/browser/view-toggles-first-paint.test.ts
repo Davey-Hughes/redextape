@@ -8,10 +8,10 @@ import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
  * THE `views` TOGGLES HOLD THEIR PLACE FROM THE FIRST PAINT — the view layouts spec §6. `view-toggle-markup.ts` writes
  * them into the page as it is built, and `app-header.ts`'s `viewToggles` adopts them.
  *
- * Were they built after the wasm loads, in a header already on the page, `+ view`, `copies`, `examples` and `encoding`
- * would each move right by the group's width as it arrived.
+ * Were they built after the wasm loads, in a header already on the page, `copies`, `examples` and `encoding` would
+ * each move right by the group's width as it arrived.
  *
- * **WHAT IS HELD IS THE GROUP AND THE FOUR CONTROLS AFTER IT, THE `encoding` SELECT THE LAST**: where each starts,
+ * **WHAT IS HELD IS THE GROUP AND THE THREE CONTROLS AFTER IT, THE `encoding` SELECT THE LAST**: where each starts,
  * and how wide the group and each button in it is, in the page's markup alone and again once the app is up. The app
  * presses the toggles of the views it shows, so this also holds a pressed toggle to the size of one that is not.
  *
@@ -20,12 +20,12 @@ import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
  * 1280 px the filled header keeps to one row because `style.css` narrows Terminal's column gap over 30rem up to
  * 85rem (`terminal-header-gap.test.ts` holds the gap, `clif-header.test.ts` the row).
  *
- * **IN A WINDOW 40rem WIDE OR NARROWER THE GROUP IS NOT DRAWN, BEFORE THE APP IS UP AS AFTER.** `main.ts` hides it
- * there with an attribute, which is not set until it runs; `style.css` has a media rule for the paint before that,
- * without which the header at 390 px would shrink when the attribute is set. **WHAT IS HELD THERE IS WHAT KEEPS THE
- * GROUP OFF THE PAGE**: its computed `display` with no attribute set, before the app is up, and the attribute after.
- * **NOT THE HEADER'S HEIGHT AT 390 px**: `main.ts` fills `encoding` and `#appearance` there as at any width, and with
- * the app up Terminal's header is taller than in the markup alone.
+ * **IN A WINDOW 40rem WIDE OR NARROWER THE GROUP IS NOT DRAWN IN THE HEADER, BEFORE THE APP IS UP AS AFTER.**
+ * `main.ts` moves it into the workspace menu there, which it does not do until it runs; `style.css` has a media rule
+ * for the paint before that, without which the header at 390 px would shrink when the group left it. **WHAT IS HELD
+ * THERE IS WHAT KEEPS THE GROUP OFF THE HEADER**: its computed `display` there before the app is up, and its place in
+ * the workspace menu after. **NOT THE HEADER'S HEIGHT AT 390 px**: `main.ts` fills `encoding` and `#appearance` there
+ * as at any width, and with the app up Terminal's header is taller than in the markup alone.
  *
  * The page's markup is `SHELL`, which `tests/node/harness.test.ts` holds to `index.html`. **ONE MOUNT, SO EVERY READING
  * OF THE MARKUP ALONE IS TAKEN BEFORE IT, IN A HOOK OF ITS OWN**, and the cases that assert on one read what the hook
@@ -34,14 +34,13 @@ import { chooseStyle, frames, pressed, queryEl, SHELL, until } from './harness'
  */
 
 const tenth = (n: number): number => Math.round(n * 10) / 10
-/** Where the group and the four controls after it start, and how wide the group and each of its buttons is. */
+/** Where the group and the three controls after it start, and how wide the group and each of its buttons is. */
 const places = (): Record<string, number | number[]> => ({
   group: tenth(queryEl('#views-shown').getBoundingClientRect().left),
   groupWidth: tenth(queryEl('#views-shown').getBoundingClientRect().width),
   toggles: [...document.querySelectorAll<HTMLElement>('#views-shown button')].map((b) =>
     tenth(b.getBoundingClientRect().width),
   ),
-  newView: tenth(queryEl('#new-view').getBoundingClientRect().left),
   copies: tenth(queryEl('#buffers').getBoundingClientRect().left),
   examples: tenth(queryEl('#examples').getBoundingClientRect().left),
   encoding: tenth(queryEl('label.encoding').getBoundingClientRect().left),
@@ -112,9 +111,12 @@ describe('the views toggles, once the app is up', () => {
     expect(places(), 'the app moved or resized what the markup had placed').toEqual(markup.wide.get(style))
   })
 
-  it('are hidden by the attribute in a narrow window', async () => {
+  it('are in the workspace menu in a narrow window, and not in the header', async () => {
     await page.viewport(390, 844)
-    await until(() => queryEl('#views-shown').hasAttribute('hidden'), 'the attribute to follow the window to 390 px')
-    expect(queryEl('#views-shown').hidden).toBe(true)
+    await until(
+      () => queryEl('#views-shown').parentElement === queryEl('#workspace-menu'),
+      'the group to follow the window to 390 px',
+    )
+    expect(document.querySelector('header.bar > .views-shown'), 'a group in the header').toBeNull()
   })
 })

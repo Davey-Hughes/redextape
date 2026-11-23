@@ -11,6 +11,7 @@ import {
   press,
   resetToFourViews,
   SHELL,
+  splitVia,
   stateIdle,
   termEditorsIn,
   titleText,
@@ -72,9 +73,9 @@ type Parked = {
 }
 
 /**
- * Show the source beside `leg`'s view, make a copy there, add a second view of it and move the copy's editor onto the
- * second; then show all four views again, by two switches. Neither arrangement they pass through names the second
- * view, so it is parked, editor and all.
+ * Show the source beside `leg`'s view, make a copy there, split a second view of it off that view and move the copy's
+ * editor onto the second; then show all four views again, by two switches. Neither arrangement they pass through names
+ * the second view, so it is parked, editor and all.
  */
 async function parkTheHolder(leg: Leg): Promise<Parked> {
   expect(mounted(), 'precondition: all four views').toEqual(FOUR)
@@ -90,12 +91,10 @@ async function parkTheHolder(leg: Leg): Promise<Parked> {
   const onCopy = `${leg.name} · copy ${number}`
   expect(titleText(leg.view), 'precondition: the view shows the copy its title names').toBe(onCopy)
 
-  host(leg.view)?.querySelector<HTMLElement>('button.view-title')?.focus()
   const before = new Set(mounted())
-  document.querySelector<HTMLButtonElement>('#new-view')?.click()
-  document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${binding}"]`)?.click()
+  splitVia(leg.view, 'row', 'same')
   const second = mounted().find((id) => !before.has(id))
-  if (second === undefined) throw new Error('+ view added no second view of the copy')
+  if (second === undefined) throw new Error('the split added no second view of the copy')
   await until(() => titleText(second) === onCopy, 'the second view of the copy')
   const holder = host(second)
   if (holder === null) throw new Error('the second view has no host')

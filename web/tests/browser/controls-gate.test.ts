@@ -88,9 +88,9 @@ const isGlyph = (s: string) => !/[\p{L}\p{N}]/u.test(s)
  * A symbol a reader would have to name aloud, inside a name that otherwise reads as words — `◐system`,
  * where a decorative glyph sits in a text node beside the word instead of being hidden from the name.
  *
- * **`+` IS AN EXCEPTION, AND IT IS THE DESIGN'S OWN**: `+ view` reads as "plus view", which is the
- * button. Every other symbol this app draws as decoration is an `icons.ts` SVG, which carries `aria-hidden`
- * and so never reaches a name at all.
+ * **`+` IS AN EXCEPTION, AND IT IS PROGRAM TEXT, AS `=` IS BELOW**: the example titled `let x = 40; x + 2` names
+ * itself by the program, whose `+` a reader says as "plus". Every other symbol this app draws as decoration is an
+ * `icons.ts` SVG, which carries `aria-hidden` and so never reaches a name at all.
  *
  * **THE CHECK IS BOUNDED TO `\p{So}` AND `\p{Sm}`, AND NAMING WHAT THAT EXCLUDES IS THE POINT OF THIS
  * PARAGRAPH.** Those two are Unicode's symbol-other and symbol-math categories; `·` (U+00B7, `Po`) and
@@ -240,17 +240,25 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
   it('with each header menu open', () => {
     const openers = [...document.querySelectorAll<HTMLButtonElement>('header.bar button[aria-controls]')]
     expect(openers.map((b) => b.id)).toEqual(
-      expect.arrayContaining(['workspace', 'new-view', 'buffers', 'examples', 'share', 'settings']),
+      expect.arrayContaining(['workspace', 'buffers', 'examples', 'share', 'settings']),
     )
     const walked: string[] = []
+    let inWorkspaceMenu: HTMLElement[] = []
     for (const button of openers) {
       button.click()
       const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
       // A MENU THAT NEVER OPENED IS A MENU WHOSE CONTROLS WERE NEVER WALKED — and a header button that opens nothing.
       expect(menu?.matches(':popover-open'), `${name}: #${button.id} opened nothing`).toBe(true)
-      walked.push(...check(`${name}: #${button.id}`).map((el) => el.id))
+      const read = check(`${name}: #${button.id}`)
+      walked.push(...read.map((el) => el.id))
+      if (button.id === 'workspace') inWorkspaceMenu = read
       if (menu?.matches(':popover-open')) menu.hidePopover()
     }
+    // THE `views` TOGGLES ARE WALKED IN THE WORKSPACE MENU, where this window's width puts them; they have no ids.
+    const toggles = [...document.querySelectorAll<HTMLElement>('#views-shown button')]
+    expect(toggles).toHaveLength(HEADER_ORDER.length)
+    for (const t of toggles)
+      expect(inWorkspaceMenu, `${name}: the workspace menu's walk skipped the ${t.textContent} toggle`).toContain(t)
     // A FORM CONTROL THAT IS NOT A SELECT IS WALKED: the settings menu's checkbox, which `button, select` alone would
     // not reach, and the share popover's field.
     expect(walked).toContain('format-on-blur')
@@ -447,10 +455,10 @@ describe('every control in Explorer, in the settings menu and the import dialog'
 })
 
 /**
- * THE `views` TOGGLES, WHICH THE WALKS ABOVE NEVER MEET (the view layouts spec §6): this file runs in the runner's
- * 414 px window, and `main.ts` hides the toggles in a window 40rem wide or narrower. So the window is widened for
- * this one group, and **THE TOGGLES ARE ASSERTED TO BE AMONG WHAT WAS WALKED**, since a walk that skipped them would
- * pass as the ones above do.
+ * THE `views` TOGGLES IN THE HEADER (the view layouts spec §6): this file runs in the runner's 414 px window, where
+ * `main.ts` puts the toggles in the workspace menu, and the walks above meet them there with that menu open. This group
+ * widens the window to meet them in the header, and **THE TOGGLES ARE ASSERTED TO BE AMONG WHAT WAS WALKED**, since a
+ * walk that skipped them would pass as the ones above do.
  */
 describe('every control in Explorer, in a window wide enough for the views toggles', () => {
   const toggles = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('#views-shown button')]

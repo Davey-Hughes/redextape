@@ -9,16 +9,16 @@ import { menuOf, moreOf, paneByLeaf, pick, SHELL, stateIdle, until, viewTitleOf 
 /**
  * A TM or rxm view showing a copy has the copy's editor, or a way to it: one editor per copy, in one view (spec
  * amendments 28 and 33). A view that comes to show a copy whose editor is mounted nowhere mounts one — by a pick from
- * another leg, a split, `+ view`, or the view that held it closing or leaving while another shows the copy — and a
- * view showing a copy whose editor another view holds offers *move the editor here*, which moves that editor.
+ * another leg, a split, or the view that held it closing or leaving while another shows the copy — and a view showing
+ * a copy whose editor another view holds offers *move the editor here*, which moves that editor.
  *
- * Every gesture is a real one: `userEvent` clicks on the title, the `⋯` menu, the `+ view` menu and `✕`.
+ * Every gesture is a real one: `userEvent` clicks on the title, the `⋯` menu and `✕`.
  *
  * ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives: `main()` runs once per page. Each test makes the copies
  * it needs from the program, so none depends on what the one before it left beyond the four views.
  *
- * **AND EACH TEST'S COPIES ARE DELETED AFTER IT** (`afterEach` below): the file makes nine copies, and with
- * `MAX_WARM_BUFFERS` at 8 the ninth would wait on a fork the cap refuses.
+ * **AND EACH TEST'S COPIES ARE DELETED AFTER IT** (`afterEach` below), so no test's fork waits on one the cap
+ * `MAX_WARM_BUFFERS` refuses, however many copies the tests before it made.
  */
 
 const SAMPLE = 'let x = 40; x + 2'
@@ -59,16 +59,6 @@ async function split(pane: HTMLElement, key: string): Promise<HTMLElement> {
   const pair = () => menuOf(moreOf(pane)).querySelector<HTMLButtonElement>(`button[data-binding="${key}"]`)
   await until(() => pair() !== null, 'the split’s pairs')
   await userEvent.click(pair() as HTMLButtonElement)
-  return made(before)
-}
-
-/** Add a view onto `key` through `+ view` with the pointer, and return it. */
-async function addView(key: string): Promise<HTMLElement> {
-  const before = new Set([...document.querySelectorAll<HTMLElement>('.pane')])
-  await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-  const item = () => document.querySelector<HTMLButtonElement>(`#new-view-menu button[data-binding="${key}"]`)
-  await until(() => item() !== null, 'the + view menu')
-  await userEvent.click(item() as HTMLButtonElement)
   return made(before)
 }
 
@@ -154,14 +144,6 @@ describe('a TM or rxm view that comes to show a copy whose editor is mounted now
     await until(() => editorOf(other) !== null, 'the copy’s editor in the split')
     expect(editorOf(other)?.state.doc.toString()).toBe(stored(sessionOf(key)))
     await close(other)
-  })
-
-  it('mounts one in a view added onto the copy with + view', async () => {
-    const key = await orphanCopy('tm-0', 'tm')
-    const added = await addView(key)
-    await until(() => editorOf(added) !== null, 'the copy’s editor in the added view')
-    expect(editorOf(added)?.state.doc.toString()).toBe(stored(sessionOf(key)))
-    await close(added)
   })
 
   it('mounts one in the view still showing the copy when the one holding it closes', async () => {

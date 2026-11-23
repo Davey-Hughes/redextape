@@ -492,10 +492,7 @@ describe("a link whose workspace's tree is past the bound", () => {
       node = { kind: 'split', dir: 'row', sizes: [0.5, 0.5], children: [node, lambda(i)] }
     return node
   }
-  /**
-   * `depth` splits deep down each split's second child, whose first child is a leaf, as `+ view` nested views until
-   * 2026-10-04.
-   */
+  /** `depth` splits deep down each split's second child, whose first child is a leaf. */
   const trailing = (depth: number): unknown => {
     let node: unknown = lambda(depth)
     for (let i = depth - 1; i >= 0; i--)

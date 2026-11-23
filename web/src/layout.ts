@@ -234,19 +234,13 @@ function hasSource(root: LayoutNode): boolean {
 }
 
 /**
- * Put a new leaf of `kind` right after the leaf `id`: as an equal share of `id`'s split when `share` is set and that
- * split runs `dir`, and otherwise in a new split of `dir` holding the two at `[0.5, 0.5]`.
+ * Put a new leaf of `kind` right after the leaf `id`, in a new split of `dir` holding the two at `[0.5, 0.5]`:
+ * `splitLeaf`'s body, once its subject passes.
  *
- * **`insertBeside`'s AND `splitLeaf`'s BODY, AND THE REFUSALS ARE THE TREE'S OWN INVARIANTS**: the leaf is in the
- * tree, at most one source leaf, since there is one editor for it to hold, and no id twice (`splitLeaf`'s own doc
- * has the argument for the last).
- *
- * **AN EQUAL SHARE KEEPS THE OTHERS' PROPORTIONS**: in a split of `n`, the new leaf takes `1/(n+1)` and each size
- * already there is multiplied by `n/(n+1)`. Sizes that summed to `1 + e` sum to `1 + e·n/(n+1)`, so a drift from 1
- * that `validate` allowed (`SIZE_EPSILON`) shrinks with each share and never grows.
+ * **THE REFUSALS ARE THE TREE'S OWN INVARIANTS**: at most one source leaf, since there is one editor for it to hold,
+ * and no id twice (`splitLeaf`'s own doc has the argument for the last).
  */
-function insert(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind, share: boolean): LayoutNode {
-  if (findLeaf(root, id) === null) throw new Error(`cannot insert beside a leaf that is not in the tree: ${id}`)
+function insert(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
   if (kind === 'source' && hasSource(root)) throw new Error('the tree already has a source leaf')
   if (findLeaf(root, newId) !== null) throw new Error(`cannot split into an id already in the tree: ${newId}`)
 
@@ -256,40 +250,9 @@ function insert(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: Pan
       if (node.id !== id) return node
       return { kind: 'split', dir, sizes: [0.5, 0.5], children: [node, fresh] }
     }
-    const at = share && node.dir === dir ? node.children.findIndex((c) => c.kind === 'leaf' && c.id === id) : -1
-    if (at === -1) return { ...node, children: node.children.map(rewrite) }
-    const n = node.children.length
-    const kept = node.sizes.map((s) => (s * n) / (n + 1))
-    return {
-      ...node,
-      children: [...node.children.slice(0, at + 1), fresh, ...node.children.slice(at + 1)],
-      sizes: [...kept.slice(0, at + 1), 1 / (n + 1), ...kept.slice(at + 1)],
-    }
+    return { ...node, children: node.children.map(rewrite) }
   }
   return rewrite(root)
-}
-
-/**
- * Put a new leaf of `kind` beside the leaf `id`: into `id`'s split as an equal share where that split runs `dir`, and
- * otherwise in a new split of `dir` holding the two at `[0.5, 0.5]` — `splitLeaf` without its refusal of the source
- * leaf as the SUBJECT, and without its halving.
- *
- * **`+ view` IS WHY THIS EXISTS** (Plan 7 part 2 spec §5). It adds the pick beside the focused view, and the
- * focused view can be the source view — or the only view, when every other has been closed. `splitLeaf`'s
- * subject refusal is about the `⋯` menu's split items, which duplicate the view they are chosen on, and there
- * is one editor, so the source view offers none; that argument says nothing about putting a DIFFERENT view
- * next to it. The other refusals are the tree's own invariants and stay: at most one source leaf, since there
- * is one editor, and no id twice (`splitLeaf`'s own doc has the argument for that one).
- *
- * **IT TAKES AN EQUAL SHARE OF THE ROW, AND DOES NOT HALVE THE VIEW** (the user's decision, 2026-10-04). A new
- * view takes the focus, so wrapping each in a new split at `[0.5, 0.5]`, as a split does, would halve the view
- * the last press made and nest the tree one split deeper per press. The view joins the row, right after the one
- * it is added beside, and the views already there keep their proportions and shrink to make room — the source
- * view too, when it shares the row. A view whose split is not a row, or that is the whole tree, is wrapped as a
- * split wraps it. `addRefusal` below is what stops a share going under `MIN_VIEW_PX`.
- */
-export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
-  return insert(root, id, dir, newId, kind, true)
 }
 
 /**
@@ -327,18 +290,17 @@ export function insertBeside(root: LayoutNode, id: LeafId, dir: Dir, newId: Leaf
  * (`parseWorkspace` reads every stored tree through it), so this refusal keeps the tree unable to reach
  * that state in the first place rather than only detecting it after the fact.
  *
- * **ITS LAST TWO REFUSALS ARE `insertBeside`'s**, whose body it shares once the subject passes; the table
- * above still describes what a caller of either sees.
+ * **ITS LAST TWO REFUSALS ARE `insert`'s**, its body once the subject passes.
  *
- * **A SPLIT HALVES THE VIEW IT IS CHOSEN ON, WHERE `+ view` TAKES AN EQUAL SHARE OF THE ROW**: a split is
- * this view in two, and its `⋯` menu says so. This function refuses nothing for size: `pane-host.ts`'s `admit` asks
- * `addRefusal` first, on width for either direction and on height too for a column.
+ * **A SPLIT HALVES THE VIEW IT IS CHOSEN ON**: a split is this view in two, and its `⋯` menu says so. This function
+ * refuses nothing for size: `pane-host.ts`'s `admit` asks `addRefusal` first, on width for either direction and on
+ * height too for a column.
  */
 export function splitLeaf(root: LayoutNode, id: LeafId, dir: Dir, newId: LeafId, kind: PaneKind): LayoutNode {
   const target = findLeaf(root, id)
   if (target === null) throw new Error(`cannot split a leaf that is not in the tree: ${id}`)
   if (target.pane === 'source') throw new Error('the source pane cannot be split: there is one editor to duplicate')
-  return insert(root, id, dir, newId, kind, false)
+  return insert(root, id, dir, newId, kind)
 }
 
 /**
@@ -437,11 +399,10 @@ function at(root: LayoutNode, path: number[]): LayoutNode {
  * divider a divider rather than a re-layout.
  *
  * **TWO NEIGHBOURS THAT CANNOT BOTH HOLD THE FLOOR DO NOT MOVE.** Where their shares together are under two floors the
- * clamp's bounds cross: the least it may move is more than the most. That is so from a row of 11 equal views, which
- * tiles can build in an area 1,880 px wide, the Stage at any width, and a stored layout can hold. Clamped anyway, the
- * first neighbour would go to the floor whichever way the divider was dragged, and from a row of 20 the second would
- * be left a share of nothing or less: a tree `parseTree` refuses, so the next load would throw the workspace away.
- * The tree is answered as it was given.
+ * clamp's bounds cross: the least it may move is more than the most. That is so from a row of 11 equal views, which a
+ * stored layout can hold. Clamped anyway, the first neighbour would go to the floor whichever way the divider was
+ * dragged, and from a row of 20 the second would be left a share of nothing or less: a tree `parseTree` refuses, so the
+ * next load would throw the workspace away. The tree is answered as it was given.
  */
 export function resize(root: LayoutNode, path: number[], index: number, delta: number): LayoutNode {
   const split = at(root, path)
@@ -501,15 +462,15 @@ export const SIZE_EPSILON = 1e-6
 const MAX_TREE_DEPTH = 64
 
 /**
- * The most leaves a tree may have; all four views' default arrangement has 4 (spec §5.3, amended 2026-10-01).
+ * The most leaves a tree may have; all four views' default arrangement has 4 (spec §5.3).
  *
- * **A LINK CAN BRING TREES THE STORE NEVER HAD**: 400 λ views took 4.4 s to open, and what a link brings is stored,
- * so every later load would build it again.
+ * **A LINK CAN BRING TREES THE STORE NEVER HAD**: a tree of hundreds of views is slow to open, and what a link brings
+ * is stored, so every later load would build it again.
  *
- * **THE APP STOPS HERE.** `pane-host.ts`'s `admit` refuses an add that would make a 65th live view, from `+ view` and
- * from a split, in tiles and on the Stage: the views of the tree on screen, and with them the ones a remembered
- * arrangement keeps off it (`arrangements.ts`'s `liveLeaves`). A tree past the bound falls back to the default at the
- * next load. Exported so that nothing which holds the bound or says the number copies it.
+ * **THE APP STOPS HERE.** `pane-host.ts`'s `admit` refuses a split that would make a 65th live view: the views of the
+ * tree on screen, and with them the ones a remembered arrangement keeps off it (`arrangements.ts`'s `liveLeaves`). A
+ * tree past the bound falls back to the default at the next load. Exported so that nothing which holds the bound or
+ * says the number copies it.
  */
 export const MAX_TREE_LEAVES = 64
 
@@ -519,7 +480,7 @@ export const MAX_TREE_LEAVES = 64
  *
  * **IT IS THIS MODULE'S OWN REFUSAL, AND NOT WHAT HOLDS THE APP'S ADDS TO THE BOUND.** `pane-host.ts`'s `admit` counts
  * every live view, refuses at the bound, and only then asks `addRefusal`; a tree's leaves are all live views, so a
- * tree this is true of has been refused by then, in tiles and on the Stage. It answers for a caller that hands
+ * tree this is true of has been refused by then. It answers for a caller that hands
  * `addRefusal` a tree and nothing else, which `tests/node/layout.test.ts` does.
  */
 export function holdsMostLeaves(root: LayoutNode): boolean {
@@ -527,19 +488,17 @@ export function holdsMostLeaves(root: LayoutNode): boolean {
 }
 
 /**
- * The narrowest a view an add makes, or shrinks, may be, in CSS pixels (the user's decision, 2026-10-04) — and, for a
- * split down, the shortest, since a split down divides height.
+ * The narrowest a view an add makes, or shrinks, may be, in CSS pixels — and, for a split down, the shortest, since a
+ * split down divides height. Why: `docs/superpowers/notes/2026-10-17-code-history-web-src.md`, under `MIN_VIEW_PX`.
  *
  * **PIXELS, WHERE `MIN_PANE_FRACTION` IS A FRACTION, AND THIS MODULE STILL MEASURES NOTHING.** What a view can show
  * is a matter of pixels and not of its share: no floor on a fraction of a split refuses a half, and a view halved
  * again and again goes to 0 px. `addRefusal` is handed the tiled area's size and the dividers' width by its caller,
  * which makes the one measurement (`pane-host.ts`'s `admit`), so the arithmetic here stays a value.
  *
- * **IT GATES THE ADD GESTURES ONLY, AND ONLY IN TILES**: a divider drag keeps `MIN_PANE_FRACTION`, and a window made
- * smaller, a switch that opens the inspector (the Debugger and Stage presets, or the readout switch), a stored layout,
- * a link's layout or an undo can still show a view under it. **THE STAGE IS EXEMPT** (the user's decision, 2026-10-04):
- * a view added there is a tab and nothing on screen shrinks, so `pane-host.ts`'s `admit` holds it to the bound on live
- * views alone, and switching from the Stage to tiles can show what it added under the floor.
+ * **IT GATES THE ADD GESTURES ONLY, WHICH ARE IN TILES ALONE**, since the Stage offers no split (`draw.ts`): a divider
+ * drag keeps `MIN_PANE_FRACTION`, and a window made smaller, a switch that opens the inspector (the Debugger and Stage
+ * presets, or the readout switch), a stored layout, a link's layout or an undo can still show a view under it.
  */
 export const MIN_VIEW_PX = 160
 
@@ -557,7 +516,7 @@ export type Axis = keyof Extent
  * of 0 and no minimum, and a divider of fixed width sits between each pair, so a child gets its size's share of the
  * split's extent less its dividers — and nothing, when the dividers alone overrun it. **IT DRAWS A TREE THAT IS NOT
  * ON THE PAGE YET** — the one an add would build — which is why it is arithmetic: in tiles every view of the current
- * tree measures what this says, and the Stage, which mounts one view, is not asked (`pane-host.ts`'s `admit`).
+ * tree measures what this says, and the Stage, which offers no split, never asks it.
  */
 export function leafExtents(root: LayoutNode, area: Extent, gap: number): Map<LeafId, Extent> {
   const out = new Map<LeafId, Extent>()
@@ -590,24 +549,22 @@ export type AddRefusal = 'full' | 'narrow' | 'short'
  * view it makes narrower, would come out under `MIN_VIEW_PX` wide; and, where `divides` is `'height'` (a split down),
  * `'short'` when either half would come out under it tall.
  *
- * **WIDTH IS HELD FOR EVERY ADD, WHATEVER IT DIVIDES** (the user's decision, 2026-10-04: "narrower than 160 px").
- * Held only along the axis the add divides, a split down of a view already under 160 px wide would make a second view
- * as narrow, unrefused. **HEIGHT IS HELD FOR A SPLIT DOWN ALONE**: it is the one add that makes a view shorter. Width
- * is asked first, so a split down short of both is said as narrow.
+ * **WIDTH IS HELD FOR EVERY ADD, WHATEVER IT DIVIDES.** Held only along the axis the add divides, a split down of a
+ * view already under 160 px wide would make a second view as narrow, unrefused. **HEIGHT IS HELD FOR A SPLIT DOWN
+ * ALONE**: it is the one add that makes a view shorter. Width is asked first, so a split down short of both is said as
+ * narrow.
  *
- * **`build` IS THE ADD ITSELF** — the caller's own `insertBeside` or `splitLeaf` call, handed the new leaf's id — so
- * what is checked is what would be built, and an equal share and a halving are answered by the one function. It is
- * handed an id the tree does not hold, so a refused add mints none.
+ * **`build` IS THE ADD ITSELF** — the caller's own `splitLeaf` call, handed the new leaf's id — so what is checked is
+ * what would be built. It is handed an id the tree does not hold, so a refused add mints none.
  *
- * **ONLY A VIEW THE ADD MADE, OR MADE SMALLER ALONG THE AXIS ASKED, IS COUNTED** — any such view, not only the one the
- * add is beside: `+ view` shrinks every view in the row. A view already under the floor that the add leaves alone —
- * dragged there, or drawn there by a narrower window — does not stop it, so a small view somewhere else never blocks an
- * add with room.
+ * **ONLY A VIEW THE ADD MADE, OR MADE SMALLER ALONG THE AXIS ASKED, IS COUNTED**: a split's two halves. A view already
+ * under the floor that the add leaves alone — dragged there, or drawn there by a narrower window — does not stop it, so
+ * a small view somewhere else never blocks an add with room.
  *
  * **FULL BEFORE ROOM**: a wider window cannot make room under the leaf bound, so the notice names the remedy that
  * works. `'full'` is `holdsMostLeaves`' answer, whose doc has why no add the app makes is given it here.
  *
- * **TILES ONLY**: on the Stage nothing on screen shrinks, and `pane-host.ts`'s `admit` does not ask this.
+ * **TILES ONLY**: the Stage offers no split, so `pane-host.ts`'s `admit` never asks this there.
  */
 export function addRefusal(
   root: LayoutNode,
@@ -634,11 +591,11 @@ export function addRefusal(
 }
 
 /**
- * The largest number a leaf id may carry, as `leafNumber` reads it (spec §5.3, amended 2026-10-01): a number the leaf
- * counter can step past. `main.ts`'s `seedLeafCounter` sets the counter one past the largest number in the tree, and
- * from 2^53 on adding one no longer moves it, so after `pane-1e300` or `pane-9007199254740991` the second view added
- * would mint a duplicate id, and `insertBeside` would throw out of the click. The counter moves by one a view added, so
- * a billion is a billion views added.
+ * The largest number a leaf id may carry, as `leafNumber` reads it (spec §5.3): a number the leaf counter can step
+ * past. `main.ts`'s `seedLeafCounter` sets the counter one past the largest number in the tree, and from 2^53 on adding
+ * one no longer moves it, so after `pane-1e300` or `pane-9007199254740991` the second view added would mint a duplicate
+ * id, and `splitLeaf` would throw out of the click. The counter moves by one a view added, so a billion is a billion
+ * views added.
  */
 const MAX_LEAF_NUMBER = 1_000_000_000
 

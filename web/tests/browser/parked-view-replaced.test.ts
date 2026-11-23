@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves } from '../../src/layout'
 import { parseWorkspace } from '../../src/workspace'
-import { copyNames, editorsOf, host, mountAt, mounted, newLambdaViewItem, titleText, until } from './harness'
-import { clickToggle } from './user-event-fixture'
+import { copyNames, editorsOf, host, mountAt, mounted, titleText, until } from './harness'
+import { clickToggle, userSplit } from './user-event-fixture'
 
 /**
  * AN EDIT THAT REPLACES THE ARRANGEMENT A PARKED VIEW IS IN CLOSES THE VIEW — the view layouts spec §4.3 and §5.1.
@@ -21,7 +21,7 @@ import { clickToggle } from './user-event-fixture'
  * condition in its keep rule, the copies menu here would go on reading `1 view` for a view nothing could show again.
  * `one-id-two-kinds.test.ts` holds the same close where another arrangement still names the view's id.
  *
- * The toggle, `+ view`, its item and the `✕` are pressed with `userEvent`, as a user presses them; *edit a copy* is
+ * The toggle, the split and the `✕` are pressed with `userEvent`, as a user presses them; *edit a copy* is
  * `.click()`, since its item is in a menu the case does not open.
  */
 
@@ -57,12 +57,8 @@ describe('a parked view of a copy, in an arrangement an edit then replaces', () 
     // SOURCE, λ AND RXM, WITH A SECOND λ VIEW ONLY THIS ARRANGEMENT HOLDS, on a copy only that view shows.
     await clickToggle('tm')
     expect(mounted(), 'precondition: source, λ and rxm').toEqual(['source', 'lambda-0', 'rxm-0'])
-    host('lambda-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
-    await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
-    await userEvent.click(newLambdaViewItem() as HTMLButtonElement)
-    const second = mounted().find((id) => !FOUR.includes(id))
-    if (second === undefined) throw new Error('+ view added no second λ view')
+    const second = await userSplit('lambda-0', 'same')
+    if (second === null) throw new Error('the split added no second λ view')
     host(second)?.querySelector<HTMLButtonElement>('button.detach')?.click()
     await until(() => titleText(second) === 'λ · copy 1' && editorsOf(second) === 1, 'the copy and its editor')
     expect(copyNames(), 'precondition: one view shows the copy').toEqual(['λ copy 1 · 1 view'])

@@ -13,11 +13,11 @@ import {
   hostKind,
   mountAt,
   mounted,
-  newLambdaViewItem,
   resetToFourViews,
   titleText,
   until,
 } from './harness'
+import { userSplit } from './user-event-fixture'
 
 /**
  * A SWITCH DOES NOT DESTROY THE VIEW THAT HOLDS AN ID ANOTHER TREE NAMES AS ANOTHER KIND — the view layouts spec §5.4.
@@ -38,7 +38,7 @@ import {
  * **THE COPY'S VIEW IS RECOGNISED BY ITS ELEMENTS**, as `view-toggles.test.ts` recognises a view kept alive: a view
  * built again on the copy would have the title and the text, and other elements.
  *
- * The toggles, `+ view` and its item are pressed with `userEvent`, as a user presses them. The pick in the title and
+ * The toggles and the split are pressed with `userEvent`, as a user presses them. The pick in the title and
  * *edit a copy* are `.click()`: each is an item of a menu the case does not open.
  */
 
@@ -252,11 +252,11 @@ describe('a TM view picked in the rxm view’s title, showing a copy', () => {
   })
 
   /**
-   * **AN EDIT THAT REPLACES THE ARRANGEMENT A PARKED VIEW IS IN CLOSES THE VIEW, WHATEVER ELSE NAMES ITS ID.** `+ view`
-   * adds a λ view beside the source and the TM view, which is the combination the copy's view is parked in, so the
-   * tree it was left in is replaced by the edit (spec §4.3) and no tree holds the view. The tree for all four still
-   * names `rxm-0`, as an rxm view. Were `applyLayout` to keep a parked pane on its id alone, the copies menu would go
-   * on reading `TM copy 1 · 1 view` here, until the rxm toggle built an rxm view over it.
+   * **AN EDIT THAT REPLACES THE ARRANGEMENT A PARKED VIEW IS IN CLOSES THE VIEW, WHATEVER ELSE NAMES ITS ID.** A split
+   * of the TM view adds a λ view to the source and the TM view, which is the combination the copy's view is parked in,
+   * so the tree it was left in is replaced by the edit (spec §4.3) and no tree holds the view. The tree for all four
+   * still names `rxm-0`, as an rxm view. Were `applyLayout` to keep a parked pane on its id alone, the copies menu
+   * would go on reading `TM copy 1 · 1 view` here, until the rxm toggle built an rxm view over it.
    */
   it('is closed when an edit replaces the arrangement it is parked in, though another still names its id', async () => {
     const was = await pickThenCopy()
@@ -264,10 +264,7 @@ describe('a TM view picked in the rxm view’s title, showing a copy', () => {
     expect(mounted(), 'precondition: the source beside the TM view').toEqual(['source', 'tm-0'])
     expect(copyNames(), 'precondition: the parked view counts as a view of its copy').toEqual([was.row])
 
-    host('tm-0')?.querySelector<HTMLElement>('button.view-title')?.focus()
-    await userEvent.click(document.querySelector<HTMLButtonElement>('#new-view') as HTMLButtonElement)
-    await until(() => newLambdaViewItem() !== undefined, '+ view’s λ · program')
-    await userEvent.click(newLambdaViewItem() as HTMLButtonElement)
+    await userSplit('tm-0', bindingKey('lambda', 'source'))
 
     const trees = storedTrees()
     expect(

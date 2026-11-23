@@ -18,19 +18,18 @@ import {
   views,
   workspaceMenu,
 } from './harness'
-import { plusView } from './user-event-fixture'
+import { userSplit } from './user-event-fixture'
 
 /**
- * **`+ VIEW` TAKES AN EQUAL SHARE OF THE FOCUSED VIEW'S ROW, AND NO ADD MAKES A VIEW NARROWER THAN 160 PX** — the
- * user's decisions of 2026-10-04. At 1280×800 in Explorer the four views are 634 px wide; `+ view` beside λ
- * pressed five times gives the top row 3, 4, 5, 6 and 7 equal views, and a sixth press, which would leave each 149.5
- * px, is refused on the notice line and changes nothing; so is an add whose new view has room when a view it shrinks
- * would not. A split still halves the view it is chosen on, refused where a half would be under the floor along the
- * axis it divides. The Stage holds only the leaf bound: a view added there is a tab, and nothing on screen shrinks.
+ * **A SPLIT HALVES THE VIEW IT IS CHOSEN ON, AND IS REFUSED WHERE A HALF WOULD BE UNDER 160 PX** — the floor, held on
+ * the split, and so is the bound of 64 views. At 1280×800 in Explorer the four views are 634 px wide: a split right of
+ * λ halves it, and a split right of a half, whose own halves would be under the floor, is refused on the notice line
+ * and changes nothing. A split down is held to the height it divides, and to width, since it makes a view as narrow as
+ * the one it halves.
  *
  * Every gesture is real input (`userEvent`): the property is about what a click does. ONE MOUNT FOR THE FILE, for the
  * reason `app.test.ts` gives; it opens on a stored layout of 64 views for the cap's case, and each later case starts
- * by setting 1280×800, choosing its preset and pressing *reset preset* (`resetPreset`), so none depends on the views,
+ * by setting 1280×800, choosing Explorer and pressing *reset preset* (`resetPreset`), so none depends on the views,
  * the preset or the window the case before it left — a case that fails half way through included.
  */
 
@@ -56,15 +55,9 @@ const focused = () => parseWorkspace(storedLayoutText())?.focused
 const titleOf = (leaf: string) =>
   (host(leaf).querySelector('.view-title-text') ?? host(leaf).querySelector('.view-title'))?.textContent
 const width = (el: Element) => el.getBoundingClientRect().width
-/** The views level with λ's top edge — the top row however the tree nests it. */
-const topRow = () =>
-  hosts().filter((h) => h.getBoundingClientRect().top === host('lambda-0').getBoundingClientRect().top)
-/** Each of `n` views' width in a row `w` px wide: `w` less the `n - 1` dividers, shared equally. */
-const share = (w: number, n: number) => (w - DIVIDER_PX * (n - 1)) / n
 /** The workspace button's preset, without its `▾`. */
 const preset = () => document.querySelector('#workspace')?.textContent?.replace('▾', '').trim()
 
-const ROOM_BESIDE = (title: string) => `no room for another view beside ${title} — close a view or widen the window`
 /** A split refused for width — split right, or split down of a view already narrow — and one refused for height. */
 const ROOM_SPLIT_NARROW = (title: string) => `no room to split ${title} — close a view or widen the window`
 const ROOM_SPLIT_SHORT = (title: string) => `no room to split ${title} — close a view or make the window taller`
@@ -72,7 +65,7 @@ const FULL =
   'the workspace holds 64 views, the most it can keep — close one to add another, or reset preset if that makes no room'
 
 /**
- * The press just made added a λ view, and `count` reaches `n`. **THE NOTICE FIRST**: a press refused says so on the
+ * The split just made added a λ view, and `count` reaches `n`. **THE NOTICE FIRST**: a split refused says so on the
  * line at once, so a refusal fails here on its own words rather than as a wait for a view that never comes.
  */
 async function added(what: string, count: () => number, n: number): Promise<void> {
@@ -110,12 +103,12 @@ async function choosePreset(p: 'explorer' | 'stage'): Promise<void> {
 }
 
 /**
- * Each case's start: the window at 1280×800, preset `p` chosen and *reset preset* pressed, with the pointer, and then
+ * Each case's start: the window at 1280×800, Explorer chosen and *reset preset* pressed, with the pointer, and then
  * all four views, focused on λ (`showFourViews`).
  */
-async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> {
+async function resetPreset(): Promise<void> {
   await page.viewport(1280, 800)
-  await choosePreset(p)
+  await choosePreset('explorer')
   await openWorkspace()
   await userEvent.click(document.querySelector('#reset-preset') as HTMLElement)
   await until(() => noticeText().endsWith('reset — the default views are back'), 'the reset')
@@ -123,8 +116,8 @@ async function resetPreset(p: 'explorer' | 'stage' = 'explorer'): Promise<void> 
   expect(focused()).toBe('tm-0')
   // ALL FOUR VIEWS: the reset leaves the source beside the TM view.
   await showFourViews()
-  expect(tabLeaves().length > 0 ? tabLeaves() : ids()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
-  // WHERE `showFourViews` PUTS THE FOCUS, AND WHERE EACH CASE'S `+ view` ADDS: the cases' start.
+  expect(ids()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
+  // WHERE `showFourViews` PUTS THE FOCUS: the cases' start.
   expect(focused()).toBe('lambda-0')
 }
 
@@ -145,7 +138,7 @@ async function dragTopDivider(key: 'ArrowRight' | 'ArrowLeft', n: number): Promi
 }
 
 /**
- * What a refused add must leave as it was — the views, their sizes, storage, and the focused view — and the live
+ * What a refused split must leave as it was — the views, their sizes, storage, and the focused view — and the live
  * region as it was before the gesture, which the refusal must change.
  */
 function snapshot() {
@@ -174,7 +167,6 @@ function refused(words: string, before: ReturnType<typeof snapshot>): void {
   expect(liveText(), 'the refusal said nothing to the live region').not.toBe(before.live)
   expect(liveText().trim()).toBe(words)
   expect(snapshot().state).toEqual(before.state)
-  expect(document.querySelector<HTMLButtonElement>('#new-view')?.disabled).toBe(false)
   expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
 }
 
@@ -189,42 +181,28 @@ beforeAll(async () => {
   await until(stateIdle, 'the first compile')
 })
 
-describe('+ view and the splits, at 1280×800', () => {
+describe('the splits, at 1280×800', () => {
   /**
    * **THE APP NEVER BUILDS A TREE ITS OWN LOADER REFUSES.** A 65th view would make a layout that falls back to the
-   * default at the next load; the focused view here is the whole width, so room is not what refuses it. The Stage,
-   * which holds no floor, still holds this bound.
+   * default at the next load; λ here is the whole width, so room is not what refuses it.
    */
-  it('refuses a 65th view in the cap’s words, from + view and from a split, and on the Stage', async () => {
+  it('refuses a 65th view in the cap’s words, from a split', async () => {
     expect(preset()).toBe('Explorer')
     expect(ids().length).toBe(64)
     expect(focused()).toBe('lambda-0')
     expect(titleOf('lambda-0')).toBe('λ · program')
     expect(width(host('lambda-0'))).toBe(1280)
 
-    let before = snapshot()
-    await plusView()
-    refused(FULL, before)
-
     const pick = await openSplit('lambda-0', 'row')
-    before = snapshot()
+    const before = snapshot()
     await userEvent.click(pick)
     refused(FULL, before)
     expect(host('lambda-0').contains(document.activeElement), 'the focus left the view the split was chosen on').toBe(
       true,
     )
-
-    await choosePreset('stage')
-    await until(() => tabLeaves().length === 64, 'the stage')
-    expect(preset()).toBe('Stage')
-    expect(focused()).toBe('lambda-0')
-    expect(titleOf('lambda-0')).toBe('λ · program')
-    before = snapshot()
-    await plusView()
-    refused(FULL, before)
   })
 
-  it('gives the row an equal share for each of five presses, every view at least 160 px', async () => {
+  it('refuses split right on a view narrower than 332 px, and still halves a wide one', async () => {
     await resetPreset()
     expect(preset()).toBe('Explorer')
     expect(titleOf('lambda-0')).toBe('λ · program')
@@ -237,48 +215,11 @@ describe('+ view and the splits, at 1280×800', () => {
     for (const d of rows) expect(width(d)).toBe(DIVIDER_PX)
     for (const d of columns) expect(heightOf(d)).toBe(DIVIDER_PX)
 
-    for (let press = 1; press <= 5; press++) {
-      await plusView()
-      await added(`press ${press}`, () => ids().length, 4 + press)
-      const row = topRow()
-      expect(row.length, `press ${press}: views in the top row`).toBe(2 + press)
-      for (const v of row) {
-        expect(Math.abs(width(v) - share(1280, 2 + press)), `press ${press}: ${v.dataset.leaf}`).toBeLessThan(1)
-        expect(width(v)).toBeGreaterThanOrEqual(MIN_VIEW_PX)
-      }
-      // ONE ROW, NOT A SPLIT NESTED PER PRESS: every view in it is a child of the same split.
-      expect(new Set(row.map((v) => v.parentElement)).size).toBe(1)
-    }
-  })
-
-  it('refuses a sixth press, says why on the notice line, and changes nothing', async () => {
-    await resetPreset()
-    for (let press = 1; press <= 5; press++) {
-      await plusView()
-      await added(`press ${press}`, () => ids().length, 4 + press)
-    }
-    expect(preset()).toBe('Explorer')
-    expect(topRow().length).toBe(7)
-    const at = focused() as string
+    const at = (await userSplit('lambda-0', 'same')) as string
+    await added('the split right of λ', () => ids().length, 5)
+    expect(focused()).toBe(at)
     expect(titleOf(at)).toBe('λ · program')
-    // AN EIGHTH VIEW IN THE ROW WOULD BE UNDER THE FLOOR — arithmetic, not a measurement: (1280 − 7 × 12) / 8 = 149.5.
-    expect(width(views())).toBe(1280)
-
-    const before = snapshot()
-    await plusView()
-    refused(ROOM_BESIDE('λ · program'), before)
-  })
-
-  it('refuses split right on a view narrower than 332 px, and still halves a wide one', async () => {
-    await resetPreset()
-    await plusView()
-    await added('press 1', () => ids().length, 5)
-    await plusView()
-    await added('press 2', () => ids().length, 6)
-    expect(preset()).toBe('Explorer')
-    const at = focused() as string
-    expect(titleOf(at)).toBe('λ · program')
-    expect(width(host(at))).toBeLessThan(320)
+    expect(width(host(at))).toBe(311)
 
     const pick = await openSplit(at, 'row')
     const before = snapshot()
@@ -289,7 +230,7 @@ describe('+ view and the splits, at 1280×800', () => {
     // A VIEW WITH ROOM FOR TWO HALVES IS STILL SPLIT IN TWO.
     expect(width(host('rxm-0'))).toBe(634)
     await userEvent.click(await openSplit('rxm-0', 'row'))
-    await until(() => ids().length === 7, 'the split')
+    await until(() => ids().length === 6, 'the split')
     const made = focused() as string
     expect(made).not.toBe('rxm-0')
     expect(width(host('rxm-0'))).toBe(311)
@@ -324,43 +265,6 @@ describe('+ view and the splits, at 1280×800', () => {
   })
 
   /**
-   * **A VIEW THE ADD SHRINKS COUNTS, NOT ONLY THE ONE IT MAKES.** λ is dragged by keyboard to 0.14 of its row,
-   * 177.52 px; `+ view` beside it would give the new view 418.67 px and take λ to 117.23, so it is refused
-   * for λ's sake.
-   */
-  it('refuses + view where the new view has room but the view beside it would go under 160 px', async () => {
-    await resetPreset()
-    expect(preset()).toBe('Explorer')
-    expect(titleOf('lambda-0')).toBe('λ · program')
-    await dragTopDivider('ArrowRight', 18)
-    await until(() => Math.abs(width(host('lambda-0')) - 177.52) < 1, 'λ at 0.14 of its row')
-    expect(focused()).toBe('lambda-0')
-    expect(width(host('lambda-0'))).toBeGreaterThanOrEqual(MIN_VIEW_PX)
-
-    const before = snapshot()
-    await plusView()
-    refused(ROOM_BESIDE('λ · program'), before)
-  })
-
-  /**
-   * **ANY VIEW IN THE ROW, NOT ONLY THE ONE BESIDE IT.** Source is dragged to 0.14 of the row, 177.52 px, and λ, still
-   * focused, has 1,090.48: `+ view` beside λ would leave λ 720.11 and the new view 418.67, and take source to 117.23.
-   */
-  it('refuses + view where another view in the row would go under 160 px', async () => {
-    await resetPreset()
-    expect(preset()).toBe('Explorer')
-    expect(titleOf('lambda-0')).toBe('λ · program')
-    await dragTopDivider('ArrowLeft', 18)
-    await until(() => Math.abs(width(host('source')) - 177.52) < 1, 'source at 0.14 of its row')
-    expect(focused()).toBe('lambda-0')
-    expect(width(host('lambda-0'))).toBeGreaterThan(1000)
-
-    const before = snapshot()
-    await plusView()
-    refused(ROOM_BESIDE('λ · program'), before)
-  })
-
-  /**
    * **A SPLIT DOWN IS HELD TO WIDTH TOO**: it makes a view as narrow as the one it halves. λ is dragged to 0.12 of
    * its row, 152.16 px; its halves would be about 165 px tall, which passes the height floor, and 152.16 wide, which
    * does not — so it is refused in the width's words.
@@ -377,33 +281,5 @@ describe('+ view and the splits, at 1280×800', () => {
     const before = snapshot()
     await userEvent.click(pick)
     refused(ROOM_SPLIT_NARROW('λ · program'), before)
-  })
-
-  /**
-   * **ON THE STAGE ONLY THE LEAF BOUND HOLDS** (the user's decision, 2026-10-04): a view added there is a tab, and
-   * nothing on screen shrinks. From the default at 1280, where the Stage's inspector leaves `#views` 992 px wide, the
-   * fourth press is one tiles would refuse there (155.3 px each, by arithmetic) and the Stage adds it; at 390, where
-   * the inspector stacks under the views and `#views` is 390 px wide, a press tiles would refuse there too (seven views
-   * in λ's row, 45.4 px each, by arithmetic) adds another tab.
-   */
-  it('adds on the Stage past the floor tiles would hold, at 1280 and at 390', async () => {
-    await resetPreset('stage')
-    expect(preset()).toBe('Stage')
-    expect(ids()).toEqual(['lambda-0'])
-    expect(titleOf('lambda-0')).toBe('λ · program')
-    expect(width(views())).toBe(992)
-
-    for (let press = 1; press <= 4; press++) {
-      await plusView()
-      await added(`press ${press}`, () => tabLeaves().length, 4 + press)
-    }
-
-    await page.viewport(390, 844)
-    await until(() => width(views()) === 390, '#views at 390')
-    expect(preset()).toBe('Stage')
-    expect(tabLeaves().length).toBe(8)
-    await plusView()
-    await added('press at 390', () => tabLeaves().length, 9)
-    expect(ids().length, 'the Stage shows one view').toBe(1)
   })
 })
