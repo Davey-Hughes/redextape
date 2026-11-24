@@ -10,10 +10,8 @@
  * something to own. A free function takes no handle, so a round trip to reach one is lag bought for
  * nothing, which is why that worker holds none of them. `LspServer` is exactly such a handle, and
  * this thread is idle between keystrokes rather than busy running reductions, so the round trip moves
- * work off the main thread instead of adding to it. The design measured that work at 135.2 ms for
- * a document just past `COLOUR_CEILING_UNITS`; how often a `didChange` arrives — per keystroke from
- * the source editor, on the recompile's 300 ms from the scratch editors — changes nothing here,
- * because all of it is paid off the main thread.
+ * work off the main thread instead of adding to it. The source editor sends a `didChange` per
+ * keystroke, and the analysis each one starts is paid here, off the main thread.
  *
  * **EVERY DECISION LIVES IN `lsp-client.ts`, NOT HERE, AND THE REASON IS TESTABILITY.** Policy in a
  * worker can only be exercised by standing up a thread; the same policy behind `LspPort` is

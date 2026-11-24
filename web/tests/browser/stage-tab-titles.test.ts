@@ -7,10 +7,11 @@ import { chooseFromWorkspace } from './user-event-fixture'
 /**
  * IN STAGE, A TAB NAMES WHAT ITS VIEW SHOWS, AS THE VIEW'S TITLE DOES (Plan 7 part 2 spec §5, §7).
  *
- * *Edit a copy*, a pick in the title's menu and a move back to the program each rebind a view in place. `draw()` brings
- * every tab up to its view's title once per frame (`layout-view.ts`'s `retitleStage`); a tab left as `renderStage`
- * built it would keep its old label until another tab was selected. So each gesture below reads the tab against the
- * title as soon as the title has changed.
+ * A pick of another kind's pair in a view's title, and a pick back, change what the view shows under its own leaf. Each
+ * rebuilds the view, and the stage is drawn again with it (`layout-view.ts`'s `renderStage`), its tab named from the
+ * view's binding (`main.ts`'s `viewTitle`); a tab named by anything else, its leaf's id among them, would go on
+ * naming the kind the view was before. So each gesture below reads the tab against the title as soon as the title has
+ * changed.
  *
  * Every gesture is a `userEvent` one. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
@@ -26,14 +27,6 @@ const label = (leaf: string) => stageTab(leaf).textContent ?? ''
 async function show(leaf: string): Promise<void> {
   await userEvent.click(stageTab(leaf))
   await until(() => paneByLeaf(leaf).isConnected, `${leaf}’s view on the stage`)
-}
-
-/** *Edit a copy* through the view's `⋯` menu, with the pointer. */
-async function editACopy(leaf: string): Promise<void> {
-  const more = paneByLeaf(leaf).querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
-  await userEvent.click(more)
-  await until(() => controlledMenu(more).matches(':popover-open'), 'the view menu to open')
-  await userEvent.click(controlledMenu(more).querySelector<HTMLButtonElement>('button.detach') as HTMLButtonElement)
 }
 
 /** Pick, in `leaf`'s title menu, the first pair `which` accepts, with the pointer; returns the label picked. */
@@ -66,70 +59,35 @@ beforeAll(async () => {
 })
 
 describe('a Stage tab', () => {
-  it('follows its rxm view through edit a copy, a pick of another copy, and back to the program', async () => {
-    // A SECOND RXM COPY, FOR THE TITLE TO PICK: a blank one from the copies menu, which no view shows.
-    await userEvent.click(document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement)
-    await userEvent.click(document.querySelector<HTMLButtonElement>('.buffer-list button.new-rxm') as HTMLElement)
-    await until(() => document.querySelector('#notice .notice-text')?.textContent?.endsWith('created') === true)
-
+  it('follows its rxm view through a pick of the TM view’s pair, and a pick back', async () => {
     await show('rxm-0')
     expect(label('rxm-0')).toBe('rxm · program')
     expect(title('rxm-0')).toBe('rxm · program')
 
-    await editACopy('rxm-0')
-    await tabFollows('rxm-0', 'rxm · program', 'edit a copy')
-    expect(label('rxm-0')).toMatch(/^rxm · copy \d+$/)
-
-    const made = title('rxm-0')
-    const picked = await pickTitle(
-      'rxm-0',
-      (b) =>
-        b.dataset.binding?.startsWith('rxm:') === true && b.textContent !== made && b.dataset.binding !== 'rxm:source',
-    )
-    await tabFollows('rxm-0', made, 'a pick of another copy')
+    const picked = await pickTitle('rxm-0', (b) => b.dataset.binding === 'tm:source')
+    await tabFollows('rxm-0', 'rxm · program', 'a pick of TM · program')
     expect(label('rxm-0')).toBe(picked)
+    expect(picked).toBe('TM · program')
 
     await pickTitle('rxm-0', (b) => b.dataset.binding === 'rxm:source')
-    await tabFollows('rxm-0', picked, 'a move back to the program')
+    await tabFollows('rxm-0', picked, 'a pick back of rxm · program')
     expect(label('rxm-0')).toBe('rxm · program')
   })
 
-  it('follows its TM and λ views through edit a copy, a pick of another copy, and back to the program', async () => {
-    for (const [leaf, leg, program] of [
-      ['tm-0', 'tm', 'TM · program'],
-      ['lambda-0', 'lambda', 'λ · program'],
+  it('follows its TM and λ views through a pick of another kind’s pair, and a pick back', async () => {
+    for (const [leaf, leg, program, other] of [
+      ['tm-0', 'tm', 'TM · program', 'rxm'],
+      ['lambda-0', 'lambda', 'λ · program', 'tm'],
     ] as const) {
       await show(leaf)
       expect(label(leaf)).toBe(program)
-      await editACopy(leaf)
-      await tabFollows(leaf, program, `${leg}’s edit a copy`)
-      const first = title(leaf)
 
-      // A FIRST COPY, LEFT BEHIND ON THE MOVE BACK TO THE PROGRAM: λ has no *new blank copy* button,
-      // since a λ copy is always made from a step of the program (`buffer-list.ts`'s `BLANK_COPY`), so a
-      // second fork is what gives the title menu another copy to pick, the way the rxm test's blank one
-      // does. TM, which has one, takes the same route in this loop.
-      await pickTitle(leaf, (b) => b.dataset.binding === `${leg}:source`)
-      await tabFollows(leaf, first, `${leg}’s move back to the program`)
-      expect(label(leaf)).toBe(program)
-
-      await editACopy(leaf)
-      await tabFollows(leaf, program, `${leg}’s second edit a copy`)
-      const second = title(leaf)
-      expect(second, 'the two copies must differ for a pick to show anything').not.toBe(first)
-
-      const picked = await pickTitle(
-        leaf,
-        (b) =>
-          b.dataset.binding?.startsWith(`${leg}:`) === true &&
-          b.textContent !== second &&
-          b.dataset.binding !== `${leg}:source`,
-      )
-      await tabFollows(leaf, second, `${leg}’s pick of another copy`)
+      const picked = await pickTitle(leaf, (b) => b.dataset.binding === `${other}:source`)
+      await tabFollows(leaf, program, `${leg}’s pick of ${other}’s pair`)
       expect(label(leaf)).toBe(picked)
 
       await pickTitle(leaf, (b) => b.dataset.binding === `${leg}:source`)
-      await tabFollows(leaf, picked, `${leg}’s move back to the program`)
+      await tabFollows(leaf, picked, `${leg}’s pick back`)
       expect(label(leaf)).toBe(program)
     }
   })

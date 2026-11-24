@@ -2,27 +2,22 @@ import type { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { LambdaTrees } from '../../src/lambda-trees'
 import type { LinkWiring } from '../../src/link-wiring'
-import { PaneCollection, type PaneEntry } from '../../src/panes'
-import type { FramesReply, RecordEnd, RunReply, RunRequest } from '../../src/protocol'
+import { PaneCollection } from '../../src/panes'
+import type { FramesReply, RecordEnd, RunReply } from '../../src/protocol'
 import { CLIF_ABSENT, clifFrameBytes, lambdaFrameBytes, rxmFrameBytes, tmFrameBytes } from '../../src/protocol'
 import type { ProgramResult } from '../../src/readout'
 import { createReplies } from '../../src/replies'
-import { ScratchBuffers } from '../../src/scratch'
-import type { PoolPort, SessionId } from '../../src/session-client'
-import { SessionPool } from '../../src/session-client'
-import type { ClifHold, LegState, SessionEntry } from '../../src/sessions'
-import { holdClifLeg, PaneSlot, rewindLeg, SessionRegistry } from '../../src/sessions'
+import type { SessionId } from '../../src/session-client'
+import type { ClifHold, LegState, SessionEntry, SessionLegs } from '../../src/sessions'
+import { holdClifLeg, rewindLeg, SessionRegistry } from '../../src/sessions'
 import type {
   ClifListing,
   ClifState,
-  Decoded,
-  Diagnostic,
   LambdaState,
   RxmProgram,
   RxmState,
   RxmStatus,
   TmProgram,
-  TmScratchStatus,
   TmState,
 } from '../../src/types'
 import { FACT_95 } from './clif-frames'
@@ -51,18 +46,10 @@ import { wireOf } from './tree-fixture'
  * **THE STAND-INS DIVIDE IN THREE.** `view` and `links` are REACHED by the arm under test — the
  * `compiled` arm dispatches two CodeMirror effects and installs a link index — so they record, and their
  * calls are asserted below, together with `draw`'s: a green retention over a switch that fell through
- * somewhere else is not a green test. `editorHome` is an honest no-op, belonging to `onScratchReply`'s
- * arms, which `driver` does not drive. `scratchpad` and `results` are not reached by the `compiled` arm
- * at all and are `undefined` behind a cast, deliberately: an arm that starts touching either crashes this
- * test loudly rather than passing over a fake that quietly absorbs the call. There is no honester option
- * in the node tier — an `EditorView` and an `HTMLElement` both need a document, which is exactly why the
- * browser tier owns everything about this retention that can be seen.
- *
- * **`onScratchReply` IS DRIVEN AT THE FOOT OF THIS FILE.** Its `no-session` arm needs neither a
- * document nor a worker — the buffer collection, the registry and the pool are all reachable in this
- * tier — so `scratchDriver` below stands `scratchpad` up for real rather than casting it away. The two
- * harnesses are separate on purpose: `driver`'s `undefined` is an assertion about which arms may touch
- * what, and reusing it would spend that.
+ * somewhere else is not a green test. `results` is not reached by the `compiled` arm at all and is `undefined`
+ * behind a cast, deliberately: an arm that starts touching it crashes this test loudly rather than passing over a fake
+ * that quietly absorbs the call. There is no honester option in the node tier — an `EditorView` and an `HTMLElement`
+ * both need a document, which is exactly why the browser tier owns everything about this retention that can be seen.
  *
  * **THE CLEARING ARMS ARE NOT HERE, AND THE REASON IS THAT SAME MISSING `#results`.** `no-session` and
  * `worker-error` clear the retention exactly as they clear every TM pane on the session, and both open by
@@ -79,15 +66,14 @@ function sourceEntry(): SessionEntry {
   return {
     id: SOURCE,
     label: 'source',
-    detached: false,
     client: fakeClient(),
     legs: {
       lambda: legState<LambdaState>(false, 1_000_000),
       rxm: legState<RxmState>(false, 1_000_000),
       tm: legState<TmState>(false, 1_000_000),
-    },
+      clif: legState<ClifState>(false, 1_000_000),
+    } satisfies Required<SessionLegs>,
     programs: { rxm: null, tm: null, clif: null },
-    readings: { rxm: null, tm: null },
   }
 }
 
@@ -102,7 +88,7 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<Run
   },
   programs: {
     rxm: null,
-    tm: tmProgram === null ? null : { program: tmProgram, tapeNames, text: null, tmResultDecodable: true },
+    tm: tmProgram === null ? null : { program: tmProgram, tapeNames },
     clif: null,
   },
   declinedSpan: null,
@@ -114,9 +100,9 @@ const compiled = (tmProgram: TmProgram | null, tapeNames: string[]): Extract<Run
 /**
  * The switch under test, over a registry holding `entry`, with no pane in the collection.
  *
- * `frame` IS OVERRIDABLE FOR `scratchDriver`'s REASON, AND DEFAULTS TO ITS STAND-IN, a callback run straight. A
- * recording chunk that does not end the recording schedules its redraw on `frame`, and `createReplies`' own default,
- * `requestAnimationFrame`, is not defined in this tier: a `frames` reply sent here without a stand-in would throw.
+ * `frame` IS OVERRIDABLE, AND DEFAULTS TO A STAND-IN, a callback run straight. A recording chunk that does not end the
+ * recording schedules its redraw on `frame`, and `createReplies`' own default, `requestAnimationFrame`, is not
+ * defined in this tier: a `frames` reply sent here without a stand-in would throw.
  */
 function driver(
   entry: SessionEntry,
@@ -138,25 +124,17 @@ function driver(
   const links = { setIndex: (i: unknown) => indexed.push(i) } as unknown as LinkWiring
   const replies = createReplies({
     setProgram: opts.results?.setProgram ?? (() => undefined),
-    trees: opts.trees ?? new LambdaTrees(() => undefined),
+    trees: opts.trees ?? new LambdaTrees(() => ({ gen: 0, awaitingRun: false, tree: () => undefined })),
     sessions: reg,
-    scratchpad: undefined as unknown as ScratchBuffers,
     results: opts.results?.results ?? (undefined as unknown as HTMLElement),
     view: () => view,
     panes: new PaneCollection(),
     links,
-    notify: () => ({ dismiss: () => undefined }),
     draw: () => {
       drawn += 1
       opts.onDraw?.()
     },
     frame: opts.frame ?? ((cb: () => void) => cb()),
-    editorHome: () => undefined,
-    // NO SCRATCH REPLY REACHES THIS DRIVER — every test built on it sends `compiled` or a recording
-    // chunk through `onReply`, and `onBuffersPersist` is called only from the build replies of the
-    // OTHER switch. A no-op rather than a throw, because "this driver does not exercise those arms" is
-    // a fact about the fixture and not a claim any test here is making.
-    onBuffersPersist: () => undefined,
     ...(opts.clif === undefined ? {} : { clif: opts.clif }),
   })
   return { replies, dispatched, indexed, drawn: () => drawn }
@@ -227,7 +205,6 @@ describe('a session retains its last compiled machine', () => {
 describe('a `clif-listing` reply with no listing', () => {
   it("tells the page the CLIF leg has no stepper, at the leg's epoch alone, and draws", () => {
     const entry = sourceEntry()
-    const withClif = { ...entry, legs: { ...entry.legs, clif: legState<ClifState>(false, 1_000_000) } }
     let absent = 0
     const clif = {
       loaded: () => undefined,
@@ -236,7 +213,7 @@ describe('a `clif-listing` reply with no listing', () => {
         absent += 1
       },
     }
-    const { replies, drawn } = driver(withClif, { clif })
+    const { replies, drawn } = driver(entry, { clif })
 
     replies.onReply(SOURCE, {
       kind: 'clif-listing',
@@ -252,7 +229,7 @@ describe('a `clif-listing` reply with no listing', () => {
 
     replies.onReply(SOURCE, { kind: 'clif-listing', gen: 1, epoch: 0, listing: null, error: 'the stepper threw' })
     expect(absent, "none, at the leg's epoch").toBe(1)
-    expect(withClif.legs.clif.status).toEqual({ available: false, reason: 'the stepper threw' })
+    expect(entry.legs.clif?.status).toEqual({ available: false, reason: 'the stepper threw' })
     expect(drawn()).toBe(2)
   })
 })
@@ -401,390 +378,6 @@ describe("a `compiled` reply's step-0 pictures", () => {
 })
 
 /**
- * A `PoolPort` with no thread behind it, recording what was posted and what a `retire` would have done
- * to it.
- *
- * `sent` MATCHES `session-fixtures.ts`'s `FakePort` rather than inventing a second shape for the same
- * recording — this file's `scratch-compiled` test needs to read back a post the same way
- * `scratch.test.ts`'s `warm posts the buffer text at step 0` does.
- */
-function fakePort(): PoolPort & { sent: RunRequest[]; terminated: number } {
-  const p: PoolPort & { sent: RunRequest[]; terminated: number } = {
-    sent: [],
-    terminated: 0,
-    postMessage: (m: RunRequest) => p.sent.push(m),
-    addEventListener: (_t: 'message', _h: (e: { data: RunReply }) => void) => undefined,
-    terminate: () => {
-      p.terminated += 1
-    },
-  }
-  return p
-}
-
-const DIAGNOSTIC: Diagnostic = { span: { start: 0, end: 3 }, severity: 'Error', message: 'unexpected `(`' }
-
-const noSession = (diagnostics: Diagnostic[]): RunReply => ({ kind: 'no-session', gen: 1, diagnostics })
-
-/**
- * The scratch arm's own driver: `createReplies` over a REAL `ScratchBuffers`, a real `SessionRegistry`
- * and a real `SessionPool` with fake threads.
- *
- * **`driver` ABOVE CANNOT BE REUSED, AND ITS `scratchpad: undefined` IS THE REASON — deliberately, per
- * this file's own doc**: an arm that starts touching the buffer collection is meant to crash there
- * rather than pass over a fake. The `no-session` arm touches it on purpose, so it needs the real thing;
- * everything except the thread is the app's own object, which is what makes "the buffer is still
- * listed" a claim about `ScratchBuffers` rather than about a stub that agreed to say so.
- *
- * `notify` RECORDS WHAT IS SAID BECAUSE A NOTICE IS WHERE THE DIAGNOSTICS SURFACE on the path where no
- * editor was ever mounted (`notice.ts`'s `createNotices`). `results` and `view` stay `undefined`
- * behind a cast for the reason the file's doc gives — this arm reaches neither, and an arm that starts
- * to should say so loudly.
- *
- * `editorHome` RECORDS THE SESSIONS IT IS ASKED FOR, and answers `undefined`, so a `?.setEditor` behind it
- * does nothing. The failed fork's arm has no editor to reach, and a call recorded there means it has
- * started reaching for one.
- *
- * **THE SLOT IS IN THE PANE COLLECTION, AND THAT IS NOT DECORATION.** A retire handed
- * `panes.all().map((p) => p.slot)` could only move a pane the COLLECTION held: with an empty collection,
- * "the pane stayed on the buffer" would be satisfied by such a retire too, and the assertion that reads
- * best would be vacuous. The pane itself is a stub, in `panes.test.ts`'s own idiom — a real `LambdaPane`
- * needs a document, which is the browser tier's business (`tests/browser/scratch-edit.test.ts`).
- */
-/**
- * `draw` and `frame` are overridable for the tests below that assert how often `draw()` runs —
- * `case 'tm-value'`'s frame coalescing, and the recording chunks' — and every other caller takes the
- * defaults, a no-op `draw` and a `frame` that runs its callback synchronously. **THE DEFAULT `frame` MUST
- * NOT BE `createReplies`'s OWN DEFAULT**, which is `requestAnimationFrame` itself: this tier's
- * `environment: 'node'` has no such global (unlike jsdom or a real page), so a test that sends a `Running`
- * tm-value reply, or a recording chunk that does not end its recording, without overriding `frame` would
- * throw `ReferenceError: requestAnimationFrame is not defined` the moment its arm schedules one. Running
- * the callback synchronously instead keeps every other test's behaviour identical to `draw()` being
- * called straight, since none of them assert on `draw`'s call count or timing — only the coalescing
- * tests do, and they pass both overrides.
- */
-function scratchDriver(opts: { draw?: () => void; frame?: (cb: () => void) => void; trees?: LambdaTrees } = {}) {
-  const reg = new SessionRegistry()
-  const ports: (PoolPort & { sent: RunRequest[]; terminated: number })[] = []
-  const pool = new SessionPool(
-    () => {
-      const p = fakePort()
-      ports.push(p)
-      return p
-    },
-    () => {},
-  )
-  const notified: string[] = []
-  const dismissed: string[] = []
-  const editorAsked: SessionId[] = []
-  // COUNTED RATHER THAN STUBBED OUT, because the text of record and the write of it are two claims:
-  // `setText` puts a term in memory, this callback is the arm's own write of it to where a reload
-  // can find it, and the arm below can satisfy the first while dropping the second.
-  let persists = 0
-  const buffers = new ScratchBuffers({
-    registry: reg,
-    pool,
-    historyBytes: 1_000_000,
-    onReply: () => undefined,
-  })
-  const links = {} as unknown as LinkWiring
-  const slot = new PaneSlot('lambda', SOURCE)
-  const panes = new PaneCollection()
-  panes.add({
-    id: 'lambda-0',
-    kind: 'lambda',
-    slot,
-    pane: {
-      render: () => undefined,
-      setBindings: () => undefined,
-      setDetached: () => undefined,
-      setLayoutControls: () => undefined,
-    } as unknown as PaneEntry<'lambda'>['pane'],
-    host: {} as HTMLElement,
-  })
-  const replies = createReplies({
-    setProgram: () => undefined,
-    trees: opts.trees ?? new LambdaTrees(() => undefined),
-    sessions: reg,
-    scratchpad: buffers,
-    results: undefined as unknown as HTMLElement,
-    view: () => undefined as unknown as EditorView,
-    panes,
-    links,
-    draw: opts.draw ?? (() => undefined),
-    frame: opts.frame ?? ((cb: () => void) => cb()),
-    editorHome: (session: SessionId) => {
-      editorAsked.push(session)
-      return undefined
-    },
-    onBuffersPersist: () => {
-      persists += 1
-    },
-    // EACH NOTICE'S `dismiss` IS RECORDED BY ITS TEXT, so a case can tell which notice a reply ended.
-    notify: (t: string) => {
-      notified.push(t)
-      return { dismiss: () => void dismissed.push(t) }
-    },
-  })
-  // THE MOST RECENT PORT'S MOST RECENT λ `scratch` REQUEST — `scratch.test.ts`'s `harness()`
-  // defines the identical helper under the identical name, for the identical reason: `cool`/`warm`'s
-  // round trip opens a NEW port, so "most recent port" is what "the build `warm` just posted" means.
-  const lastScratchPost = (): { src: string; step: number } | undefined => {
-    const req = ports.at(-1)?.sent.at(-1)
-    return req?.kind === 'scratch' && req.leg === 'lambda' ? { src: req.src, step: req.step } : undefined
-  }
-  return {
-    reg,
-    pool,
-    buffers,
-    ports,
-    replies,
-    panes,
-    slot,
-    notified: () => notified,
-    dismissed: () => dismissed,
-    editorAsked: () => editorAsked,
-    lastScratchPost,
-    persists: () => persists,
-  }
-}
-
-/**
- * **A BUFFER THAT FAILED TO BUILD IS STILL A BUFFER** — 5d-ii-c decision 2, design §4.3's row for
- * "worker error / poison": *ended it* -> **survives; retire is the escape**.
- *
- * Retiring the buffer here — terminating its worker, dropping it from the registry and the pool, and
- * rebinding every pane on it back to the source session — would end it implicitly. The governing rule
- * is that nothing ends a buffer implicitly, and a build that failed is not a user asking for the buffer
- * to end. `ScratchBuffers.noSessionReply` hands the diagnostics back so the caller can report them.
- *
- * **WHAT THAT COSTS.** The pane stays on a buffer that will never produce a frame, reading
- * `did not build`, and `✎ edit a copy` is not offerable there until the user retires the buffer from the
- * header list (design §4.2/§4.4). Retiring rebinds the pane to source and `✎ edit a copy` comes back
- * with the binding.
- */
-describe('a poisoned buffer survives its own no-session reply', () => {
-  /**
-   * THE BUFFER IS STILL IN `list()`, which is the header control's input. A retire deletes the entry
-   * `list()` reads, so this would fail against an arm that retired the buffer.
-   *
-   * THE POOL AND THE REGISTRY ARE ASSERTED BESIDE IT, AND `terminated` IS THE ONE THAT CANNOT BE
-   * SATISFIED BY ACCIDENT. A `list()` that kept its row while `retire` still ran underneath would leave
-   * a name pointing at a dead thread — the phantom `buffer-list.ts` is written to refuse — so the claim
-   * is made on the thread as well as on the menu, the same axis `scratch.test.ts` uses for the retire.
-   */
-  it('keeps the buffer listed, registered and running after a no-session reply', () => {
-    const { reg, pool, buffers, ports, replies, slot } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-
-    expect(buffers.list().map((b) => b.id)).toContain(id)
-    expect(reg.has(id)).toBe(true)
-    expect(pool.has(id)).toBe(true)
-    expect(ports[0]?.terminated).toBe(0)
-  })
-
-  /**
-   * THE PANE STAYS WHERE THE FORK PUT IT. The pane is showing a buffer that will never build, so "put it
-   * back" is the intuitive repair, and it is exactly the implicit ending decision 2 refuses: the buffer
-   * would still be live and the pane would have left it without being asked to.
-   */
-  it('leaves the pane on the buffer rather than dragging it home', () => {
-    const { buffers, replies, slot } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-
-    expect(slot.binding.session).toBe(id)
-  })
-
-  /**
-   * **THE DIAGNOSTICS SURFACE IN A NOTICE.** A notice (`notice.ts`) is the surface for this path
-   * because no editor was ever mounted to hold a gutter: `scratch-compiled` never fired for a build
-   * that never succeeded. So the arm asks `editorHome` for no editor at all.
-   */
-  it('reports the reason in a notice, since no editor was ever mounted to hold a gutter', () => {
-    const { buffers, replies, slot, notified, editorAsked } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-
-    expect(notified().join(' ')).toContain('unexpected `(`')
-    expect(editorAsked()).toEqual([])
-  })
-
-  /**
-   * **ONE NOTICE FOR A COPY THAT HAS NEVER BUILT, NOT ONE PER FAILED EDIT.** The copy's editor shows each edit's
-   * diagnostics, so saying the same sentence again on every keystroke's build would only repeat it in the live region
-   * (Plan 7 part 5 spec, amendment 27). The leg goes on saying it did not build.
-   */
-  it('says once that a copy which has never built did not build, however often its builds fail', () => {
-    const { reg, buffers, replies, slot, notified } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-
-    expect(notified()).toEqual(['the copy did not build — unexpected `(`'])
-    expect(reg.legOf({ session: id, leg: 'lambda' }).status).toEqual({ available: false, reason: 'did not build' })
-  })
-
-  /**
-   * **THE COPY'S LEG SAYS IT DID NOT BUILD**, the reason its view's step line and its readout read while the leg is not
-   * available (`controls.ts`'s `controlState`, `readout.ts`'s `copyParts`). The `building…` a new copy's leg
-   * starts with would go on saying a build is coming after this one has been answered. A build that lands replaces it.
-   */
-  it('says on the copy’s leg that it did not build, until a build of it lands', () => {
-    const { reg, buffers, replies, slot } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-    const leg = () => reg.legOf({ session: id, leg: 'lambda' })
-    expect(leg().status, 'precondition: the build has not answered').toEqual({ available: false, reason: 'building…' })
-
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-    expect(leg().status).toEqual({ available: false, reason: 'did not build' })
-
-    replies.onScratchReply(id, {
-      kind: 'scratch-compiled',
-      first: null,
-      lambdaTree: null,
-      gen: 1,
-      lambda: { available: true, reason: '', node: null, run: null },
-      text: 'λx. x',
-    })
-    expect(leg().status).toEqual({ available: true, reason: '' })
-  })
-
-  /**
-   * **A BUILD THAT LANDS ENDS THE NOTICE SAYING ITS COPY DID NOT BUILD**, which would otherwise go on saying so over a
-   * copy that now runs, for the rest of its eight seconds. Another copy's build leaves it: that copy's notice is not
-   * this one.
-   */
-  it('ends the notice that a copy did not build when a build of that copy lands', () => {
-    const { buffers, replies, slot, notified, dismissed } = scratchDriver()
-    const failing = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-    replies.onScratchReply(failing, noSession([DIAGNOSTIC]))
-    expect(notified(), 'precondition: the failure is said').toEqual(['the copy did not build — unexpected `(`'])
-    const compiled = (text: string): RunReply => ({
-      kind: 'scratch-compiled',
-      first: null,
-      lambdaTree: null,
-      gen: 1,
-      lambda: { available: true, reason: '', node: null, run: null },
-      text,
-    })
-
-    const other = buffers.fork(slot, 'λx. x', 0, 'lambda')
-    replies.onScratchReply(other, compiled('λx. x'))
-    expect(dismissed(), 'another copy’s build').toEqual([])
-
-    replies.onScratchReply(failing, compiled('λy. y'))
-    expect(dismissed()).toEqual(['the copy did not build — unexpected `(`'])
-  })
-
-  /**
-   * **A COPY'S THREAD THREW, AND THE PROGRAM'S READOUT IS NOT WHERE THAT GOES — Plan 7 part 2 spec §9,
-   * §13.** The strip reads the FOCUSED view's session, so a copy's failure stored as the program's result
-   * would replace a program result that is still valid and then show up only while the program is
-   * focused — nowhere at all while the copy's own view is on screen. It is a notice that names the copy,
-   * and the copy's own leg carries the reason its readout reads.
-   */
-  it('says a copy stopped, by name, and leaves the program alone', () => {
-    const { reg, buffers, replies, slot, notified } = scratchDriver()
-    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
-
-    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'RuntimeError: unreachable' })
-
-    expect(notified()).toEqual(['λ copy 1 stopped — RuntimeError: unreachable'])
-    // THE COPY'S OWN LEG CARRIES WHAT ITS READOUT SAYS, and its frames are gone rather than left under
-    // a message saying the thread broke.
-    const leg = reg.legOf({ session: id, leg: 'lambda' })
-    expect(leg.status).toEqual({ available: false, reason: 'the copy failed' })
-    expect(leg.hist.length).toBe(0)
-  })
-
-  /**
-   * THE LIVE-EDIT PATH IS DISTINGUISHED. A buffer with a frame behind it takes the other branch —
-   * nothing is reported as a failed fork and the buffer survives — and that discrimination is the whole
-   * reason `noSessionReply` returns something rather than nothing. Without this case the arm could
-   * report every parse failure as a fork failure and every assertion above would still pass.
-   *
-   * **THE GUTTER IS NOT PART OF THAT DISCRIMINATION.** Every editor is an LSP document and its
-   * diagnostics arrive on that document's own sink. What this case pins — no notice, buffer retained —
-   * is the whole of what the branch decides.
-   */
-  it('does not report a mid-edit parse failure as a failed fork', () => {
-    const { reg, buffers, replies, slot, notified } = scratchDriver()
-    const id = buffers.fork(slot, 'λx. x', 0, 'lambda')
-    reg.legOf({ session: id, leg: 'lambda' }).hist.push(lambdaFrame('λx. x'), 1)
-
-    replies.onScratchReply(id, noSession([DIAGNOSTIC]))
-
-    expect(notified()).toEqual([])
-    expect(buffers.list().map((b) => b.id)).toContain(id)
-  })
-})
-
-/**
- * **THE FORK'S WRITER OF THE TEXT OF RECORD** (5d-ii-d design §4.3) — `scratch.test.ts`'s `recompile
- * records the text it posts` covers the OTHER writer, the user's own typed text. This is the worker's,
- * and it is the only one that can record a term for a buffer whose editor never mounts at all.
- *
- * READ BACK THE SAME WAY, because there is no `textOf` accessor: cool the buffer, clear the recorded
- * posts, warm it again, and check what the rebuild posted.
- */
-describe('onScratchReply records a buffer’s text from its own scratch-compiled reply', () => {
-  it('records the built term as the buffer’s text and asks for it to be persisted', () => {
-    const { buffers, ports, replies, slot, lastScratchPost, persists } = scratchDriver()
-    const id = buffers.fork(slot, 'seed', 0, 'lambda')
-
-    replies.onScratchReply(id, {
-      kind: 'scratch-compiled',
-      first: null,
-      lambdaTree: null,
-      gen: 1,
-      lambda: { available: true, reason: '', node: null, run: null },
-      text: 'built-term',
-    })
-
-    expect(buffers.cool(id, SOURCE, [])).toBe(true)
-    ports.length = 0
-    buffers.warm(id)
-
-    expect(lastScratchPost()).toEqual({ src: 'built-term', step: 0 })
-    // **THE WRITE IS A SECOND CLAIM FROM THE RECORDING** (5d-ii-d design §4.3). `setText` alone leaves
-    // the term in memory: this is the only moment a FORKED buffer's term exists at all, and without
-    // this call it would reach `localStorage` only when some other event wrote the whole collection. An
-    // implementation that kept the `setText` and dropped this line passes every other assertion here.
-    expect(persists()).toBe(1)
-  })
-
-  /**
-   * THE `null` ARM, WHICH THE WORKER NEVER SENDS: `protocol.ts` types `scratch-compiled`'s `text`
-   * nullable defensively, and unparseable text or a term over `LAMBDA_BYTE_BUDGET` takes `no-session`
-   * instead. `setText` is skipped for it, so there is nothing new for a write to carry.
-   *
-   * IT ALSO PINS WHICH GUARD THE WRITE SITS UNDER. `text: null` tells "persist whenever this arm runs"
-   * apart from "persist when the text changed"; both pass the test above.
-   */
-  it('does not ask for a write when the build produced no scratch', () => {
-    const { buffers, replies, slot, persists } = scratchDriver()
-    const id = buffers.fork(slot, 'not a term (((', 0, 'lambda')
-
-    replies.onScratchReply(id, {
-      kind: 'scratch-compiled',
-      first: null,
-      lambdaTree: null,
-      gen: 1,
-      lambda: { available: false, reason: 'no scratch', node: null, run: null },
-      text: null,
-    })
-
-    expect(persists()).toBe(0)
-  })
-})
-
-/**
  * A hand-driven stand-in for `requestAnimationFrame`: `frame` queues a callback and `fire` runs one frame.
  *
  * A REAL `requestAnimationFrame` HANDS EACH QUEUED CALLBACK THE SAME FRAME — draining what is queued NOW, not what a
@@ -804,173 +397,19 @@ function frameQueue() {
   }
 }
 
-describe('a TM buffer retains what its panes were last told', () => {
-  const STATUS: TmScratchStatus = {
-    available: true,
-    reason: '',
-    width: 8,
-    run: 'Running',
-    header: true,
-    reduction: { stages: ['single-tape'], steps: 241_666 },
-  }
-
-  const built = (tapeNames: string[]): RunReply => ({
-    kind: 'tm-scratch-compiled',
-    first: null,
-    gen: 1,
-    tm: STATUS,
-    tmProgram: ONE_RULE_PROGRAM,
-    tapeNames,
-  })
-
-  /**
-   * THE NAMES COME FROM THE REPLY, NOT FROM THE FIXED EXPORT. A label no bank list contains is the only value that
-   * tells the two apart, since the fixed export answers the bank names for every machine.
-   */
-  it('holds the status and the tape names its own reply carried, with no pane to tell', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['5 tapes, interleaved']))
-    expect(reg.entryOf(id).programs.tm?.tapeNames).toEqual(['5 tapes, interleaved'])
-    expect(reg.entryOf(id).readings.tm).toEqual({ status: STATUS, value: null })
-  })
-
-  it('holds the latest value reading beside that status', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['REG']))
-    const running = { run: 'Running', steps: 200_000, cap: 241_666 } as const
-    replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: running, value: 'Unfinished' })
-    const ended = { run: 'Ended', steps: 241_666, cap: 241_666 } as const
-    replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: ended, value: { Value: { text: '2' } } })
-    expect(reg.entryOf(id).readings.tm).toEqual({
-      status: STATUS,
-      value: { run: ended, value: { Value: { text: '2' } } },
-    })
-  })
-
-  /**
-   * **A RUNNING VALUE'S REDRAW IS COALESCED TO ONE PER FRAME, NOT ONE PER REPLY.** `case 'tm-value'`'s own
-   * comment in `replies.ts` has the reason: the worker posts a chunk far more often than a display paints,
-   * so a `draw()` per chunk is a synchronous redraw the browser cannot skip. This test drives the fake
-   * `frame` scheduler by hand instead of the default synchronous stand-in, so it can tell "several replies
-   * landed before the frame fired" from "each reply drew on its own" — the default stand-in (`cb()` run
-   * straight) collapses that distinction, which is why only the tests that count draws — this one and the
-   * recording chunks' further down — replace it.
-   */
-  it('coalesces a burst of running replies to one draw per frame, and flushes the ending reply at once', () => {
-    let drawn = 0
-    const { pending, frame, fire: fireFrame } = frameQueue()
-    const { buffers, reg, replies } = scratchDriver({ draw: () => (drawn += 1), frame })
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['REG']))
-    // PRECONDITION: the build itself draws once, straight, exactly as `tm-scratch-compiled`'s own arm
-    // does — a build is not one of the streamed replies whose redraw is coalesced. Reset the counter
-    // so the burst below is read against a known zero, not against this unrelated draw.
-    expect(drawn).toBe(1)
-    drawn = 0
-    const running = (steps: number) =>
-      ({ kind: 'tm-value', gen: 1, run: { run: 'Running', steps, cap: 2_000_000 }, value: 'Unfinished' }) as const
-
-    // Three chunks land before any frame fires: one redraw is scheduled, not three.
-    replies.onScratchReply(id, running(500_000))
-    replies.onScratchReply(id, running(1_000_000))
-    replies.onScratchReply(id, running(1_500_000))
-    expect(drawn).toBe(0)
-    expect(pending.length).toBe(1)
-    fireFrame()
-    expect(drawn).toBe(1)
-
-    // A frame with nothing newly scheduled draws nothing a second time.
-    fireFrame()
-    expect(drawn).toBe(1)
-
-    // A fourth chunk schedules exactly one more pending frame.
-    replies.onScratchReply(id, running(2_000_000))
-    expect(drawn).toBe(1)
-    expect(pending.length).toBe(1)
-
-    // The reply that ends the run draws AT ONCE, without waiting on the frame already pending —
-    // the whole point: the final value must not wait on a frame a hidden tab may never paint.
-    const ended = { run: 'Ended', steps: 2_000_000, cap: 2_000_000 } as const
-    replies.onScratchReply(id, { kind: 'tm-value', gen: 1, run: ended, value: { Value: { text: '2' } } })
-    expect(drawn).toBe(2)
-
-    // The frame the fourth chunk scheduled still fires later — nothing cancels a browser's own callback —
-    // but it must not draw again for a run that has already ended and already flushed.
-    fireFrame()
-    expect(drawn).toBe(2)
-    expect(reg.entryOf(id).readings.tm?.value).toEqual({ run: ended, value: { Value: { text: '2' } } })
-  })
-
-  it('a new build forgets the previous value', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['REG']))
-    replies.onScratchReply(id, {
-      kind: 'tm-value',
-      gen: 1,
-      run: { run: 'Ended', steps: 1, cap: 1 },
-      value: { Value: { text: '2' } },
-    })
-    replies.onScratchReply(id, built(['REG']))
-    expect(reg.entryOf(id).readings.tm?.value).toBeNull()
-  })
-
-  it('forgets a reading that was still running when the next text does not build', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['REG']))
-    replies.onScratchReply(id, {
-      kind: 'tm-value',
-      gen: 1,
-      run: { run: 'Running', steps: 200_000, cap: 241_666 },
-      value: 'Unfinished',
-    })
-    replies.onScratchReply(id, { kind: 'no-session', gen: 1, diagnostics: [] })
-    expect(reg.entryOf(id).readings.tm).toEqual({ status: STATUS, value: null })
-  })
-
-  it('keeps a finished reading when the next text does not build', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['REG']))
-    replies.onScratchReply(id, {
-      kind: 'tm-value',
-      gen: 1,
-      run: { run: 'Ended', steps: 241_666, cap: 241_666 },
-      value: { Value: { text: '2' } },
-    })
-    replies.onScratchReply(id, { kind: 'no-session', gen: 1, diagnostics: [] })
-    expect(reg.entryOf(id).readings.tm?.value).toEqual({
-      run: { run: 'Ended', steps: 241_666, cap: 241_666 },
-      value: { Value: { text: '2' } },
-    })
-  })
-
-  it('forgets its reading when its worker throws', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('tm')
-    replies.onScratchReply(id, built(['REG']))
-    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
-    expect(reg.entryOf(id).readings.tm).toBeNull()
-  })
-})
-
 /**
- * **A RECORDING CHUNK'S REDRAW IS COALESCED TO ONE PER FRAME, AS A RUNNING VALUE'S IS** — the two `frames` arms, one
- * in each switch, over three legs. `record-loop.ts`'s `recordLeg` posts one chunk per `RECORD_CHUNK` steps while any
- * leg records, far more often than a display paints, so each arm pushes the chunk's frames at once and leaves only the
- * paint for the next frame; the chunk that ends the recording paints at once, since a copy's run gets no `result`
- * reply to paint its last frame.
+ * **A RECORDING CHUNK'S REDRAW IS COALESCED TO ONE PER FRAME** — the `frames` arm, over three legs.
+ * `record-loop.ts`'s `recordLeg` posts one chunk per `RECORD_CHUNK` steps while any leg records, far more often than a
+ * display paints, so the arm pushes the chunk's frames at once and leaves only the paint for the next frame; the chunk
+ * that ends the recording paints at once, since a rewound leg's recording gets no `result` reply to paint its last
+ * frame.
  *
- * EVERY CASE RUNS FOR BOTH SWITCHES AND ALL THREE LEGS. The helper both arms share sizes a chunk by its leg's
- * `LEG_FRAME_BYTES` entry, and a wrong entry is wrong for that leg alone, so one leg's case says nothing of the rest.
+ * EVERY CASE RUNS FOR ALL THREE LEGS. The arm sizes a chunk by its leg's `LEG_FRAME_BYTES` entry, and a wrong entry is
+ * wrong for that leg alone, so one leg's case says nothing of the rest.
  */
 describe('a recording chunk redraws once per frame', () => {
   const FRAMES_LEGS = ['lambda', 'tm', 'rxm'] as const
   type FramesLeg = (typeof FRAMES_LEGS)[number]
-  const CASES = (['onReply', 'onScratchReply'] as const).flatMap((sw) => FRAMES_LEGS.map((l) => [sw, l] as const))
 
   /** A `frames` reply for `leg` carrying steps `from` to `from + 1` under `epoch`, and the frames it carries. */
   const chunk = (
@@ -997,29 +436,18 @@ describe('a recording chunk redraws once per frame', () => {
   }
 
   /**
-   * `sw`'s switch over a session with a `leg` leg: the program's session through `driver`, or a blank copy through
-   * `scratchDriver`. Both take the same hand-driven frame queue, and `drawn` counts from zero.
+   * The program's session, its `leg` leg and the switch over it, on a hand-driven frame queue; `drawn` counts from
+   * zero.
    */
-  const harness = (sw: 'onReply' | 'onScratchReply', leg: FramesLeg) => {
+  const harness = (leg: FramesLeg) => {
     const q = frameQueue()
-    if (sw === 'onReply') {
-      const entry = sourceEntry()
-      const d = driver(entry, { frame: q.frame })
-      return {
-        q,
-        send: (r: RunReply) => d.replies.onReply(SOURCE, r),
-        leg: () => entry.legs[leg] as LegState<unknown>,
-        drawn: d.drawn,
-      }
-    }
-    let drawn = 0
-    const d = scratchDriver({ draw: () => (drawn += 1), frame: q.frame })
-    const id = d.buffers.forkBlank(leg)
+    const entry = sourceEntry()
+    const d = driver(entry, { frame: q.frame })
     return {
       q,
-      send: (r: RunReply) => d.replies.onScratchReply(id, r),
-      leg: () => d.reg.legOf({ session: id, leg }) as LegState<unknown>,
-      drawn: () => drawn,
+      send: (r: RunReply) => d.replies.onReply(SOURCE, r),
+      leg: () => entry.legs[leg] as LegState<unknown>,
+      drawn: d.drawn,
     }
   }
 
@@ -1027,8 +455,8 @@ describe('a recording chunk redraws once per frame', () => {
    * THE HISTORY IS ASSERTED FIRST, BEFORE ANY COUNT. Only the paint may wait for the frame: the step bar, the
    * controls and the next chunk all read the leg straight, so every frame the burst carried must already be there.
    */
-  it.each(CASES)('%s, %s: a burst of chunks draws once, on the frame, with the history already current', (sw, leg) => {
-    const h = harness(sw, leg)
+  it.each(FRAMES_LEGS)('%s: a burst of chunks draws once, on the frame, with the history already current', (leg) => {
+    const h = harness(leg)
     const first = chunk(leg, 0, null)
     const last = chunk(leg, 4, null)
     h.send(first.reply)
@@ -1046,8 +474,8 @@ describe('a recording chunk redraws once per frame', () => {
     expect(hist.current).toEqual(last.frames.at(-1))
   })
 
-  it.each(CASES)('%s, %s: the chunk that ends the recording draws at once', (sw, leg) => {
-    const h = harness(sw, leg)
+  it.each(FRAMES_LEGS)('%s: the chunk that ends the recording draws at once', (leg) => {
+    const h = harness(leg)
     h.send(chunk(leg, 0, 'budget').reply)
 
     expect(h.leg().done).toBe('budget')
@@ -1059,8 +487,8 @@ describe('a recording chunk redraws once per frame', () => {
    * **A CHUNK OF ANOTHER EPOCH THAN ITS LEG'S IS FROM A RECORDING A REWIND REPLACED**, posted before the worker took
    * the rewind: it pushes nothing, leaves the leg's end and draws nothing, and a chunk at the leg's epoch lands.
    */
-  it.each(CASES)('%s, %s: a chunk of another epoch is dropped whole, and one of the leg’s own lands', (sw, leg) => {
-    const h = harness(sw, leg)
+  it.each(FRAMES_LEGS)('%s: a chunk of another epoch is dropped whole, and one of the leg’s own lands', (leg) => {
+    const h = harness(leg)
     h.leg().epoch = 1
     h.send(chunk(leg, 0, null).reply)
     h.send(chunk(leg, 2, 'ended').reply)
@@ -1079,8 +507,8 @@ describe('a recording chunk redraws once per frame', () => {
    * **A LEG'S `gen` IS THE GENERATION OF THE FRAMES ITS RING HOLDS**, which `restart` reads to tell whether the
    * worker still holds their recording: set from each chunk the leg takes, and left by one it drops.
    */
-  it.each(CASES)('%s, %s: a chunk of the leg’s epoch sets its gen, and one of another epoch leaves it', (sw, leg) => {
-    const h = harness(sw, leg)
+  it.each(FRAMES_LEGS)('%s: a chunk of the leg’s epoch sets its gen, and one of another epoch leaves it', (leg) => {
+    const h = harness(leg)
     h.leg().epoch = 1
     h.send({ ...chunk(leg, 0, null).reply, gen: 3 })
     expect(h.leg().gen).toBe(0)
@@ -1093,8 +521,8 @@ describe('a recording chunk redraws once per frame', () => {
    * A BROWSER'S FRAME CANNOT BE UNCALLED, so the one a burst scheduled still fires after the ending chunk has drawn,
    * and must find nothing left to draw.
    */
-  it.each(CASES)('%s, %s: the frame left pending when the recording ends draws nothing', (sw, leg) => {
-    const h = harness(sw, leg)
+  it.each(FRAMES_LEGS)('%s: the frame left pending when the recording ends draws nothing', (leg) => {
+    const h = harness(leg)
     h.send(chunk(leg, 0, null).reply)
     expect(h.q.pending.length).toBe(1)
     h.send(chunk(leg, 2, 'ended').reply)
@@ -1105,40 +533,20 @@ describe('a recording chunk redraws once per frame', () => {
   })
 
   /**
-   * **ONE PENDING FLAG FOR EVERY ARM, NOT ONE PER ARM.** `draw()` repaints the whole app from live state, so a frame
-   * scheduled by either reply paints what both brought. A TM copy's value run and its recording are the pair that
-   * really do land together.
+   * **ONE PENDING FLAG FOR EVERY LEG.** The program's session records its three legs at once, so a flag kept per leg
+   * would give each of them a frame of its own.
    */
-  it('a running TM value and a TM chunk landing before one frame share its one draw', () => {
-    const h = harness('onScratchReply', 'tm')
-    h.send({ kind: 'tm-value', gen: 1, run: { run: 'Running', steps: 500_000, cap: 2_000_000 }, value: 'Unfinished' })
-    h.send(chunk('tm', 0, null).reply)
-
-    expect(h.drawn()).toBe(0)
-    expect(h.q.pending.length).toBe(1)
-    h.q.fire()
-    expect(h.drawn()).toBe(1)
-  })
-
-  /**
-   * **AND ACROSS BOTH SWITCHES AND EVERY LEG.** The program's session records its three legs at once and a copy records
-   * beside it, so a flag kept per switch, or per leg, would give each of them a frame of its own; the pair above lands in
-   * one switch on one leg and cannot tell. One `createReplies` serves both switches here, as it does in the app.
-   */
-  it("the program's λ and TM chunks and a copy's rxm chunk landing before one frame share its one draw", () => {
+  it("the program's λ, TM and rxm chunks landing before one frame share its one draw", () => {
     const q = frameQueue()
-    let drawn = 0
-    const d = scratchDriver({ draw: () => (drawn += 1), frame: q.frame })
-    d.reg.add(sourceEntry())
-    const copy = d.buffers.forkBlank('rxm')
+    const d = driver(sourceEntry(), { frame: q.frame })
     d.replies.onReply(SOURCE, chunk('lambda', 0, null).reply)
     d.replies.onReply(SOURCE, chunk('tm', 0, null).reply)
-    d.replies.onScratchReply(copy, chunk('rxm', 0, null).reply)
+    d.replies.onReply(SOURCE, chunk('rxm', 0, null).reply)
 
-    expect(drawn).toBe(0)
+    expect(d.drawn()).toBe(0)
     expect(q.pending.length).toBe(1)
     q.fire()
-    expect(drawn).toBe(1)
+    expect(d.drawn()).toBe(1)
   })
 
   /** `frames`, charged by `leg`'s own function, named here rather than read off `LEG_FRAME_BYTES`. */
@@ -1154,14 +562,14 @@ describe('a recording chunk redraws once per frame', () => {
   }
 
   /**
-   * **EACH LEG'S FRAMES ARE CHARGED BY THAT LEG'S OWN FUNCTION, IN BOTH SWITCHES.** Both size a chunk through
-   * `LEG_FRAME_BYTES`, and an entry that charges a leg's frame otherwise fills or empties the ring early with nothing on
-   * screen to say so. The charge is read where the ring takes it, at its `push`, and checked against `ownCharge`, so
-   * that the table is checked against something other than itself.
+   * **EACH LEG'S FRAMES ARE CHARGED BY THAT LEG'S OWN FUNCTION.** The arm sizes a chunk through `LEG_FRAME_BYTES`, and
+   * an entry that charges a leg's frame otherwise fills or empties the ring early with nothing on screen to say so. The
+   * charge is read where the ring takes it, at its `push`, and checked against `ownCharge`, so that the table is
+   * checked against something other than itself.
    */
-  it('charges each leg’s frames by that leg’s own function, in both switches', () => {
-    for (const [sw, leg] of CASES) {
-      const h = harness(sw, leg)
+  it('charges each leg’s frames by that leg’s own function', () => {
+    for (const leg of FRAMES_LEGS) {
+      const h = harness(leg)
       const { hist } = h.leg()
       const charged: number[] = []
       const push = hist.push.bind(hist)
@@ -1171,179 +579,28 @@ describe('a recording chunk redraws once per frame', () => {
       }
       const { reply, frames } = chunk(leg, 0, 'ended')
       h.send(reply)
-      expect(charged, `${sw}, ${leg}`).toEqual(ownCharge(leg, frames))
+      expect(charged, leg).toEqual(ownCharge(leg, frames))
     }
   })
 })
 
-/**
- * An rxm copy retains what its views were last told, as a TM copy does: its listing, its status and its value, all from
- * the one build reply (Plan 7 part 5 spec, amendment 26), the value replaced by an `rxm-value`, the frames recorded
- * into its rxm leg, and all of it written to storage with the build.
- */
-describe('an rxm copy retains what its views were last told', () => {
-  const STATUS: RxmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 1 }
-  const LISTING: RxmProgram = { listing: ['halt'], labels: [] }
-  const built = (value: Decoded): RunReply => ({
-    kind: 'rxm-scratch-compiled',
-    first: null,
-    gen: 1,
-    rxm: STATUS,
-    rxmProgram: LISTING,
-    value,
-  })
-
-  it('holds the listing, the status and the value its build reply carried, and persists the copy', () => {
-    const { buffers, reg, replies, persists } = scratchDriver()
-    const id = buffers.forkBlank('rxm')
-    replies.onScratchReply(id, built({ Value: { text: '0 (no result type)' } }))
-    const entry = reg.entryOf(id)
-    expect(entry.programs.rxm).toEqual({ program: LISTING, text: null })
-    expect(entry.readings.rxm).toEqual({ status: STATUS, value: { Value: { text: '0 (no result type)' } } })
-    expect(entry.legs.rxm?.status).toEqual({ available: true, reason: '' })
-    expect(persists()).toBe(1)
-  })
-
-  it('records its frames into its rxm leg', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('rxm')
-    replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, {
-      kind: 'frames',
-      leg: 'rxm',
-      gen: 1,
-      epoch: 0,
-      frames: [frameOf(), frameOf({ step: 1 })],
-      done: 'ended',
-    })
-    const leg = reg.legOf({ session: id, leg: 'rxm' })
-    expect(leg.hist.length).toBe(2)
-    expect(leg.hist.current?.step).toBe(0)
-    expect(leg.done).toBe('ended')
-  })
-
-  it('takes the value a [continue] brings in place of the build’s', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('rxm')
-    replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '[1, 2, 3]' } } })
-    expect(reg.entryOf(id).readings.rxm).toEqual({ status: STATUS, value: { Value: { text: '[1, 2, 3]' } } })
-  })
-
-  /** A rewind takes the copy's cursor back under its build's cap, where its next `[continue]` reads `Unfinished`. */
-  it('keeps a decided value when a later [continue] brings Unfinished, as after a rewind', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('rxm')
-    replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '6' } } })
-    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: 'Unfinished' })
-    expect(reg.entryOf(id).readings.rxm).toEqual({ status: STATUS, value: { Value: { text: '6' } } })
-  })
-
-  it('tells every view on the copy the value a [continue] brings, and the null a dead worker leaves', () => {
-    const { buffers, reg, replies, panes } = scratchDriver()
-    const id = buffers.forkBlank('rxm')
-    const told: unknown[] = []
-    panes.add({
-      id: 'rxm-0',
-      kind: 'rxm',
-      slot: new PaneSlot('rxm', id),
-      pane: { setScratch: (r: unknown) => told.push(r) } as unknown as PaneEntry<'rxm'>['pane'],
-      host: {} as HTMLElement,
-    })
-    reg.entryOf(id).readings.rxm = { status: STATUS, value: 'Unfinished' }
-    replies.onScratchReply(id, { kind: 'rxm-value', gen: 1, value: { Value: { text: '6' } } })
-    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
-    expect(told).toEqual([{ status: STATUS, value: { Value: { text: '6' } } }, null])
-  })
-
-  it('forgets its reading when its worker throws', () => {
-    const { buffers, reg, replies } = scratchDriver()
-    const id = buffers.forkBlank('rxm')
-    replies.onScratchReply(id, built('Unfinished'))
-    replies.onScratchReply(id, { kind: 'worker-error', gen: 1, message: 'boom' })
-    expect(reg.entryOf(id).readings.rxm).toBeNull()
-  })
-})
-
-/** The program's rxm text rides `compiled` beside its listing, for *edit a copy* — `TmCompiled.text`'s arrangement. */
-describe('a session retains its rxm text beside its listing', () => {
+/** The program's rxm listing rides `compiled`, kept on the session for a view built after the reply. */
+describe('a session retains its rxm listing', () => {
   const LISTING: RxmProgram = { listing: ['li\trr, #1', 'halt'], labels: [] }
 
-  it('holds the text a `compiled` reply carried, and nothing when it carried no listing', () => {
+  it('holds the listing a `compiled` reply carried, and nothing when it carried none', () => {
     const entry = sourceEntry()
     const { replies } = driver(entry)
     const rxm: RxmStatus = { available: true, reason: '', run: 'Running', cap: null, total_steps: 2 }
-    const text = 'result Nat\n\n    li\trr, #1\n    halt\n'
     const base = compiled(ONE_RULE_PROGRAM, ['TAPE'])
     replies.onReply(SOURCE, {
       ...base,
       statuses: { ...base.statuses, rxm },
-      programs: { ...base.programs, rxm: { program: LISTING, text } },
+      programs: { ...base.programs, rxm: { program: LISTING } },
     })
-    expect(entry.programs.rxm).toEqual({ program: LISTING, text })
+    expect(entry.programs.rxm).toEqual({ program: LISTING })
 
     replies.onReply(SOURCE, compiled(ONE_RULE_PROGRAM, ['TAPE']))
     expect(entry.programs.rxm).toBeNull()
-  })
-})
-
-/**
- * **A COPY'S BUILD PUTS ITS STEP 0 ON THE PAGE IN THE ONE DRAW ITS REPLY MAKES**, as the program's `compiled` does
- * (recompile-flash design): the step-0 frame in the copy's ring and a λ copy's step-0 tree in the cache, so an edit in a
- * copy's editor does not draw the copy's view emptied, or its term as flat text, first.
- */
-describe("a copy's build reply's step-0 picture", () => {
-  it('is in the ring, and a λ copy’s tree in the cache, when each arm draws, and no tree is asked for', () => {
-    const asked: number[] = []
-    const trees = new LambdaTrees(() => ({ gen: 1, awaitingRun: false, tree: (step: number) => asked.push(step) }))
-    let look: () => unknown = () => null
-    const seen: unknown[] = []
-    const { buffers, reg, replies, slot } = scratchDriver({ trees, draw: () => seen.push(look()) })
-    const ringOf = (session: SessionId, leg: 'lambda' | 'rxm' | 'tm') => {
-      const state = reg.legOf({ session, leg })
-      return { current: state.hist.current, length: state.hist.length, gen: state.gen }
-    }
-    const tree = wireOf('λx. x')
-    const lambda = lambdaFrame('λx. x')
-    const tm = tmFrame(0, 0, '#')
-    const rxm = frameOf({ step: 0 })
-
-    const lam = buffers.fork(slot, 'λx. x', 0, 'lambda')
-    look = () => ({ ...ringOf(lam, 'lambda'), tree: trees.want(lam, 0) })
-    replies.onScratchReply(lam, {
-      kind: 'scratch-compiled',
-      gen: 1,
-      lambda: { available: true, reason: '', node: null, run: null },
-      text: 'λx. x',
-      first: lambda,
-      lambdaTree: tree,
-    })
-    expect(seen.splice(0)).toEqual([{ current: lambda, length: 1, gen: 1, tree: { kind: 'tree', tree } }])
-    expect(asked).toEqual([])
-
-    const tmCopy = buffers.forkBlank('tm')
-    look = () => ringOf(tmCopy, 'tm')
-    replies.onScratchReply(tmCopy, {
-      kind: 'tm-scratch-compiled',
-      gen: 1,
-      tm: { available: true, reason: '', width: 8, run: 'Running', header: false, reduction: null },
-      tmProgram: ONE_RULE_PROGRAM,
-      tapeNames: ['TAPE'],
-      first: tm,
-    })
-    expect(seen.splice(0)).toEqual([{ current: tm, length: 1, gen: 1 }])
-
-    const rxmCopy = buffers.forkBlank('rxm')
-    look = () => ringOf(rxmCopy, 'rxm')
-    replies.onScratchReply(rxmCopy, {
-      kind: 'rxm-scratch-compiled',
-      gen: 1,
-      rxm: { available: true, reason: '', run: 'Running', cap: null, total_steps: 1 },
-      rxmProgram: { listing: ['halt'], labels: [] },
-      value: 'Unfinished',
-      first: rxm,
-    })
-    expect(seen.splice(0)).toEqual([{ current: rxm, length: 1, gen: 1 }])
   })
 })

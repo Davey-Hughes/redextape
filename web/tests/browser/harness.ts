@@ -46,7 +46,6 @@ export const SHELL = `
     <div id="views-shown" class="views-shown" role="group" aria-label="show">
       ${viewToggleButtons()}
     </div>
-    <button type="button" id="buffers">copies <span aria-hidden="true">▾</span></button>
     <button type="button" id="examples" aria-haspopup="menu" aria-controls="examples-menu" aria-expanded="false">examples <span aria-hidden="true">▾</span></button>
     <div id="examples-menu" class="header-menu" popover></div>
     <label class="encoding">
@@ -263,15 +262,6 @@ export const innerOf = (pane: HTMLElement): { readonly left: number; readonly ri
   return { left, right: left + pane.clientWidth }
 }
 
-/** The milliseconds from posting `payload` on a `MessageChannel` to its arrival at the other port: its structured clone. */
-export const cloneMs = (payload: unknown) =>
-  new Promise<number>((resolve) => {
-    const ch = new MessageChannel()
-    const start = performance.now()
-    ch.port2.onmessage = () => resolve(performance.now() - start)
-    ch.port1.postMessage(payload)
-  })
-
 /** The median of `xs`, the upper of the two middles for an even count, and `NaN` for none. */
 export const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? Number.NaN
 
@@ -380,20 +370,6 @@ export const leafKind = (leaf: string) =>
 /** The kind of the view `leaf`'s host, its `data-kind`, or `''` where there is none. */
 export const hostKind = (leaf: string): string => host(leaf)?.dataset.kind ?? ''
 
-/** A view's *move the editor here*, which its menu holds only while it is offered. */
-export const claim = (leaf: string): HTMLButtonElement | null =>
-  host(leaf)?.querySelector<HTMLButtonElement>('button.claim-editor') ?? null
-
-/** The copy editors a view's host holds, on the page or off it. */
-export const termEditorsIn = (host: HTMLElement | null): number =>
-  host?.querySelectorAll('.term-editor .cm-editor').length ?? 0
-
-/** The copy editors the view `id`'s host holds, counted by `termEditorsIn`. */
-export const editorsOf = (id: string): number => termEditorsIn(host(id))
-
-/** The CodeMirror editors under the elements whose `data-leaf` is `leaf`, counted. */
-export const editorsInLeaf = (leaf: string) => document.querySelectorAll(`[data-leaf="${leaf}"] .cm-editor`).length
-
 /** The layout the λ view `lambda-0`'s term is drawn in, its `data-layout`. */
 export const lambdaLayout = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')?.dataset.layout
 
@@ -402,9 +378,6 @@ export const lambdaStepText = () => stepTextOf('lambda-0')
 
 /** The λ view `lambda-0`'s term, or `null` where it shows none. */
 export const lambdaTerm = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')
-
-/** The text of the λ view `lambda-0`'s term, or `''` where it shows none. */
-export const lambdaTermText = () => document.querySelector('[data-leaf="lambda-0"] .term')?.textContent ?? ''
 
 /** A mark the λ view draws: a bar piece's `data-lane`, and the `is-` class of a one-row node's run. */
 export type LambdaMark = 'next-redex' | 'contractum' | 'linked'
@@ -466,26 +439,11 @@ export const barRows = (term: Element | null, lane: LambdaMark, strip: number): 
 /** The text of the view `leaf`'s term, or `''` where it shows none. */
 export const termOf = (leaf: string) => document.querySelector(`[data-leaf="${leaf}"] .term`)?.textContent ?? ''
 
-/** The text of the λ view `lambda-0`'s `h2`, or `''` where it has none. */
-export const lambdaHeading = () => document.querySelector('[data-leaf="lambda-0"] h2')?.textContent ?? ''
-
-/** The λ view `lambda-0`'s `button.detach`, or `null` where it has none. */
-export const forkButton = () => document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')
-
 /** Click the λ view `lambda-0`'s control labelled `label`; nothing happens where it has none. */
 export const lambdaControl = (label: string) =>
   [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')]
     .find((b) => b.textContent === label)
     ?.click()
-
-/** Click the λ view `lambda-0`'s control labelled `label`; it throws where it has none. */
-export const clickLambda = (label: string) => {
-  const b = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="lambda-0"] .controls button')].find(
-    (x) => x.textContent === label,
-  )
-  if (b === undefined) throw new Error(`no \`${label}\` button in the λ pane`)
-  b.click()
-}
 
 /** The view hosts actually in the document — every `[data-leaf]` under `#views` that is not a tab. */
 export const mounted = (): string[] =>
@@ -514,10 +472,7 @@ export const viewOfFocus = (): string | undefined =>
 /** The source view's host. */
 export const sourcePane = (): HTMLElement => host('source') as HTMLElement
 
-/**
- * `#results` READS THE FOCUSED VIEW'S SESSION (Plan 7 part 2 spec §9), so a read of the PROGRAM'S result
- * after a copy's view took the focus puts the focus on the program first.
- */
+/** Puts the focus in the source editor, so the keys a case types next edit the program. */
 export const focusProgram = () => document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
 
 /** The box that scrolls a long program: the source editor's own, in the share of its view it has (spec §11.1). */
@@ -525,10 +480,6 @@ export const sourceScroller = (): HTMLElement => sourcePane().querySelector('.cm
 
 /** The λ view `lambda-0`'s host. */
 export const lambdaHost = (): HTMLElement => host('lambda-0') as HTMLElement
-
-/** The λ view `lambda-0`'s pane, `.pane[data-leaf="lambda-0"]`. */
-export const lambdaPane = (): HTMLElement =>
-  document.querySelector<HTMLElement>('.pane[data-leaf="lambda-0"]') as HTMLElement
 
 /** A view's host — `.pane`, since in the stage each tab carries the leaf id too. */
 export const paneByLeaf = (leaf: string) =>
@@ -597,18 +548,9 @@ export const countOf = (printed: string) => Number(printed.replaceAll(',', ''))
 /** The rxm view `rxm-0`'s pane. */
 export const rxmPane = () => paneByLeaf('rxm-0')
 
-/** The text of the rxm view's value readout, or `''` where it shows none. */
-export const rxmValue = () => rxmPane().querySelector('.rxm-value')?.textContent ?? ''
-
-/** The text of `pane`'s step readout, or `''` where it shows none. */
-export const paneStepText = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
-
 /** The control labelled `label` among `pane`'s controls, or `undefined` where there is none. */
 export const controlIn = (pane: HTMLElement, label: string) =>
   [...pane.querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
-
-/** Whether `pane` says it shows a copy that is not linked. */
-export const copyShown = (pane: HTMLElement) => /copy · not linked/.test(pane.textContent ?? '')
 
 /** The TM view `tm-0`'s host. */
 export const tmViewHost = (): HTMLElement => host('tm-0') as HTMLElement
@@ -616,7 +558,7 @@ export const tmViewHost = (): HTMLElement => host('tm-0') as HTMLElement
 /** The state table under the TM view `tm-0`'s `host`, where `stateTable` looks under `tmPane`. */
 export const tmStateTable = (): HTMLElement => host('tm-0')?.querySelector('.state-table') as HTMLElement
 
-/** The TM view `tm-0`'s element, `[data-leaf="tm-0"]`; unlike `tmPaneHost`, it does not throw where none is mounted. */
+/** The TM view `tm-0`'s element, `[data-leaf="tm-0"]`. */
 export const tmPane = () => document.querySelector('[data-leaf="tm-0"]') as HTMLElement
 
 /** The text of `tmPane`'s status line, or `''` where it shows none. */
@@ -786,12 +728,6 @@ export const noticeElText = () => noticeEl().querySelector('.notice-text')?.text
 /** What the notice line says, or `''` while it says nothing: unlike `notice`, not trimmed. */
 export const noticeText = () => document.querySelector('#notice .notice-text')?.textContent ?? ''
 
-/** The notice line's text — where a refusal is said (Plan 7 part 2 spec §11) — or `''` while it is hidden. */
-export const shownNoticeText = () => {
-  const notice = document.querySelector<HTMLElement>('#notice')
-  return notice === null || notice.hidden ? '' : (notice.querySelector('.notice-text')?.textContent ?? '')
-}
-
 /** The notice line's action button, or `null` where the notice offers none. */
 export const undoButton = () => document.querySelector<HTMLButtonElement>('#notice button.notice-action')
 
@@ -854,12 +790,6 @@ export function retype(v: EditorView, text: string): void {
 /** `v`'s document, as a string. */
 export const text = (v: EditorView): string => v.state.doc.toString()
 
-/**
- * Error markers inside ONE pane's editor, so a source-editor marker cannot be mistaken for a copy's — the settle
- * signal for "this pane's edit reached the server".
- */
-export const markersIn = (pane: HTMLElement) => pane.querySelectorAll('.cm-editor .cm-lintRange-error').length
-
 /** The examples menu's button, `#examples`. */
 export const examplesButton = () => document.querySelector<HTMLButtonElement>('#examples') as HTMLButtonElement
 
@@ -917,8 +847,7 @@ export function splitVia(leaf: string, dir: 'row' | 'column', pick: string): voi
  * Split `leaf` into a second pane of the same kind on the same session.
  *
  * **THE PICK IS THE PANE'S OWN PAIR**, the item `view-header.ts`'s `viewMenu` labels "another view of this": the
- * same pane, duplicated, on the same session, which is how `two-lambda-panes.test.ts` reaches two λ panes on one
- * scratch without a rebind.
+ * same pane, duplicated, on the same session, which reaches two views of one session without a rebind.
  */
 export const splitSame = (leaf: string, dir: 'row' | 'column'): void => splitVia(leaf, dir, 'same')
 
@@ -934,9 +863,6 @@ export const splitRow = (leaf: string): void => splitVia(leaf, 'row', 'same')
 /** The title-selector of `leaf`'s view — the pair in force is its `data-binding`. */
 export const titleOf = (leaf: string) =>
   document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-title`)
-
-/** The title-selector of the λ view `lambda-0`, as `titleOf` finds it. */
-export const lambdaTitle = () => titleOf('lambda-0')
 
 /** The title-selector of the view in `pane` — the pair in force is its `data-binding`. */
 export const viewTitleOf = (pane: HTMLElement) =>
@@ -1418,7 +1344,7 @@ export const inertEvents = (over: Partial<PaneEvents> = {}): PaneEvents => ({
 
 /**
  * `PaneEvents`'s members, all inert — no test that calls this clicks a transport control. Unlike `inertEvents`, it
- * gives `editSink` and `collapse` too, and takes no `over`.
+ * takes no `over`.
  */
 export const paneEvents = (): PaneEvents => ({
   back: vi.fn(),
@@ -1430,8 +1356,6 @@ export const paneEvents = (): PaneEvents => ({
   speed: () => 8,
   setSpeed: vi.fn(),
   rebind: vi.fn(),
-  editSink: () => vi.fn(),
-  collapse: vi.fn(),
 })
 
 /** A new `section.pane` at the end of `<body>`, to build a pane in by hand. */
@@ -1548,71 +1472,6 @@ export const fixtureHost = (fixture: string): HTMLElement => {
   return el
 }
 
-/** The TM view `tm-0`'s host, thrown on where none is mounted. */
-export const tmPaneHost = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('[data-leaf="tm-0"]')
-  if (el === null) throw new Error('no TM pane mounted at [data-leaf="tm-0"]')
-  return el
-}
-
-/**
- * Rewrite the start state's rule list to a single unconditional jump to `halt`, and hand back the
- * name that state was edited under — `tm-scratch-fork.test.ts`'s `runs the edited machine` reads it back rather
- * than hard-coding it a second time: the assertion has to name the SAME state this function edited, derived from
- * the SAME text, or a future change to the lowering's naming could silently desynchronize the two.
- *
- * **DERIVED FROM THE REAL TEXT, NOT HARD-CODED.** The state names are the lowering's (`pc0`,
- * `wl1s2.s.sk0`, …) and it is free to change them; a machine typed into this file would keep passing
- * after such a change while no longer being the machine the pane forked. This reads the `start`
- * directive out of the emitted header and edits the state it names.
- *
- * **`halt` ITSELF IS NOT DERIVED, AND THAT IS SAFE RATHER THAN A SECOND HARD-CODE — `redextape-core`'s
- * `tm/lower_tm.rs` BUILDS THE ACCEPT STATE WITH THE LITERAL `"halt"`.** It is the lowering's own fixed name for
- * the machine's one accept state, not a fact this function reads off the source program the way `start`'s target
- * is, and `crates/redextape-core/tests/fixtures/list_1_2.tm` (`state halt: accept`) is a committed instance of
- * exactly that convention.
- */
-export function editedToHaltImmediately(text: string): { text: string; start: string } {
-  const start = /^start (\S+)$/m.exec(text)?.[1]
-  if (start === undefined) throw new Error('emitted text has no `start` directive')
-  const tapes = Number(/^tapes (\d+)$/m.exec(text)?.[1])
-  if (!Number.isInteger(tapes)) throw new Error('emitted text has no `tapes` directive')
-  const wild = Array.from({ length: tapes }, () => '*').join(' ')
-  const stay = Array.from({ length: tapes }, () => 'S').join(' ')
-  const rule = `  [${wild}] -> write [${wild}], move [${stay}], goto halt`
-
-  // Replace every rule line under `state <start>:` with the one above. A state block runs from its
-  // header to the next line that is not indented.
-  const lines = text.split('\n')
-  const at = lines.indexOf(`state ${start}:`)
-  if (at < 0) throw new Error(`no block for the start state \`${start}\``)
-  let end = at + 1
-  while ((lines[end] ?? '').startsWith('  ')) end++
-  return { text: [...lines.slice(0, at + 1), rule, ...lines.slice(end)].join('\n'), start }
-}
-
-/**
- * Whether the δ-table's rendered rows show `state`'s own header immediately followed by exactly the
- * one rule `editedToHaltImmediately` wrote — the fact worth waiting for and asserting, in place of
- * both a vacuous `/halt/i` (`state halt: accept` is always somewhere in the δ-table, forked or not,
- * edited or not) and plain content quiescence (`tm-scratch-fork.test.ts`'s `typeInto` changes
- * the editor's own text synchronously, well before the 300 ms debounce ever posts a recompile, so a quiescence
- * poll can settle in the gap before the worker answers at all — polling for this fact instead is
- * immune to that race by construction, since it can only become true once the reply that recompiled
- * the edited text has actually landed and repainted).
- *
- * READS THE RENDERED TABLE, NOT THE EDITOR'S OWN TEXT. The editor shows whatever was typed the
- * instant `typeInto` runs, which proves a keystroke reached the document and nothing about whether
- * the worker ever recompiled it — `TmPane.setProgram` is the one thing that can move what this reads.
- */
-export function startStateGoesToHalt(pane: HTMLElement, start: string): boolean {
-  const rows = [...pane.querySelectorAll<HTMLElement>('.state-row')]
-  const at = rows.findIndex((el) => el.classList.contains('is-state') && el.textContent === start)
-  const rule = at < 0 ? undefined : rows[at + 1]
-  if (rule === undefined || !rule.classList.contains('is-rule')) return false
-  return /→ halt$/.test(rule.textContent ?? '')
-}
-
 /**
  * Whether `v` is in vim's NORMAL mode, asked of the DOM rather than of the package.
  *
@@ -1621,54 +1480,6 @@ export function startStateGoesToHalt(pane: HTMLElement, start: string): boolean 
  * "which mode is it in" together, and it answers them about the element the user is looking at.
  */
 export const inNormalMode = (v: EditorView): boolean => v.scrollDOM.classList.contains('cm-vimMode')
-
-/** The host of the scratch editor in the λ view `lambda-0`, or `null` where none is mounted. */
-export const editorHost = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term-editor')
-
-/**
- * The header's buffers button — thrown rather than optional-chained past, the same standard
- * `tmPaneHost` sets: every caller needs the real element to act on, and a silent `null` here would
- * turn a missing mount point into a `TypeError` several lines away from where the mount actually failed.
- */
-export const buffersButton = (): HTMLButtonElement => {
-  const el = document.querySelector<HTMLButtonElement>('#buffers')
-  if (el === null) throw new Error('no #buffers control in the header')
-  return el
-}
-
-/** The header's buffers button, or `null` where there is none: `buffersButton` throws instead. */
-export const buffersControl = () => document.querySelector<HTMLButtonElement>('#buffers')
-
-/**
- * The popover `bufferList` appends beside `#buffers` — present once `bufferList` has run at all
- * (`main.ts` constructs it unconditionally: the button is never withheld), whether or not it is currently open.
- */
-export const buffersMenu = (): HTMLElement => {
-  const el = document.querySelector<HTMLElement>('.buffer-list')
-  if (el === null) throw new Error('no .buffer-list popover beside #buffers')
-  return el
-}
-
-/**
- * Every row the list currently holds — elements rather than text, since `it('mints a warm TM
- * buffer...')` in `tm-blank-buffer.test.ts` claims only the COUNT.
- *
- * **FORCES THE LIST OPEN FIRST, THE WAY `buffer-restore.test.ts`'s OWN `openList` DOES.** `bufferList`'s
- * rows are built on `beforetoggle` — a closed list keeps whatever it last rendered, which can predate a
- * mint that happened while it was shut (`buffer-list.ts`'s own doc: "A closed list has no state to keep
- * fresh"). The *new TM copy* control dismisses the popover before it mints (`buffer-list.ts`'s own click
- * handler), so every mint leaves the list closed on stale rows; reading it without reopening would answer
- * what the list showed BEFORE the mint, not what it holds now.
- */
-export const bufferRows = (): HTMLElement[] => {
-  const button = buffersButton()
-  if (button.getAttribute('aria-expanded') !== 'true') button.click()
-  return [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row')]
-}
-
-/** What each row READS, which is what §5 requires an assertion about a buffer to be made against. */
-export const rowNames = (): (string | null)[] =>
-  [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
 
 /**
  * A press with the pointer on the one element `sel` names, which throws where there is none. `vitest/browser` is
@@ -1679,68 +1490,6 @@ export const press = async (sel: string): Promise<void> => {
   if (el === null) throw new Error(`nothing to press at ${sel}`)
   const { userEvent } = await import('vitest/browser')
   await userEvent.click(el)
-}
-
-/** A `press` on the toggle in `#views-shown` that shows and hides the `kind` views. */
-export const pressShownToggle = (kind: string): Promise<void> => press(`#views-shown button[data-shows="${kind}"]`)
-
-/** The copies menu beside `#buffers`, or `null` where the page has none. */
-export const copiesMenu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
-
-/** Press a control of the copies menu by its name, opening the menu with a press where it is shut. */
-export const inCopiesMenu = async (label: string): Promise<void> => {
-  if (copiesMenu()?.matches(':popover-open') !== true) await press('#buffers')
-  await press(`.buffer-list button[aria-label="${label}"]`)
-}
-
-/** Close the copies menu where it is open. */
-export const shutCopiesMenu = (): void => {
-  if (copiesMenu()?.matches(':popover-open') === true) copiesMenu()?.hidePopover()
-}
-
-/** Delete every copy, which leaves every view on the program. */
-export function deleteEveryCopy(): void {
-  for (let n = 0; n < 16; n += 1) {
-    shutCopiesMenu()
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
-    if (del === null) {
-      shutCopiesMenu()
-      return
-    }
-    del.click()
-  }
-  throw new Error('the copies menu still lists a copy after 16 deletes')
-}
-
-/**
- * Delete every copy, which leaves every view on the program. Unlike `deleteEveryCopy`, it finds and shuts the copies
- * menu itself rather than through `shutCopiesMenu`.
- */
-export function deleteEveryCopyInline(): void {
-  const menu = (): HTMLElement | null => document.querySelector<HTMLElement>('.buffer-list')
-  const shut = (): void => {
-    if (menu()?.matches(':popover-open') === true) menu()?.hidePopover()
-  }
-  for (let n = 0; n < 16; n += 1) {
-    shut()
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    const del = document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')
-    if (del === null) {
-      shut()
-      return
-    }
-    del.click()
-  }
-  throw new Error('the copies menu still lists a copy after 16 deletes')
-}
-
-/** The copies menu's rows, read with the menu opened and shut again. */
-export const copyNames = (): (string | null)[] => {
-  document.querySelector<HTMLButtonElement>('#buffers')?.click()
-  const rows = [...document.querySelectorAll<HTMLElement>('.buffer-list .buffer-row-name')].map((e) => e.textContent)
-  document.querySelector<HTMLElement>('.buffer-list')?.hidePopover()
-  return rows
 }
 
 /** The menu `button` controls, thrown where it controls none. */
@@ -1773,8 +1522,7 @@ export const moreOf = (pane: HTMLElement) =>
 
 /**
  * Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. It finds the menu through
- * `moreOf` and `menuOf`, where `pickInViewMenu` finds it through `viewMenu`, and the two throw differently where there
- * is none. `vitest/browser` is imported when it is called, as `chooseSetting` says why.
+ * `moreOf` and `menuOf`. `vitest/browser` is imported when it is called, as `chooseSetting` says why.
  */
 export async function pick(pane: HTMLElement, cls: string): Promise<void> {
   const { userEvent } = await import('vitest/browser')
@@ -1791,19 +1539,6 @@ export const viewMenu = (pane: HTMLElement): HTMLElement => {
   const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
   if (more === null || menu === null) throw new Error('no view menu')
   return menu
-}
-
-/**
- * Open `pane`'s `⋯` menu with the pointer and pick `cls`'s item with it, as a user does. `vitest/browser` is imported
- * when it is called, as `chooseSetting` says why.
- */
-export async function pickInViewMenu(pane: HTMLElement, cls: string): Promise<void> {
-  const { userEvent } = await import('vitest/browser')
-  await userEvent.click(pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement)
-  await until(() => viewMenu(pane).matches(':popover-open'), 'the view menu to open')
-  const item = viewMenu(pane).querySelector<HTMLButtonElement>(`button.${cls}`)
-  if (item === null) throw new Error(`the menu offers no ${cls}`)
-  await userEvent.click(item)
 }
 
 export { until }

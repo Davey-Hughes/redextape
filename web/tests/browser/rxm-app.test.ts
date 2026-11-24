@@ -1,8 +1,8 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { bindingKey } from '../../src/view-header'
-import { compile, paneByLeaf, pickPreset, SHELL, segments, stageTab, until } from './harness'
+import { compile, paneByLeaf, pickPreset, SHELL, segments, stageTab, until, viewMenu } from './harness'
 
 /**
  * The rxm leg through the whole app (Plan 7 part 5 spec §5–§6): a compile reaches the rxm view of a four-view page,
@@ -35,6 +35,38 @@ const register = (name: string) =>
   [...paneByLeaf('rxm-0').querySelectorAll<HTMLElement>('.rxm-register')].find(
     (r) => r.querySelector('dt')?.textContent === name,
   )
+
+/**
+ * Open `leaf`'s ⋯ menu with the pointer and hold that every item it holds is drawn, that every group holds an item
+ * after its label, and that no other part of the list is left with no item after it. Answers each item's class.
+ */
+async function menuDrawn(leaf: string): Promise<string[]> {
+  const pane = paneByLeaf(leaf)
+  const more = pane.querySelector<HTMLButtonElement>('button.view-more')
+  expect(more, `${leaf}: a ⋯ button`).not.toBeNull()
+  await userEvent.click(more as HTMLButtonElement)
+  await until(() => viewMenu(pane).matches(':popover-open'), 'the view menu to open')
+  const menu = viewMenu(pane)
+  const items = [...menu.querySelectorAll<HTMLButtonElement>('.view-menu-main button')]
+  expect(items.length, 'precondition: the menu holds items').toBeGreaterThan(0)
+  for (const item of items) {
+    const box = item.getBoundingClientRect()
+    expect([box.width > 0, box.height > 0], `${item.className}: a drawn box`).toEqual([true, true])
+  }
+  const parts = [...(menu.querySelector('.view-menu-main') as HTMLElement).children]
+  const holdsItem = (part: Element) => part.matches('button') || part.querySelector('button') !== null
+  for (const [i, part] of parts.entries()) {
+    if (part.classList.contains('view-menu-group'))
+      expect(
+        part.querySelector('.view-menu-group-label ~ button'),
+        `${part.className}: a group with no item`,
+      ).not.toBeNull()
+    else if (!holdsItem(part))
+      expect(parts.slice(i + 1).some(holdsItem), `${part.className}: a part with no item after it`).toBe(true)
+  }
+  await userEvent.keyboard('{Escape}')
+  return items.map((item) => item.className)
+}
 
 /** Pick `key` (`bindingKey(leg, session)`) through `leaf`'s title menu, as `harness.ts`'s `pickBinding` does. */
 function pick(leaf: string, key: string): void {
@@ -73,6 +105,21 @@ describe('the rxm leg in the app', () => {
     expect(stepOf('rxm-0')).toBe('step 0 of 5')
     expect(segments()).toContain('rxm 42 · 5 instructions')
     expect(segments().map((s) => s.split(' ')[0])).toEqual(['λ', 'rxm', 'TM'])
+  })
+
+  it('draws every item of its ⋯ menu, with no group or other part left empty', () => menuDrawn('rxm-0'))
+
+  it('draws every item of the TM view’s ⋯ menu too, with no group or other part left empty', () => menuDrawn('tm-0'))
+
+  it('draws every item of the λ view’s ⋯ menu too, with no group or other part left empty', () => menuDrawn('lambda-0'))
+
+  // THE SOURCE VIEW HOLDS THE PAGE'S ONE EDITOR, so its menu is the one with a document to format.
+  it('offers format in the source view’s ⋯ menu and in no other view’s', async () => {
+    for (const leaf of ['lambda-0', 'tm-0', 'rxm-0']) {
+      const items = await menuDrawn(leaf)
+      expect(items, `${leaf}: a format item`).not.toContain('format-doc')
+    }
+    expect(await menuDrawn('source'), 'the source view: a format item').toContain('format-doc')
   })
 
   it('steps from the start, the listing marking what runs next and the registers what changed', async () => {

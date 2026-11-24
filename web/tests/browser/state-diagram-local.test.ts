@@ -8,7 +8,6 @@ import {
   diagramShows,
   frame,
   intoCmpeq,
-  programScroll,
   SHELL,
   stateIdle,
   tmPane,
@@ -18,16 +17,12 @@ import {
 
 /**
  * The state diagram's local level and its switch (Plan 7 part 4, spec §7, §8 and amendment 10): the current state
- * and every state within two rules of it, in signed columns; *show states*; and a machine with no program level.
+ * and every state within two rules of it, in signed columns; and *show states*.
  */
 
 let view: EditorView
 
 const FACT3 = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact(3)'
-/** A machine whose names carry no dots and whose states no instruction built: §7's third tier. */
-const FLAT = 'tapes 1\nstart q0\n\nstate q0:\n  [*] -> write [*], move [R], goto q1\nstate q1: accept\n'
-/** `FLAT` with dotted names, so it groups by name (§7's second tier) and has a program level. */
-const DOTTED = 'tapes 1\nstart a.q0\n\nstate a.q0:\n  [*] -> write [*], move [R], goto b.q1\nstate b.q1: accept\n'
 
 const nodes = () => [...diagram().querySelectorAll<HTMLElement>('.local-node')]
 async function stepUntilStateChanges(): Promise<void> {
@@ -305,67 +300,5 @@ describe('the local level (spec §8)', () => {
     expect(marked).toHaveLength(1)
     expect(marked[0]?.dataset.to).toBe(exit.dataset.state)
     expect(marked[0]?.dataset.from).not.toBe(marked[0]?.dataset.to)
-  })
-})
-
-describe('a machine with no program level (spec §7)', () => {
-  it('shows the local level alone, with program disabled and its reason stated', async () => {
-    tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-    const editor = await (async () => {
-      await until(() => tmPane().querySelector('.term-editor .cm-editor') !== null, 'the copy to mount its editor')
-      return tmPane().querySelector('.term-editor .cm-content') as HTMLElement
-    })()
-    const copy = (await import('@codemirror/view')).EditorView.findFromDOM(editor)
-    copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: FLAT } })
-    await until(() => nodes().some((n) => n.title === 'q0'), 'the copy to compile and draw q0')
-    expect(diagramChoice('program')?.disabled).toBe(true)
-    expect(diagramChoice('program')?.getAttribute('aria-description')).toMatch(/no program level/)
-    expect(diagramChoice('local')?.getAttribute('aria-checked')).toBe('true')
-    expect(diagramShows('.program-level')).toBe(false)
-    // The keys pass over the choice that cannot be made: an arrow from `local` finds nothing to move to, and the
-    // stored level is not changed behind the reader's back. Chosen first, so the level stored is `local` and a key
-    // that landed on `program` would show.
-    diagramChoice('local')?.click()
-    const before = JSON.parse(localStorage.getItem('redextape.layout') ?? '{}').tmDisplay?.['tm-0']
-    expect(before?.level).toBe('local')
-    diagramChoice('local')?.focus()
-    await userEvent.keyboard('{ArrowLeft}')
-    expect(document.activeElement).toBe(diagramChoice('local'))
-    expect(JSON.parse(localStorage.getItem('redextape.layout') ?? '{}').tmDisplay?.['tm-0']).toEqual(before)
-  })
-})
-
-describe('a recompile that changes the level shown', () => {
-  /** The copy's editor, which the case above mounted. A dispatch to it is an edit that leaves the focus where it is. */
-  const copy = async () => {
-    const { EditorView } = await import('@codemirror/view')
-    return EditorView.findFromDOM(tmPane().querySelector('.term-editor .cm-content') as HTMLElement) as EditorView
-  }
-
-  it('hands the focus from the program level to the local one when the new machine has no program level', async () => {
-    ;(await copy()).dispatch({ changes: { from: 0, to: (await copy()).state.doc.length, insert: DOTTED } })
-    await until(() => diagramChoice('program')?.disabled === false, 'the dotted copy to compile, with a program level')
-    diagramChoice('program')?.click()
-    await until(() => diagramShows('.program-level') && diagram().querySelector('.program-row') !== null, 'its rows')
-    programScroll().focus()
-    expect(document.activeElement).toBe(programScroll())
-    ;(await copy()).dispatch({ changes: { from: 0, to: (await copy()).state.doc.length, insert: FLAT } })
-    await until(() => nodes().some((n) => n.title === 'q0'), 'the flat copy to compile and draw q0')
-    expect(diagramShows('.program-level')).toBe(false)
-    // The grid is hidden under it, and a hidden element's focus falls to the page.
-    expect(document.activeElement).not.toBe(document.body)
-    expect((document.activeElement as HTMLElement).classList.contains('local-node')).toBe(true)
-  })
-
-  it('hands it back to the grid when the next machine has one again', async () => {
-    // Still `program` as stored — the flat machine showed the local level without choosing it.
-    const node = nodes().find((n) => n.tabIndex === 0) as HTMLElement
-    node.focus()
-    expect(document.activeElement).toBe(node)
-    ;(await copy()).dispatch({ changes: { from: 0, to: (await copy()).state.doc.length, insert: DOTTED } })
-    // NOT BY ITS ROWS: the flat machine left the dotted one's in the hidden level, where nothing draws.
-    await until(() => diagramShows('.program-level'), 'the dotted copy to compile and show its program level')
-    expect(diagramShows('.local-level')).toBe(false)
-    expect(document.activeElement).toBe(programScroll())
   })
 })

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { TmScratchStatus } from '../../bindings/TmScratchStatus'
 import type {
   ClifRow,
   ClifState,
@@ -9,7 +10,6 @@ import type {
   RxmState,
   RxmStatus,
   StateView,
-  TmScratchStatus,
   TmState,
   TmStatus,
 } from '../../src/types'

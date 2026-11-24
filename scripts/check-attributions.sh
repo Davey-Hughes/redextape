@@ -98,8 +98,7 @@
 #      rule reads the same way.
 #   2. **A TYPESCRIPT PARAMETER ON ITS OWN LINE** (`button: HTMLButtonElement,`), **A DEFAULT PARAMETER**
 #      (`width = 3,`), **A DESTRUCTURED KEY** (`warm: isWarm,`) **AND A LABEL** (`outer:`) all match the
-#      property rule and go in plain. So `web/src/buffer-list.ts` satisfies a qualified `Session.button`,
-#      through the first parameter of `bufferList`.
+#      property rule and go in plain.
 #   3. **A RUST TUPLE-VARIANT MATCH ARM.** `Some(y) =>` goes in plain through the UpperCamel variant
 #      rule, so a qualified `Option::Some` passes on any file holding one.
 #
@@ -115,20 +114,18 @@
 # open misses:
 #
 #   1. **A TYPESCRIPT SIGNATURE WHOSE RETURN TYPE ITSELF CONTAINS BRACES IS CLOSED, NOT MISSED.**
-#      `scratch.ts`'s `editorSeed` and `pane-host.ts`'s `scratchSeedOf` both return
-#      `{ text: string; collapsed: boolean } | null`, and the signature rule accepts the whole tail after
-#      `):`, so they are read as the declarations they are.
+#      `state-diagram.ts`'s `#offset` returns `{ x: number; y: number } | null`, and the signature rule
+#      accepts the whole tail after `):`, so it is read as the declaration it is.
 #
 #      **LEFT OPEN, THE MISS WOULD BE NOT ONLY A FALSE NEGATIVE BUT A FALSE POSITIVE AT A DELEGATING CALL
-#      SITE.** `pane-host.ts` declares `scratchSeedOf` as a member of its own deps type and `main.ts`
-#      supplies it as an object-literal property —
-#      `scratchSeedOf: (session: SessionId) => scratchpad.editorSeed(session)` — which the property rule
-#      reads as a declaration. Were the miss open, a citation naming `main.ts` would pass for
-#      `scratchSeedOf` while the file declaring the member failed. The reassurance that "a cited
-#      declaration this extractor misses IS a violation" holds only when no other file happens to emit
-#      the same name; where one does, the extractor would prefer the delegating call site over the
-#      declaration — the defect this gate exists to reject, produced by the gate. That asymmetry is why
-#      the signature rule reads such a return type: see the comment on that rule.
+#      SITE.** A file can declare such a signature as a member of its own deps type while another file
+#      supplies it as an object-literal property, `name: (id: Id) => impl(id)`, which the property rule
+#      reads as a declaration. Were the miss open, a citation naming the supplying file would pass for the
+#      member while the file declaring it failed. The reassurance that "a cited declaration this extractor
+#      misses IS a violation" holds only when no other file happens to emit the same name; where one does,
+#      the extractor would prefer the delegating call site over the declaration — the defect this gate
+#      exists to reject, produced by the gate. That asymmetry is why the signature rule reads such a return
+#      type: see the comment on that rule.
 #
 #   2. **AN `export function` WITH A DEFAULT PARAMETER VALUE IS NOT MISSED AT ALL**: the keyword rule reads
 #      the `function` and never looks inside the parameter list. `export function withDefault(a = 1) {`
@@ -283,15 +280,14 @@ strip_code() {
       # `{` or a return type. A call is followed by `;`, `,`, `)` or a member access, and matches neither --
       # but only once the list is found by its matching parenthesis, as the walk below does, rather than by
       # any `)` that happens to precede a colon. A wrapped CALL whose parameter list spills to the next line
-      # (`bufferList(` alone on a line) is deliberately not accepted as a signature, since accepting it
-      # would produce false declarations under `web/` and no genuine signature.
+      # is deliberately not accepted as a signature, since accepting it would produce false declarations
+      # under `web/` and no genuine signature.
       if (match(line, /^[ \t]*((export|default|declare|abstract|async|static|readonly|public|private|protected|override)[ \t]+)*#?[A-Za-z_$][A-Za-z0-9_$]*[ \t]*(<[^<>]*>)?[ \t]*\(/)) {
         head = substr(line, RSTART, RLENGTH)
         # **NOTHING AFTER THE `:` OF A RETURN TYPE IS TESTED, SO A SIGNATURE WHOSE RETURN TYPE IS AN OBJECT
         # TYPE IS NOT LOST**, although an object type carries `{`, `}` and `;`:
-        # `scratchSeedOf(s: SessionId): { text: string; collapsed: boolean } | null`. A test that forbade
-        # `;` there would lose both `scratchSeedOf` (`pane-host.ts`) and `editorSeed` (`scratch.ts`), which
-        # return such a type.
+        # `#offset(state: number): { x: number; y: number } | null {` (`state-diagram.ts`), which a test that
+        # forbade `;` there would lose.
         #
         # **THE WALK, NOT A `\)`-ANCHORED REGEX, FINDS THE PARENTHESIS TO TEST.** A `\)`-anchored regex is
         # satisfied by ANY `)` on the line, so `setTimeout((): void => { tick() }, DEBOUNCE_MS)` would read
@@ -306,7 +302,7 @@ strip_code() {
         # parenthesis is not, and loses the signature: `strip(s = /\(/): string {` yields nothing.
         #
         # A body brace need not end the line, so the methods of the fake `panes.test.ts` builds, written
-        # `setDetached(_d: boolean) {},`, are read as the real declarations they are.
+        # `setStepsShown(_shown: boolean) {},`, are read as the real declarations they are.
         after = ""
         if (line ~ /\)[ \t]*[:{]/) {
           parens = 0
@@ -326,8 +322,7 @@ strip_code() {
       # A field, a property, or an interface or type member. **MANY OF THE TREE'"'"'S SITES REST ON THIS RULE
       # ALONE**, and the audit of them is why it is here rather than dropped as loose: this codebase
       # declares methods as object-literal properties holding arrow functions, and shapes as interface
-      # members, and dropping the rule reddens those correct citations. The `style.css` citation of
-      # `BufferRow.term` rests on the member alone, not on the local `const term` in `buffer-list.ts`.
+      # members, and dropping the rule reddens those correct citations.
       if (match(line, /^[ \t]*((export|declare|static|readonly|public|private|protected|override)[ \t]+)*#?[A-Za-z_$][A-Za-z0-9_$]*[ \t]*[?!]?[ \t]*[:=]/)) {
         s = substr(line, RSTART, RLENGTH); sub(/[ \t]*[?!]?[ \t]*[:=]$/, "", s); sub(/^[ \t]*/, "", s)
         while (match(s, /^(export|declare|static|readonly|public|private|protected|override)[ \t]+/)) {
@@ -670,7 +665,7 @@ self_test() {
   # A `wasm_bindgen` js_name MINTS the JS name, so the Rust file IS where it is declared.
   printf '#[wasm_bindgen(js_name = linkIndex)]\npub fn link_index(&self) -> usize { 0 }\n' >"$tmp/bindgen.rs"
   # An object-literal method, read by the property rule, which many of the tree's sites rest on alone.
-  printf 'export const make = () => ({\n  detach: (step: number) => {},\n})\n' >"$tmp/factory.ts"
+  printf 'export const make = () => ({\n  seek: (step: number) => {},\n})\n' >"$tmp/factory.ts"
   # A cited CSS file, for which there is no declaration extractor and the presence rule stands.
   printf '.linked {\n  color: red;\n}\n' >"$tmp/style.css"
 
@@ -818,7 +813,7 @@ self_test() {
   assert_declared 'a BARE citation IS satisfied by a local let binding' "$tmp/binder.rs" 'overflow' 1
   assert_declared 'a re-export is NOT a declaration' "$tmp/barrel.ts" 'Owner' 0
   assert_declared 'a wasm_bindgen js_name IS a declaration' "$tmp/bindgen.rs" 'linkIndex' 1
-  assert_declared 'an object-literal method IS a declaration' "$tmp/factory.ts" 'detach' 1
+  assert_declared 'an object-literal method IS a declaration' "$tmp/factory.ts" 'seek' 1
   assert_declared 'a cited CSS file falls back to the presence rule' "$tmp/style.css" 'linked' 1
   assert_declared 'a Rust type-keyword declaration IS a declaration' "$tmp/typekw.rs" 'Marker' 1
   assert_declared 'a Rust struct field satisfies a QUALIFIED citation' "$tmp/rec.rs" 'Rec::width' 1

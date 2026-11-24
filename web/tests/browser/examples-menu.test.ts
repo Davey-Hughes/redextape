@@ -42,13 +42,14 @@ beforeAll(async () => {
 })
 
 describe('examples ▾', () => {
-  it('sits after copies ▾, in the chrome of the header’s other buttons', () => {
-    const buffers = document.querySelector<HTMLButtonElement>('#buffers') as HTMLButtonElement
-    expect(buffers.compareDocumentPosition(examplesButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    const [a, b] = [buffers, examplesButton()].map((el) => el.getBoundingClientRect())
-    expect(b?.left).toBeGreaterThan(a?.right ?? Number.POSITIVE_INFINITY)
+  it('sits after the views toggles, in the chrome of the header’s other buttons', () => {
+    const group = document.querySelector<HTMLElement>('#views-shown') as HTMLElement
+    expect(group.compareDocumentPosition(examplesButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(examplesButton().getBoundingClientRect().left).toBeGreaterThan(group.getBoundingClientRect().right)
+    const workspace = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement
+    const [a, b] = [workspace, examplesButton()].map((el) => el.getBoundingClientRect())
     expect(b?.height).toBe(a?.height)
-    const [x, y] = [buffers, examplesButton()].map((el) => getComputedStyle(el))
+    const [x, y] = [workspace, examplesButton()].map((el) => getComputedStyle(el))
     for (const property of [
       'borderTopStyle',
       'borderTopWidth',
@@ -212,10 +213,10 @@ describe('examples ▾', () => {
   })
 
   /**
-   * **AN UNDO LEFT TO RUN OUT GIVES THE FOCUS BACK TO `examples ▾`**, the control the pick was made from, and not to the
-   * copies button, where the notice line leaves a copy's undo that went away (`NoticeAction`'s `fallback`). The one
-   * long wait in this file, alone in its body for #99's reason: `NOTICE_MS` is a clock the app started at the pick,
-   * which fake timers installed now could not reach.
+   * **AN UNDO LEFT TO RUN OUT GIVES THE FOCUS BACK TO `examples ▾`**, the control the pick was made from, and not to
+   * `settings`, where the notice line leaves an action that names no control of its own (`NoticeAction`'s
+   * `fallback`). The one long wait in this file, alone in its body for #99's reason: `NOTICE_MS` is a clock the app
+   * started at the pick, which fake timers installed now could not reach.
    */
   it('gives the focus back to its button when the undo the focus is on runs out', async () => {
     await userEvent.click(examplesButton())

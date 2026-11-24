@@ -99,7 +99,7 @@ describe('the step controls', () => {
   })
 
   /**
-   * **THE CHAIN'S END, WHICH IS THE STATE A COPY'S WORKER THROWING PRODUCES.** `controls.ts`'s
+   * **THE CHAIN'S END, WHICH IS THE STATE A LEG THAT DID NOT COMPILE PRODUCES.** `controls.ts`'s
    * unavailable branch disables every transport button and offers no continue label at once, so the
    * neighbour chain has nothing in it; the speed select is what is left, and it is never disabled.
    */
@@ -116,8 +116,8 @@ describe('the step controls', () => {
       recording: false,
       playing: false,
       continueLabel: null,
-      stepText: 'the copy failed',
-      stepTextAtNewest: 'the copy failed',
+      stepText: 'not compiled',
+      stepTextAtNewest: 'not compiled',
     })
     expect(document.activeElement).not.toBe(document.body)
     expect(document.activeElement).toBe(s.el.querySelector('select.speed'))
@@ -361,8 +361,8 @@ describe('a step button a state change turns off hands the focus on', () => {
       recording: false,
       playing: false,
       continueLabel: null,
-      stepText: 'the copy failed',
-      stepTextAtNewest: 'the copy failed',
+      stepText: 'not compiled',
+      stepTextAtNewest: 'not compiled',
     })
     expect.soft(seen, 'the focus when ↺ was disabled').toEqual(['playback speed'])
     expect.soft(await settledFocus(), 'where the focus settles').toBe('playback speed')

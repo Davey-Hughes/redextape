@@ -1,14 +1,11 @@
 /**
  * A CUT TEXT READS WHOLE IN THE BROWSER'S TOOLTIP, AND ONLY WHILE IT IS CUT (the cut-text tooltips design): a listing
  * row, a diagram's instruction, a machine panel's name, a value, a frame or a heap line that the stylesheet cuts with an
- * ellipsis, and a copy's `no term yet`. A text cut where its own code gives it a title is not watched here;
- * `tests/node/cut-text.test.ts` holds the two lists to the stylesheet.
+ * ellipsis. A text cut where its own code gives it a title is not watched here; `tests/node/cut-text.test.ts` holds the
+ * two lists to the stylesheet.
  */
 
-/**
- * The texts the stylesheet cuts that nothing else lets a pointer read whole. A copy's `.buffer-row-term` is watched only
- * where its row has no term: a term has its own title, which the watcher would take off when the pointer left it.
- */
+/** The texts the stylesheet cuts that nothing else lets a pointer read whole. */
 export const CUT_TEXT_SELECTORS: readonly string[] = [
   '.state-cell',
   '.rxm-cell',
@@ -18,7 +15,6 @@ export const CUT_TEXT_SELECTORS: readonly string[] = [
   '.rxm-register dd',
   '.rxm-frame',
   '.rxm-cell-line',
-  '.buffer-row-term.is-absent',
 ]
 
 /** `CUT_TEXT_SELECTORS` as one selector. */
@@ -28,7 +24,7 @@ export const CUT_TEXT: string = CUT_TEXT_SELECTORS.join(', ')
  * Give the watched text the pointer arrives on its whole text as its `title` where it is cut then, and take that title
  * off at the next arrival. It measures only at an arrival the browser reports, which a step can bring on a text it
  * draws under a resting pointer; one title at a time, so none outlives the pointer. One listener on `doc`, so every
- * view, a copy's too, is covered without naming it.
+ * view is covered without naming it.
  *
  * **IT RELIES ON NO CONTAINER REWRITING A WATCHED TEXT IN PLACE**: each builds a new element at every draw, so a title
  * leaves with its text. A text rewritten in place keeps its old title until the engine reports an arrival on it.

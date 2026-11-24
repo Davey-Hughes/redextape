@@ -1,13 +1,11 @@
 /**
  * THE PROGRAM, KEPT ACROSS RELOADS — Plan 7 part 6a spec §4.3: the source editor's text, the encoding and width it
- * compiles under, and the listing its CLIF views show, stored as the workspace and the copies are, under a key of their
- * own.
+ * compiles under, and the listing its CLIF views show, stored as the workspace is, under a key of its own.
  *
  * **VERSIONED AND VALIDATED AS THE OTHER STORES ARE, AND A REFUSAL IS SILENT.** `parseProgram` answers `null` for
  * anything it will not take, and `null` reads exactly as a first visit does: the app opens on the first-load example.
  * A stored program cannot be told from a hand-edited one or one a later version wrote, and a banner on every load
- * after a format change would be worse than what it reports — `buffers-store.ts`'s `parseBuffers` refuses on the same
- * terms.
+ * after a format change would be worse than what it reports.
  *
  * **THE ENCODINGS AND WIDTHS ARE PARAMETERS** rather than read from the wasm module, so this file and its node tests
  * need no wasm. `main.ts` hands in `encodings()` and `fieldWidths()`.
@@ -16,7 +14,7 @@
 import { listedWidth } from './field-width'
 import { knownListing, type Listing } from './protocol'
 
-/** The `localStorage` key, namespaced for the reason `buffers-store.ts`'s `BUFFERS_STORAGE_KEY` gives. */
+/** The `localStorage` key, namespaced for the reason `appearance.ts`'s `STORAGE_KEY` gives. */
 export const PROGRAM_STORAGE_KEY = 'redextape.program'
 
 /**
@@ -90,5 +88,21 @@ export function parseProgram(
     encoding: stored.encoding,
     width: listedWidth(stored.width, widths),
     listing: knownListing(stored.listing) ?? 'as-built',
+  }
+}
+
+/**
+ * **THE KEY NO PART OF THE APP READS, REMOVED AT EVERY START-UP.** A tab still running an older build can write it
+ * again, so a removal made once behind a flag would leave it. Silent when the storage refuses, as a failed read of the
+ * program is: a key left behind costs its bytes and nothing else.
+ *
+ * **IT READS `localStorage` INSIDE ITS `try`**, for the reason `editor-prefs.ts`'s `readFormatOnBlur` gives: where site
+ * data is blocked the getter itself throws, and a default parameter would read it before the `try` begins.
+ */
+export function forgetCopies(store?: Storage): void {
+  try {
+    ;(store ?? localStorage).removeItem('redextape.buffers')
+  } catch {
+    // Nothing reads the key, so a storage that refuses leaves nothing to put right.
   }
 }

@@ -70,7 +70,7 @@ function readHalf(node: unknown): CustomHalf | null {
 }
 
 /**
- * The stored palette, or `null` for nothing usable — refused whole, as `buffers-store.ts`'s `parseBuffers` refuses,
+ * The stored palette, or `null` for nothing usable — refused whole, as `program-store.ts`'s `parseProgram` refuses,
  * without a notice, since a failed read cannot be told from a first visit: not JSON, another `version`, a half that is
  * not an object, a `name` that is not a string, `colours` without one of the sixteen or holding anything but lowercase
  * `#rrggbb`, an `adjusted` that is not a boolean, `tokens` that are not an object or are an array, or a token holding

@@ -21,14 +21,13 @@ of the machine.
 - The λ, rxm and Turing machine views each step forwards and backwards, play at a speed you pick and
   go back to step 0. A long run pauses when it reaches the step cap or fills the recording, and you
   can tell it to carry on.
-- You can copy the λ-term, rxm program or Turing machine out as text, edit it and run the copy.
 - A share link holds the program, the layout of the views and the step shown for each machine. It's
   kept in the URL's fragment, which the browser doesn't send to the server.
 - The tests run the same programs through a reference interpreter, the λ reducer, the Turing machine
   with unary and binary tapes, and native code, and fail if any two disagree.
 - `redextape-lsp` is a language server for `.rxt` and for the λ, rxm and Turing machine text formats.
-  There are tree-sitter grammars for all four and a Neovim plugin that sets them up. The site uses
-  the same server and grammars.
+  There are tree-sitter grammars for all four and a Neovim plugin that sets them up. The site's
+  editor uses the same server and the `.rxt` grammar.
 - `redextape` is the command-line tool. It formats, lints and runs programs, and writes out a
   program's λ-term, rxm program or Turing machine.
 

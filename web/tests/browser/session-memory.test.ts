@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import init, { compile, lambdaScratch, tmScratch } from '../../../pkg/redextape_wasm.js'
+import init, { compile } from '../../../pkg/redextape_wasm.js'
 import { History } from '../../src/history'
 import type { RunReply } from '../../src/protocol'
 import { FRAME_BYTES, HISTORY_BYTES, lambdaFrameBytes, TM_RADIUS, tmFrameBytes } from '../../src/protocol'
-import type { PoolPort, SessionId } from '../../src/session-client'
+import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
 import type { LambdaState, TmState } from '../../src/types'
 import { chromiumOnly } from './engine'
@@ -82,9 +82,14 @@ type Loaded = {
 /** One session slot in a round: which legs it retains, under which id. */
 type Slot = { id: SessionId; legs: { lambda: boolean; tm: boolean } }
 
-function realPool(): SessionPool {
+/** A pool over REAL `session-worker.ts` threads, each pushed to `workers` so that a round can end them. */
+function realPool(workers: Worker[]): SessionPool {
   return new SessionPool(
-    (): PoolPort => new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' }),
+    (): ClientPort => {
+      const w = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
+      workers.push(w)
+      return w
+    },
     () => {},
   )
 }
@@ -94,13 +99,9 @@ function realPool(): SessionPool {
  * `SessionPool`, the REAL `session-worker.ts`, and the REAL `History`, sized and pushed exactly as
  * `replies.ts`'s `onReply` does it.
  *
- * A LEG THE SLOT DOES NOT NAME IS RECEIVED AND DROPPED, WHICH IS WHAT MAKES A SCRATCH SIMULABLE.
- * §4.1's `LambdaScratch` has a λ leg and no TM leg, and a slot naming one leg retains exactly what a
- * scratch would retain — one ring of the same frame type, filled from the same program — because the
- * quantity this harness measures lives entirely on THIS side of the boundary. The simulation is
- * pessimistic on the far side and exact on the near one: the third test measures what a real
- * `LambdaScratch`/`TmScratch` costs in the worker, so the substitution is quantified rather than
- * waved at.
+ * A LEG THE SLOT DOES NOT NAME IS RECEIVED AND DROPPED, so a slot naming one leg retains one ring of that frame
+ * type, filled from the same program, because the quantity this harness measures lives entirely on THIS side of the
+ * boundary. The far side holds a whole `Session` whatever the slot keeps; the third test measures what that costs.
  */
 function record(pool: SessionPool, slot: Slot): { rings: Rings; done: Promise<void> } {
   const rings: Rings = {
@@ -155,13 +156,14 @@ function record(pool: SessionPool, slot: Slot): { rings: Rings; done: Promise<vo
  * threshold is about.
  */
 async function load(slots: Slot[]): Promise<Loaded> {
-  const pool = realPool()
+  const workers: Worker[] = []
+  const pool = realPool(workers)
   const started = slots.map((s) => record(pool, s))
   await Promise.all(started.map((s) => s.done))
   return {
     rings: started.map((s) => s.rings),
     release() {
-      for (const s of slots) pool.unbind(s.id)
+      for (const w of workers) w.terminate()
     },
   }
 }
@@ -173,22 +175,19 @@ async function load(slots: Slot[]): Promise<Loaded> {
 const ONE_SESSION: Slot[] = [{ id: 'source', legs: { lambda: true, tm: true } }]
 
 /**
- * Arm B: three sessions, FOUR legs — the source slot's two (λ and TM), plus one leg apiece for the two
- * scratchpads (§4.1, and confirmed against the generated `pkg/redextape_wasm.d.ts`: `LambdaScratch`
- * exposes `stepLambda`/`lambdaState` and no TM method, `TmScratch` the mirror image).
+ * Arm B: three sessions, FOUR legs — the source slot's two (λ and TM), plus one leg apiece for two one-legged
+ * slots.
  *
- * ALL THREE RUN THE SAME PROGRAM, AND THAT IS THE ONLY UNCONFOUNDED CHOICE. A scratchpad in the
- * shipped app holds whatever the user typed into it, so a "realistic" second program would be a
- * guess — and picking one makes the ratio a statement about the two programs rather than about the
- * leg count. Running `MAP` everywhere makes arm B's retained history EXACTLY twice arm A's by
- * construction (two λ rings with identical contents, two TM rings with identical contents), which is
- * precisely the plan's "four legs = 2x, not 3x" claim expressed as an experiment: if the measured
+ * ALL THREE RUN THE SAME PROGRAM, AND THAT IS THE ONLY UNCONFOUNDED CHOICE: a second program would make the ratio a
+ * statement about the two programs rather than about the leg count. Running `MAP` everywhere makes arm B's retained
+ * history EXACTLY twice arm A's by construction (two λ rings with identical contents, two TM rings with identical
+ * contents), which is precisely the plan's "four legs = 2x, not 3x" claim expressed as an experiment: if the measured
  * ratio of the retained bytes is not 2, the claim is wrong about something other than counting.
  */
 const THREE_SESSIONS: Slot[] = [
   { id: 'source', legs: { lambda: true, tm: true } },
-  { id: 'lambda-scratch', legs: { lambda: true, tm: false } },
-  { id: 'tm-scratch', legs: { lambda: false, tm: true } },
+  { id: 'lambda-only', legs: { lambda: true, tm: false } },
+  { id: 'tm-only', legs: { lambda: false, tm: true } },
 ]
 
 /** One round's readings. `resident` is the absolute heap with the round's sessions alive. */
@@ -198,7 +197,7 @@ type Reading = { resident: number; base: number; delta: number; ms: number; kept
  * What a round's rings ended up holding, as plain numbers.
  *
  * NUMBERS AND NOT THE RINGS THEMSELVES, AND THAT IS NOT TIDINESS — IT IS THE MEASUREMENT.
- * **`release()` UNBINDS THE WORKERS AND DOES NOT DROP THE RINGS** — only losing the last reference
+ * **`release()` TERMINATES THE WORKERS AND DOES NOT DROP THE RINGS** — only losing the last reference
  * does — so a round's `Loaded` kept in an outer variable would carry its frames into every round that
  * followed, inflating their baselines and pulling the resident ratio towards 1, `(base + 2C)/(base + C)`
  * falling exactly as this file's own model says it must. Summarising to scalars is what makes that
@@ -253,12 +252,11 @@ describe('session memory', () => {
 
     const round = async (slots: Slot[]): Promise<{ reading: Reading; shape: Shape[] }> => {
       releaseHeld()
-      // THE RELEASE NEEDS A TASK BOUNDARY BEFORE A COLLECTION CAN SEE IT. `unbind` deletes the entry
-      // and calls `terminate`, but without this `await` the previous round's frames stay reachable
-      // across two immediate `collect()` calls: arm A's `base` would read the whole of the preceding
-      // arm-B round, and its delta would come back negative. A negative delta is the signature, and
-      // it is the same class of error as reading an uncollected heap: the number is real, it just is
-      // not a size.
+      // THE RELEASE NEEDS A TASK BOUNDARY BEFORE A COLLECTION CAN SEE IT. `release` terminates the round's workers, but
+      // without this `await` the previous round's frames stay reachable across two immediate `collect()` calls: arm A's
+      // `base` would read the whole of the preceding arm-B round, and its delta would come back negative. A negative
+      // delta is the signature, and it is the same class of error as reading an uncollected heap: the number is real,
+      // it just is not a size.
       await new Promise((r) => setTimeout(r, 100))
       // COLLECTED UNTIL THE HEAP STOPS FALLING. These rounds put tens of thousands of frames into old
       // space, and on a loaded runner two collections are not always enough: the residue lands in
@@ -472,56 +470,19 @@ describe('session memory', () => {
    * and `globalThis.crossOriginIsolated` is `false` under Vitest's server (both checked in the same
    * run). So the far side has to be measured in its own units, which is what this does.
    *
-   * IT READS `WebAssembly.Memory.buffer.byteLength` FROM ONE MAIN-THREAD MODULE INSTANCE, not from
-   * three workers, because a worker's memory cannot be read from outside it without a probe worker
-   * and a second protocol. The number that matters survives that simplification: the MODULE BASELINE
-   * is paid once per thread, and decision 3 (§4.2, one worker per session) makes three sessions three
-   * threads. `HISTORY_BYTES` arithmetic says 2x; this says the process does not.
-   *
-   * THE ORDER IS DELIBERATE — scratches first, `Session` last. Linear memory grows and never shrinks,
-   * so a growth measured after a large allocation can be absorbed by that allocation's slack and read
-   * as 0; measuring the two small consumers before the large one keeps their figures from being
-   * hidden inside it. `TmScratch` still reads 0, which is the granularity showing through rather than
-   * a free lunch: wasm grows in 64 KiB pages, and the machine below fits in what `LambdaScratch`'s
-   * page had left.
+   * IT READS `WebAssembly.Memory.buffer.byteLength` FROM ONE MAIN-THREAD MODULE INSTANCE, not from three workers,
+   * because a worker's memory cannot be read from outside it without a probe worker and a second protocol. The number
+   * that matters survives that simplification: the MODULE BASELINE is paid once per thread, and decision 3 (§4.2, one
+   * worker per session) makes three sessions three threads, each holding a whole `Session` whatever legs its slot
+   * keeps, so on this side three sessions cost three times this case's figure, by arithmetic from it rather than
+   * measured, where `HISTORY_BYTES` arithmetic says arm B is 2x.
    */
-  it('measures the wasm linear memory a session kind costs, which the heap harness cannot see', async () => {
+  it('measures the wasm linear memory a session costs, which the heap harness cannot see', async () => {
     const out = await init()
     const bytes = (): number => out.memory.buffer.byteLength
-    const held: unknown[] = []
 
     const baseline = bytes()
     console.log('wasm module baseline after init():', baseline)
-
-    const { scratch: ls } = lambdaScratch('(\\x. x) (\\y. y)') as {
-      scratch: { stepLambda(): boolean; lambdaState(b: number): unknown } | null
-    }
-    if (!ls) throw new Error('BLOCKED: lambdaScratch declined a term the wasm browser tier pins as valid')
-    let lambdaSteps = 0
-    while (ls.stepLambda() && lambdaSteps < 100_000) {
-      ls.lambdaState(FRAME_BYTES)
-      lambdaSteps += 1
-    }
-    const afterLambdaScratch = bytes()
-    held.push(ls)
-    console.log(`LambdaScratch (${lambdaSteps} steps):`, afterLambdaScratch, 'growth', afterLambdaScratch - baseline)
-
-    // The headerless machine from `crates/redextape-wasm/tests/browser.rs`'s
-    // `a_headerless_tm_scratch_runs_and_says_its_configuration_was_invented` — one rule, blank tape,
-    // `MIN_FIELD_WIDTH`. Small on purpose: this measures a scratch's FLOOR, and the ceiling is whatever
-    // the user types.
-    const { scratch: ts } = tmScratch(
-      'tapes 1\nstart scan\n\nstate scan:\n  [1] -> write [*], move [R], goto scan\n  [*] -> write [1], move [S], goto halt\nstate halt: accept\n',
-    ) as { scratch: { stepTm(): boolean; tmState(r: number): unknown } | null }
-    if (!ts) throw new Error('BLOCKED: tmScratch declined a machine the wasm browser tier pins as valid')
-    let tmSteps = 0
-    while (ts.stepTm() && tmSteps < 100_000) {
-      ts.tmState(TM_RADIUS)
-      tmSteps += 1
-    }
-    const afterTmScratch = bytes()
-    held.push(ts)
-    console.log(`TmScratch (${tmSteps} steps):`, afterTmScratch, 'growth', afterTmScratch - afterLambdaScratch)
 
     const { session } = compile(MAP, 'unary') as {
       session: {
@@ -533,7 +494,7 @@ describe('session memory', () => {
     }
     if (!session) throw new Error('BLOCKED: compile declined the probe program')
     const afterCompile = bytes()
-    console.log('Session after compile(MAP):', afterCompile, 'growth', afterCompile - afterTmScratch)
+    console.log('Session after compile(MAP):', afterCompile, 'growth', afterCompile - baseline)
     let sessionLambda = 0
     while (session.stepLambda() && sessionLambda < 100_000) {
       session.lambdaState(FRAME_BYTES)
@@ -545,7 +506,6 @@ describe('session memory', () => {
       sessionTm += 1
     }
     const afterStepping = bytes()
-    held.push(session)
     console.log(
       `Session after stepping both legs (${sessionLambda} lambda, ${sessionTm} tm):`,
       afterStepping,
@@ -553,23 +513,15 @@ describe('session memory', () => {
       afterStepping - afterCompile,
     )
 
-    const sessionCost = afterStepping - afterTmScratch
-    const lambdaScratchCost = afterLambdaScratch - baseline
-    const tmScratchCost = afterTmScratch - afterLambdaScratch
+    const sessionCost = afterStepping - baseline
     const oneWorker = baseline + sessionCost
-    const threeWorkers = 3 * baseline + sessionCost + lambdaScratchCost + tmScratchCost
-    console.log('one worker  (baseline + Session)      :', oneWorker)
-    console.log('three workers (3*baseline + all three):', threeWorkers)
-    console.log('wasm ratio:', threeWorkers / oneWorker)
+    console.log('one worker (baseline + Session):', oneWorker)
 
-    // Sanity only. The module has to cost something, a session has to cost more than nothing, and
-    // three threads cannot cost less than one — an inversion in any of those means the reading is not
-    // measuring what the names say. The ratio is the output and is NOT asserted: it exceeds 2, and
-    // the threshold design §5 pre-registers is over the heap harness's figure and not this one.
+    // Sanity only. The module has to cost something and a session has to cost more than nothing; a reading of
+    // either at 0 means it is not measuring what the names say. The figure is the output and is NOT asserted: the
+    // threshold design §5 pre-registers is over the heap harness's figure and not this one.
     // `DROP_HISTORY_ON_UNFOCUS`'s doc records the overshoot and why the boolean is not its remedy.
     expect(baseline).toBeGreaterThan(0)
     expect(sessionCost).toBeGreaterThan(0)
-    expect(threeWorkers).toBeGreaterThan(oneWorker)
-    expect(held.length).toBe(3)
   })
 })

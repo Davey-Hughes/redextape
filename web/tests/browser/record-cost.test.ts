@@ -16,10 +16,9 @@ import {
 } from '../../src/protocol'
 import type { ProgramResult } from '../../src/readout'
 import { createReplies } from '../../src/replies'
-import type { ScratchBuffers } from '../../src/scratch'
 import type { SessionId } from '../../src/session-client'
-import { type SessionEntry, SessionRegistry } from '../../src/sessions'
-import type { LambdaState, RxmState, TmState } from '../../src/types'
+import { type SessionEntry, type SessionLegs, SessionRegistry } from '../../src/sessions'
+import type { ClifState, LambdaState, RxmState, TmState } from '../../src/types'
 import { legState } from '../node/leg-fixture'
 import { fakeClient } from '../node/session-fixtures'
 import {
@@ -27,34 +26,27 @@ import {
   clickWorkspaceItem,
   compile,
   controlIn,
-  copyShown,
   countOf,
-  deleteEveryCopy,
-  host,
   median,
   mountAt,
   ms,
   paneOrThrow,
-  pickInViewMenu,
   recorded,
   recordingOver,
   results,
   showWideDefault,
   stepLineOf,
-  titleOf,
   until,
 } from './harness'
-import { CASES } from './rxm-copy-corpus'
 
 /**
  * **A PROBE, NOT A GATE** (`vite.config.ts`'s `PROBE_FILES`): what recording through the real `session-worker.ts`
  * costs, what the app's reply handling costs, and what a step costs in the mounted app, so that a change to the record
  * loops, the replies or the per-step draw is timed against its base. Run by `pnpm run test:probe:record`.
  *
- * **EACH LINE'S TAG IS ITS CLASS**: a timing prints as `RUN`, in `rxm-copy-cost.test.ts`'s shape, the median and
- * spread of `RUNS` samples; a value that must not vary prints as `FIXED`, pinned here and asserted equal to its pin in
- * every sample, so that a broken or drifted run fails rather than prints. A `RUN` under 100 ms at the median is
- * followed by a `SHORT` line.
+ * **EACH LINE'S TAG IS ITS CLASS**: a timing prints as `RUN`, the median and spread of `RUNS` samples; a value that
+ * must not vary prints as `FIXED`, pinned here and asserted equal to its pin in every sample, so that a broken or
+ * drifted run fails rather than prints. A `RUN` under 100 ms at the median is followed by a `SHORT` line.
  */
 
 const RUNS = 5
@@ -78,38 +70,7 @@ const SUM_TO_N = 2750
 const SUM_TO = textOf('sum-to').replace('sum_to(5)', `sum_to(${SUM_TO_N})`)
 if (!SUM_TO.endsWith(`sum_to(${SUM_TO_N})\n`)) throw new Error('sum-to.rxt no longer ends on sum_to(5)')
 
-/**
- * **UNREACHABLE BLOCKS ENLARGE A COPY'S BUILD AND NOTHING ELSE**: they are parsed, checked and listed, but never run,
- * so the copy's run and frames stay its program's. Without them a copy's build is too short to time.
- */
-const rxmUnreached = (bytes: number): string => {
-  const parts: string[] = []
-  for (let i = 0, size = 0; size < bytes; i++) {
-    const block = `unreached${i}:\n    li\tr1, #${i}\n    add\tr2, r1, r1\n    jz\tr0, unreached${i}\n`
-    parts.push(block)
-    size += block.length
-  }
-  return parts.join('')
-}
-
-/** `text` followed by states that nothing goes to, as `rxmUnreached` enlarges an rxm copy. */
-const tmUnreached = (text: string, bytes: number): string => {
-  const tapes = Number(/^tapes (\d+)$/m.exec(text)?.[1] ?? Number.NaN)
-  if (!(tapes > 0)) throw new Error('the TM text names no tapes')
-  const [any, stay] = [Array(tapes).fill('*').join(' '), Array(tapes).fill('S').join(' ')]
-  const parts = [text.endsWith('\n') ? text : `${text}\n`]
-  for (let i = 0, size = 0; size < bytes; i++) {
-    const state = `state unreached${i}:\n  [${any}] -> write [${any}], move [${stay}], goto unreached${i}\n`
-    parts.push(state)
-    size += state.length
-  }
-  return parts.join('')
-}
-
-type Compiled = Extract<
-  RunReply,
-  { kind: 'compiled' | 'scratch-compiled' | 'tm-scratch-compiled' | 'rxm-scratch-compiled' }
->
+type Compiled = Extract<RunReply, { kind: 'compiled' }>
 type LegHeard = { ms: number; frames: number; replies: number; done: RecordEnd | null }
 type Heard = {
   readonly compiledMs: number
@@ -121,8 +82,8 @@ type Heard = {
 /** What one leg of a case sends and how it stops, pinned, so that a drift on either side of a comparison fails there. */
 type LegPin = { readonly frames: number; readonly replies: number; readonly done: RecordEnd }
 /**
- * fact-12's three legs, as (a) records them, as (h) replays them, and as the TM copy (g) records its TM leg: the legs a
- * compile records at once, since CLIF records only while a CLIF view is shown.
+ * fact-12's three legs, as (a) records them and as (h) replays them: the legs a compile records at once, since CLIF
+ * records only while a CLIF view is shown.
  */
 const FACT_12_LEGS: Readonly<Record<CopyLeg, LegPin>> = {
   lambda: { frames: 1_407, replies: 6, done: 'budget' },
@@ -134,27 +95,6 @@ const FACT_12_LEGS: Readonly<Record<CopyLeg, LegPin>> = {
 const heardOf = (h: Heard, leg: Leg) => {
   const l = h.legs[leg]
   return l === undefined ? undefined : { frames: l.frames, replies: l.replies, done: l.done }
-}
-
-const COMPILED_KINDS: ReadonlySet<string> = new Set([
-  'compiled',
-  'scratch-compiled',
-  'tm-scratch-compiled',
-  'rxm-scratch-compiled',
-])
-
-/** The legs whose step-0 frame `c` carries: every compiled leg of a build, a copy's own leg. */
-const firstLegs = (c: Compiled): Leg[] => {
-  switch (c.kind) {
-    case 'compiled':
-      return LEGS.filter((leg) => c.first[leg] !== null)
-    case 'scratch-compiled':
-      return c.first === null ? [] : ['lambda']
-    case 'tm-scratch-compiled':
-      return c.first === null ? [] : ['tm']
-    case 'rxm-scratch-compiled':
-      return c.first === null ? [] : ['rxm']
-  }
 }
 
 /**
@@ -196,12 +136,12 @@ function record(name: string, request: RunRequest, last: Leg | 'result', kept?: 
         warming = false
         t0 = performance.now()
         worker.postMessage(request)
-      } else if (COMPILED_KINDS.has(r.kind)) {
+      } else if (r.kind === 'compiled') {
         compiledMs = now - t0
-        compiled = r as Compiled
-        // COUNTED WITH THE LEG'S CHUNKS, which record on from step 1, so that a leg's frames are its whole recording
-        // for a build and a copy alike, and are what (h)'s rings hold.
-        for (const leg of firstLegs(compiled)) {
+        compiled = r
+        // COUNTED WITH THE LEG'S CHUNKS, which record on from step 1, so that a leg's frames are its whole recording,
+        // which is what (h)'s rings hold.
+        for (const leg of LEGS.filter((l) => r.first[l] !== null)) {
           const l = legs[leg] ?? { ms: Number.NaN, frames: 0, replies: 0, done: null }
           legs[leg] = l
           l.frames += 1
@@ -227,7 +167,7 @@ function record(name: string, request: RunRequest, last: Leg | 'result', kept?: 
   })
 }
 
-/** A timing's line: its median and spread over the samples, in `rxm-copy-cost.test.ts`'s `RUN` shape. */
+/** A timing's line: its median and spread over the samples, tagged `RUN`. */
 function figure(name: string, format: (x: number) => string, xs: number[]): string {
   const [mid, lo, hi] = [median(xs), Math.min(...xs), Math.max(...xs)]
   return `RUN  ${name}: median=${format(mid)} spread=${format(lo)}-${format(hi).trim()}`
@@ -250,8 +190,6 @@ type Case = {
   readonly last: Leg | 'result'
   /** What each leg the case records sends and how it stops; a leg not named here must record nothing. */
   readonly legs: Partial<Record<Leg, LegPin>>
-  /** The copy run's length, read off its compiled reply, and its pin: what the copy is, beside how it stops. */
-  readonly totalSteps?: { readonly of: (compiled: Compiled) => number | null; readonly is: number }
 }
 
 async function measure(c: Case): Promise<void> {
@@ -261,7 +199,6 @@ async function measure(c: Case): Promise<void> {
   for (const h of runs) {
     expect(Object.keys(h.legs).sort(), `${c.id}: the legs that recorded`).toEqual([...legs].sort())
     for (const leg of legs) expect(heardOf(h, leg), `${c.id}: ${leg}`).toEqual(c.legs[leg])
-    if (c.totalSteps !== undefined) expect(c.totalSteps.of(h.compiled), `${c.id}: total steps`).toBe(c.totalSteps.is)
   }
   const rows = [
     timed(
@@ -269,7 +206,6 @@ async function measure(c: Case): Promise<void> {
       runs.map((h) => h.compiledMs),
     ),
   ]
-  if (c.totalSteps !== undefined) rows.push(fixed(`${c.id} total steps`, c.totalSteps.is))
   for (const leg of legs)
     rows.push(
       timed(
@@ -295,37 +231,7 @@ const run = (src: string) => async (): Promise<RunRequest> => ({
   encoding: EXAMPLE_ENCODING,
   clif: null,
 })
-const rxmCopy = (src: string) => async (): Promise<RunRequest> => ({
-  kind: 'scratch',
-  gen: 2,
-  leg: 'rxm',
-  src,
-  step: 0,
-})
-const rxmTotal = (compiled: Compiled): number | null =>
-  compiled.kind === 'rxm-scratch-compiled' ? compiled.rxm.total_steps : null
-const heapCells = CASES.find((c) => c.name === 'heap cells')?.src
-if (heapCells === undefined) throw new Error("rxm-copy-corpus.ts' CASES has no heap cells")
 
-let tmCopyMemo: Promise<string> | undefined
-/**
- * The TM copy's text: fact-12's TM text, so that the copy is the machine (a) records, then unreachable states. **READ
- * ONCE, FROM ONE UNTIMED RUN**: the text is the same for every sample, and each sample still builds it in a fresh worker.
- */
-const tmCopyText = (): Promise<string> => {
-  tmCopyMemo ??= (async () => {
-    const { compiled } = await record('fact-12 tmText', await run(FACT_12)(), 'result')
-    const text = compiled.kind === 'compiled' ? (compiled.programs.tm?.text ?? null) : null
-    if (text === null) throw new Error('fact-12 has no TM text to copy')
-    return tmUnreached(text, 3_000_000)
-  })()
-  return tmCopyMemo
-}
-
-/**
- * **NO λ COPY**: its build parses at most `LAMBDA_BYTE_BUDGET` bytes of λ text, too short to time however the text is
- * enlarged, and its recording is `RECORDINGS.lambda`, which (a) and (b) time.
- */
 const WORKER_CASES: readonly Case[] = [
   { id: '(a) fact-12', request: run(FACT_12), last: 'result', legs: FACT_12_LEGS },
   {
@@ -337,26 +243,6 @@ const WORKER_CASES: readonly Case[] = [
       rxm: { frames: 36_922, replies: 145, done: 'budget' },
       tm: { frames: 74_803, replies: 293, done: 'budget' },
     },
-  },
-  {
-    id: '(c) rxm copy: a loop to its step cap',
-    request: rxmCopy(`loop:\n    jmp\tloop\n${rxmUnreached(4_000_000)}`),
-    last: 'rxm',
-    legs: { rxm: { frames: 289_263, replies: 1_130, done: 'budget' } },
-    totalSteps: { of: rxmTotal, is: 5_000_000 },
-  },
-  {
-    id: '(d) rxm copy: heap cells',
-    request: rxmCopy(heapCells + rxmUnreached(4_000_000)),
-    last: 'rxm',
-    legs: { rxm: { frames: 18_315, replies: 72, done: 'budget' } },
-    totalSteps: { of: rxmTotal, is: 2_020_001 },
-  },
-  {
-    id: '(g) TM copy: fact-12',
-    request: async () => ({ kind: 'scratch', gen: 2, leg: 'tm', src: await tmCopyText(), step: 0 }),
-    last: 'tm',
-    legs: { tm: FACT_12_LEGS.tm },
   },
 ]
 
@@ -371,22 +257,20 @@ const REPLAYS = 200
 /**
  * One replay of `capture` through a fresh `onReply`, timed, then checked: each leg's ring holds the frames the capture
  * carried, and the `compiled` and `result` arms ran. A source session with a ring per leg and no view on the page;
- * the stand-ins are `replies.test.ts`' driver's, so `draw` does nothing, a frame runs at once, and `scratchpad`, which
- * no arm of `onReply` reaches, is not there.
+ * the stand-ins are `replies.test.ts`' driver's, so `draw` does nothing and a frame runs at once.
  */
 function replay(capture: readonly RunReply[]): number {
   const entry: SessionEntry = {
     id: SOURCE,
     label: 'program',
-    detached: false,
     client: fakeClient(),
     legs: {
       lambda: legState<LambdaState>(false, HISTORY_BYTES),
       rxm: legState<RxmState>(false, HISTORY_BYTES),
       tm: legState<TmState>(false, HISTORY_BYTES),
-    },
+      clif: legState<ClifState>(false, HISTORY_BYTES),
+    } satisfies Required<SessionLegs>,
     programs: { rxm: null, tm: null, clif: null },
-    readings: { rxm: null, tm: null },
   }
   const sessions = new SessionRegistry()
   sessions.add(entry)
@@ -399,17 +283,13 @@ function replay(capture: readonly RunReply[]): number {
   const shown = document.createElement('section')
   const { onReply } = createReplies({
     sessions,
-    scratchpad: undefined as unknown as ScratchBuffers,
     results: shown,
     view: () => view,
     panes: new PaneCollection(),
     links: { setIndex: () => undefined } as unknown as LinkWiring,
-    trees: new LambdaTrees(() => undefined),
+    trees: new LambdaTrees(() => ({ gen: 0, awaitingRun: false, tree: () => undefined })),
     draw: () => undefined,
     frame: (cb) => cb(),
-    editorHome: () => undefined,
-    onBuffersPersist: () => undefined,
-    notify: () => ({ dismiss: () => undefined }),
     setProgram: (r) => {
       said.program = r
     },
@@ -483,7 +363,7 @@ const stepOf = (line: string): number => countOf(/^step ([\d,]+) of /.exec(line)
 
 /** A view's newest step and its walk's K, pinned: K is the newest step, at most `K_CAP`. */
 type WalkPin = { readonly newest: number; readonly k: number }
-/** Each view's walk over fact-12, the same for the view's copy, whose program is the view's. */
+/** Each view's walk over fact-12. */
 const WALKS: Readonly<Record<CopyLeg, WalkPin>> = {
   lambda: { newest: 1_406, k: 300 },
   tm: { newest: 75_850, k: 300 },
@@ -492,19 +372,14 @@ const WALKS: Readonly<Record<CopyLeg, WalkPin>> = {
 
 /**
  * **THE READOUT IS THE ONE THE WALK NAMES, CHECKED BEFORE IT IS TIMED**: `clickWorkspaceItem` does nothing where its
- * switch is missing, and a walk over the wrong readout would time it without a sign. A copy's readout opens on the
- * copy's name, which its view's title spells with a ` · ` after the leg, so the name says which copy it describes.
+ * switch is missing, and a walk over the wrong readout would time it without a sign.
  */
-function expectReadout(leaf: string, mode: Mode, copy: boolean): void {
+function expectReadout(leaf: string, mode: Mode): void {
   const [want, other] = mode === 'inspector' ? ['row', 'segment'] : ['segment', 'row']
   const shown = results()
   expect(shown.querySelectorAll(`:scope > .${want}`).length, `${leaf}: the ${mode}'s lines`).toBeGreaterThan(0)
   expect(shown.querySelectorAll(`:scope > .${other}`).length, `${leaf}: lines not the ${mode}'s`).toBe(0)
-  expect(shown.dataset.describes, `${leaf}: what the readout describes`).toBe(copy ? 'copy' : 'program')
-  if (!copy) return
-  const name = titleOf(leaf)?.textContent?.trim().replace(' · ', ' ') ?? ''
-  expect(name, `${leaf}: the copy's name`).toMatch(/ copy \d+$/)
-  expect((shown.textContent ?? '').slice(0, name.length), `${leaf}: whose readout this is`).toBe(name)
+  expect(shown.dataset.describes, `${leaf}: what the readout describes`).toBe('program')
 }
 
 type Walk = { readonly newest: number; readonly k: number; readonly ms: number }
@@ -513,9 +388,9 @@ type Walk = { readonly newest: number; readonly k: number; readonly ms: number }
  * **K SYNCHRONOUS `.click()`S ON THE VIEW'S ▶, FROM STEP 0**, each a `forward` and a `draw()`, timed together. A
  * synthetic click is right here: it times the handler and the draw, and no gesture is under test. The readout must
  * name step K after. **↺ GOES BEFORE THE FOCUS**: at the newest step of a recording that ended, ▶ is off, and a button
- * that is off takes no focus, so the readout would stay on the view the focus was in.
+ * that is off takes no focus.
  */
-function walk(leaf: string, mode: Mode, copy: boolean, pin: WalkPin): Walk {
+function walk(leaf: string, mode: Mode, pin: WalkPin): Walk {
   const pane = paneOrThrow(leaf)
   const [forward, restart] = [controlIn(pane, '▶'), controlIn(pane, '↺')]
   if (forward === undefined || restart === undefined) throw new Error(`${leaf} has no ▶ or ↺`)
@@ -526,7 +401,7 @@ function walk(leaf: string, mode: Mode, copy: boolean, pin: WalkPin): Walk {
   expect(stepOf(stepLineOf(leaf)), `${leaf}: the walk's start`).toBe(0)
   forward.focus()
   expect(document.activeElement === forward, `${leaf}: the focus on its ▶`).toBe(true)
-  expectReadout(leaf, mode, copy)
+  expectReadout(leaf, mode)
   const t0 = performance.now()
   for (let i = 0; i < k; i++) forward.click()
   const t = performance.now() - t0
@@ -590,36 +465,9 @@ describe('stepping in the mounted app', () => {
         const out: Record<string, Walk> = {}
         for (const mode of MODES) {
           clickWorkspaceItem(`[data-switch="readout"][data-value="${mode}"]`)
-          for (const leg of ['lambda', 'tm', 'rxm'] as const)
-            out[`${leg} ${mode}`] = walk(views[leg], mode, false, WALKS[leg])
+          for (const leg of ['lambda', 'tm', 'rxm'] as const) out[`${leg} ${mode}`] = walk(views[leg], mode, WALKS[leg])
         }
         clickWorkspaceItem('[data-switch="readout"][data-value="strip"]')
-        return out
-      })
-    },
-    CASE_MS,
-  )
-
-  it(
-    '(f) steps an rxm copy and a TM copy, each focused, in each readout',
-    async () => {
-      await steps('(f) copy', async () => {
-        await fresh()
-        for (const leaf of [views.rxm, views.tm]) {
-          await pickInViewMenu(host(leaf) as HTMLElement, 'detach')
-          await until(
-            () => copyShown(paneOrThrow(leaf)) && recordingOver(stepLineOf(leaf)),
-            `${leaf}'s copy to record: ${stepLineOf(leaf)}`,
-            RUN_MS,
-          )
-        }
-        const out: Record<string, Walk> = {}
-        for (const mode of MODES) {
-          clickWorkspaceItem(`[data-switch="readout"][data-value="${mode}"]`)
-          for (const leg of ['rxm', 'tm'] as const) out[`${leg} ${mode}`] = walk(views[leg], mode, true, WALKS[leg])
-        }
-        clickWorkspaceItem('[data-switch="readout"][data-value="strip"]')
-        deleteEveryCopy()
         return out
       })
     },

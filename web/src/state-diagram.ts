@@ -2,7 +2,7 @@ import { type Box, CAP_CHARS, layoutLocal, type Metrics } from './local-layout'
 import { type Local, localLevel, predecessors, REACH } from './local-level'
 import { type Arc, arcsOf, chipsOf, type Edges, type ProgramRow, programRows } from './program-level'
 import { DRAG_THRESHOLD } from './separator'
-import { type Groups, groupStates, stepOf, type Tier } from './state-groups'
+import { type Groups, groupStates, stepOf } from './state-groups'
 import { ROW_HEIGHT } from './state-table'
 import type { TmProgram, TmState } from './types'
 import { type GridRows, VirtualGrid } from './virtual-grid'
@@ -112,13 +112,12 @@ export type Level = 'program' | 'local'
 /**
  * The state diagram (Plan 7 part 4, spec §8), at either of its two levels.
  *
- * THE PROGRAM LEVEL is one row per instruction, or per name group, with its state count and a ⚠ where it reaches
+ * THE PROGRAM LEVEL is one row per instruction, with its state count and a ⚠ where it reaches
  * `overflow`; the current row open onto its sub-steps; and the edges between rows drawn as *arcs* — a gutter of
  * lanes, the runtime routines in a column of their own — or as *chips*, text on each row (amendment 11).
  *
  * THE LOCAL LEVEL is the current state and every state within `REACH` rules of it, in columns by signed distance
- * (amendment 10), the rules between them drawn and labelled; a mouse drag moves it in a panel too small for it. A
- * machine with no program level — neither instructions nor dotted names (§7's third tier) — shows it alone.
+ * (amendment 10), the rules between them drawn and labelled; a mouse drag moves it in a panel too small for it.
  *
  * **WHAT IS BUILT WHEN** (amendment 18). The groups, the arcs and their lanes are built once per machine
  * (`setProgram`), and the list of rows once per current group, since the current group is the one that opens onto
@@ -345,29 +344,19 @@ export class StateDiagram {
     return this.shown === 'local' || this.#grid.following
   }
 
-  /** How this machine groups (§7), or `none` with no machine. */
-  get tier(): Tier {
-    return this.#groups?.tier ?? 'none'
-  }
-
   /**
-   * The level on screen: the one chosen, unless the machine itself HAS NO PROGRAM LEVEL TO SHOW AT ALL
-   * (§7's third tier — its states carry neither an instruction nor a dotted name to group by).
-   * **NO MACHINE AT ALL IS NOT THAT TIER** — `tier` reads `'none'` for both, but only a real machine can
-   * lack a program level; a compile that produced nothing shows whichever level was already stored,
-   * empty, rather than being forced to `local` out from under a reader who chose `program`.
+   * The level on screen: the one chosen. **NO MACHINE AT ALL KEEPS IT TOO**: a compile that produced nothing shows
+   * whichever level was already stored, empty, rather than forcing `local` on a reader who chose `program`.
    */
   get shown(): Level {
-    return this.#level === 'local' || (this.#groups !== null && this.tier === 'none') ? 'local' : 'program'
+    return this.#level
   }
 
   /** Group a new machine's states. Once per compile, like the rule table's `StateIndex`. */
   setProgram(p: TmProgram | null, names: readonly string[] = []): void {
-    // THE FOCUS GOES WITH THE LEVEL ON A RECOMPILE TOO (`setLevel`'s reason): a machine with a program level
-    // compiled into one with none, or back, hides the level that held it; and the runtime column's boxes are built
-    // again below, so one holding it is gone. Either way it moves to the shown level's tab stop.
+    // THE FOCUS STAYS IN THE DIAGRAM ON A RECOMPILE: the runtime column's boxes are built again below, so one holding
+    // it is gone, and it moves to the shown level's tab stop (`setLevel`'s reason).
     const had = this.el.contains(document.activeElement)
-    const was = this.shown
     this.#program = p
     this.#names = names
     this.#into = p === null ? [] : predecessors(p)
@@ -387,7 +376,7 @@ export class StateDiagram {
     this.#grid.reset()
     this.#drawBoxes()
     this.#layout()
-    if (had && (this.shown !== was || !this.el.contains(document.activeElement))) this.#focusShown()
+    if (had && !this.el.contains(document.activeElement)) this.#focusShown()
   }
 
   /** Show *arcs* or *chips*: the rows and the column change, the groups and the arcs do not. */

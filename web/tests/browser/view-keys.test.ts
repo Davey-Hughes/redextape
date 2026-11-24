@@ -1,4 +1,4 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
 import { HEADER_ORDER } from '../../src/layout'
@@ -8,7 +8,6 @@ import {
   armed,
   chooseOption,
   focusInPage,
-  host,
   live,
   mounted,
   notice,
@@ -666,28 +665,5 @@ describe('view keys', () => {
     } finally {
       chooseOption('#keymap', 'default')
     }
-  })
-
-  /** Spec §7.2's other two editors: a copy's own, on each kind of leg that has one of its own class. */
-  it.each([
-    ['a λ copy', 'lambda-0', '.term-editor'],
-    ['a machine copy', 'tm-0', '.cm-editor'],
-  ])('arms from the editor of %s', async (_what, leaf, editor) => {
-    await start()
-    const more = host(leaf)?.querySelector('button.view-more') as HTMLElement
-    await userEvent.click(more)
-    const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
-    await until(() => menu.matches(':popover-open'), 'the view’s menu')
-    await userEvent.click(menu.querySelector('button.detach') as HTMLElement)
-    await until(() => host(leaf)?.querySelector(editor) != null, 'the copy’s editor')
-    const copy = EditorView.findFromDOM(host(leaf)?.querySelector(editor) as HTMLElement) as EditorView
-    copy.focus()
-    await until(() => copy.hasFocus, 'the copy’s editor to take the focus')
-    const text = copy.state.doc.toString()
-    await prefix()
-    await userEvent.keyboard('{Escape}')
-    expect(armed()).toBe(false)
-    expect(copy.state.doc.toString(), 'the prefix or Escape changed the copy').toBe(text)
-    expect(copy.hasFocus).toBe(true)
   })
 })

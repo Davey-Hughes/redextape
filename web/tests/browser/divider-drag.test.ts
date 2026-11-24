@@ -24,8 +24,7 @@ import { SHELL, storeFourViews } from './harness'
  *
  * `main.ts` computes `ready` once at import evaluation and does not export `main`, so a second bare
  * import returns the same cached module and mounts nothing. Vite's dev server keys its module graph on
- * the full specifier including the query, so `?remount=N` is a distinct module realm. This is
- * `tm-buffer-restore.test.ts`'s mechanism verbatim; that file's own doc carries the long form.
+ * the full specifier including the query, so `?remount=N` is a distinct module realm.
  */
 let remountSeq = 0
 async function freshMain(): Promise<{ ready: Promise<EditorView> }> {

@@ -14,7 +14,7 @@ export type Edges = 'arcs' | 'chips'
 export type ProgramRow =
   /** A label from the rxm listing, above the instruction it names (amendment 9). */
   | { readonly kind: 'label'; readonly name: string }
-  /** One group: an instruction, a runtime routine, or a name group. */
+  /** One group: an instruction or a runtime routine. */
   | { readonly kind: 'group'; readonly group: number }
   /** The current group's sub-steps, the row under it — spec §8's "opens to show its sub-steps". */
   | { readonly kind: 'steps'; readonly group: number }
@@ -35,10 +35,6 @@ export function programRows(g: Groups, labels: Labels, edges: Edges, open: numbe
   const push = (group: number): void => {
     rows.push({ kind: 'group', group })
     if (group === open) rows.push({ kind: 'steps', group })
-  }
-  if (g.tier !== 'instr') {
-    for (let i = 0; i < g.groups.length; i += 1) push(i)
-    return rows
   }
   const listed = g.groups.filter((x) => !x.runtime).length
   placeLabels(listed, labels, (name) => rows.push({ kind: 'label', name }), push)

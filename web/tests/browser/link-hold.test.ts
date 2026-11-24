@@ -72,7 +72,7 @@ const stepOf = (leaf: string) => paneByLeaf(leaf)?.querySelector('.step')?.textC
  * **THE SOURCE WORKER'S `compiled` REPLIES, AND ITS TM `frames` REPLIES SINCE THE LAST, COUNTED**, by wrapping
  * `Worker`'s own `addEventListener` before the app mounts, as `share-positions.test.ts` and
  * `readout-history-held.test.ts` do. With the TM view off the page nothing on it shows the TM leg recording, and the
- * worker's replies are what still counts it; this file makes no copy, so every worker reply is the program's. A reply
+ * worker's replies are what still counts it; every worker reply is the program's. A reply
  * is counted after the app's listener has taken it in.
  */
 let compiles = 0

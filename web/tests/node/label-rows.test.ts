@@ -62,13 +62,12 @@ const labelSets = (count: number): [string, number][][] => [
 ]
 
 describe('the two callers', () => {
-  it('places labels the same way for the listing and the instruction tier’s rows', () => {
+  it('places labels the same way for the listing and the program level’s rows', () => {
     for (const [program, hasRuntime] of [
       [NO_RUNTIME, false],
       [COMPILED, true],
     ] as const) {
       const groups = groupStates(program)
-      expect(groups.tier).toBe('instr')
       expect(groups.groups.some((g) => g.runtime)).toBe(hasRuntime)
       const count = groups.groups.filter((g) => !g.runtime).length
       const listing = program.listing.slice(0, count)

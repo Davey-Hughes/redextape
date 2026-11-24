@@ -319,51 +319,6 @@ const compiled = (gen: number): RunReply => ({
   lambdaTree: null,
 })
 
-describe('scratch on the tm leg', () => {
-  it('posts a scratch request on the tm leg', () => {
-    const { port, sent } = fakePort()
-    const c = new SessionClient(port, () => {})
-    const gen = c.supersede()
-    c.scratch(gen, 'tm', 'tapes 1\nstart q0\nstate q0:\n', 0)
-    expect(sent).toEqual([{ kind: 'scratch', gen, leg: 'tm', src: 'tapes 1\nstart q0\nstate q0:\n', step: 0 }])
-  })
-
-  /**
-   * SAME STALE-GENERATION GUARD AS `request`, ASSERTED RATHER THAN ASSUMED. A request posted under a
-   * superseded generation is a message the worker will answer into a pane that has moved on — the
-   * shape `supersede` exists to prevent, and a new method that forgot the guard would reopen it.
-   */
-  it('drops a request whose generation has been superseded', () => {
-    const { port, sent } = fakePort()
-    const c = new SessionClient(port, () => {})
-    const stale = c.supersede()
-    c.supersede()
-    sent.length = 0
-    c.scratch(stale, 'tm', 'tapes 1\n', 0)
-    expect(sent).toEqual([])
-  })
-})
-
-describe('scratch on the rxm leg', () => {
-  it('posts a scratch request on the rxm leg', () => {
-    const { port, sent } = fakePort()
-    const c = new SessionClient(port, () => {})
-    const gen = c.supersede()
-    c.scratch(gen, 'rxm', 'result Nat\n\thalt\n', 0)
-    expect(sent).toEqual([{ kind: 'scratch', gen, leg: 'rxm', src: 'result Nat\n\thalt\n', step: 0 }])
-  })
-
-  it('drops a request whose generation has been superseded', () => {
-    const { port, sent } = fakePort()
-    const c = new SessionClient(port, () => {})
-    const stale = c.supersede()
-    c.supersede()
-    sent.length = 0
-    c.scratch(stale, 'rxm', '\thalt\n', 0)
-    expect(sent).toEqual([])
-  })
-})
-
 describe('SessionClient generation', () => {
   it('drops the previous generation as soon as supersede is called, before request posts', () => {
     const p = port()

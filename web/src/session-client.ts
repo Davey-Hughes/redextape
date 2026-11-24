@@ -1,4 +1,4 @@
-import type { CopyLeg, Leg, Listing, RunReply, RunRequest } from './protocol'
+import type { Leg, Listing, RunReply, RunRequest } from './protocol'
 
 /**
  * What the client needs from a `Worker`, and nothing more.
@@ -58,7 +58,7 @@ export class SessionClient {
    * conservative there costs nothing — but the two predicates are not the same one.
    *
    * A WEDGED WORKER HOLDS THIS TRUE FOREVER, AND THAT IS THE HONEST ANSWER: an extend posted to a
-   * worker that never answers would not be serviced either. Recovery is the header list's retire.
+   * worker that never answers would not be serviced either.
    */
   get awaitingRun(): boolean {
     return this.#awaitingRun
@@ -100,21 +100,6 @@ export class SessionClient {
     this.#port.postMessage(
       width === null ? { kind: 'run', gen, src, encoding, clif } : { kind: 'run', gen, src, encoding, width, clif },
     )
-  }
-
-  /**
-   * Post the build of a `leg` copy from `src` for `gen`, or do nothing if a later `supersede` has already replaced it
-   * (`protocol.ts`'s `RunRequest` says what `step` means). ON A λ FORK, `src` IS THE SOURCE'S STEP-0 TEXT, and
-   * `step` turns it into the term the pane had on screen (`lambda_scratch_at`'s replay, `transport.ts`'s `detach`);
-   * both arrive unresolved, for the reason `ScratchBuffers.fork`'s doc gives for being handed the same two.
-   *
-   * THE SAME GUARD AS `request`, spelled out rather than shared: folding the two into one method taking a `RunRequest`
-   * would move the choice of message to every call site. IT DOES NOT CLAIM A GENERATION EITHER: a copy is seeded by a
-   * caller who has just superseded what the session was doing, and `supersede`'s doc keeps the claim at that site.
-   */
-  scratch(gen: number, leg: CopyLeg, src: string, step: number): void {
-    if (gen !== this.#gen) return
-    this.#port.postMessage({ kind: 'scratch', gen, leg, src, step })
   }
 
   /**
@@ -188,28 +173,8 @@ export class SessionClient {
 export type SessionId = string
 
 /**
- * What the POOL needs from a worker: everything a client needs, plus the ability to kill it.
- *
- * `terminate` IS DELIBERATELY NOT ON `ClientPort`. That type's doc is "what the client needs from a
- * `Worker`, and nothing more", and its point is that the staleness rule can be exercised by an object
- * with two methods. A client never kills its worker — that is a lifecycle decision, and lifecycle is
- * what the pool owns and the client does not. Widening `ClientPort` instead would put a lifecycle
- * method on the one interface whose whole job is to keep a rule testable without a thread.
- *
- * CONSEQUENCE FOR 5d-i DESIGN §3.2'S SKETCH, which says the pool is a `Map<SessionId, SessionClient>`:
- * it cannot literally be one, because a `SessionClient` holds its port privately (`#port`) and offers
- * no way to terminate it. `#live` below carries the port beside the client instead. Nothing in the
- * design rests on the map's value type — §3.2's claim is one client per session id, and that holds —
- * but the sketch is not the type.
- */
-export type PoolPort = ClientPort & { terminate(): void }
-
-/** One session's worker and the client that talks to it. Created together, destroyed together. */
-type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
-
-/**
- * One worker per session (5d-i design decision 3, §4.2), and the only thing in the app that may spawn or
- * terminate one.
+ * One worker per session (5d-i design decision 3, §4.2). The pool is the only thing in the app that spawns one, on the
+ * session's first bind, and nothing ends one: a worker lasts the page's life.
  *
  * THE ARGUMENT IS DAMAGE CONTAINMENT, NOT TIDINESS, and it rests on two findings of the print-depth-cap
  * slice (PR #25):
@@ -223,10 +188,8 @@ type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
  *     `redextape_wasm::session::MAX_PRINT_DEPTH` is 1,000 and not something near 1,900.
  *
  * BOTH DAMAGES ARE PROPERTIES OF A WORKER, NOT OF A SESSION, which is the whole argument. One worker
- * holding three sessions shares both: a borrow left taken by the λ scratchpad poisons the source
- * session with it, and a ceiling pulled down by the scratchpad's deep print stays down for every
- * session on that thread. Separate workers keep each local, and `terminate` + respawn resets both;
- * 5d-ii-c design §4.4 puts that recovery in the header list's retire.
+ * holding several sessions shares both: a borrow left taken by one poisons the others with it, and a ceiling pulled
+ * down by one's deep print stays down for every session on that thread. Separate workers keep each local.
  *
  * `session-worker.ts`'S ONE-LIVE-SESSION INVARIANT IS WHAT MAKES THIS SAFE (5d-i design §4.2). It frees
  * the live handle at the top of every `run` (`dropLive`, called before `compile`), so two sessions
@@ -237,21 +200,20 @@ type Pooled = { readonly client: SessionClient; readonly port: PoolPort }
  * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `sessions.ts`'s REGISTRY — AND THEY ARE NOT THE SAME
  * FACT WRITTEN TWICE. This one says what a session RUNS ON and is the only thing allowed to change it;
  * the registry says what a session HAS (its histories, its playback flags). Merging them would either
- * drag `History` and the player into this file or give `sessions.ts` the spawning and terminating
- * that only this class may do.
+ * drag `History` and the player into this file or give `sessions.ts` the spawning that only this class may do.
  */
 export class SessionPool {
-  #spawn: () => PoolPort
+  #spawn: () => ClientPort
   #onSupersede: () => void
-  #live = new Map<SessionId, Pooled>()
+  #live = new Map<SessionId, SessionClient>()
 
   /**
    * @param spawn Makes the worker for a session that does not have one yet.
    *
    * INJECTED RATHER THAN HARD-CODED, for the reason `ClientPort` exists: everything in this class is a
-   * map, a spawn on first bind and a `terminate` on unbind, and none of it needs a thread to exercise.
-   * `tests/node/session-pool.test.ts` passes a factory returning a recording fake and drives the whole
-   * lifecycle in the node tier.
+   * map and a spawn on first bind, and none of it needs a thread to exercise.
+   * `tests/node/session-pool.test.ts` passes a factory returning a recording fake and drives every
+   * bind in the node tier.
    *
    * IT IS ALSO WHERE THE FAILURE POLICY LIVES, which is the reason it is a constructor argument and
    * not a hard-coded `new Worker(new URL('./session-worker.ts', import.meta.url))` right here.
@@ -259,27 +221,20 @@ export class SessionPool {
    * half of 5a design §6's "worker or wasm fails to load" row), and a banner needs the app's root
    * element — a decision about DOM, taken in a module that has none.
    *
-   * IT TAKES NO `SessionId`. A scratch session runs the SAME `session-worker.ts` module a source session
-   * does; what differs is the first message it is sent (a `scratch` request against a `run`, in
-   * `protocol.ts`'s `RunRequest`), because the module's job is "hold one wasm handle and answer about
-   * it" and every kind of handle is that. So the kind is a fact about the CONVERSATION and not about the
-   * thread, and there is nothing for a `SessionId` here to select.
+   * IT TAKES NO `SessionId`. Every session runs the SAME `session-worker.ts` module, whose job is "hold one wasm
+   * handle and answer about it", so there is nothing for a `SessionId` here to select.
    *
    * @param onSupersede Repaint the app. Called by every client this pool makes, from `supersede()`.
    *
-   * REQUIRED HERE RATHER THAN ON `bind`, AND THAT IS WHAT KEEPS `bind`'s SIGNATURE STILL. This pool
-   * is the only route from `src/` to a `SessionClient`, so one required argument at one place is
-   * enough for no app site to be able to claim a generation without the panes learning — while
-   * `bind` keeps the two parameters its 23 test call sites pass, plus one more site that replaces the
-   * method with a two-parameter interceptor of its own. A third argument there would be dropped silently by
-   * any interceptor that was not updated by hand, which is the shape of the defect this argument
-   * exists to fix.
+   * REQUIRED HERE RATHER THAN ON `bind`. This pool is the only route from `src/` to a `SessionClient`, so one
+   * required argument at one place is enough for no app site to be able to claim a generation without the panes
+   * learning.
    *
    * IT TAKES NO SESSION, UNLIKE `bind`'s `onReply`. A reply is routed to one session's legs; a
    * repaint is routed nowhere — it paints every pane — so a `SessionId` here would be a parameter
    * nothing reads.
    */
-  constructor(spawn: () => PoolPort, onSupersede: () => void) {
+  constructor(spawn: () => ClientPort, onSupersede: () => void) {
     this.#spawn = spawn
     this.#onSupersede = onSupersede
   }
@@ -303,38 +258,14 @@ export class SessionPool {
    * previous caller's legs, which is the same "two places to be wrong" failure `sessions.ts`'s `LegState`
    * doc refuses one layer up.
    *
-   * `ScratchBuffers.fork` mints a name no session has held, so no caller needs to ask `has` first. The
-   * misdelivery is a property of THIS method rather than of any caller: one client, one `onReply`, so
+   * The misdelivery is a property of THIS method rather than of any caller: one client, one `onReply`, so
    * any second binding of a live id is frames landing under the wrong name whoever asked for it.
    */
   bind(id: SessionId, onReply: (r: RunReply) => void): SessionClient {
     if (this.#live.has(id)) throw new Error(`session already has a worker: ${id}`)
     const port = this.#spawn()
     const client = new SessionClient(port, onReply, this.#onSupersede)
-    this.#live.set(id, { client, port })
+    this.#live.set(id, client)
     return client
-  }
-
-  /**
-   * Terminate `id`'s worker and forget it. A no-op for a session that has none.
-   *
-   * IDEMPOTENT WHERE `bind` THROWS, AND THE ASYMMETRY IS DELIBERATE. A second `bind` asks for
-   * something that cannot be honoured; a second `unbind` asks for a state that is already true, and a
-   * guard every caller must write is a guard the callee should have.
-   *
-   * DELETED BEFORE TERMINATED, in that order, mirroring `session-worker.ts`'s `dropLive` ("NULLED
-   * BEFORE FREED"): no caller may reach a client whose worker is gone, not even on the path where
-   * `terminate` throws on the way out.
-   *
-   * `terminate()` IS THE CURE THE POISON CANNOT REFUSE, which is what makes this method the whole
-   * recovery story for both findings in this class's doc. It kills the thread rather than asking the
-   * damaged module to clean up after itself — unlike `Session::free`, which throws on a poisoned
-   * handle and so cannot be relied on by the code recovering from the poisoning.
-   */
-  unbind(id: SessionId): void {
-    const held = this.#live.get(id)
-    if (held === undefined) return
-    this.#live.delete(id)
-    held.port.terminate()
   }
 }

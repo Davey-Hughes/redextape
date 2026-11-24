@@ -9,17 +9,7 @@ import type { LinkWiring } from './link-wiring'
 import { isLinkedLeg, LINKED, type LinkedLeg, perLinkedLeg } from './linked-legs'
 import type { PaneHost } from './pane-host'
 import { type LeafId, onPage, type PaneCollection } from './panes'
-import {
-  type CopyReadings,
-  copyLegOf,
-  copyParts,
-  copyRows,
-  copySegments,
-  type Lines,
-  type ProgramResult,
-  programRows,
-  programSegments,
-} from './readout'
+import { type Lines, type ProgramResult, programRows, programSegments } from './readout'
 import type { UnseenViews } from './replies'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
@@ -52,13 +42,6 @@ import type { SessionRegistry } from './sessions'
  * tree rather than as a `layout.ts` import here for the reason above. It is the one input the split
  * menu needs that this module cannot already see: `SessionRegistry.pairs()` and each pane's own
  * binding, which are the rest of a `SplitChoices`, are both already in the loop below's hands.
- *
- * `hasEditor: (session) => boolean` IS THE SAME SHAPE AGAIN, over the OTHER thing `main.ts` owns and
- * this module has no other route to: `editor-custody.ts`'s two maps. A view cannot work out whether
- * its session has an editor anywhere — that is a fact about other panes and about the editors waiting
- * between them — so `LambdaPane.setEditorAvailable` is fed from here, per frame, alongside `renderTree`,
- * and the TM and rxm views' `setEditorAvailable` in the pass over every view.
- * A thunk for the same reason as its two siblings: custody moves under a `draw()` that did not cause it.
  */
 export function createDraw(deps: {
   view: () => EditorView
@@ -78,9 +61,6 @@ export function createDraw(deps: {
    * remembers (the view layouts spec §5). A hidden Stage tab is in the tree, so it answers true.
    */
   arranged: (id: LeafId) => boolean
-  hasEditor: (session: SessionId) => boolean
-  /** The view the user is in — the readout describes its session (spec §9). */
-  focused: () => LeafId
   /** The program's session id, `main.ts`'s `SOURCE_SESSION`, passed in rather than re-spelled here. */
   sourceSession: SessionId
   readout: { show(program: ProgramResult | null, lines: Lines): void }
@@ -95,9 +75,6 @@ export function createDraw(deps: {
   stage: () => boolean
   /** The one bottom bar, brought up to date once per frame after every pane has been painted (spec §8). */
   stepBar: { update(): void }
-  /** The stage's tabs, whose labels follow their views' titles — brought up to date once per frame in Stage (§5). */
-  stageTabs: { update(): void }
-  nameOf: (session: SessionId) => string | null
 }): () => void {
   const {
     view,
@@ -110,16 +87,12 @@ export function createDraw(deps: {
     leaves,
     sourceAvailable,
     arranged,
-    hasEditor,
-    focused,
     sourceSession,
     readout,
     program,
-    nameOf,
     stepsInView,
     stage,
     stepBar,
-    stageTabs,
   } = deps
   return () => {
     // "THE" λ, RXM AND TM PANES, RESOLVED THROUGH THE COLLECTION RATHER THAN CLOSED OVER — AND ANY MAY
@@ -135,14 +108,6 @@ export function createDraw(deps: {
     // line and the ONE source editor's decoration, neither of which has a per-pane identity. What a
     // leg with NO pane contributes is `null` at both sites.
     //
-    // **EACH LEG'S RUNNING FOCUS IS THE PROGRAM'S, SO IT IS READ OFF A VIEW OF THE PROGRAM — `onProgram`.** It
-    // resolves against the program's link index and marks the program's rows, and a copy's frames own no construct
-    // of the program's. Read off whichever view was focused last, it would go blank the moment that view showed
-    // a copy: the program's own view would lose its marks, in Stage even while it was the view shown and being
-    // stepped. So each leg asks for the most recently focused view that shows the program, and a copy's view is
-    // never the source. With no view of the program on a leg, that leg has no running focus, as a leg with no
-    // view has none.
-    //
     // **WHICH PANE ANSWERS DEPENDS ON WHAT THE READER READS.** `lam` and `running` ask `active` — in Stage
     // possibly a view off the page. They read the leg's own history through the pane's binding, which is live
     // whether or not the pane is drawn, so a hidden pane still answers truly for its session; and part 2's spec §8
@@ -150,15 +115,10 @@ export function createDraw(deps: {
     // clause after the render loop asks `shown` instead, because it reads a view's own pin and tree, which
     // only a view on the page has fresh (`PaneCollection.shown`'s doc).
     //
-    // **AND NEVER A VIEW THE TREE ON SCREEN DOES NOT HOLD** (the view layouts spec §5): a view kept alive in a
+    // **NEVER A VIEW THE TREE ON SCREEN DOES NOT HOLD** (the view layouts spec §5): a view kept alive in a
     // remembered arrangement is no one's to watch, where a hidden Stage tab has a tab that names it. With the λ view
     // toggled off, the source editor carries no running focus of a term no view shows.
-    const onProgram = (e: { readonly slot: { readonly binding: { readonly session: SessionId } } }): boolean =>
-      !sessions.entryOf(e.slot.binding.session).detached
-    const watched = (e: {
-      readonly id: LeafId
-      readonly slot: { readonly binding: { readonly session: SessionId } }
-    }): boolean => arranged(e.id) && onProgram(e)
+    const watched = (e: { readonly id: LeafId }): boolean => arranged(e.id)
     const lam = panes.active('lambda', watched)?.slot.resolve(sessions)
     // EACH LINKED LEG'S OWN RUNNING FOCUS — its `LINKED` entry's `focusNode`, NOT `lam.hist.current?.owner` below.
     // Design table (`2026-08-10-plan5c-dual-focus-design.md` §4.2). Each pane reports what ITS OWN leg
@@ -174,11 +134,11 @@ export function createDraw(deps: {
     // own comment covers.
     //
     // `active !== undefined` IS A THIRD GATE ALONGSIDE `linkable`/`index`, NOT A NULL-CHECK BOLTED ON. With
-    // no view of the program on a leg there is no run of the program's being watched there, so there is nothing for a
-    // running focus to mark — and feeding `sourceNodeOwner(null)` through anyway would report a definite "the
-    // machine is nowhere" where the honest answer is "no one is asking".
+    // no view on a leg there is no run being watched there, so there is nothing for a running focus to mark — and
+    // feeding `sourceNodeOwner(null)` through anyway would report a definite "the machine is nowhere" where the
+    // honest answer is "no one is asking".
     //
-    // A leg's focus marks the rows of its views of the program and feeds the status line's coincidence; the source
+    // A leg's focus marks the rows of its views and feeds the status line's coincidence; the source
     // editor's focus mark stays λ's, as Plan 5c's dual-focus design settled.
     const running: Record<LinkedLeg, { focus: Focus | null; link: Link | null }> = perLinkedLeg(
       <K extends LinkedLeg>(leg: K) => {
@@ -227,14 +187,9 @@ export function createDraw(deps: {
         unseen.delete(p.pane)
       }
       const leg = p.slot.resolve(sessions)
-      // **A MACHINE VIEW SHOWING A COPY MARKS NOTHING OF THE PROGRAM'S** — neither its running focus here nor its pin
-      // below. Both resolve to the PROGRAM's state and instruction indices, and a copy numbers its rows by itself, so
-      // an index read there names whatever the copy has at it (spec amendment 32, in the inbound direction): the λ
-      // loop's guard below, "A COPY IS NOT LINKED", for the machine views. Asked only of a TM, rxm or CLIF view.
-      const unlinked = machine !== null && sessions.entryOf(p.slot.binding.session).detached
       if (machine !== null && isLinkedLeg(boundLeg)) {
         const focusLink = running[boundLeg].link
-        machine.setFocus(unlinked || focusLink === null ? [] : LINKED[boundLeg].rows(focusLink, null))
+        machine.setFocus(focusLink === null ? [] : LINKED[boundLeg].rows(focusLink, null))
       }
       p.slot.render(sessions, p.pane, leg)
       // **THE SEED DROPPED THE PIN AND ITS SCROLL, AND BOTH ARE GIVEN BACK AFTER THE VIEW'S RENDER.** The view missed
@@ -251,10 +206,9 @@ export function createDraw(deps: {
       // `render` would be held against a `null` frame, and `render`'s own draw of this tick's frame would release it
       // at once. After it, the view shows this tick's frame, and the draw `setLink` makes holds against that.
       //
-      // **A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned** — `unlinked` above, as
-      // `link-wiring.ts`'s fan-out guards its own. Resolved once, and only for a view seeded this frame.
+      // Resolved once, and only for a view seeded this frame.
       const seededPin =
-        seeded && !unlinked && linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
+        seeded && linkWiring.linkable && linkWiring.link !== null && linkWiring.index !== null
           ? linkWiring.index.linkFor(linkWiring.link.node)
           : null
       if (seeded && machine !== null && isLinkedLeg(boundLeg)) {
@@ -273,7 +227,7 @@ export function createDraw(deps: {
       // its own — `PaneView.setLayoutControls`'s own doc has that argument. `p.slot.binding` is the
       // pane's own pair, which the split menu puts first; it is read here rather than remembered by the
       // pane for `PaneCollection`'s reason for reading bindings through the slot on every call — a
-      // copy is a second place to be wrong.
+      // remembered binding is a second place to be wrong.
       // `!stage()` IS THE SPLIT REFUSAL: in Stage a split can never apply, because the stage draws ONE view over a tab
       // strip and a split of it would be invisible — umbrella §4 rule 4's "removed where it can never apply in that
       // view". On the Stage the toggles choose the tabs, and nothing adds a view beside the focused one. The source
@@ -287,9 +241,6 @@ export function createDraw(deps: {
       // rather than about the frame just rendered, so this per-frame pass is the only hook a caller with
       // no render loop of its own has.
       p.pane.setStepsShown(stepsInView())
-      // *MOVE THE EDITOR HERE* ON A TM OR RXM VIEW, fed from custody every frame as the λ pass below feeds a λ view's:
-      // whether another view holds the copy's editor is a fact about other views (`CopyEditor.#editorAvailable`).
-      if (machine !== null) machine.setEditorAvailable(hasEditor(p.slot.binding.session))
     }
 
     // RESOLVED ONCE, HERE, FOR `drawLink` BELOW. `draw()` runs on every recorded frame during
@@ -303,11 +254,8 @@ export function createDraw(deps: {
     // READ HERE, AND NOT ONLY IN `setLinkTo`: each step's tree must be marked as it arrives, and every
     // stepping control routes through `draw()` rather than through `setLinkTo`.
     const pin = linkWiring.linkable && linkWiring.link !== null ? linkWiring.link.node : null
-    // THE λ-ONLY PER-FRAME PASS. The pin is per-leg (one construct, fanned out); `setEditorAvailable` is
-    // PER PANE, because it is a question about each pane's own binding — two λ panes on two different
-    // buffers get two different answers, and two on the SAME buffer get the same one, which is exactly
-    // the state the control exists to resolve.
-    trees.prune((id) => sessions.has(id))
+    // THE λ-ONLY PER-FRAME PASS. The pin is per-leg (one construct, fanned out); each pane is told its own build and
+    // the tree for its own step.
     for (const p of panes.of('lambda')) {
       // THE SAME SKIP THE MAIN LOOP TAKES, for the same reason (Plan 7 part 2 spec §5) — and a hidden view
       // therefore asks the worker for no tree until its tab is next selected (part 4's spec §5.5).
@@ -316,13 +264,10 @@ export function createDraw(deps: {
       const session = p.slot.binding.session
       const leg = p.slot.resolve(sessions)
       pane.setBuild(trees.buildOf(session))
-      // A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned.
-      const pinned = sessions.entryOf(session).detached ? null : pin
       pane.renderTree(
         leg.hist.current === undefined ? { kind: 'none' } : trees.want(session, leg.hist.currentStep),
-        pinned,
+        pin,
       )
-      pane.setEditorAvailable(hasEditor(session))
     }
 
     // THE RUNNING FOCUS: a SECOND, INDEPENDENT layer from `l`/`link` above, computed here rather than
@@ -366,12 +311,7 @@ export function createDraw(deps: {
     // it last drew, and asking it would answer for an earlier pin. So the view is `shown`'s: of the λ views on
     // the page, the one focused most recently. With no λ view on the page there is no term on screen to
     // explain, which is `'absent'`.
-    //
-    // **AND A VIEW OF THE PROGRAM, `onProgram`, AS FOR THE RUNNING FOCUSES.** The clause explains why the program's
-    // term does not show the pin, and a copy's view marks nothing whatever is pinned (5d-i design §4.5).
-    // `linkStatus` keeps the λ clause while any λ view shows the program, so a copy's view answering here
-    // would put its term's answer in a sentence about the program's.
-    const drewLambda = panes.shown('lambda', onPage, onProgram)
+    const drewLambda = panes.shown('lambda', onPage)
     const lambdaLink: LambdaLinkState =
       drewLambda === undefined
         ? 'absent'
@@ -384,52 +324,25 @@ export function createDraw(deps: {
       lambdaLink,
     )
 
-    // THE READOUT (spec §9): the focused view's session. A focused source view has no pane entry
-    // (`panes.get('source')` is `undefined`) and shows the program, as does any view bound to it.
-    const entry = panes.get(focused())
-    if (entry === undefined || entry.slot.binding.session === sourceSession) {
-      // **THE PROGRAM'S LEGS AS THEY ARE RECORDING, AND THE GENERATION THE CLIENT LAST CLAIMED**, which the
-      // legs record from its `compiled` reply on, beside the last result the program's session answered: the result
-      // counts a compile's whole run, and a leg's recording can fill its history before that run's end. Read on every
-      // frame, so the readout follows *keep recording* as the step line does. The result may be an earlier compile's,
-      // since it arrives once every leg has recorded; `readout.ts`'s `programResultRows` draws a recording's fact only
-      // beside a result of the generation the client last claimed.
-      const recording = {
-        gen: sessions.entryOf(sourceSession).client.gen,
-        ...perLeg((leg) => sessions.legOf({ session: sourceSession, leg })),
-      }
-      readout.show(program(), {
-        segments: () => programSegments(program(), recording),
-        rows: () => programRows(program(), recording),
-      })
-    } else {
-      const session = entry.slot.binding.session
-      // **NOT THE SESSION ID — IT IS THE ONE PLACE THE VOCABULARY SWEEP CANNOT SEE.** `nameOf` answers
-      // `null` only for a session the copies store does not hold, which is a wiring bug rather than a
-      // state; printing `scratch-3` at a user would ship the old words in the one form no grep for a
-      // literal finds.
-      const name = nameOf(session) ?? 'a copy'
-      const leg = entry.slot.resolve(sessions)
-      // **THE LEG FACTS ARE READ HERE, OUTSIDE THE THUNKS**, because both thunks read them and a
-      // value built inside one of them is a value the other cannot see. One value for every leg, as the copies
-      // menu's rows read it (`main.ts`'s `copyHolds`).
-      const kind = entry.slot.binding.leg
-      const copyLeg = copyLegOf(leg)
-      const readings: CopyReadings = sessions.entryOf(session).readings
-      // NEVER A CLIF VIEW: a CLIF view offers no copy, so one is always on the program, the branch above.
-      if (kind !== 'clif')
-        readout.show(null, {
-          segments: () => copySegments(kind, name, readings, copyLeg),
-          rows: () => copyRows(copyParts(kind, name, readings, copyLeg)),
-        })
+    // THE READOUT (spec §9): the program's, whichever view is focused, since every view shows the program.
+    // **THE PROGRAM'S LEGS AS THEY ARE RECORDING, AND THE GENERATION THE CLIENT LAST CLAIMED**, which the
+    // legs record from its `compiled` reply on, beside the last result the program's session answered: the result
+    // counts a compile's whole run, and a leg's recording can fill its history before that run's end. Read on every
+    // frame, so the readout follows *keep recording* as the step line does. The result may be an earlier compile's,
+    // since it arrives once every leg has recorded; `readout.ts`'s `programResultRows` draws a recording's fact only
+    // beside a result of the generation the client last claimed.
+    const recording = {
+      gen: sessions.entryOf(sourceSession).client.gen,
+      ...perLeg((leg) => sessions.legOf({ session: sourceSession, leg })),
     }
+    readout.show(program(), {
+      segments: () => programSegments(program(), recording),
+      rows: () => programRows(program(), recording),
+    })
 
     // THE BAR (spec §8), AFTER THE READOUT AND AFTER EVERY PANE. It resolves its own target through the
     // thunks `main.ts` gave it, so this call is only "a frame has been painted, say what is true now" —
     // the same division `readout.show` above takes, and the reason `draw.ts` still needs no layout tree.
     stepBar.update()
-    // THE STAGE'S TABS, AFTER EVERY VIEW'S HEADER: a view rebound in place repaints its title on this frame, and its
-    // tab is the other place the stage names it (`layout-view.ts`'s `retitleStage`).
-    if (stage()) stageTabs.update()
   }
 }

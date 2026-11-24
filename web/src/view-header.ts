@@ -8,23 +8,21 @@ import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
 
 /**
- * A VIEW'S HEADER — Plan 7 part 2 spec §7. Left to right: the title, which is the selector; the status;
- * the step controls; the view's actions (`⋯`, `✕`).
+ * A VIEW'S HEADER — Plan 7 part 2 spec §7. Left to right: the title, which is the selector; the step controls; the
+ * view's actions (`⋯`, `✕`).
  *
- * **THE TITLE IS THE SELECTOR.** It says what the view shows — `λ · program`, `TM · copy 2` — and opening it is
+ * **THE TITLE IS THE SELECTOR.** It says what the view shows — `λ · program`, `TM · program` — and opening it is
  * how to show something else. A `shows` select listing `(leg, session)` pairs under optgroups would read as a
  * trivial choice while picking another leg rebuilds the whole view, with only an optgroup label saying so.
  *
  * **THE `<h2>` IS THE TITLE'S CONTAINER.** A view is a section with a heading: the heading is what a
- * screen-reader user jumps between views by, and the status sits inside it, so the two
- * facts about a view's identity — what it shows, and that it is a copy no longer linked to the program —
- * read together.
+ * screen-reader user jumps between views by, and the title, which says what the view shows, is its text.
  *
  * **A PICK IS REPORTED, NOT PERFORMED.** `onPick` is `PaneEvents.rebind`, and `pane-host.ts` decides what a
  * pick across legs does (it rebuilds the view in place). This module knows nothing about the tree.
  */
 
-/** How a pair reads everywhere a menu names one: `λ · program`, `TM · copy 2` — the leg as `LEG_NAME` says it. */
+/** How a pair reads everywhere a menu names one: `λ · program`, `rxm · program` — the leg as `LEG_NAME` says it. */
 export function pairLabel(o: { readonly leg: Leg; readonly label: string }): string {
   return `${LEG_NAME[o.leg]} · ${o.label}`
 }
@@ -50,8 +48,6 @@ export type ViewHeader = {
   readonly actions: HTMLElement
   /** The pairs on offer and the one in force. On the per-frame path: a repeat call changes nothing. */
   setBindings(options: readonly PaneOption[], current: Binding<Leg>): void
-  /** Whether the view shows a copy, which is not linked to the program. */
-  setDetached(detached: boolean): void
   /**
    * Whether the step slot is in the header at all — spec §8's `steps` switch.
    *
@@ -109,15 +105,9 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   const plain = document.createElement('span')
   plain.className = 'view-title'
 
-  const status = document.createElement('span')
-  status.className = 'view-status'
-  status.textContent = 'copy · not linked'
-  status.title = 'this view shows a copy, which is not linked to the program'
-
   let options: readonly PaneOption[] = []
   let current: Binding<Leg> | null = null
   let rendered = ''
-  let detached = false
   let stepsShown = true
 
   // BUILT ON OPEN, NOT PER FRAME: `draw()` repaints every view on every recorded frame during playback, and a
@@ -152,8 +142,7 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
    * the same element, unchanged. **Removing the focused element from the document resets focus to `<body>`, and
    * putting it back does not bring the focus with it.** So every repaint would blur a focused title: on the
    * same-leg pick the title itself had just performed (the one rebind arm with no `focusPane` behind it, because
-   * the view stays exactly where it was), on a detach or reattach, and on any other view's copy being created —
-   * every view's key changes when the session list does.
+   * the view stays exactly where it was).
    *
    * Spec §11 is categorical about it, and `pane-host.ts`'s same-leg arm relies on this function to keep
    * the promise. `view-title.test.ts`'s "keeps the focus on the title it was picked from" holds it.
@@ -179,11 +168,6 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
     const other = control === button ? plain : button
     other.remove()
     if (control.parentNode !== heading) heading.prepend(control)
-    if (detached) {
-      if (status.parentNode !== heading) heading.append(status)
-    } else {
-      status.remove()
-    }
     if (control === button) {
       if (menu.parentNode === null) heading.after(menu)
     } else {
@@ -205,16 +189,11 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
       current = now
       paint()
     },
-    setDetached(next: boolean): void {
-      if (next === detached) return
-      detached = next
-      paint()
-    },
     setStepsShown(shown: boolean): void {
       if (shown === stepsShown) return
       stepsShown = shown
       if (shown) {
-        // BEFORE THE ACTIONS, so the header keeps spec §7's order: title · status · step controls · ⋯ · ✕.
+        // BEFORE THE ACTIONS, so the header keeps spec §7's order: title · step controls · ⋯ · ✕.
         el.insertBefore(steps, actions)
         return
       }
@@ -239,22 +218,9 @@ export function sourceViewHeader(): { readonly el: HTMLElement; readonly actions
   return { el, actions }
 }
 
-/**
- * What `✎ edit a copy` can do right now: not offered (`null`), offered, or offered and disabled with its
- * reason — disabled rather than removed, because the refusal (a machine or a text over its size cap, or a TM
- * program whose result type has no header a copy can run) is not an absence: the program exists (umbrella §4
- * rule 4). `CopyEditor.#refreshDetach` and `LambdaPane.#refreshDetach` decide which of the three this is.
- */
-export type CopyState = null | 'ready' | { readonly reason: string }
-
 export type ViewMenu = {
   /** Whether `✕` applies (not on the last view) and whether the split items do (not on the source view). */
   setLayout(canClose: boolean, canSplit: boolean): void
-  setCopy(state: CopyState): void
-  /** Whether `move the editor here` applies: the view shows a copy whose editor is elsewhere. */
-  setClaim(available: boolean): void
-  /** Whether `format` applies: this view has an editor holding a document the server serves. */
-  setFormattable(available: boolean): void
   /**
    * Add a display setting that is on or off at the menu's end, built as "expand all" is, and mount `⋯` if it was not.
    * For a setting the view can read only once its own constructor has run: a `MachineViewChrome` view's, whose menu
@@ -310,8 +276,8 @@ export type DisplayCheck = { readonly on: () => boolean; readonly set: (on: bool
  * `sync` puts the choices in step with `current()`. A choice made here syncs itself; a caller whose
  * setting can change from elsewhere calls it before the group is next seen.
  *
- * **A CHOICE THAT CANNOT BE MADE NOW IS DISABLED WITH ITS REASON STATED** (the umbrella's rule 4), the way the view
- * menu's *edit a copy* is: `disabled`, and the reason as its `aria-description` and its tooltip. The keys skip it.
+ * **A CHOICE THAT CANNOT BE MADE NOW IS DISABLED WITH ITS REASON STATED** (the umbrella's rule 4): `disabled`, and the
+ * reason as its `aria-description` and its tooltip. The keys skip it.
  */
 export function radioGroup(
   g: DisplayGroup,
@@ -378,9 +344,6 @@ export function radioGroup(
 export type ViewMenuOptions = {
   readonly split?: (dir: Dir, choice: PaneChoice) => void
   readonly close?: () => void
-  /** `what` is the second line: what is copied — "the term at this step", "the whole machine". */
-  readonly editCopy?: { readonly run: () => void; readonly what: string }
-  readonly claim?: () => void
   /**
    * Reformat this view's document.
    *
@@ -396,8 +359,8 @@ export type ViewMenuOptions = {
 
 let viewMenuSeq = 0
 
-/** One menu item: an optional icon, its label, and an optional second line. */
-function item(className: string, label: string, hint?: string, glyph?: IconName): HTMLButtonElement {
+/** One menu item: an optional icon and its label. */
+function item(className: string, label: string, glyph?: IconName): HTMLButtonElement {
   const b = document.createElement('button')
   b.type = 'button'
   b.className = className
@@ -406,20 +369,6 @@ function item(className: string, label: string, hint?: string, glyph?: IconName)
   l.className = 'view-menu-label'
   l.textContent = label
   b.append(l)
-  if (hint !== undefined) {
-    const h = document.createElement('span')
-    h.className = 'view-menu-hint'
-    h.textContent = hint
-    b.append(h)
-    // **THE NAME IS WRITTEN DOWN RATHER THAN LEFT TO THE LAYOUT, AND THAT IS NOT BELT-AND-BRACES.** What
-    // is copied — or why it cannot be — belongs in the name: it is what a reader needs before choosing
-    // the item. Built from the content, the name would join these two spans with a space only while they
-    // are not `display: inline` (accname's rule, and `dom-accessibility-api` implements it as
-    // `separator = display !== 'inline' ? ' ' : ''`) — so it would read `edit a copythe whole machine`
-    // the day `.view-menu button`'s `display: grid` changed, with no test and no gate able to say why.
-    // An `aria-label` costs one line and says it outright; `sync` below keeps it in step with the hint.
-    b.setAttribute('aria-label', `${label} ${hint}`)
-  }
   return b
 }
 
@@ -448,8 +397,8 @@ function checkItem(
  * A view's `⋯` menu and its `✕` — Plan 7 part 2 spec §7.
  *
  * **ONE GLYPH, ONE MEANING (umbrella §4 rule 2).** `⋯` only ever opens a view's menu and `✕` only ever closes a
- * view. The two splits, *edit a copy* and the claim are menu items rather than controls in a view's strip,
- * because none of them is a thing a user does every few seconds.
+ * view. The two splits are menu items rather than controls in a view's strip, because neither is a thing a user
+ * does every few seconds.
  *
  * **THE ITEMS STAY IN THE DOM WHILE THE MENU IS CLOSED, ADDED AND REMOVED AS THEY APPLY.** That is this file's
  * idiom for a control that cannot apply (removed, not disabled — rule 4), applied inside a popover: the popover
@@ -557,25 +506,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     }
   }
 
-  const edit = opts.editCopy === undefined ? null : item('detach', 'edit a copy', opts.editCopy.what, 'edit')
-  if (edit !== null && opts.editCopy !== undefined) {
-    const run = opts.editCopy.run
-    edit.addEventListener('click', () => {
-      shut()
-      run()
-    })
-  }
-  const claim =
-    opts.claim === undefined ? null : item('claim-editor', 'move the editor here', undefined, 'move-editor-here')
-  if (claim !== null && opts.claim !== undefined) {
-    const run = opts.claim
-    claim.addEventListener('click', () => {
-      shut()
-      run()
-    })
-  }
-
-  const fmt = opts.format === undefined ? null : item('format-doc', 'format', undefined, 'format')
+  const fmt = opts.format === undefined ? null : item('format-doc', 'format', 'format')
   if (fmt !== null && opts.format !== undefined) {
     const run = opts.format
     fmt.addEventListener('click', () => {
@@ -632,35 +563,15 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
 
   let canClose = false
   let canSplit = false
-  let copy: CopyState = null
-  let claimable = false
-  let formattable = false
-  const what = opts.editCopy?.what ?? ''
 
   const sync = (): void => {
     const wanted: HTMLElement[] = []
     if (canSplit) wanted.push(...splitItems)
-    if (edit !== null && copy !== null) {
-      // THE HINT LINE AND THE NAME MOVE TOGETHER — see `item`'s own note on why the name is written down.
-      const line = copy === 'ready' ? what : copy.reason
-      const hint = edit.querySelector('.view-menu-hint')
-      if (hint !== null) hint.textContent = line
-      edit.setAttribute('aria-label', `edit a copy ${line}`)
-      if (copy === 'ready') {
-        edit.disabled = false
-        edit.removeAttribute('aria-description')
-      } else {
-        edit.disabled = true
-        edit.setAttribute('aria-description', copy.reason)
-      }
-      wanted.push(edit)
-    }
-    if (claim !== null && claimable) wanted.push(claim)
-    if (fmt !== null && formattable) wanted.push(fmt)
+    if (fmt !== null) wanted.push(fmt)
     wanted.push(...displayItems)
     // RECONCILED, NOT REPLACED, FOR `paint`'s REASON ONE LEVEL OUT: `replaceChildren` takes every item
     // out of the document, and an item holding the focus does not get it back. Reachable while the menu
-    // is open and a frame changes what applies — a copy created elsewhere, a recording ending.
+    // is open and a frame changes what applies — a recording ending.
     const same = wanted.length === main.children.length && wanted.every((b, i) => main.children[i] === b)
     if (!same) {
       const going = [...main.children].filter((child) => !wanted.includes(child as HTMLElement))
@@ -697,32 +608,16 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     if (canClose && close.parentNode === null && opts.close !== undefined) actions.append(close)
     if (!canClose && close.parentNode !== null) close.remove()
   }
-  // THE DISPLAY SETTINGS APPLY FROM THE START, AND NO SETTER WOULD EVER MOUNT THEM: each setter syncs only
-  // on a change, so a view whose other state never left its first value would have no `⋯`. Mounted here, `⋯` is
+  // `format` AND THE DISPLAY SETTINGS APPLY FROM THE START, AND NO SETTER WOULD EVER MOUNT THEM: each setter syncs
+  // only on a change, so a view whose other state never left its first value would have no `⋯`. Mounted here, `⋯` is
   // in `actions` before the view appends anything of its own, so a view with settings prepends its actions.
-  if (displayItems.length > 0) sync()
+  if (fmt !== null || displayItems.length > 0) sync()
 
   return {
     setLayout(nextClose: boolean, nextSplit: boolean): void {
       if (nextClose === canClose && nextSplit === canSplit) return
       canClose = nextClose
       canSplit = nextSplit
-      sync()
-    },
-    setCopy(next: CopyState): void {
-      const key = (s: CopyState) => (s === null ? 'none' : s === 'ready' ? 'ready' : `reason:${s.reason}`)
-      if (key(next) === key(copy)) return
-      copy = next
-      sync()
-    },
-    setClaim(next: boolean): void {
-      if (next === claimable) return
-      claimable = next
-      sync()
-    },
-    setFormattable(next: boolean): void {
-      if (next === formattable) return
-      formattable = next
       sync()
     },
     addCheck(className: string, label: string, check: DisplayCheck): void {

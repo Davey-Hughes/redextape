@@ -77,8 +77,7 @@ function innermost(start: Uint32Array, end: Uint32Array, byteOffset: number): nu
  *
  * **NOTHING HERE LINKS INTO THE λ VIEW (Plan 7 part 4 spec §5.4).** The view finds a construct's nodes in the tree
  * it draws, at whatever step it shows, so no caller gates a λ highlight on the play head. What this keeps of the λ
- * leg is step 0's text: `lambdaText`, the INITIAL term, which seeds a copy and is `''` when the λ backend declined
- * the program.
+ * leg is step 0's text: `lambdaText`, the INITIAL term, which is `''` when the λ backend declined the program.
  */
 export class LinkIndex {
   readonly lambdaText: string

@@ -51,9 +51,8 @@ describe('the pages beside the app', () => {
 
 describe('the help page', () => {
   /**
-   * **THE EDITOR TABLE IS THE EDITORS' OWN BINDINGS, NO MORE AND NO FEWER**: every key `navKeymap` binds in every
-   * editor, and the source editor's `LINK_KEY`. A key added to either without a row, or a row left behind by a
-   * removed key, fails here.
+   * **THE EDITOR TABLE IS THE SOURCE EDITOR'S OWN BINDINGS, NO MORE AND NO FEWER**: every key `navKeymap` binds, and
+   * `LINK_KEY`. A key added to either without a row, or a row left behind by a removed key, fails here.
    */
   it("lists exactly the app's own editor keys", () => {
     const nav = navKeymap({ uri: () => undefined, client: () => undefined, reveal: () => {}, notify: () => {} })
@@ -75,6 +74,17 @@ describe('the help page', () => {
       const shown = [...before.matchAll(/<kbd>([^<]+)<\/kbd>/g)].map((m) => m[1]).join('-')
       expect(shown, key).toBe((key ?? '').replace(/^Mod-/, 'Ctrl-'))
     }
+  })
+
+  /**
+   * **EVERY ROW NAMES THE SOURCE EDITOR AS WHERE ITS KEY WORKS**: it is the one editor the app builds, so a row naming
+   * any other place sends a reader looking for an editor that is not there.
+   */
+  it('names the source editor as where each key works', () => {
+    const table = /<table id="editor-keys">([\s\S]*?)<\/table>/.exec(html('help'))?.[1] ?? ''
+    const third = /<tr data-key="[^"]+">(?:<td>[\s\S]*?<\/td>){2}<td>([\s\S]*?)<\/td><\/tr>/g
+    const where = [...table.matchAll(third)].map((m) => m[1])
+    expect(where).toEqual(tableKeys('help', 'editor-keys').map(() => 'the source editor'))
   })
 
   /**

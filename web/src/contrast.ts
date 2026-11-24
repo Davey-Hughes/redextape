@@ -81,8 +81,8 @@ export type BinderClash = { readonly token: ColourToken; readonly apart: number 
  * Every token `tok-binder` is within `BINDER_APART` of, in its most distant channel — empty when it stands apart
  * from all of them.
  *
- * `tok-binder` exists ONLY to be a different colour from the two other classes a λ editor can show, so a value
- * that drifted back onto a neighbour would leave the token in place and the defect intact.
+ * `tok-binder` exists ONLY to be a different colour from its neighbours in the λ view, `tok-ident` and `tok-punct`,
+ * so a value that drifted back onto one of them would leave the token in place and the defect intact.
  *
  * NOT A PERCEPTUAL GATE, AND NOT PRETENDING TO BE ONE. Whether two colours read apart is a judgement made by eye,
  * against a rendered editor; 24 in some channel is far below what the eye needs and far above what `tok-punct`

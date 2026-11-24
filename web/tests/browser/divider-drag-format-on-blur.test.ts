@@ -1,9 +1,9 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { formats, formatsOnALeave, recordFormats } from './format-on-leave-fixture'
-import { drawn, frames, host, SHELL, stateIdle, until } from './harness'
+import { drawn, frames, SHELL, stateIdle, until } from './harness'
 
 /**
  * A DIVIDER DRAGGED WHILE AN EDITOR HAS THE FOCUS DOES NOT FORMAT IT — the settings menu's
@@ -20,9 +20,6 @@ import { drawn, frames, host, SHELL, stateIdle, until } from './harness'
  *
  * **EACH CASE FIRST LEAVES ITS EDITOR FOR REAL**, with a pointer press elsewhere, and asserts a request was posted and
  * the text formatted: the setting is on, the server answers, and the count reads what a blur does.
- *
- * **A COPY'S EDITOR IS HELD ON A MACHINE COPY ALONE.** Every copy's editor is handed the one answer to whether a blur
- * formats, whatever its leg (`transport.ts`'s `formatOnBlur`).
  */
 
 recordFormats()
@@ -59,8 +56,8 @@ async function drag(): Promise<void> {
  */
 async function staysAsTypedAcrossADrag(editor: EditorView, messy: string): Promise<void> {
   editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: messy } })
-  // THE COMPILE THE TEXT STARTED, WHERE THE EDITOR IS THE PROGRAM'S: the page is laid out again when it lands
-  // (`view-keys-format-on-blur.test.ts` has the measurement), and a press aimed before that can land elsewhere.
+  // THE COMPILE THE TEXT STARTED: the page is laid out again when it lands, and a press aimed before that can land
+  // elsewhere.
   await until(stateIdle, 'the compile the text started')
   await userEvent.click(editor.contentDOM.querySelectorAll('.cm-line')[1] as HTMLElement)
   const caret = editor.state.selection.main.head
@@ -108,21 +105,5 @@ beforeEach(async () => {
 describe('a divider dragged with the pointer from an editor, with format on blur on', () => {
   it('leaves the source editor’s text as it was typed, and its caret where it was', async () => {
     await staysAsTypedAcrossADrag(view, UNFORMATTED)
-  })
-
-  it('leaves a machine copy’s editor’s text as it was typed, and its caret where it was', async () => {
-    const more = host('tm-0')?.querySelector('button.view-more') as HTMLElement
-    await userEvent.click(more)
-    const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
-    await until(() => menu.matches(':popover-open'), 'the view’s menu')
-    await userEvent.click(menu.querySelector('button.detach') as HTMLElement)
-    await until(() => host('tm-0')?.querySelector('.cm-editor') != null, 'the copy’s editor')
-    const copy = EditorView.findFromDOM(host('tm-0')?.querySelector('.cm-editor') as HTMLElement) as EditorView
-    // THE COPY'S OWN TEXT WITH ITS FIRST SPACE MADE FOUR, which the formatter makes one again.
-    const text = copy.state.doc.toString()
-    const messy = text.replace(' ', '    ')
-    expect(messy, 'precondition: the copy’s text has a space to widen').not.toBe(text)
-    expect(await formatsOnALeave(copy, messy)).toBe(text)
-    await staysAsTypedAcrossADrag(copy, messy)
   })
 })

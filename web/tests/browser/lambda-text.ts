@@ -1,6 +1,3 @@
-import { codeLines, lineText } from '../../src/lambda-layout'
-import { Tree } from '../../src/lambda-tree'
-import { wireOf } from '../node/tree-fixture'
 import { until } from './harness'
 
 /**
@@ -22,16 +19,4 @@ export async function lambdaSettled(
       ?.replaceAll(',', '')
     return term?.dataset.stale === undefined && step !== undefined && term?.dataset.step === step
   }, `the λ view in ${leaf} to draw its own step's tree`)
-}
-
-/**
- * How the λ view writes `printed` — the printer's text for a term — on one line: binders merged, numerals
- * and booleans as chips. A test that compares the view with printed text (a copy's seed, or the
- * text of record of a copy nobody has typed into) compares it with this.
- */
-export function asShown(printed: string): string {
-  const t = new Tree(wireOf(printed))
-  return codeLines(t, { width: 100_000, vars: 'names', open: (i) => t.chip(i) === null })
-    .map(lineText)
-    .join('')
 }

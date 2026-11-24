@@ -63,7 +63,7 @@ const tmViews = () => [...document.querySelectorAll<HTMLElement>('.pane[data-kin
 /**
  * **EVERY PANEL EXPLORER DRAWS ON `sum_to(5)`, BY VIEW AND NAME**, in the page's order. `.panel-header` and
  * `.panel-actions` are every panel's (`panel.ts`), so a rule that fits the TM view's headers is held against all of
- * them. The text panel of a copy and the outline of a TM or rxm copy are not drawn here: no view holds a copy.
+ * them.
  */
 const PANELS = [
   ['source', 'outline'],

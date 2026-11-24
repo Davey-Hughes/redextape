@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { createNotices, NOTICE_MS } from '../../src/notice'
+import { unsavedLine } from '../../src/unsaved'
 import { hear } from './harness'
+
+/** The line's resting sentence: the program's storage refusal, as `unsaved.ts` words it. */
+const RESTING = unsavedLine('full')
 
 let line: HTMLElement
 let live: HTMLElement
@@ -21,11 +25,11 @@ afterEach(() => {
 describe('notices', () => {
   it('shows one notice, says it in the live region, and clears it after NOTICE_MS', () => {
     const n = createNotices(line, live)
-    n.notify('λ copy 1 paused · 1 view now shows the program')
+    n.notify('Debugger reset — the default views are back')
     expect(line.hidden).toBe(false)
-    expect(line.querySelector('.notice-text')?.textContent).toBe('λ copy 1 paused · 1 view now shows the program')
+    expect(line.querySelector('.notice-text')?.textContent).toBe('Debugger reset — the default views are back')
     expect(live.getAttribute('role')).toBe('status')
-    expect(live.textContent).toContain('λ copy 1 paused')
+    expect(live.textContent).toContain('Debugger reset')
     vi.advanceTimersByTime(NOTICE_MS)
     expect(line.hidden).toBe(true)
   })
@@ -38,20 +42,26 @@ describe('notices', () => {
     live.id = 'live'
     const ears = hear()
     const n = createNotices(line, live)
-    n.notify('TM copy 1 created')
-    n.notify('the copy did not build — missing `tapes <n>`')
+    n.notify('Explorer reset — the default views are back')
+    n.notify('this link could not be read — nothing was changed')
     await Promise.resolve()
     ears.stop()
-    expect(ears.notices).toEqual(['TM copy 1 created', 'the copy did not build — missing `tapes <n>`'])
-    expect(ears.said).toEqual(['TM copy 1 created', 'the copy did not build — missing `tapes <n>`'])
+    expect(ears.notices).toEqual([
+      'Explorer reset — the default views are back',
+      'this link could not be read — nothing was changed',
+    ])
+    expect(ears.said).toEqual([
+      'Explorer reset — the default views are back',
+      'this link could not be read — nothing was changed',
+    ])
   })
 
   it('replaces the notice before it, action and all', () => {
     const n = createNotices(line, live)
     const run = vi.fn()
-    n.notify('λ copy 1 deleted', { action: { label: 'undo', run } })
-    n.notify('TM copy 2 created')
-    expect(line.querySelector('.notice-text')?.textContent).toBe('TM copy 2 created')
+    n.notify('dark palette Night removed', { action: { label: 'undo', run } })
+    n.notify('Explorer reset — the default views are back')
+    expect(line.querySelector('.notice-text')?.textContent).toBe('Explorer reset — the default views are back')
     expect(line.querySelector('button.notice-action')).toBeNull()
     vi.advanceTimersByTime(NOTICE_MS - 1)
     expect(line.hidden).toBe(false)
@@ -74,7 +84,7 @@ describe('notices', () => {
 
     it('goes to the fallback when the notice holding it expires', () => {
       const n = createNotices(line, live, fallbackEl)
-      n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+      n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
       line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
       vi.advanceTimersByTime(NOTICE_MS)
       expect(document.activeElement).not.toBe(document.body)
@@ -83,13 +93,13 @@ describe('notices', () => {
 
     it('goes to the next notice’s own action when there is one', () => {
       const n = createNotices(line, live, fallbackEl)
-      n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+      n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
       line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
-      n.notify('TM copy 2 deleted', { action: { label: 'undo', run: () => undefined } })
+      n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
       expect(document.activeElement).toBe(line.querySelector('button.notice-action'))
     })
 
-    // A PALETTE REMOVAL'S UNDO BELONGS TO THE SETTINGS, NOT THE COPIES: its action names where the focus goes instead.
+    // A PALETTE REMOVAL'S UNDO NAMES WHERE THE FOCUS GOES, in place of the line's own fallback.
     it('goes to the action’s own fallback when it names one, whether the notice expires or its action runs', () => {
       const own = document.createElement('button')
       document.body.append(own)
@@ -123,11 +133,11 @@ describe('notices', () => {
       const own = document.createElement('button')
       document.body.append(own)
       const n = createNotices(line, live, fallbackEl)
-      n.rest('copies are not being saved')
+      n.rest(RESTING)
       n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined, fallback: () => own } })
       line.querySelector<HTMLButtonElement>('button.notice-action')?.focus()
       vi.advanceTimersByTime(NOTICE_MS)
-      expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+      expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
       expect(document.activeElement).toBe(own)
     })
 
@@ -146,7 +156,7 @@ describe('notices', () => {
         own.textContent = 'examples'
         document.body.append(own)
         const n = createNotices(line, live, fallbackEl)
-        n.rest('copies are not being saved')
+        n.rest(RESTING)
         const run = vi.fn()
         n.notify('opened the example fact(4)', { action: { label: 'undo', run, fallback: () => own } })
         return { own, run, undo: line.querySelector('button.notice-action') as HTMLButtonElement }
@@ -165,7 +175,7 @@ describe('notices', () => {
         const at = undo.getBoundingClientRect()
         await userEvent.dblClick(undo)
         expect(line.hidden, 'the resting sentence after the double-click').toBe(false)
-        expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+        expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
         expect(run).toHaveBeenCalledTimes(1)
         const hide = line.querySelector('button.notice-action') as HTMLElement
         expect(hide.textContent, 'precondition: hide is drawn where undo was').toBe('hide')
@@ -178,10 +188,10 @@ describe('notices', () => {
 
     it('leaves the focus alone when it is somewhere else entirely', () => {
       const n = createNotices(line, live, fallbackEl)
-      n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+      n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
       fallbackEl()?.focus()
       const elsewhere = document.activeElement
-      n.notify('TM copy 2 created')
+      n.notify('Explorer reset — the default views are back')
       expect(document.activeElement).toBe(elsewhere)
     })
   })
@@ -214,9 +224,9 @@ describe('notices', () => {
 
     it('replaces the button for another action under the same label', () => {
       const n = createNotices(line, live)
-      n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+      n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
       const first = line.querySelector('button.notice-action')
-      n.notify('TM copy 2 deleted', { action: { label: 'undo', run: () => undefined } })
+      n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
       expect(first).not.toBeNull()
       expect(line.querySelector('button.notice-action')).not.toBe(first)
     })
@@ -258,13 +268,13 @@ describe('notices', () => {
     const text = () => line.querySelector('.notice-text')?.textContent
     const expired = n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
     vi.advanceTimersByTime(NOTICE_MS)
-    n.notify('λ copy 1 deleted', { action: { label: 'undo', run: () => undefined } })
+    n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
     expired.dismiss()
-    expect(text()).toBe('λ copy 1 deleted')
+    expect(text()).toBe('dark palette Night removed')
     const replaced = n.notify('dark palette Night removed', { action: { label: 'undo', run: () => undefined } })
-    const showing = n.notify('TM copy 2 created')
+    const showing = n.notify('Explorer reset — the default views are back')
     replaced.dismiss()
-    expect(text()).toBe('TM copy 2 created')
+    expect(text()).toBe('Explorer reset — the default views are back')
     showing.dismiss()
     expect(line.hidden).toBe(true)
   })
@@ -276,11 +286,11 @@ describe('notices', () => {
    */
   it('ends its own notice early, action and all, and leaves the resting line under it', () => {
     const n = createNotices(line, live)
-    n.rest('copies are not being saved')
+    n.rest(RESTING)
     const pick = n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
     pick.dismiss()
     expect(line.querySelector('button.notice-action')?.textContent).toBe('hide')
-    expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+    expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
   })
 
   /**
@@ -290,11 +300,11 @@ describe('notices', () => {
    */
   it('ends nothing once it has run out, and leaves the line as it is', () => {
     const n = createNotices(line, live)
-    n.rest('copies are not being saved')
+    n.rest(RESTING)
     const expired = n.notify('opened the example fact(4)', { action: { label: 'undo', run: () => undefined } })
     vi.advanceTimersByTime(NOTICE_MS)
     const resting = line.querySelector('.notice-text')
-    expect(resting?.textContent).toBe('copies are not being saved')
+    expect(resting?.textContent).toBe(RESTING)
     expired.dismiss()
     expect(line.querySelector('.notice-text')).toBe(resting)
   })
@@ -302,7 +312,7 @@ describe('notices', () => {
   it('runs its action once and clears', () => {
     const n = createNotices(line, live)
     const run = vi.fn()
-    n.notify('λ copy 1 deleted', { action: { label: 'undo', run } })
+    n.notify('dark palette Night removed', { action: { label: 'undo', run } })
     const undo = line.querySelector<HTMLButtonElement>('button.notice-action')
     expect(undo?.textContent).toBe('undo')
     undo?.click()
@@ -313,32 +323,36 @@ describe('notices', () => {
   describe('the resting state', () => {
     it('is what the line says when nothing else is being said', () => {
       const n = createNotices(line, live)
-      n.rest('copies are not being saved')
+      n.rest(RESTING)
       expect(line.hidden).toBe(false)
-      expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
-      expect(live.textContent).toContain('copies are not being saved')
+      expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
+      expect(live.textContent).toContain(RESTING)
     })
 
     it('is said at once and comes back when the notice over it ends', () => {
       const n = createNotices(line, live)
-      n.notify('λ copy 1 created')
-      n.rest('copies are not being saved')
+      n.notify('Explorer reset — the default views are back')
+      n.rest(RESTING)
       // SAID, THOUGH NOT SHOWN: the notice the user may be reading keeps the line.
-      expect(live.textContent).toContain('copies are not being saved')
-      expect(line.querySelector('.notice-text')?.textContent).toBe('λ copy 1 created')
+      expect(live.textContent).toContain(RESTING)
+      expect(line.querySelector('.notice-text')?.textContent).toBe('Explorer reset — the default views are back')
       vi.advanceTimersByTime(NOTICE_MS)
-      expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+      expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
       expect(line.hidden).toBe(false)
     })
 
     it('survives every notice after it, and goes when the condition does', () => {
       const n = createNotices(line, live)
-      n.rest('copies are not being saved')
-      for (const text of ['λ copy 1 created', 'view added — TM · program', 'λ copy 1 deleted']) {
+      n.rest(RESTING)
+      for (const text of [
+        'Explorer reset — the default views are back',
+        'view added — TM · program',
+        'dark palette Night removed',
+      ]) {
         n.notify(text)
         expect(line.querySelector('.notice-text')?.textContent).toBe(text)
         vi.advanceTimersByTime(NOTICE_MS)
-        expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+        expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
       }
       n.rest(null)
       expect(line.hidden).toBe(true)
@@ -346,26 +360,25 @@ describe('notices', () => {
 
     it('says a condition once, however many times it is reported', () => {
       const n = createNotices(line, live)
-      n.rest('copies are not being saved')
+      n.rest(RESTING)
       const said = live.textContent
-      n.rest('copies are not being saved')
+      n.rest(RESTING)
       expect(live.textContent).toBe(said)
     })
 
     /**
-     * **AND ONCE ACROSS A CYCLE, NOT ONCE PER RUN OF IT.** A write refused by SIZE succeeds and fails by
-     * turns — a user typing into a copy near the quota gets one every 300 ms — so a condition cleared and
-     * reported again is the ordinary case, not a corner. The line still tracks it; the announcement does
-     * not repeat.
+     * **AND ONCE ACROSS A CYCLE, NOT ONCE PER RUN OF IT.** A write refused by SIZE succeeds and fails by turns for a
+     * user typing near the quota, so a condition cleared and reported again is the ordinary case, not a corner. The
+     * line still tracks it; the announcement does not repeat.
      */
     it('does not say it again when the condition comes back', () => {
       const n = createNotices(line, live)
-      n.rest('copies are not being saved')
+      n.rest(RESTING)
       const said = live.textContent
       n.rest(null)
-      n.rest('copies are not being saved')
+      n.rest(RESTING)
       expect(live.textContent).toBe(said)
-      expect(line.querySelector('.notice-text')?.textContent).toBe('copies are not being saved')
+      expect(line.querySelector('.notice-text')?.textContent).toBe(RESTING)
     })
   })
 

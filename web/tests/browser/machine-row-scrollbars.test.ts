@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { RxmPane } from '../../src/rxm-pane'
 import { frame, frames, hearLoops } from './harness'
 import { arrangement, drawnAs, loadViews, mount, row, VIEWS } from './machine-views'
 
@@ -37,26 +36,19 @@ async function fitHeight(host: HTMLElement): Promise<void> {
 describe('the rxm view under classic scroll bars', () => {
   const view = VIEWS[0]
 
-  it('keeps the arrangement when a line the view shows brings a bar in at the threshold, the row under it', async () => {
-    const { host, pane } = mount(view, view.wide + 1)
+  it('keeps the arrangement when a line less room brings a bar in at the threshold, the row under it', async () => {
+    const { host } = mount(view, view.wide + 1)
     await frames()
     expect(arrangement(host), 'precondition: wide, a pixel over its threshold').toBe('wide')
     await fitHeight(host)
     expect(bar(host), 'precondition: no bar').toBe(0)
-    if (!(pane instanceof RxmPane)) throw new Error('the rxm view was built on another pane')
-    // A COPY'S VALUE LINE, WHICH ITS BUILD SETS: one more line in a view that had no height to spare.
-    pane.setScratch({
-      status: { available: true, reason: '', run: 'Ended', cap: null, total_steps: 55 },
-      value: { Value: { text: '42' } },
-    })
+    // ONE LINE LESS ROOM THAN A VIEW THAT HAD NONE TO SPARE: the bar comes in with the box that changed, and the row
+    // decides on that change, so the decision is made while the bar is there.
+    const line = (host.querySelector('.rxm-row') as HTMLElement).offsetHeight
+    host.style.height = `${host.offsetHeight - line}px`
     await frames()
-    expect(bar(host), 'precondition: a bar came with the line').toBeGreaterThanOrEqual(10)
+    expect(bar(host), 'precondition: a bar came with the shorter view').toBeGreaterThanOrEqual(10)
     expect(row(host).clientWidth, 'precondition: the row is under the wide threshold').toBeLessThan(view.wide)
-    // A DECISION MADE WHILE THE BAR IS THERE: the row decides when the view's box changes, and a line of text changes
-    // no box, so without this the case could not tell which width the decision reads.
-    host.style.height = `${host.offsetHeight - 1}px`
-    await frames()
-    expect(bar(host), 'precondition: the bar is there after the decision').toBeGreaterThanOrEqual(10)
     for (let i = 0; i < 10; i += 1) await frame()
     expect(arrangement(host), 'and stays wide').toBe('wide')
     expect(drawnAs(host, view.values)).toBe('wide')

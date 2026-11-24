@@ -52,9 +52,6 @@ const LABEL_CLASS: { readonly [K in Exclude<ClifRowKind, 'Inst'>]: string } = {
  * The CLIF view (CLIF view design §4): Cranelift's IR for the program, built from the rxm program, and the run's frame
  * at the displayed step. **THE RXM VIEW'S PARTS, WITH ITS OWN ROWS** (`clif-view.ts`): its listing's labels are the
  * rows that show no instruction, as Cranelift prints them, and its panels share the view's height as the rxm view's do.
- *
- * **NO COPY'S EDITOR**: a CLIF view offers no *edit a copy* (`transport.ts`'s `programFork`) and holds no editor
- * (`pane-host.ts`'s `holdsEditor`), so the copy's text panel and outline the chrome builds are never mounted.
  */
 export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   #on: PaneEvents
@@ -94,7 +91,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     sizes: Shares = {},
     display: ClifDisplay = DEFAULT_CLIF_DISPLAY,
   ) {
-    super(on, { what: 'the whole program', noun: 'instructions', outlineOpen: false })
+    super(on)
     this.#on = on
     this.#layout = display.layout
     this.#notice = document.createElement('p')

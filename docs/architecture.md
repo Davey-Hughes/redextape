@@ -9,19 +9,18 @@ compiler to WASM through **eleven exported functions** — the eleventh, `tapeNa
 Turing-machine tape rows from the lowering's own constants (`build.rs`) rather than a hand-copied
 list, so it can only speak for machines this compiler produced. The module's `start` function,
 `init`, runs when the module loads and is not among the eleven. `web/` is a real app: a source pane
-with lint diagnostics and syntax highlighting driven by a committed tree-sitter grammar — the same
-colourer the λ, TM and rxm copy editors take, whose grammar loads asynchronously so only the first
-paint waits on it, while every reparse and rebuild after that runs inside the same `ViewUpdate` as
-the keystroke that triggered it — a λ pane that draws the term as a tree you can fold, an rxm pane,
-and a Turing-machine pane showing all five tapes, a status line, a state diagram and a virtualized
-δ-table: current state and the rule about to fire highlighted, following the machine by default and
-a control to reattach it after a manual scroll detaches it, toggleable, and tested rendering only a
-viewport's worth of rows. **All three legs — λ, Turing machine and rxm — are steppable forward and
-backward** through a recorded, byte-budgeted history (◀ ▶ ⏵ ↺), with a caps affordance
-(`[continue]`) for a run that outgrows its recording budget before it outgrows its answer.
-Clicking a construct in one pane marks the same construct in the others, a running step underlines
-the source construct it came from, and the λ, rxm and TM text can be copied into an editor and the
-copy run.
+with lint diagnostics and syntax highlighting driven by a committed tree-sitter grammar — it loads
+asynchronously, so only the first paint waits on it, and every reparse and rebuild after that runs
+inside the same `ViewUpdate` as the keystroke that triggered it — a λ pane that draws the term as a
+tree you can fold, an rxm pane, and a Turing-machine pane showing all five tapes, a status line, a
+state diagram and a virtualized δ-table: current state and the rule about to fire highlighted,
+following the machine by default and a control to reattach it after a manual scroll detaches it,
+toggleable, and tested rendering only a viewport's worth of rows. **All three legs — λ, Turing
+machine and rxm — are steppable forward and backward** through a recorded, byte-budgeted history
+(◀ ▶ ⏵ ↺), with a caps affordance (`[continue]`) for a run that outgrows its recording budget
+before it outgrows its answer.
+Clicking a construct in one pane marks the same construct in the others, and a running step
+underlines the source construct it came from.
 What is left is under [Not built yet](#not-built-yet). See [Development](development.md) to build
 and run it, or still `cargo run --example` for the raw backends without a browser.
 

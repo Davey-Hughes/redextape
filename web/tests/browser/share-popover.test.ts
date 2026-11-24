@@ -112,7 +112,7 @@ describe('share', () => {
     expect(shareLinkField().readOnly).toBe(true)
     // NAMED BY ITS LABEL, `link`, and not by the link it holds.
     expect(computeAccessibleName(shareLinkField())).toBe('link')
-    // A SHORT LINK AND NO COPY ON THE PAGE: neither line, and nothing describing the field.
+    // A SHORT LINK: no length line, and nothing describing the field.
     expect(shareMenu().querySelector('.share-line')).toBeNull()
     expect(shareLinkField().hasAttribute('aria-describedby')).toBe(false)
   })
@@ -244,19 +244,6 @@ describe('share', () => {
     shareMenu().hidePopover()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
     await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
-  })
-
-  it('names the views that will open on the program, when a view shows a copy', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    await until(
-      () => (document.querySelector('[data-leaf="lambda-0"] .view-title')?.textContent ?? '').includes('copy'),
-      'the copy',
-    )
-    await openShare()
-    expect(shareMenu().querySelector('#share-copies')?.textContent).toBe(
-      'copies are not included — the λ · copy 1 view will open on the program',
-    )
-    expect(shareLinkField().getAttribute('aria-describedby')).toBe('share-copies')
   })
 
   /**

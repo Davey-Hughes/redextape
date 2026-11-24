@@ -1,8 +1,18 @@
-import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import IS_EVEN from '../../src/examples/is-even.rxt?raw'
-import { diagram, diagramChoice, frames, SHELL, stateIdle, tmPane, tmStatus, until } from './harness'
+import {
+  diagram,
+  diagramChoice,
+  frames,
+  SHELL,
+  stateIdle,
+  tmPane,
+  tmStatus,
+  tmWalk,
+  until,
+  walkInParts,
+} from './harness'
 
 /**
  * Fans of sloping edges on the state diagram's local level (`docs/superpowers/specs/2026-11-16-state-diagram-tidy-design.md`,
@@ -11,22 +21,13 @@ import { diagram, diagramChoice, frames, SHELL, stateIdle, tmPane, tmStatus, unt
  * rising to it, and two fall from `bdt35.q1.e0` while one rises across them. A reader takes a label to belong to the
  * line nearest it, so each label must be nearer its own edge's line than any other's, as the browser draws them.
  *
- * The level is a function of the program and its current state, so the program's TM copy is started in that state
- * rather than walked there: 11,827 clicks of `▶` would take most of a minute.
+ * The run is walked there from step 0 by `▶`, in parts, each a hook of its own with a timeout that fits its share of
+ * the clicks, so no one hook runs long under a loaded suite.
  */
 
 const STATE = 'bdt35.q1.s.sk0'
 const level = () => diagram().querySelector('.local-level') as HTMLElement
 const nodes = () => [...diagram().querySelectorAll<HTMLElement>('.local-node')]
-
-/** The TM view's own copy's editor, detached from the program first. */
-async function copyEditor(): Promise<EditorView> {
-  const content = () => tmPane().querySelector<HTMLElement>('.term-editor .cm-content')
-  if (content() === null) tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => content() !== null, 'the copy to mount its editor')
-  const { EditorView } = await import('@codemirror/view')
-  return EditorView.findFromDOM(content() as HTMLElement) as EditorView
-}
 
 type Box = { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number }
 /** How far the point `(x, y)` is from the box `b`: 0 inside it. */
@@ -45,12 +46,16 @@ beforeAll(async () => {
   await userEvent.click(document.querySelector('#examples-menu [data-example="is-even"]') as HTMLElement)
   await until(() => view.state.doc.toString() === IS_EVEN && stateIdle() && tmStatus() !== '', 'is_even(6) to compile')
   tmPane().querySelector<HTMLButtonElement>('[data-panel="rules"] .panel-toggle')?.click()
-  const copy = await copyEditor()
-  const start = /^start .*$/m.exec(copy.state.doc.toString())
-  expect(start).not.toBeNull()
-  const from = start?.index ?? 0
-  copy.dispatch({ changes: { from, to: from + (start?.[0].length ?? 0), insert: `start ${STATE}` } })
-  await until(() => tmStatus().startsWith(`${STATE} `), `the copy to start in ${STATE}`)
+})
+/** 11,827 steps from step 0, the first in `STATE`: five parts of 2,000 clicks and the 1,827 left. */
+for (const part of walkInParts(
+  tmWalk(tmPane, /^bdt35\.q1\.s\.sk0 /, `in ${STATE}`, true),
+  Array.from({ length: 5 }, () => 2000),
+)) {
+  beforeAll(part, 60_000)
+}
+beforeAll(async () => {
+  expect(tmStatus()).toMatch(/^bdt35\.q1\.s\.sk0 · step 11,827 of /)
   await userEvent.click(diagramChoice('local') as HTMLButtonElement)
   await until(() => nodes().length === 11, `the local level around ${STATE}`)
   // THE SCREENSHOT'S PANEL: the level is 844 px wide, scroll bar room included.

@@ -145,7 +145,7 @@ describe('diagnostics', () => {
     h.client.start()
     h.port().reply({ kind: 'ready' })
     h.open('redextape:///view/v1.rxt', 'redextape', 'let x = ;')
-    h.open('redextape:///view/v2.tm', 'redextape_tm', 'tapes 1\n')
+    h.open('redextape:///view/v2.rxt', 'redextape', 'let y = 2;')
 
     const ds: LspDiagnostic[] = [
       {
@@ -159,32 +159,11 @@ describe('diagnostics', () => {
         {
           jsonrpc: '2.0',
           method: 'textDocument/publishDiagnostics',
-          params: { uri: 'redextape:///view/v2.tm', diagnostics: ds },
+          params: { uri: 'redextape:///view/v2.rxt', diagnostics: ds },
         },
       ]),
     )
-    expect(h.diagnostics).toEqual([['redextape:///view/v2.tm', ds]])
-  })
-
-  it('drops diagnostics for a document that was closed while they were in flight', () => {
-    const h = harness()
-    h.client.start()
-    h.port().reply({ kind: 'ready' })
-    h.open('redextape:///view/v1.rxt', 'redextape', 'let x = ;')
-    h.client.closeDocument('redextape:///view/v1.rxt')
-
-    expect(() =>
-      h.port().reply(
-        OUT([
-          {
-            jsonrpc: '2.0',
-            method: 'textDocument/publishDiagnostics',
-            params: { uri: 'redextape:///view/v1.rxt', diagnostics: [] },
-          },
-        ]),
-      ),
-    ).not.toThrow()
-    expect(h.diagnostics).toHaveLength(0)
+    expect(h.diagnostics).toEqual([['redextape:///view/v2.rxt', ds]])
   })
 })
 
@@ -213,17 +192,6 @@ describe('documents', () => {
     h.client.changeDocument('redextape:///view/ghost.rxt', 'x')
     expect(h.port().methods()).not.toContain('textDocument/didChange')
   })
-
-  it('drops a closed document from the replay set, not only from the server', () => {
-    const h = harness()
-    h.client.start()
-    h.port().reply({ kind: 'ready' })
-    h.open('redextape:///view/v1.rxt', 'redextape', 'a')
-    expect(h.client.openDocumentCount).toBe(1)
-    h.client.closeDocument('redextape:///view/v1.rxt')
-    expect(h.client.openDocumentCount).toBe(0)
-    // Otherwise a restart would reopen it into the new worker after its view was gone.
-  })
 })
 
 describe('when the worker dies', () => {
@@ -232,7 +200,7 @@ describe('when the worker dies', () => {
     h.client.start()
     h.port().reply({ kind: 'ready' })
     h.open('redextape:///view/v1.rxt', 'redextape', 'let x = 1;')
-    h.open('redextape:///view/v2.tm', 'redextape_tm', 'tapes 1\n')
+    h.open('redextape:///view/v2.rxt', 'redextape', 'let y = 2;')
     const first = h.port()
 
     first.crash()
@@ -245,7 +213,7 @@ describe('when the worker dies', () => {
     const opens = second.parsed().filter((m) => m.method === 'textDocument/didOpen')
     expect(opens.map((o) => (o.params.textDocument as { uri: string }).uri)).toEqual([
       'redextape:///view/v1.rxt',
-      'redextape:///view/v2.tm',
+      'redextape:///view/v2.rxt',
     ])
     expect(h.client.available).toBe(true)
     expect(h.notices.some((n) => n.includes('restarted'))).toBe(true)

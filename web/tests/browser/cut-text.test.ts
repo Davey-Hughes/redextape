@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { page, userEvent } from 'vitest/browser'
-import { type BufferRow, bufferList } from '../../src/buffer-list'
+import { userEvent } from 'vitest/browser'
 import type { ClifPane } from '../../src/clif-pane'
 import { CUT_TEXT, watchCutText } from '../../src/cut-text'
 import { ROW_HEIGHT } from '../../src/state-table'
@@ -24,10 +23,9 @@ import {
 /**
  * A CUT TEXT READS WHOLE IN THE BROWSER'S TOOLTIP WHILE THE POINTER RESTS ON IT, AND ONLY WHILE IT IS CUT (the cut-text
  * tooltips design, `cut-text.ts`): a value, a panel's name, a frame, a heap line and a listing row in an rxm view and a
- * clif view built by hand, an accept state in a TM view's rule table, and a copy's `no term yet` in the copies list. A
- * tooltip cannot be seen from here, so each case reads the `title` a real hover leaves, and first holds the text cut or
- * whole, so that no case passes because a text happened to fit. A view built by hand has no app to add the watcher, so
- * this file adds it.
+ * clif view built by hand, and an accept state in a TM view's rule table. A tooltip cannot be seen from here, so each
+ * case reads the `title` a real hover leaves, and first holds the text cut or whole, so that no case passes because a
+ * text happened to fit. A view built by hand has no app to add the watcher, so this file adds it.
  */
 
 loadViews()
@@ -433,50 +431,5 @@ describe('in the TM rule table', () => {
     expect(c.scrollWidth, 'precondition: its ` · accept` runs past its box').toBeGreaterThan(c.clientWidth)
     await hover(c, 2)
     expect(c.title, 'the accept state').toBe(name)
-  })
-})
-
-/**
- * How wide the page is for the copies list's case: narrow enough that the list cuts `no term yet`, and wide enough
- * that it still draws some of it, which a hover needs.
- */
-const NARROW = 240
-
-const noop = () => {}
-
-/** Two warm λ copies: the first's term `LONG`, the second with none yet. */
-const ROWS: readonly BufferRow[] = [
-  { id: 'scratch-1', label: 'copy 1', paneCount: 1, term: LONG, warm: true, leg: 'lambda' },
-  { id: 'scratch-2', label: 'copy 2', paneCount: 1, term: null, warm: true, leg: 'lambda' },
-]
-
-describe('in the copies list', () => {
-  it("gives a copy's cut `no term yet` its text, and leaves a cut term's own title as its code set it", async () => {
-    await page.viewport(NARROW, 1000)
-    try {
-      const bar = document.createElement('header')
-      document.body.append(bar)
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.textContent = 'copies'
-      bar.append(button)
-      bufferList(button, () => ROWS, noop, noop, noop)
-      await userEvent.click(button)
-      const [term, absent] = [...bar.querySelectorAll<HTMLElement>('.buffer-row-term')] as HTMLElement[]
-      if (term === undefined || absent === undefined) throw new Error('precondition: the list draws two terms')
-      expect(absent.textContent, 'precondition: the second copy has no term').toBe('no term yet')
-      expect(whole(absent), `precondition: no term yet is cut at ${NARROW} px`).toBe(false)
-      expect(absent.hasAttribute('title'), 'precondition: no term yet has no title of its own').toBe(false)
-      expect(whole(term), `precondition: the first copy's term is cut at ${NARROW} px`).toBe(false)
-      expect(term.title, "precondition: the first copy's term has its own title").toBe(LONG)
-      await hover(absent, 4)
-      expect(absent.title, 'no term yet').toBe('no term yet')
-      await hover(term, 4)
-      await hover(bar.querySelector('.buffer-row-name') as HTMLElement, 4)
-      expect(term.title, "the first copy's term, once the pointer has rested on it and left").toBe(LONG)
-      expect(titled(document.body), 'the texts with a title, the pointer on a name').toEqual([])
-    } finally {
-      await page.viewport(1280, 1000)
-    }
   })
 })

@@ -242,7 +242,6 @@ select option {
 /* THE HEADER'S BUTTONS: `#appearance`'s chrome, shared, so the header reads as one row of controls — and not
    the browser's default dark button. */
 #workspace,
-#buffers,
 #examples,
 #share,
 #appearance,
@@ -471,7 +470,7 @@ select option {
    menu is fitted to, so one that fills that room stops `1rem` short of the page's edge, and where the placement flips
    to open leftward the margin flips with it. Not on `.header-menu`: settings opens leftward from its button's right
    edge, and an end margin would move it off that edge at every width. Their height cap takes the same `1rem` from the
-   room below, in place of `.header-menu`'s. The buffers list reaches the edge too; `.buffer-list` keeps its own gutter.
+   room below, in place of `.header-menu`'s.
 
    **WHERE A MENU IS WIDER THAN THE ROOM FROM ITS BUTTON AND NO FLIP FITS, A FALLBACK OPENS IT BELOW ITS BUTTON AGAINST
    THE PAGE'S END EDGE**, its margin from that edge. Left to its first placement, the browser shifts the menu back, and
@@ -545,9 +544,10 @@ select option {
   font-size: var(--step--2);
   color: var(--fg-dim);
 }
-/* THE SHARE POPOVER (Plan 7 part 6a spec §5.2): the link in a read-only field, `copy link` under it, and up to two
-   lines under that. As wide as a link's start needs to be told from another's at a desktop width, and no wider than
-   the page less its gutter at a phone's. `:popover-open` for the grid, for `.header-menu.settings`' reason. */
+/* THE SHARE POPOVER (Plan 7 part 6a spec §5.2): the link in a read-only field, `copy link` under it, and a line under
+   that when the link is long. As wide as a link's start needs to be told from another's at a desktop width, and no
+   wider than the page less its gutter at a phone's. `:popover-open` for the grid, for `.header-menu.settings`'
+   reason. */
 .header-menu.share {
   padding: var(--space-2) var(--space-3);
   width: min(32rem, calc(100vw - 2rem));
@@ -589,22 +589,9 @@ select option {
   color: var(--fg-dim);
 }
 
-/* Same treatment as `.controls button` — chrome, not a new visual language.
-
-   `.buffer-delete` SHARES THIS RULE RATHER THAN RESTATING IT: a shared selector cannot disagree with itself.
-
-   `.buffer-delete` IS NOT A RED ONE: no new colour-carried state (5d-ii-a design §6.3), so a control that
-   destroys a buffer is told apart by the row it sits in and the word on it rather than by a hue this
-   stylesheet would have to invent.
-
-   `.buffer-temperature` AND `.buffer-new` — *new rxm copy* and *new TM copy* — JOIN THE SELECTOR FOR THE SAME REASON:
-   one declaration, not a second copy to drift out of step with it. Without a rule each would render as the
-   browser's own button beside the styled ones. */
+/* Same treatment as `.controls button` — chrome, not a new visual language. */
 .view-more,
 .view-close,
-.buffer-delete,
-.buffer-temperature,
-.buffer-new,
 .clif-listing-choice,
 .panel-actions button {
   font: inherit;
@@ -641,9 +628,9 @@ select option {
   gap: var(--space-1) var(--space-3);
   min-width: 0;
 }
-/* DIMMED WHILE THE PROGRAM IS COMPILING, AND ONLY WHILE THE STRIP IS DESCRIBING THE PROGRAM. The
-   attribute is the program's compile state wherever the readout has moved to (spec §9), so without the
-   second half a copy's readout would grey out for a compile that had nothing to do with it. */
+/* DIMMED WHILE THE PROGRAM IS COMPILING, AND ONLY WHILE THE STRIP IS DESCRIBING A PROGRAM. The attribute is the
+   program's compile state (spec §9), and a readout with no program yet, as on the run's first frames, has nothing a
+   compile could make stale. */
 .results[data-state="running"][data-describes="program"] {
   opacity: 0.55;
 }
@@ -687,8 +674,8 @@ select option {
   color: var(--tok-punct);
 }
 
-/* Seven classes. SIX come only from the rxm and TM forms, through their grammars (`grammars/`). The
- * seventh, `.tok-comment`, is not one of them: this rule is what paints `//` comments in ordinary source. */
+/* Seven classes. `.tok-comment` paints `//` comments in the source. Only the TM and rxm grammars reach the
+ * other SIX, and the app loads neither; they keep a rule because every variant gets one (`theme.ts`). */
 .tok-comment,
 .tok-mnemonic,
 .tok-register,
@@ -700,10 +687,10 @@ select option {
 }
 
 /* THE ONE CLASS OUTSIDE THE MINI-LANGUAGE'S OWN WITH A PALETTE TOKEN OF ITS OWN, because of what the λ
- * grammar reaches rather than because a binder is special. `REDEXTAPE_LAMBDA` maps its captures to
- * `Binder`, `Ident` and `Punct` and to nothing else; `--tok-ident` is `--fg` in every variant and
- * `--tok-punct` sits on or beside `--tok-neutral`, so sharing the block above would leave a λ editor
- * drawing `λf` and `(` in one colour. `palettes.ts`'s header has the rest of the argument. */
+ * view draws rather than because a binder is special: its binders sit among names and punctuation.
+ * `--tok-ident` is `--fg` in every variant and `--tok-punct` sits on or beside `--tok-neutral`, so sharing
+ * the block above would leave the λ view drawing `λf` and `(` in one colour. `palettes.ts`'s header has the
+ * rest of the argument. */
 .tok-binder {
   color: var(--tok-binder);
 }
@@ -729,7 +716,7 @@ select option {
   caret-color: var(--fg);
 }
 
-/* CodeMirror sets `monospace` on its scroller in its own base theme, so without this the editors ignore
+/* CodeMirror sets `monospace` on its scroller in its own base theme, so without this the editor ignores
    the style's code face — Hack under Instrument — while every other piece of code on the page uses it. */
 .cm-editor .cm-scroller {
   font-family: var(--font-mono);
@@ -781,7 +768,7 @@ select option {
 
    THE CLASS IS TRIPLED, ON THE SAME REASONING AS `.cm-editor.cm-editor.cm-focused` ABOVE, AND FOR
    THE SAME KIND OF OPPONENT. CodeMirror's own border/background rule is not `.cm-tooltip` alone —
-   it is scoped to the theme class every editor carries (`&light .cm-tooltip`, compiled to a
+   it is scoped to the theme class an editor carries (`&light .cm-tooltip`, compiled to a
    two-class descendant selector), which beats a bare one-class `.cm-tooltip` on specificity
    regardless of which stylesheet loads second. Three class selectors outrank that two-class one
    outright, rather than tying it and hoping cascade order breaks the tie our way. */
@@ -803,9 +790,9 @@ select option {
 /* A VIEW'S HEADER — Plan 7 part 2 spec §7: title, status, step controls, actions, on one line that wraps
    rather than overflowing a narrow view. The step controls take the middle and the actions the end.
    **THE HEADER KEEPS ITS TEXT AND CONTROLS OFF THE PANE'S EDGES, BECAUSE THE PANE DOES NOT**: a pane has no
-   padding, so that its editors, tapes and highlight bands run edge to edge, and without this the title, `⋯`, `✕`
-   and every row the step controls wrap onto would touch the pane's sides and top, which read as clipped. The
-   inline padding is `.panel-header`'s, so a view's title lines up with its panels' headers' content. */
+   padding, so that the source editor, the tapes and the highlight bands run edge to edge, and without this the
+   title, `⋯`, `✕` and every row the step controls wrap onto would touch the pane's sides and top, which read as
+   clipped. The inline padding is `.panel-header`'s, so a view's title lines up with its panels' headers' content. */
 .view-header {
   display: flex;
   flex-wrap: wrap;
@@ -815,12 +802,9 @@ select option {
   padding-block-start: var(--space-1);
   margin-bottom: var(--space-2);
 }
-/* THE HEADING WRAPS THE HEADER AS ITS TITLE DOES, WHATEVER ITS STATUS. Were a copy's `copy · not linked` in the
-   heading's width when the header broke its line, in a half-width view it would push `⋯` and `✕` onto a second row
-   where the program's view, with the same title, fits one. So the line breaks on the heading's MIN-CONTENT width,
-   which is the title's (the status's own is one character, below), and the heading then grows toward its max-content
-   width ahead of the step controls — the 1000 — so the status takes whatever the row has left, cut with an ellipsis.
-   Alone on a narrower row, it shrinks to the row, the title's text taking the ellipsis too (`.view-title-text`). */
+/* THE HEADING WRAPS THE HEADER AS ITS TITLE DOES: the line breaks on the heading's MIN-CONTENT width, which is the
+   title's, and the heading grows toward its max-content width ahead of the step controls — the 1000. Alone on a
+   narrower row, it shrinks to the row, the title's text taking the ellipsis (`.view-title-text`). */
 .view-header .view-title-heading {
   display: flex;
   align-items: center;
@@ -857,9 +841,8 @@ select option {
   color: var(--fg);
   letter-spacing: inherit;
   text-transform: none;
-  /* THE TITLE KEEPS ITS WIDTH WHILE THE STATUS BESIDE IT CAN GIVE ANY, and gives way only to the heading's own width,
-     alone on a row narrower than it. A shrink factor, however small beside the status's, would still take a fraction
-     of a pixel from the title, and the ellipsis below would then cut its last characters where there is room. */
+  /* THE TITLE KEEPS ITS WIDTH, and gives way only to the heading's own width, alone on a row narrower than it, where
+     the ellipsis below cuts it. */
   flex: none;
   max-width: 100%;
 }
@@ -888,33 +871,6 @@ button.view-title[aria-expanded="true"] {
 .view-title-caret {
   rotate: 90deg;
   flex: none;
-}
-/* `copy · not linked`, and its rule: NOT COLOUR-ONLY. A border and the monospace face carry it;
-   `tests/browser/view-status.test.ts` asserts the border computes to a non-zero width, so reducing this
-   to `color:` alone fails a test. */
-.view-status {
-  padding: 0 0.35em;
-  border: 1px solid currentColor;
-  border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: var(--step--2);
-  letter-spacing: normal;
-  text-transform: none;
-  color: var(--fg);
-  /* ONE LINE, CUT WITH AN ELLIPSIS TO THE ROOM THE HEADER LEAVES IT (the heading's rule above), its full meaning in
-     its `title`. `word-break: break-all` is what makes its min-content width one character, so the header breaks its
-     line on the title alone, and it fills a line to its last character where a break at a space would leave a gap
-     inside the border; the one-line clamp then shows that first line, ended by `…`. IT GIVES WAY BEFORE THE TITLE
-     DOES (`.view-title`), since the title says which view this is and the status only that it is a copy, which its
-     border and the view's own title already show. */
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  word-break: break-all;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
 }
 /* The title's menu, on the view menu's positioning — `.view-menu`'s comment has the argument for every
    declaration this SHARES with it: the implicit anchor, `position-try-fallbacks` as the viewport edge,
@@ -1084,24 +1040,14 @@ button.view-title[aria-expanded="true"] {
   margin: var(--space-1) 0 0;
 }
 
-/* 5d-iii design §4.2's upper region — the editor scrolls rather than pushing the term off the pane. */
-.term-editor {
-  max-height: 8lh;
-  overflow: auto;
-  border-bottom: 1px solid var(--rule);
-  margin-bottom: 0.5rem;
-}
-
 .truncated {
   color: var(--fg-dim);
   font-style: italic;
 }
 
-/* THE STATUS LINES CARRY THE PANE'S INLINE GAP, as the view's header does and for its reason: the pane has none,
-   so a line without it starts on the pane's edge. The same `var(--space-2)` keeps them in line with the title above. */
-.tm-status,
-.tm-value,
-.rxm-value {
+/* THE STATUS LINE CARRIES THE PANE'S INLINE GAP, as the view's header does and for its reason: the pane has none,
+   so a line without it starts on the pane's edge. The same `var(--space-2)` keeps it in line with the title above. */
+.tm-status {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   color: var(--fg-dim);
@@ -1147,20 +1093,6 @@ button.view-title[aria-expanded="true"] {
 .tm-line > .tm-reserved::after {
   content: attr(data-reserve);
   visibility: hidden;
-}
-
-/* AN EMPTY VALUE LINE TAKES NO SPACE AND STAYS IN THE ACCESSIBILITY TREE. `TmPane` empties the line rather than
-   hiding it (its `#value` doc has why: a live region is announced from that tree), so `display: none` is not an
-   option here. `tm-pane-editor.test.ts` holds the gap. */
-.tm-value:empty:not(.has-value-run),
-.rxm-value:empty {
-  margin-bottom: 0;
-}
-
-/* BUT A HEADERED COPY'S LINE KEEPS ONE LINE'S ROOM WHILE IT WAITS for its value run's first reading, so the panels
-   below do not move when the reading comes (`TmPane`'s `#drawValue` doc). `recompile-swap.test.ts` holds it. */
-.tm-value.has-value-run {
-  min-height: 1lh;
 }
 
 /* Tape rows scroll horizontally INSIDE the pane. A wide tape must never make the page scroll. */
@@ -1415,11 +1347,6 @@ button.view-title[aria-expanded="true"] {
 .view-menu .view-menu-label {
   grid-column: 2;
 }
-.view-menu .view-menu-hint {
-  grid-column: 2;
-  font-size: var(--step--2);
-  color: var(--fg-dim);
-}
 /* A SETTING'S CHECKED CHOICE (`view-header.ts`'s `radioGroup`), DRAWN WITHOUT RELYING ON COLOUR: heavier
    than its siblings, with a bar at its leading edge. The bar takes `--accent`, a palette token; the weight is
    what still shows in a palette whose colours a reader cannot tell apart. `lambda-display.test.ts` compares
@@ -1430,140 +1357,6 @@ button.view-title[aria-expanded="true"] {
 .clif-compact[aria-checked="true"] {
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--accent);
-}
-
-/* THE HEADER'S BUFFER LIST, ON `.view-menu`'S TWO POSITIONING DECLARATIONS ABOVE, plus a last fallback of its own
-   below — and the argument for them is up there rather than restated here: without `position-area` this list opens
-   in the TOP-LEFT CORNER OF THE VIEWPORT, because `margin: 0` is what leaves the UA's `inset: 0`
-   over-constrained against a definite width. The anchor is `buffer-list.ts`'s button and it is
-   implicit, so there is no `anchor-name` here either, and `position-try-fallbacks` is what keeps a
-   list opened near an edge on screen. `tests/browser/buffer-list.test.ts`'s "where the list opens"
-   measures it, from a fixture that moves the header off the origin — the real bar sits at the top-left
-   of the page, where a corner-pinned list and a correct one are too close to tell apart.
-
-   IT DOES NOT SHARE A SELECTOR WITH `.view-menu`, DELIBERATELY. `.view-menu button` above is
-   a full-width grid, which is right for a menu whose entries ARE the choices and wrong for
-   a row whose retire control sits beside its text — a shared rule would have to be undone here, which
-   is longer than stating both. The width is wider for the same reason: a row carries a name, a pane
-   count and a control rather than one label.
-
-   NOTHING HERE IS A NEW COLOUR: `--rule` and `--bg` are the tokens `.view-menu` already uses, and
-   `.buffer-delete` shares `.view-more`'s own rule ABOVE rather than restating it. A native popover is
-   in the top layer, so it needs no z-index to clear the header's border or the panes below it. */
-.buffer-list {
-  position-area: block-end span-inline-end;
-  position-try-fallbacks:
-    flip-block,
-    flip-inline,
-    flip-block flip-inline,
-    --buffer-list-to-end;
-  border: 1px solid var(--rule);
-  background: var(--bg);
-  padding: var(--space-1);
-  margin: 0;
-  /* The gutter on the side the list grows towards, flipping with it and kept in the end fallback below:
-     `var(--space-2)`, the settings menu's, so that, filling its room to the window's edge, the list stops as far short
-     of it as that menu does. */
-  margin-inline-end: var(--space-2);
-  /* WIDE ENOUGH FOR A TERM TO BE WORTH SHOWING, capped so the list stays a menu rather than a panel.
-     A row carries the buffer's term (`buffer-list.ts`'s `BufferRow.term`), and a `min-width` of 14rem would
-     truncate it to a few tokens, which distinguishes nothing — every buffer on this page is a fork of one
-     program, so the rows agree on their first tokens and differ later. The `max-width` is what keeps
-     `text-overflow: ellipsis` the mechanism rather than an unbounded row: a λ term has no useful upper
-     length, so the row must stop somewhere it was told to rather than somewhere the content happened to end.
-
-     **THE `min()` ON THE MIN-WIDTH IS NOT DECORATION.** `min-width` BEATS `max-width` in CSS, so a bare
-     `min-width: 26rem` beside any `max-width` overflows every viewport narrower than 26rem: the browser
-     cannot honour both and the minimum wins, in the browser tier's 414px-wide tester page and in a
-     phone-width window in the real app alike, which is what makes this a fix and not a test
-     accommodation. */
-  min-width: min(26rem, 90vw);
-  max-width: min(40rem, 90vw);
-  /* Capped and scrolled as `.header-menu` is, for its reason. */
-  max-height: calc(100% - var(--space-2));
-}
-/* WHERE THE LIST IS TOO WIDE TO OPEN EITHER WAY FROM ITS BUTTON, IT OPENS BELOW IT AGAINST THE PAGE'S END EDGE, its own
-   margin from that edge, the gutter its cap keeps from the bottom; without this fallback the browser shifts it back
-   against that edge, Firefox's shift dropping the margin. `min-content` keeps the width the first placement had there,
-   as for the header menus' fallback. */
-@position-try --buffer-list-to-end {
-  position-area: block-end span-all;
-  justify-self: end;
-  width: min-content;
-}
-/* WITHOUT ANCHOR POSITIONING, GIVE THE MARGIN BACK — `.view-menu`'s `@supports` block above states
-   this in full, including why the test is written `not (position-area: block-end)` rather than against
-   a feature name, and why a branch that cannot fire in the browser tier is still worth
-   writing. The same two declarations fail the same way, so they take the same fallback. */
-@supports not (position-area: block-end) {
-  .buffer-list {
-    margin: auto;
-  }
-}
-
-/* The retire control sits AT THE ROW'S TRAILING EDGE rather than inline after the text, so every row
-   presents its destructive control in the same place regardless of how long the buffer's name is —
-   a column to aim down, which is what makes "aim at one row" the deliberate act §4.2 relies on in
-   place of a confirmation dialog. */
-.buffer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-1);
-}
-
-/* THE NAME AND THE TERM AS ONE FLEX CHILD, so the retire control keeps the trailing edge the comment
-   above argues for whichever of the two lines is longer.
-
-   `min-width: 0` IS THE LOAD-BEARING DECLARATION AND IT LOOKS LIKE NOISE. A flex item's default
-   `min-width: auto` refuses to shrink below its content's intrinsic width, so `text-overflow: ellipsis`
-   on the child below never fires: the row grows instead and a long term pushes the retire button off
-   the popover. This is the standard fix and it is written down because it reads as removable. */
-.buffer-row-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* What the buffer holds: a λ copy's term, or a machine copy's run as its readout says it — `buffer-list.ts`'s
-   `BufferRow.term` has why the row carries one at all. Monospace because the panes print terms, and the strip
-   its readout, in `--font-mono`; dim and one step down because the NAME is what the row is aimed at and this is
-   what tells two names apart.
-
-   TRUNCATED HERE RATHER THAN IN THE BUILDER, which is the other half of that file's argument: the
-   ellipsis lands at whatever width the list has at this zoom and font size, and the whole term stays
-   in the DOM for selection, for `title`, and for a screen reader. */
-.buffer-row-term {
-  font-family: var(--font-mono);
-  font-size: var(--step--1);
-  color: var(--fg-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* A buffer with no term yet. NOT A NEW COLOUR (5d-ii-a design §6.3) and not a hue that would read as an
-   error: this is an ordinary state — a build that landed, before its first frame — wearing the same `--fg-dim` as the
-   term it stands in for, italic so a glance down the column can tell prose from a term without reading it. */
-.buffer-row-term.is-absent {
-  font-family: inherit;
-  font-style: italic;
-}
-
-/* THE NEW-COPY CONTROLS SIT APART, AND IN LINE WITH THE ROWS: each takes a row's inset as its margin, so two side by
-   side are a row's inset apart twice over, and neither touches the list's edge. */
-.buffer-new {
-  margin: var(--space-1);
-}
-
-/* THE CONTROL DOES NOT SHRINK. Without this the flex line takes the button's width first when a term is
-   long, which is the same failure `min-width: 0` above prevents on the other side of the row.
-
-   `.buffer-temperature` GETS THE SAME RULE FOR THE SAME REASON. */
-.buffer-delete,
-.buffer-temperature {
-  flex: none;
 }
 
 .banner {
@@ -2889,12 +2682,10 @@ main {
   cursor: pointer;
 }
 
-/* A TM VIEW'S OPEN PANELS SHARE ITS HEIGHT (Plan 7 part 4 spec §9.1): the rules two shares, the diagram and the
-   outline one each, each down to a floor, and a closed panel keeps only its header. Everything else in the view —
-   the status lines, the tapes and, until a boundary beside it is dragged, the text panel — keeps its own height.
-   The view is a flex column so the panels have a height to share, which `.pane` alone is not; below the floors the
-   view scrolls. The share is also what bounds the outline: it lists a copy's states, a row each, and unbounded, a
-   machine of many states would stretch the view to the length of its list. `data-kind` is `pane-host.ts`'s. */
+/* A TM VIEW'S OPEN PANELS SHARE ITS HEIGHT (Plan 7 part 4 spec §9.1): the rules two shares and the diagram one, each
+   down to a floor, and a closed panel keeps only its header. Everything else in the view — the status lines and the
+   tapes — keeps its own height. The view is a flex column so the panels have a height to share, which `.pane` alone
+   is not; below the floors the view scrolls. `data-kind` is `pane-host.ts`'s. */
 .pane[data-kind="tm"] {
   display: flex;
   flex-direction: column;
@@ -2907,52 +2698,23 @@ main {
 .tm-pane > * {
   flex: none;
 }
-/* NOT A HIDDEN ONE: `tm-pane.ts` hides the outline panel while the view holds no copy, and a `display` here would
-   outrank the browser's `[hidden]` and show it anyway, which `hidden.test.ts` looks for. */
-.tm-pane > .panel[data-panel="rules"][data-open="true"]:not([hidden]),
-.tm-pane > .panel[data-panel="diagram"][data-open="true"]:not([hidden]),
-.tm-pane > .panel[data-panel="outline"][data-open="true"]:not([hidden]) {
+.tm-pane > .panel[data-panel="rules"][data-open="true"],
+.tm-pane > .panel[data-panel="diagram"][data-open="true"] {
   display: flex;
   flex-direction: column;
 }
 /* THE SHARE IS `panel-stack.ts`'s TO WRITE (the view layouts spec §11): the one a region is built with, the rules
    two and the others one each, or the one a dragged boundary left. */
 .tm-pane > .panel[data-panel="rules"][data-open="true"],
-.tm-pane > .panel[data-panel="diagram"][data-open="true"],
-.tm-pane > .panel[data-panel="outline"][data-open="true"] {
+.tm-pane > .panel[data-panel="diagram"][data-open="true"] {
   flex: var(--share, 1) 1 0;
 }
-/* THE BOUNDARY UNDER A COPY'S TEXT TAKES THE PLACE OF THE GAP ITS EDITOR KEEPS UNDER ITSELF, as a boundary over a
-   panel takes the gap that panel keeps above: with both, what lies under the text would sit 8px lower. */
-.panel[data-panel="text"]:has(+ .panel-boundary) > .term-editor {
-  margin-bottom: 0;
-}
-/* A COPY'S TEXT KEEPS ITS OWN HEIGHT UNTIL A BOUNDARY BESIDE IT IS DRAGGED, and is `data-sized` from then on: a
-   region of the stack like the others, its editor scrolling inside the share it has. */
-.tm-pane > .panel[data-panel="text"][data-open="true"][data-sized]:not([hidden]),
-.rxm-pane > .panel[data-panel="text"][data-open="true"][data-sized]:not([hidden]) {
-  display: flex;
-  flex-direction: column;
-  flex: var(--share, 1) 1 0;
-}
-.panel[data-panel="text"][data-open="true"][data-sized] > .term-editor {
-  flex: 1 1 0;
-  max-height: none;
-  min-height: 2lh;
-}
-/* THE FLOORS ARE THE BODIES', so a panel's own minimum is its header and a floor, whatever the header's height.
-   Five rows each: the table's are `ROW_HEIGHT`, the outline's a line of its own. */
-.tm-pane > .panel[data-open="true"] > .state-table,
-.tm-pane > .panel[data-open="true"] > .state-diagram,
-.tm-pane > .panel[data-open="true"] > .outline {
-  flex: 1 1 0;
-}
+/* THE FLOORS ARE THE BODIES', so a panel's own minimum is its header and a floor, whatever the header's height:
+   five rows of `ROW_HEIGHT` each. */
 .tm-pane > .panel[data-open="true"] > .state-table,
 .tm-pane > .panel[data-open="true"] > .state-diagram {
+  flex: 1 1 0;
   min-height: calc(5 * 24px);
-}
-.tm-pane > .panel[data-open="true"] > .outline {
-  min-height: 5lh;
 }
 /* `hidden` MUST STILL HIDE WHAT A `display` RULE LAYS OUT. The browser's own `[hidden] { display: none }` loses to
    any author rule that sets `display`, so without this rule every outline's list would stay on screen while its
@@ -2968,9 +2730,8 @@ main {
    `.machine-stack` and `.machine-heap`, by the view's width (`machine-row.ts`, the machine panels row design §5): the
    heap's with one share, the call stack's with a part of the row's (the after-the-try design's G1). A closed panel
    keeps only its header's height, and each body keeps a floor (below). A region takes no share of its own while
-   every panel in it is closed. On a copy the text panel keeps its own height above them all, until a boundary beside
-   it is dragged, and the outline takes one share below, as in a TM view. The CLIF view's listing, values, call stack
-   and heap share its height by the same rules; it has no copy, so no text panel and no outline. */
+   every panel in it is closed. The CLIF view's listing, values, call stack and heap share its height by the same
+   rules. */
 .pane[data-kind="rxm"],
 .pane[data-kind="clif"] {
   display: flex;
@@ -2986,11 +2747,9 @@ main {
 .clif-pane > * {
   flex: none;
 }
-/* NAMED, NOT EVERY OPEN PANEL: the text panel keeps its own height, and both it and the outline are `hidden` on a view of
-   the program — a `display` here would outrank the browser's `[hidden]` and show them (`hidden.test.ts`). The call
-   stack's and the heap's regions are `hidden` while their panels are in the row, and are guarded the same way. */
+/* THE CALL STACK'S AND THE HEAP'S REGIONS ARE `hidden` WHILE THEIR PANELS ARE IN THE ROW: a `display` here would
+   outrank the browser's `[hidden]` and show them (`hidden.test.ts`), so each is guarded. */
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
-.rxm-pane > .panel[data-panel="outline"][data-open="true"]:not([hidden]),
 .clif-pane > .panel[data-panel="listing"][data-open="true"],
 .machine-stack:not([hidden]):has(> .panel[data-open="true"]),
 .machine-stack > .panel[data-open="true"],
@@ -3003,7 +2762,6 @@ main {
 /* THE SHARES ARE `panel-stack.ts`'s TO WRITE, as the TM view's are: the listing's two and the others' one each, or
    what a dragged boundary left. */
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
-.rxm-pane > .panel[data-panel="outline"][data-open="true"],
 .rxm-pane > .rxm-machine:has(> .panel[data-open="true"]),
 .rxm-pane > .machine-stack:has(> .panel[data-open="true"]),
 .rxm-pane > .machine-heap:has(> .panel[data-open="true"]),
@@ -3016,10 +2774,6 @@ main {
 .machine-stack > .panel[data-open="true"],
 .machine-heap > .panel[data-open="true"] {
   flex: 1 1 0;
-}
-.rxm-pane > .panel[data-open="true"] > .outline {
-  flex: 1 1 0;
-  min-height: 5lh;
 }
 /* THE ROW NEVER WRAPS: `machine-row.ts` chooses which panels it holds from the view's width. A wrapped line of closed
    panels would take its line's part of the row's height, an empty gap under its headers (design §5.2). */
@@ -3215,17 +2969,14 @@ main {
 }
 
 /* THE BOUNDARY TAKES THE PLACE OF THE GAP THE REGION UNDER IT KEEPS ABOVE ITSELF, and does across what draws nothing
-   between the two: the call stack's region outside narrow, both it and the heap's in wide, an rxm copy's empty value
-   line. Here, after the rules that set those gaps, with the source and λ views' regions below: Biome's
-   `noDescendingSpecificity` rejects a selector that follows a more specific one for the same element, and each of
-   these narrows a rule far above it. */
+   between the two: the call stack's region outside narrow. Here, after the rules that set those gaps, with the source
+   and λ views' regions below: Biome's `noDescendingSpecificity` rejects a selector that follows a more specific one
+   for the same element, and each of these narrows a rule far above it. */
 .panel-boundary + .panel,
 .panel-boundary + .rxm-machine,
 .panel-boundary + .machine-stack,
 .panel-boundary + .machine-heap,
-.panel-boundary + .machine-stack[hidden] + .machine-heap,
-.panel-boundary + .rxm-value:empty + .panel,
-.panel-boundary + .machine-stack[hidden] + .machine-heap[hidden] + .panel {
+.panel-boundary + .machine-stack[hidden] + .machine-heap {
   margin-block-start: 0;
 }
 
@@ -3285,7 +3036,6 @@ main {
   flex: var(--share, 1) 1 0;
   max-height: none;
 }
-.pane[data-kind="lambda"] > .panel[data-panel="text"][data-open="true"][data-sized]:not([hidden]),
 .pane[data-kind="lambda"] > .panel[data-panel="map"][data-open="true"][data-sized] {
   display: flex;
   flex-direction: column;

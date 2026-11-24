@@ -1,5 +1,4 @@
 import type { ControlState } from './controls'
-import type { EditablePane } from './editor-custody'
 import { ListingPanel } from './listing-panel'
 import {
   callStackPanel,
@@ -14,9 +13,7 @@ import { MachineRow } from './machine-row'
 import { MachineViewChrome } from './machine-view-chrome'
 import type { PaneEvents } from './pane-chrome'
 import { PanelStack, type Shares } from './panel-stack'
-import { endedLine } from './results'
 import { instrParts, rxmHeap, rxmStack, rxmValues } from './rxm-view'
-import type { RxmScratchReading } from './sessions'
 import type { RxmProgram, RxmState } from './types'
 
 /** Mints each view's listing a prefix for its cells' ids, which `aria-activedescendant` names. */
@@ -28,7 +25,6 @@ export type RxmPanels = {
   readonly registers?: boolean
   readonly stack?: boolean
   readonly heap?: boolean
-  readonly outline?: boolean
 }
 
 /**
@@ -46,16 +42,10 @@ export type RxmPanels = {
  * arguments, 8 frames, 16 cells and 16 boxes, set in `protocol.ts`), so a frame's panels are at most a few hundred short
  * lines however long the run.
  *
- * **ON A COPY IT HOLDS THE COPY'S EDITOR, AS THE TM VIEW HOLDS A TM COPY'S** (spec amendment 28): the text panel first,
- * then the copy's value, the panels above, and the outline — its labels — last. The listing stays: it is the only
- * place the instruction about to run is marked, since a copy's editor marks no running line (spec §10).
- *
  * `RxmPane` SATISFIES `PaneView<RxmState>`, as the λ and TM views satisfy theirs, with no `implements PaneView`
- * clause — `sessions.ts`'s `PaneView` doc says why the parameterisation is the check. It implements `EditablePane`,
- * as `TmPane` does, so custody can mount a copy's editor on it and destroy the one it leaves; the members it inherits
- * from `MachineViewChrome` hand off to `copy`, the `CopyEditor` the two views share.
+ * clause — `sessions.ts`'s `PaneView` doc says why the parameterisation is the check.
  */
-export class RxmPane extends MachineViewChrome implements EditablePane {
+export class RxmPane extends MachineViewChrome {
   #body: HTMLElement
   #program: RxmProgram | null = null
   #frame: RxmState | null = null
@@ -63,30 +53,13 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
   #values: MachinePanel<ValuesView>
   #stack: MachinePanel<StackView>
   #heap: MachinePanel<HeapView>
-  /**
-   * A copy's value, `value: 42`, from the reading its build and any `[continue]` carried; empty on a view of the
-   * program, whose value the readout says. A `status` region, like `TmPane.#value`, though it changes per build, not
-   * per step.
-   *
-   * **`setDetached` DOES NOT CLEAR IT, WHERE `TmPane`'S CLEARS ITS SCRATCH READING AS A SECOND LINE.** Every route
-   * that moves a view onto a session but one seeds it through `seedRxm`, which sets the value that session has — none,
-   * for the program. The one is a fork, which moves a view of the program, whose value line is already empty, onto a
-   * copy that has built nothing yet, and the copy's first build sets its value (`replies.ts`'s `rxm-scratch-compiled`
-   * arm). So a clear there would repeat one no route can skip, and nothing could tell whether it ran.
-   */
-  #value: HTMLElement
 
   /**
    * `panels` is the view's stored panel state, read once here; each panel reports every later toggle through
    * `on.panel`. Every panel opens by default.
    */
   constructor(host: HTMLElement, on: PaneEvents, panels: RxmPanels = {}, sizes: Shares = {}) {
-    // THE COPY'S EDITOR, TEXT PANEL AND OUTLINE (`copy-editor.ts`). The outline is closed by default, as the TM view's
-    // is. No `editorUnmounted`: `#value`'s doc says why the copy's value is not cleared with the editor.
-    super(on, { what: 'the whole program', noun: 'instructions', outlineOpen: panels.outline ?? false })
-    this.#value = document.createElement('div')
-    this.#value.className = 'rxm-value'
-    this.#value.setAttribute('role', 'status')
+    super(on)
 
     // THE LISTING (spec §6.2). A row links the construct its instruction was lowered from (spec §6.6); a label row names
     // no instruction and links nothing.
@@ -133,27 +106,15 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
       columns: [18, 18, 18],
     })
 
-    // THE TEXT PANEL FIRST, THE OUTLINE LAST — the TM view's order under its status line (spec amendment 28), a line
-    // this view does not have. On a view of the program both start hidden and take no room, so this order is
-    // invisible until a copy's editor mounts.
     this.#body = document.createElement('div')
     this.#body.className = 'rxm-pane'
-    this.#body.append(
-      this.copy.textPanel,
-      this.#value,
-      listingPanel.el,
-      row.el,
-      row.stackRegion,
-      row.heapRegion,
-      this.copy.outline,
-    )
+    this.#body.append(listingPanel.el, row.el, row.stackRegion, row.heapRegion)
     this.mount(host, this.#body)
     // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The row and the call
     // stack's and the heap's regions are three, whichever of them each panel is in now (`machine-row.ts`).
     // IT KEEPS ITSELF: its listeners are on the regions and their headers, and only the row reads it again.
     const stack = new PanelStack(
       [
-        this.textRegion(),
         {
           name: 'listing',
           label: 'listing',
@@ -163,7 +124,6 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
           bodies: () => [listingPanel.body],
         },
         ...row.regions,
-        this.outlineRegion(),
       ],
       sizes,
       (next) => on.panelSizes?.(next),
@@ -190,11 +150,6 @@ export class RxmPane extends MachineViewChrome implements EditablePane {
   /** Mark the instructions the running focus names, for the next `render` to draw: `ListingPanel.setFocus`. */
   setFocus(instrs: readonly number[]): void {
     this.#listing.setFocus(instrs)
-  }
-
-  /** An rxm copy's value, or `null` to clear it — set by its build, a `[continue]`, and a seed from what its session kept. */
-  setScratch(reading: RxmScratchReading | null): void {
-    this.#value.textContent = reading === null ? '' : endedLine(reading.value)
   }
 
   render(frame: RxmState | null, controls: ControlState): void {

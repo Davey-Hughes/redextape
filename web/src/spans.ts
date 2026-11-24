@@ -52,8 +52,8 @@ export function byteIndexAt(map: Uint32Array, byteOffset: number): number {
  *
  * **THE λ PANE'S RENDERED FRAME IS THE ONLY CALLER**: the λ view's flat text (`lambda-body.ts`'s `flatText`,
  * shown until a step's tree arrives), whose spans the worker computes per frame from a term it holds, in bytes.
- * The source and copy editors take `colour.ts`'s `treeSitterColour`, whose offsets are already UTF-16 code units
- * and must NOT come through here.
+ * The source editor takes `colour.ts`'s `treeSitterColour`, whose offsets are already UTF-16 code units and must
+ * NOT come through here.
  *
  * **THE SPANS ARRIVE AS ONE BYTE STRING, THREE LITTLE-ENDIAN `u32`S A SPAN** (`viewmodel.rs`'s `LambdaState.spans`):
  * its start and end, byte offsets into `text`, and its class's index in `TOKEN_CLASSES`. Read with a `DataView`, so

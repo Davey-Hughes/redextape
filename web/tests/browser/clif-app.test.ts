@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { compile, host, PREFIX, SHELL, until, viewMenu } from './harness'
+import { compile, host, PREFIX, SHELL, until } from './harness'
 
 /**
  * The CLIF view through the whole app (CLIF view design §4): a compile of `fact.rxt` reaches a CLIF view shown with
@@ -124,14 +124,6 @@ describe('the CLIF view in the app', () => {
     },
     CASE_MS,
   )
-
-  it('offers no edit a copy', async () => {
-    await userEvent.click(clif().querySelector('button.view-more') as HTMLButtonElement)
-    await until(() => viewMenu(clif()).matches(':popover-open'), 'the view menu to open')
-    expect(viewMenu(clif()).querySelector('button.detach')).toBeNull()
-    expect(viewMenu(clif()).textContent).not.toContain('edit a copy')
-    await userEvent.keyboard('{Escape}')
-  })
 
   it('says why a program has no CLIF', async () => {
     await compile(view, LIST)

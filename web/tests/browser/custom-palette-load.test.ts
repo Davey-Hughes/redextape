@@ -9,8 +9,8 @@ import { bodyStyle, chooseOption, rgb, SHELL } from './harness'
 
 /**
  * **A STORED CUSTOM PALETTE IS THE PAGE'S FROM THE START** (Plan 7 part 6b spec §7.2): what an import leaves in
- * storage — a dark half and the `custom` choice — seeded before `main()` mounts, as `buffer-restore.test.ts` seeds
- * its copies. One mount for the file, for that file's reason.
+ * storage — a dark half and the `custom` choice — seeded before `main()` mounts, as `program-restore.test.ts` seeds
+ * its program. One mount for the file, for the reason `app.test.ts` gives.
  */
 
 beforeAll(async () => {

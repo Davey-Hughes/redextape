@@ -9,12 +9,10 @@
  * — and it would be enormous, because the protocol is vastly larger than the slice below.
  *
  * **SO THE RISK THIS FILE CARRIES IS DRIFT AGAINST THE SERVER.** `tests/node/lsp-protocol.test.ts`
- * asserts `LANGUAGE_IDS` is exactly what `Language::from_language_id` matches. That is a field where
- * a mismatch is SILENT rather than loud: an unmatched id makes the server answer every request with
- * nothing, which on screen is indistinguishable from a file with no problems in it.
+ * asserts every id in `LANGUAGE_IDS` is one `Language::from_language_id` matches. That is the direction
+ * where a mismatch is SILENT rather than loud: an unmatched id makes the server answer every request
+ * with nothing, which on screen is indistinguishable from a file with no problems in it.
  */
-
-import type { PaneKind } from './panes'
 
 /** A request id. Monotonic, assigned by `LspClient`; `0` is never used, so it can mean "none". */
 export type RequestId = number
@@ -69,72 +67,42 @@ export type LspDocumentSymbol = {
 }
 
 /**
- * The four `languageId` values the server matches, and **the app's half of a contract whose failure
- * is silent**.
+ * The `languageId` values the app sends, each one the server matches, and **the app's half of a contract
+ * whose failure is silent**.
  *
  * `Language::from_language_id` answers `None` for anything else, after which every language request
  * returns empty and no diagnostic is ever published for that document. There is no error, no
  * console warning and no visible difference from a clean file.
  */
-export const LANGUAGE_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'redextape_rxm'] as const
+export const LANGUAGE_IDS = ['redextape'] as const
 
 export type LanguageId = (typeof LANGUAGE_IDS)[number]
-
-/**
- * The language each kind of view's editor holds, or `null` for a kind whose view holds none: a CLIF view offers no copy
- * to edit. An rxm view's is an rxm copy's, which takes `redextape_rxm` from here (Plan 7 part 5 spec §5.5, §7).
- *
- * **KEYED BY `PaneKind`.** A union spelled out here would be a second copy of `PaneKind` that nothing held to the
- * first, so a new pane kind would leave this map without it and `transport.ts`'s lookups by leg reading `undefined`
- * as a language. Keyed by `PaneKind`, a kind with no language is a type error here (`legs.ts` has the class of
- * bug) — and only here: an annotation rather than the `as const satisfies` its neighbours take, for the reason
- * `legs.ts`'s `LEG_NAME` gives. Those neighbours are looked up by exactly the keys they have; this one is looked up
- * by `Leg`.
- */
-export const LANGUAGE_OF_PANE: Readonly<Record<PaneKind, LanguageId | null>> = {
-  source: 'redextape',
-  lambda: 'redextape_lambda',
-  rxm: 'redextape_rxm',
-  tm: 'redextape_tm',
-  clif: null,
-}
 
 /**
  * How each language reads in a sentence shown to a user — the colourer's failure notice, which
  * `main.ts` builds from `colour.ts`'s `createGrammarRegistry`, and its ceiling notice.
  *
- * **THE WORDS ARE THE APP'S EXISTING ONES, NOT NEW ONES**, per the umbrella's rule that every
+ * **THE WORD IS THE APP'S EXISTING ONE, NOT A NEW ONE**, per the umbrella's rule that every
  * user-visible word is the umbrella's: `source` is what `main.ts`'s `layoutChanged` calls the source
- * view, and `λ`/`rxm`/`TM` are `legs.ts`'s `LEG_NAME` — the same names every view title and
- * every menu item already carries. A second vocabulary for the same four surfaces is what this map
- * exists to avoid.
- *
- * `redextape_rxm` IS AN RXM COPY'S EDITOR'S, and its entry reaches the notice when the rxm grammar fails to
- * load. `satisfies Record<LanguageId, string>` is what keeps this map total, so a language added without a
+ * view. `satisfies Record<LanguageId, string>` is what keeps this map total, so a language added without a
  * word here fails here rather than at the call site.
  */
 export const LANGUAGE_LABEL = {
   redextape: 'source',
-  redextape_lambda: 'λ',
-  redextape_tm: 'TM',
-  redextape_rxm: 'rxm',
 } as const satisfies Record<LanguageId, string>
 
 /** The file extension each language's synthetic document URI carries. Never fetched, never parsed. */
 export const EXTENSION_OF_LANGUAGE = {
   redextape: 'rxt',
-  redextape_lambda: 'rxlambda',
-  redextape_tm: 'tm',
-  redextape_rxm: 'rxm',
 } as const satisfies Record<LanguageId, string>
 
 /**
  * A synthetic, per-view document URI.
  *
- * **PER VIEW RATHER THAN PER LANGUAGE**, because two views can hold the same language over different
- * text — which copies make routine — and the server keys documents by this string. It is never
- * fetched and never parsed: `gen-lsp-types` is taken with default features precisely so `Uri` stays a
- * newtype over `String`, and nothing on either side resolves it.
+ * **PER VIEW RATHER THAN PER LANGUAGE**: the server keys documents by this string, so a document is the
+ * view's that holds it, whatever its language. It is never fetched and never parsed: `gen-lsp-types` is
+ * taken with default features precisely so `Uri` stays a newtype over `String`, and nothing on either side
+ * resolves it.
  */
 export function documentUri(viewId: string, language: LanguageId): string {
   return `redextape:///view/${viewId}.${EXTENSION_OF_LANGUAGE[language]}`

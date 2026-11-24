@@ -74,7 +74,7 @@ describe('Tree', () => {
     expect(new Tree(wireOf('\\f. \\x. x')).chip(0)).toEqual({ kind: 'numeral', value: 0 })
     expect(new Tree(wireOf('\\a. \\b. a (a b)')).chip(0)).toBeNull()
     expect(new Tree(wireOf('\\f. \\x. f x x')).chip(0)).toBeNull()
-    // A copy's hints are its printed names, freshened digits and all.
+    // A hint is a printed name, freshened digits and all.
     expect(new Tree(wireOf('\\f0. \\x1. f0 x1')).chip(0)).toEqual({ kind: 'numeral', value: 1 })
     expect(new Tree(wireOf('\\t2. \\f0. f0')).chip(0)).toEqual({ kind: 'bool', value: false })
     expect(new Tree(wireOf('\\f. \\x. x f')).chip(0)).toBeNull()

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { PROGRAM_VERSION, parseProgram, type StoredProgram, serializeProgram } from '../../src/program-store'
+import {
+  forgetCopies,
+  PROGRAM_VERSION,
+  parseProgram,
+  type StoredProgram,
+  serializeProgram,
+} from '../../src/program-store'
+import { hostileStorage, memoryStorage } from './storage-fixture'
 
 /** The encodings `main.ts` hands in, as `encodings()` lists them today. */
 const ENCODINGS = ['unary', 'binary']
@@ -153,5 +160,18 @@ describe('parseProgram', () => {
     expect(parseProgram(raw({ encoding: undefined }), ENCODINGS, WIDTHS)).toBeNull()
     // THE LIST IS THE ONE HANDED IN, NOT A LIST OF ITS OWN: an encoding a build stops offering is refused.
     expect(parseProgram(raw({}), ['unary'], WIDTHS)).toBeNull()
+  })
+})
+
+describe('forgetCopies', () => {
+  it('removes redextape.buffers and leaves every other key', () => {
+    const store = memoryStorage({ 'redextape.buffers': '{}', 'redextape.program': 'p', 'redextape.layout': 'l' })
+    forgetCopies(store)
+    expect(store.getItem('redextape.buffers')).toBeNull()
+    expect([store.getItem('redextape.program'), store.getItem('redextape.layout')]).toEqual(['p', 'l'])
+  })
+
+  it('returns quietly when the storage refuses', () => {
+    expect(() => forgetCopies(hostileStorage())).not.toThrow()
   })
 })

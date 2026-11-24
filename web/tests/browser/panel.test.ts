@@ -17,11 +17,6 @@ describe('icon', () => {
     expect(svg.classList.contains('icon')).toBe(true)
     expect(svg.querySelector('path')?.getAttribute('stroke')).toBe('currentColor')
   })
-
-  it('draws a different shape for each meaning', () => {
-    const d = (n: 'disclose' | 'move-editor-here') => icon(n).querySelector('path')?.getAttribute('d')
-    expect(d('disclose')).not.toBe(d('move-editor-here'))
-  })
 })
 
 describe('createPanel', () => {

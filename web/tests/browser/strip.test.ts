@@ -5,7 +5,7 @@ import { lambdaSettled } from './lambda-text'
 
 /**
  * THE STRIP (Plan 7 part 2 spec §9) — the readout and the link sentence on one line, the readout showing the
- * FOCUSED view's session: the program, or a copy.
+ * program's value and counts.
  */
 
 const PROGRAM = 'let x = 40; x + 2'
@@ -81,44 +81,11 @@ describe('the strip', () => {
     expect(liveText()).not.toBe(raw)
     expect(liveText().trimEnd()).toBe(said)
   })
-
-  /**
-   * **THE DIM IS THE PROGRAM'S, AND IT MUST NOT REACH A COPY'S READOUT.** `#results[data-state]` stays the
-   * program's compile state wherever the strip has moved to (spec §9), and the rule that greys a running
-   * compile hangs off the same element, so a rule keyed on `data-state` alone would grey a copy's readout
-   * for a compile that has nothing to do with it.
-   */
-  it('does not dim a copy’s readout for the program’s compile', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
-    await until(() => /^λ copy 1 · /.test(resultsText()), "the copy's readout")
-
-    view.dispatch({ changes: { from: view.state.doc.length, insert: ' ' } })
-    const results = document.querySelector<HTMLElement>('#results')
-    expect(results?.dataset.describes).toBe('copy')
-    expect(getComputedStyle(results as HTMLElement).opacity).toBe('1')
-
-    await until(() => state() === 'idle', 'the recompile')
-    document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
-    expect(document.querySelector<HTMLElement>('#results')?.dataset.describes).toBe('program')
-  })
-
-  it('reads a copy while its view is focused, and the program again when the source is', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    document.querySelector<HTMLElement>('[data-leaf="lambda-0"] button.view-title')?.focus()
-    await until(() => /^λ copy 1 · [\d,]+ reductions/.test(resultsText()), "the copy's readout")
-    expect(segments()).toHaveLength(1)
-    expect(state()).toBe('idle')
-
-    document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')?.focus()
-    expect(segments()[0]).toBe('λ 42 · 7 reductions')
-    expect(state()).toBe('idle')
-  })
 })
 
 /**
  * **`createReadout` ON ITS OWN ELEMENT.** The tests above drive the strip through the whole app, which is
- * the right way to check that the readout FOLLOWS the focus; it cannot reach the first call of a readout's
+ * the right way to check what it reads; it cannot reach the first call of a readout's
  * life, because by the time a test can look, the app has already made it. These build their own host and
  * call `show` directly.
  */
@@ -128,18 +95,43 @@ describe('createReadout', () => {
     const host = document.createElement('div')
     // THE APP'S OWN FIRST CALL: no program yet, nothing to say.
     createReadout(host).show(null, strip([]))
-    expect(host.dataset.describes, 'the first call wrote no data-describes').toBe('copy')
+    expect(host.dataset.describes, 'the first call wrote no data-describes').toBe('none')
   })
 
-  it('keeps a copy out of the program error it renders next', async () => {
+  it('describes a program error as the program after a call that had no program', async () => {
     const { createReadout } = await import('../../src/readout')
     const host = document.createElement('div')
     const readout = createReadout(host)
-    readout.show(null, strip(['λ copy 1 · 3 reductions']))
-    expect(host.dataset.describes).toBe('copy')
-    // An error arm that returned before writing the attribute would let `'copy'` survive into a program error.
+    readout.show(null, strip([]))
+    expect(host.dataset.describes).toBe('none')
+    // An error arm that returned before writing the attribute would let `'none'` survive into a program error, and a
+    // recompile under that error would not dim it.
     readout.show({ kind: 'error', error: 'the worker stopped' } as never, strip([]))
-    expect(host.dataset.describes, 'a program error still read as a copy').toBe('program')
+    expect(host.dataset.describes, 'a program error still read as describing nothing').toBe('program')
+  })
+
+  /**
+   * **THE DIM IS A RUNNING COMPILE'S, AND ONLY WHILE THE LINE DESCRIBES A PROGRAM** (`style.css`'s `.results` rule): a
+   * readout with no program yet, as on the run's first frames, has nothing a compile could make stale, so it keeps its
+   * full opacity while the compile runs. The element carries the class the stylesheet keys on, and the browser tier's
+   * setup file loads the app's own stylesheet for every file.
+   */
+  it('dims for a running compile only while it describes a program', async () => {
+    const { createReadout } = await import('../../src/readout')
+    const host = document.createElement('section')
+    host.className = 'results'
+    host.dataset.state = 'running'
+    document.body.append(host)
+    try {
+      const readout = createReadout(host)
+      readout.show(null, strip([]))
+      expect(host.dataset.describes).toBe('none')
+      expect(getComputedStyle(host).opacity, 'a line with no program, dimmed for the compile').toBe('1')
+      readout.show({ kind: 'error', error: 'the worker stopped' } as never, strip([]))
+      expect(getComputedStyle(host).opacity, 'a program line under a running compile, not dimmed').toBe('0.55')
+    } finally {
+      host.remove()
+    }
   })
 
   /**

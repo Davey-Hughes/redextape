@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import { type EscapeFocus, type EscapePress, escapeClears } from '../../src/link-clear'
 import { createLinkWiring } from '../../src/link-wiring'
 import type { PaneCollection } from '../../src/panes'
-import type { SessionRegistry } from '../../src/sessions'
 
 /**
  * Escape's rule and `LinkWiring.unpin` (`docs/superpowers/specs/2026-11-17-link-clear-design.md`); the clicks and the
@@ -58,14 +57,11 @@ function wiring() {
         },
       }) as unknown as EditorView,
     statusHost: status,
-    sessions: {} as SessionRegistry,
     panes: { of: () => [] } as unknown as PaneCollection,
     draw: () => {
       seen.draws += 1
     },
     announce: (t) => seen.said.push(t),
-    viewTitle: () => '',
-    arranged: () => true,
   })
   links.setIndex({ linkFor: () => ({ source: null, states: [], instrs: [] }) } as never)
   return { links, seen }

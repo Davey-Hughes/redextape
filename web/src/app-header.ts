@@ -251,7 +251,7 @@ export const NARROW_WINDOW = `(max-width: ${NARROW_WINDOW_REM}rem)`
  *
  * **THE LAST PRESSED BUTTON IS DISABLED, AND ITS TOOLTIP IS THE REASON** (rule 4): it could apply and cannot now,
  * since one view stays, or one kind of view where it stands for several (`toggleSentence`). `aria-description` says
- * the same to a reader who does not hover, as *edit a copy* says its own reason.
+ * the same to a reader who does not hover.
  *
  * **`sync` IS HANDED HOW MANY VIEWS EACH TOGGLE STANDS FOR**, since the kinds on screen do not say: `count(kind)` is
  * the views of the kind a press would hide, or would show (`main.ts`'s `viewsOfKind`).

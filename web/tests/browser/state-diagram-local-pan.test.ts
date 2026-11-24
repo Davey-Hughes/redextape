@@ -1,7 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, commands, page, userEvent } from 'vitest/browser'
+import type { TmPane } from '../../src/tm-pane'
+import type { TmProgram } from '../../src/types'
 import { CHROMIUM, chromiumOnly } from './engine'
-import { control, diagram, diagramChoice, frame, frames, SHELL, stateIdle, tmPane, tmStatus, until } from './harness'
+import { controlState, diagram, diagramChoice, frame, frames, until } from './harness'
+import { mountTmFixture } from './tm-fixture'
 
 /**
  * Moving the state diagram's local level in its panel like a map
@@ -11,14 +14,59 @@ import { control, diagram, diagramChoice, frame, frames, SHELL, stateIdle, tmPan
  */
 
 /**
+ * A machine whose states run in a line, each by one rule that reads anything and moves right, to the next, the last
+ * accepting; each state is an instruction of its own, listed by its name, as a compiled machine's states carry theirs.
+ * `feeding` names more states, each running into `names[0]` by such a rule.
+ */
+function line(names: readonly string[], feeding: readonly string[] = []): TmProgram {
+  const all = [...names, ...feeding]
+  return {
+    states: all.map((name, i) => ({
+      name,
+      accept: i === names.length - 1,
+      rules:
+        i === names.length - 1
+          ? []
+          : [{ read: [null], write: [null], moves: ['R'], next: i < names.length ? i + 1 : 0 }],
+      instr: i,
+    })),
+    alphabet: ['_'],
+    tapes: 1,
+    width: 4,
+    start: 0,
+    listing: all,
+    labels: [],
+  }
+}
+
+/**
  * Eight states before `s`, which stack eight rows high in the column before it, and three after it in a line, with
  * names long enough to be cut: a level around `s` or the state after it is wider and taller than a 300 by 160 panel.
- * No dots in the names, so the diagram shows the local level alone.
  */
-const MACHINE = `tapes 1\nstart s\n\nstate s:\n  [*] -> write [*], move [R], goto after_one_rule_on\nstate after_one_rule_on:\n  [*] -> write [*], move [R], goto after_two_rules_on\nstate after_two_rules_on:\n  [*] -> write [*], move [R], goto after_three_rules\nstate after_three_rules: accept\n${Array.from(
-  { length: 8 },
-  (_, i) => `state before_s_number_${i}:\n  [*] -> write [*], move [R], goto s\n`,
-).join('')}`
+const MACHINE = line(
+  ['s', 'after_one_rule_on', 'after_two_rules_on', 'after_three_rules'],
+  Array.from({ length: 8 }, (_, i) => `before_s_number_${i}`),
+)
+
+/** The view the cases draw in, and an input outside it, which holds the focus where a case needs it elsewhere. */
+let pane: TmPane
+const field = document.createElement('input')
+
+/** Show `program`'s run at `step`, in the state that many rules along its line from its start, as a step there does. */
+function show(program: TmProgram, step: number): void {
+  pane.render(
+    {
+      state: step,
+      step,
+      heads: [step],
+      window_start: [0],
+      window: ['_'.repeat(step + 1)],
+      source_node: null,
+      rule: program.states[step]?.accept === true ? null : 0,
+    },
+    controlState(step > 0, `step ${step} of ${program.states.findIndex((s) => s.accept)}`),
+  )
+}
 
 const level = () => diagram().querySelector('.local-level') as HTMLElement
 /** The box the part of the drawing anything is drawn in takes, at the zoom: what the room for a pan is round. */
@@ -28,7 +76,6 @@ const drawing = () => diagram().querySelector('.local-drawing') as HTMLElement
 const group = () => diagram().querySelector('.local-nodes') as HTMLElement
 const nodes = () => [...group().querySelectorAll<HTMLElement>('.local-node')]
 const nodeNamed = (name: string) => group().querySelector<HTMLElement>(`.local-node[title="${name}"]`) as HTMLElement
-const editor = () => tmPane().querySelector('.term-editor .cm-content') as HTMLElement
 const scroll = () => ({ left: level().scrollLeft, top: level().scrollTop })
 const maxScroll = () => ({
   left: level().scrollWidth - level().clientWidth,
@@ -157,16 +204,18 @@ function centredOrClamped(el: HTMLElement, axis: 'x' | 'y'): boolean {
 
 beforeAll(async () => {
   await page.viewport(1280, 2400)
-  document.body.innerHTML = SHELL
-  const view = await (await import('../../src/main')).ready
-  await until(stateIdle, 'the app to settle')
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'fn f(n) { n } f(1)' } })
-  await until(stateIdle, 'the app to settle on a program')
-  tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => tmPane().querySelector('.term-editor .cm-content') !== null, 'the copy to mount its editor')
-  const copy = (await import('@codemirror/view')).EditorView.findFromDOM(editor())
-  copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: MACHINE } })
-  await until(() => nodes().length === 11, 'the copy to draw s, the eight states before it and the two after')
+  document.body.append(field)
+  const fixture = mountTmFixture(MACHINE, ['t'], { width: 1180, height: 2000 })
+  // NAMED AS THE APP'S FIRST TM VIEW IS, so the harness's readers of that view's diagram read this one.
+  fixture.host.dataset.leaf = 'tm-0'
+  // ROOM ON THE LEFT OF THE VIEW, which starts its level at the host's left edge, for the drags that end past the
+  // level's: Firefox gives a pointer that leaves the frame to the frame as a move with no button held, which ends the
+  // press before the drag's end.
+  fixture.host.style.marginLeft = '100px'
+  pane = fixture.pane
+  show(MACHINE, 0)
+  await userEvent.click(diagramChoice('local') as HTMLButtonElement)
+  await until(() => nodes().length === 11, 'the level around s: the eight states before it and the two after')
   await panel(300, 160)
 })
 
@@ -255,7 +304,7 @@ describe('a level in its panel', () => {
     await frames()
     expect(Math.abs(scroll().left - start.left - 40), 'scrollLeft moved by the drag').toBeLessThanOrEqual(1)
     expect(Math.abs(scroll().top - start.top - 30), 'scrollTop moved by the drag').toBeLessThanOrEqual(1)
-    // A COPY'S NODES LINK NOTHING (`transport.ts`'s `linkedRowClick`), so what a click does here is take the tab stop
+    // THIS VIEW'S NODES LINK NOTHING (its events have no `linkState`), so what a click does here is take the tab stop
     // and the focus, in the one handler that links: a drag that did neither linked nothing.
     // `state-diagram-local-layout.test.ts` links a node of the program's own machine in a panel too narrow for it.
     expect(
@@ -274,7 +323,7 @@ describe('a level in its panel', () => {
   })
 
   it('draws no focus ring on a node a click focuses after the keyboard was used', async () => {
-    await userEvent.click(editor())
+    await userEvent.click(field)
     await userEvent.keyboard('{ArrowRight}')
     const k = content().getBoundingClientRect()
     level().scrollLeft += k.left - viewport().left
@@ -287,16 +336,16 @@ describe('a level in its panel', () => {
     expect(getComputedStyle(target).outlineStyle, 'its outline').toBe('none')
   })
 
-  it('takes the focus from the editor into the level, with no ring, on a click on its background', async () => {
-    await userEvent.click(editor())
+  it('takes the focus from a text field into the level, with no ring, on a click on its background', async () => {
+    await userEvent.click(field)
     await userEvent.keyboard('{ArrowRight}')
-    expect(editor().contains(document.activeElement), 'precondition: the focus in the editor').toBe(true)
+    expect(document.activeElement, 'precondition: the focus in the field').toBe(field)
     const from = background()
     const box = level().getBoundingClientRect()
     await userEvent.click(level(), { position: { x: from.x - box.left, y: from.y - box.top } })
     await frame()
     const focused = document.activeElement as HTMLElement
-    expect(editor().contains(focused), 'the focus out of the editor').toBe(false)
+    expect(focused, 'the focus out of the field').not.toBe(field)
     expect(level().contains(focused), 'the focus in the level').toBe(true)
     expect(getComputedStyle(focused).outlineStyle, 'its outline').toBe('none')
   })
@@ -408,9 +457,7 @@ describe('a level in its panel', () => {
     level().scrollLeft = 0
     level().scrollTop = maxScroll().top
     await frame()
-    const at = tmStatus()
-    control('▶')?.click()
-    await until(() => tmStatus() !== at, 'the step')
+    show(MACHINE, 1)
     await until(
       () => nodeNamed('after_one_rule_on')?.classList.contains('is-current'),
       'the level around the next state',
@@ -881,9 +928,7 @@ describe('the zoom', () => {
     await frame()
     expect(zoom(), 'precondition: zoomed').toBeCloseTo(1.6, 2)
     const was = current()
-    const at = tmStatus()
-    control('◀')?.click()
-    await until(() => tmStatus() !== at, 'the step back')
+    show(MACHINE, 0)
     await until(() => current() !== undefined && current().title !== was.title, 'the level around the state before')
     await frames()
     expect(zoom(), 'after the step').toBeCloseTo(1.6, 3)
@@ -905,9 +950,7 @@ describe('the zoom', () => {
     expect(level().dataset.dragging, 'precondition: panning').toBe('true')
     const dragged = scroll()
     const drawn = nodes()
-    const at = tmStatus()
-    control('▶')?.click()
-    await until(() => tmStatus() !== at, 'the step')
+    show(MACHINE, 1)
     await frames()
     expect(scroll(), 'where the drag left it').toEqual(dragged)
     expect(nodes(), 'the same drawing').toEqual(drawn)
@@ -928,14 +971,14 @@ describe('the reach of a pan', () => {
    * A machine whose start state has nothing before it, as a program's first state has not: in a panel wider than the
    * level, the gaps before its column spread into blank room on its left.
    */
-  const FIRST = `tapes 1\nstart s\n\nstate s:\n  [*] -> write [*], move [R], goto t\nstate t:\n  [*] -> write [*], move [R], goto u\nstate u: accept\n`
+  const FIRST = line(['s', 't', 'u'])
   /** `local-layout.ts`'s `PAD`, the margin the part of the drawing anything is drawn in keeps round it. */
   const PAD = 8
 
   beforeAll(async () => {
-    const copy = (await import('@codemirror/view')).EditorView.findFromDOM(editor())
-    copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: FIRST } })
-    await until(() => nodes().length === 3, 'the copy to draw s and the two states after it')
+    pane.setProgram(FIRST, ['t'])
+    show(FIRST, 0)
+    await until(() => nodes().length === 3, 'the level around s and the two states after it')
     await panel(634, 300)
   })
 
@@ -949,8 +992,8 @@ describe('the reach of a pan', () => {
     for (const side of ['left', 'right'] as const) {
       if (side === 'right') {
         const before = group().firstElementChild
-        for (let i = 0; i < 2; i += 1) control('▶')?.click()
-        await until(() => tmStatus().split(' ')[0] === 'u', 'the run to reach u')
+        show(FIRST, 1)
+        show(FIRST, 2)
         await until(() => group().firstElementChild !== before, 'the level to be laid out around u')
         await frames()
         expect(zoom(), 'precondition: the zoom kept through the steps').toBeCloseTo(z, 2)

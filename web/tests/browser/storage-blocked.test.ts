@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { FIRST_LOAD } from '../../src/examples'
-import { bodyBackground, inNormalMode, resultsText, SHELL, showFourViews, stateIdle, text, until } from './harness'
+import { bodyBackground, inNormalMode, mounted, resultsText, SHELL, stateIdle, text, until } from './harness'
 
 /**
  * **THE APP WHERE THIS SITE'S DATA IS BLOCKED** — Chrome with site data blocked, and the privacy modes that
@@ -21,7 +21,7 @@ import { bodyBackground, inNormalMode, resultsText, SHELL, showFourViews, stateI
  *
  * **EVERY SETTING BELOW CHECKS THAT ITS CHOICE REACHED THE GETTER.** A control that stopped writing its
  * choice at all would pass "nothing threw" without ever meeting the refusal, so each of those cases asserts
- * that `reached` grew. The copy's case needs no count: the report it waits for is the refusal, said.
+ * that `reached` grew.
  */
 let reached = 0
 const refuse = (): never => {
@@ -52,8 +52,6 @@ const said: string[] = []
 
 /** The resting line's sentences for a refusal here, whose cause is a getter that throws: `blocked`, not full. */
 const PROGRAM_LINE = 'the program is not being saved — this browser’s storage for this site is blocked'
-const COPIES_LINE = 'copies are not being saved — this browser’s storage for this site is blocked'
-const BOTH_LINE = 'the program and copies are not being saved — this browser’s storage for this site is blocked'
 
 /** The formatter rewrites this, which is how a blur that formatted can be told from one that did not. */
 const UNFORMATTED = 'fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } }\nfact(3)\n'
@@ -73,13 +71,6 @@ async function openSettings(): Promise<void> {
   await until(() => byId('settings-menu').matches(':popover-open'), 'the settings menu to open')
 }
 
-/** Close the settings menu with `Esc`, as a user would before reaching past it. */
-async function closeSettings(): Promise<void> {
-  if (!byId('settings-menu').matches(':popover-open')) return
-  await userEvent.keyboard('{Escape}')
-  await until(() => !byId('settings-menu').matches(':popover-open'), 'the settings menu to close')
-}
-
 beforeAll(async () => {
   document.body.innerHTML = SHELL
   const live = byId('live')
@@ -95,6 +86,11 @@ beforeAll(async () => {
 describe('with site data blocked', () => {
   it('starts, reads storage on the way, and compiles its program', () => {
     expect(reached, 'precondition: start-up never touched storage, so it never met the refusal').toBeGreaterThan(0)
+    // `setup.ts` stores four views behind the refusal, so a page that read past it would open on those.
+    expect(mounted(), 'a page whose storage cannot be read did not open on the first-load views').toEqual([
+      'source',
+      'tm-0',
+    ])
     expect(text(view), 'a first visit opens on the first-load example').toBe(FIRST_LOAD.text)
     expect(resultsText()).toContain('reductions')
     expect(resultsText()).toContain(`λ ${FIRST_LOAD.value} · `)
@@ -117,7 +113,7 @@ describe('with site data blocked', () => {
     expect(errors).toEqual([])
   })
 
-  it('lets the keymap be changed, and every editor follows it', async () => {
+  it('lets the keymap be changed, and the source editor follows it', async () => {
     await openSettings()
     const keymap = byId<HTMLSelectElement>('keymap')
     expect(keymap.value, 'precondition: a first visit starts on the default keymap').toBe('default')
@@ -167,39 +163,11 @@ describe('with site data blocked', () => {
   })
 
   /**
-   * **THE REFUSAL IS REPORTED BESIDE THE PROGRAM'S.** A copy is work, and `main.ts`'s buffers writer says so when
-   * its write fails; a getter that throws is a write that fails. The program the cases above edited is refused the
-   * same way (Plan 7 part 6a spec §4.3), and its own sentence is waited for before the copy is made: otherwise the
-   * copy's refusal can land first, inside the pause before the program's write, and be said alone. After it, the
-   * one sentence the copy adds is the two stores' together.
-   *
-   * **THE PROGRAM THE CASE ABOVE FORMATTED IS WAITED FOR TOO, BY ITS VALUE.** That case ends when the format
-   * lands, with the compile it starts still to run, and a λ view offers no copy between a compile's reply and the
-   * first frame drawn for it: there is no term to copy. The menu opened inside that time has no *edit a copy*. The
-   * strip turns to running at the edit and back to idle with the result, whose draw is in the same task, so idle
-   * with `fact(3)`'s value is the view holding a frame again.
+   * **THE PROGRAM'S REFUSAL IS SAID, AS BLOCKED.** The cases above edited the program, and each write of it met the
+   * getter's throw (Plan 7 part 6a spec §4.3), which is storage the browser withholds, not storage that is full.
    */
-  it('still says that copies are not being saved, beside the program', async () => {
+  it('says the program is not being saved because the storage is blocked', async () => {
     await until(() => said.includes(PROGRAM_LINE), 'the program’s own refusal')
-    await until(() => stateIdle() && resultsText().includes('λ 6 · '), 'the formatted program to compile')
-    await closeSettings()
-    // WITH NOTHING READABLE IN STORAGE THE PAGE OPENED ON THE SOURCE AND THE TM VIEW, so the λ view is asked for.
-    expect(
-      [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].map((el) => el.dataset.leaf),
-      'a page whose storage cannot be read did not open on the first-load views',
-    ).toEqual(['source', 'tm-0'])
-    await showFourViews()
-    const more = document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-more')
-    const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
-    if (more === null || menu === null) throw new Error('no view menu on the λ view')
-    await userEvent.click(more)
-    await until(() => menu.matches(':popover-open'), 'the λ view’s menu to open')
-    const fork = menu.querySelector<HTMLButtonElement>('button.detach')
-    if (fork === null) throw new Error('no edit-a-copy control in the λ view’s menu')
-    await userEvent.click(fork)
-    await until(() => document.querySelector('[data-leaf="lambda-0"] .term-editor') !== null, 'the copy to open')
-    await until(() => said.includes(BOTH_LINE), 'the copies report, beside the program’s')
-    expect(said).not.toContain(COPIES_LINE)
     expect(errors).toEqual([])
   })
 })

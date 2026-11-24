@@ -7,7 +7,7 @@ import { boundary, clickWorkspaceItem, frame, frames, lambdaHost, SHELL, stateId
  * **`hidden` HIDES.** The browser's own `[hidden] { display: none }` loses to any author rule that sets `display`,
  * so an element a view hides can stay on screen with nothing but a probe to notice: an outline's list would, since
  * `.outline` is a flex column. So this looks for the whole class, not an instance: every `[hidden]` element on the
- * page, across every panel opened and closed and every view forked to a copy.
+ * page, across every panel opened and closed, with the λ view's map given a share and the readout in the inspector.
  */
 
 const shownWhileHidden = (): string[] =>
@@ -27,18 +27,14 @@ const walk = (seen: Set<string>, round: string): void => {
   }
 }
 
-it('leaves nothing on screen that is hidden, through every panel and a copy of each view', async () => {
+it('leaves nothing on screen that is hidden, through every panel', async () => {
   document.body.innerHTML = SHELL
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'fn f(x) { x + 1 }\nf(2)\n' } })
   await until(stateIdle, 'the app to settle')
   const seen = new Set(shownWhileHidden())
-  // Each panel opened and closed, before and after both views fork a copy — a copy is what shows a TM view's
-  // outline, and what gives the λ view an editor.
+  // Each panel opened and closed.
   walk(seen, 'as compiled')
-  for (const fork of document.querySelectorAll<HTMLButtonElement>('button.detach')) fork.click()
-  await until(() => document.querySelectorAll('.term-editor').length >= 2, 'both copies to mount an editor')
-  walk(seen, 'with copies')
   expect([...seen]).toEqual([])
 })
 

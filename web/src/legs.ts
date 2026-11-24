@@ -19,8 +19,8 @@ import type { CopyLeg, Leg } from './protocol'
  */
 
 /**
- * Each leg's name as a user reads it: a view's title (`λ · program`), a copy's name (`TM copy 2`), the copies
- * menu, and the link status line's detachment clause.
+ * Each leg's name as a user reads it: a view's title and the title-selector's pairs (`λ · program`), the readout's
+ * rows and segments, and the notice naming each leg a link's open could not take to its step (`share-positions.ts`).
  *
  * **READ HERE BY EVERY SITE THAT HOLDS A `Leg` AND SAYS IT**, rather than each spelling `leg === 'lambda' ?
  * 'λ' : 'TM'` for itself, which would name a third leg `TM` at every one of them.
@@ -34,11 +34,11 @@ export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', rxm: 'rxm
 
 /**
  * Every leg, in the order the app lists them — the title-selector's groups (`SessionRegistry.pairs`) and the
- * detachment clause's names (`link-status.ts`'s `detachedText`).
+ * readout's segments (`readout.ts`'s `programSegments`).
  *
  * **READ OFF `LEG_NAME`'s KEYS RATHER THAN WRITTEN OUT**, the idiom `editor-prefs.ts`'s `KEYMAP_MODES` already
  * takes. A written list only says that each entry is a leg — `['lambda'] satisfies readonly Leg[]` typechecks —
- * so a leg left out of it would be offered by no selector and named by no clause, silently. `LEG_NAME`'s type
+ * so a leg left out of it would be offered by no selector and given no segment, silently. `LEG_NAME`'s type
  * makes a missing key an error and its literal's excess-property check refuses an extra one, so its keys are
  * exactly `Leg`, which is what the cast restates: `Object.keys` answers `string[]` for every object, because a
  * value may carry keys its type does not name, and this one is a literal that cannot. The order is
@@ -50,8 +50,8 @@ export const LEG_NAME: Readonly<Record<Leg, string>> = { lambda: 'λ', rxm: 'rxm
 export const LEGS: readonly Leg[] = Object.keys(LEG_NAME) as Leg[]
 
 /**
- * `LEGS` without CLIF, in `LEGS`' order: the legs a compile records at once and a copy can hold (`protocol.ts`'s
- * `CopyLeg`). **CLIF IS LAST IN `LEGS`**, so a walk over these is a walk over `LEGS` that stops before it.
+ * `LEGS` without CLIF, in `LEGS`' order: the legs a compile records at once (`protocol.ts`'s `CopyLeg`). **CLIF IS LAST
+ * IN `LEGS`**, so a walk over these is a walk over `LEGS` that stops before it.
  */
 export const COPY_LEGS: readonly CopyLeg[] = LEGS.filter((leg): leg is CopyLeg => leg !== 'clif')
 

@@ -10,8 +10,13 @@ import rxmWasmUrl from '../../../grammars/tree-sitter-redextape-rxm/tree-sitter-
 import tmHighlights from '../../../grammars/tree-sitter-redextape-tm/queries/highlights.scm?raw'
 import tmWasmUrl from '../../../grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm?url'
 import init, { captureClasses } from '../../../pkg/redextape_wasm.js'
-import { type CaptureTable, classMapFrom, colourSpans, createGrammarRegistry } from '../../src/colour'
-import { LANGUAGE_IDS, type LanguageId } from '../../src/lsp-protocol'
+import {
+  type CaptureTable,
+  classMapFrom,
+  colourSpans,
+  createGrammarRegistry,
+  type GrammarRegistry,
+} from '../../src/colour'
 import { tokenClassName } from '../../src/theme'
 import { TOKEN_CLASSES, type TokenClass } from '../../src/types'
 
@@ -20,9 +25,9 @@ import { TOKEN_CLASSES, type TokenClass } from '../../src/types'
  *
  * `redextape-grammar-check` holds the four grammars to the hand-written front end span for span, and it
  * **cannot run here**: its `build.rs` compiles four generated `parser.c` into itself through `cc`, so
- * there is no wasm build of it. What runs here is the other artefact — the four committed `.wasm`, under
- * `web-tree-sitter`, which is what the app actually colours from and which no Rust test can load. The
- * two meet in `grammars/capture-golden.json`, which that crate's `tests/golden.rs` emits and verifies.
+ * there is no wasm build of it. What runs here is the other artefact — the four committed `.wasm`, which no
+ * Rust test can load, under `web-tree-sitter`, the runtime the app colours with. The two meet in
+ * `grammars/capture-golden.json`, which that crate's `tests/golden.rs` emits and verifies.
  *
  * **SO THIS TEST FAILS IF THE ARTEFACT MOVES**: a grammar ABI bump, a bumped tree-sitter CLI, or a
  * committed `.wasm` that no longer matches its own `grammar.js`.
@@ -60,15 +65,19 @@ type Golden = Record<string, Record<string, GoldenFixture>>
 
 const golden = JSON.parse(goldenRaw) as Golden
 
+/** The language ids of the four grammars the repository ships, which the golden is keyed by. */
+const GRAMMAR_IDS = ['redextape', 'redextape_lambda', 'redextape_tm', 'redextape_rxm'] as const
+
+type GrammarId = (typeof GRAMMAR_IDS)[number]
+
 /**
- * The artefacts under test, named here rather than taken from `colour.ts`'s private table.
+ * The artefacts under test, named here: `colour.ts`'s own table holds the source's grammar alone.
  *
  * **THE POINT IS THAT THIS TEST SAYS WHICH `.wasm` IT READ.** `createGrammarRegistry` takes `sources`,
  * so swapping two rows below is the one-line sabotage that shows the comparison is reading the compiled
- * artefact and not merely the query text — which is the half `colour.ts` alone could not demonstrate,
- * since it holds the only copy of the mapping.
+ * artefact and not merely the query text.
  */
-const SOURCES: Record<LanguageId, { readonly wasmUrl: string; readonly highlights: string }> = {
+const SOURCES: Record<GrammarId, { readonly wasmUrl: string; readonly highlights: string }> = {
   redextape: { wasmUrl: redextapeWasmUrl, highlights: redextapeHighlights },
   redextape_lambda: { wasmUrl: lambdaWasmUrl, highlights: lambdaHighlights },
   redextape_tm: { wasmUrl: tmWasmUrl, highlights: tmHighlights },
@@ -82,18 +91,18 @@ const asTokenClass = (name: string): TokenClass => {
   return hit
 }
 
-/** The golden's key as a `languageId`, or a failure: an unknown one would otherwise be skipped silently. */
-const asLanguageId = (id: string): LanguageId => {
-  const hit = LANGUAGE_IDS.find((l) => l === id)
-  if (hit === undefined) throw new Error(`the golden names the language \`${id}\`, which this app does not have`)
+/** The golden's key as a grammar's id, or a failure: an unknown one would otherwise be skipped silently. */
+const asGrammarId = (id: string): GrammarId => {
+  const hit = GRAMMAR_IDS.find((l) => l === id)
+  if (hit === undefined) throw new Error(`the golden names the language \`${id}\`, which no grammar here has`)
   return hit
 }
 
-/** Per language, capture name to CSS class — built from the wasm export, exactly as `main.ts` builds it. */
+/** Per language, capture name to CSS class — built from the wasm export, every table of it. */
 let classes: Map<string, Map<string, string>>
 
 /** One registry for the file, as the app keeps one for the page. */
-let registry: ReturnType<typeof createGrammarRegistry>
+let registry: GrammarRegistry<GrammarId>
 
 /** The failures the registry reported, so a grammar that did not load fails loudly instead of uncoloured. */
 const failures: string[] = []
@@ -116,7 +125,7 @@ describe('the committed grammar .wasm agree with the Rust differential, span for
   for (const [languageKey, fixtures] of Object.entries(golden)) {
     for (const [name, fixture] of Object.entries(fixtures)) {
       it(`${languageKey}: ${name}`, async () => {
-        const languageId = asLanguageId(languageKey)
+        const languageId = asGrammarId(languageKey)
         const grammar = await registry.load(languageId)
         expect(failures, 'a grammar that will not load is this test failing, not this test skipping').toEqual([])
         if (grammar === null) throw new Error(`${languageId}: the grammar did not load`)
@@ -176,14 +185,14 @@ describe('the committed grammar .wasm agree with the Rust differential, span for
   }
 
   /**
-   * The golden covers all four languages.
+   * The golden covers all four grammars.
    *
    * Without this, deleting a language from the fixture file would delete its coverage here and leave
    * every remaining test green — the loop above iterates the FILE, so an absent language is not a
    * failure, it is silence. The Rust side refuses a language the golden carries and no fixture
    * computes; this is the other direction.
    */
-  it('covers every language the app colours', () => {
-    expect(Object.keys(golden).sort()).toEqual([...LANGUAGE_IDS].sort())
+  it('covers every grammar the repo ships', () => {
+    expect(Object.keys(golden).sort()).toEqual([...GRAMMAR_IDS].sort())
   })
 })

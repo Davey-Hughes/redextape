@@ -1,8 +1,8 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { formats, formatsOnALeave, recordFormats } from './format-on-leave-fixture'
-import { armed, host, mounted, SHELL, stateIdle, until } from './harness'
+import { armed, mounted, SHELL, stateIdle, until } from './harness'
 import { viewKey } from './user-event-fixture'
 
 /**
@@ -70,28 +70,5 @@ describe('a view key from an editor, with format on blur on', () => {
     await keepsItsTextAcrossAKey(view, UNFORMATTED, 7)
     // AND THE SETTING IS STILL IN FORCE ONCE THE SWITCH IS OVER: the next real leave formats.
     expect(await formatsOnALeave(view, UNFORMATTED)).toBe(formatted)
-  })
-
-  /**
-   * **THE COMPILE THE CASE BEFORE STARTED IS WAITED FOR FIRST.** Its last leave formats the program, which compiles
-   * again, and the page is laid out again when that lands: with the menu open, this menu's *edit a copy* moves 34 px up
-   * a frame before the compile is idle. A press aimed before the move lands outside the menu, the browser shuts it, and
-   * the case would wait out its cap for an item no longer on the page.
-   */
-  it('leaves a machine copy’s editor’s text as it was typed', async () => {
-    await until(stateIdle, 'the compile the case before started')
-    const more = host('tm-0')?.querySelector('button.view-more') as HTMLElement
-    await userEvent.click(more)
-    const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
-    await until(() => menu.matches(':popover-open'), 'the view’s menu')
-    await userEvent.click(menu.querySelector('button.detach') as HTMLElement)
-    await until(() => host('tm-0')?.querySelector('.cm-editor') != null, 'the copy’s editor')
-    const copy = EditorView.findFromDOM(host('tm-0')?.querySelector('.cm-editor') as HTMLElement) as EditorView
-    // THE COPY'S OWN TEXT WITH ITS FIRST SPACE MADE FOUR, which the formatter makes one again.
-    const text = copy.state.doc.toString()
-    const messy = text.replace(' ', '    ')
-    expect(messy, 'precondition: the copy’s text has a space to widen').not.toBe(text)
-    expect(await formatsOnALeave(copy, messy)).toBe(text)
-    await keepsItsTextAcrossAKey(copy, messy, 5)
   })
 })

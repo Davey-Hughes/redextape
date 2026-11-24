@@ -11,8 +11,8 @@ import { rect, SHELL, until } from './harness'
  * buttons' font, padding, radius, border and height, and the palette's text colour, not the dim colour of the label
  * wrapping them.
  *
- * **`#buffers` IS THE REFERENCE**: it stands next to `#encoding`, and every header button shares its one rule, so any
- * of them would read the same. The expected text and option colours are read off `<body>`, whose own rule is
+ * **`#examples` IS THE REFERENCE**: it stands next to `#encoding`, and every header button shares its one rule, so
+ * any of them would read the same. The expected text and option colours are read off `<body>`, whose own rule is
  * `var(--bg)` and `var(--fg)`.
  *
  * **THE HEIGHT IS SET, NOT LEFT TO THE FONT.** Chrome holds a select's `line-height` at `normal`, the font's own, so
@@ -81,8 +81,8 @@ describe.each(STYLE_IDS.flatMap((s) => (['light', 'dark'] as const).map((t) => [
       // THE PRECONDITION: the settings menu is open, so its four selects are laid out and what they compute is
       // what they paint.
       expect(menu().matches(':popover-open')).toBe(true)
-      const buffers = byId('buffers')
-      const reference = getComputedStyle(buffers)
+      const examples = byId('examples')
+      const reference = getComputedStyle(examples)
       const fg = getComputedStyle(document.body).color
       for (const id of SELECTS) {
         const select = byId(id)
@@ -97,11 +97,11 @@ describe.each(STYLE_IDS.flatMap((s) => (['light', 'dark'] as const).map((t) => [
         // THE LABEL WRAPPING IT IS DIM, so a select inheriting its colour would be dim too.
         expect(getComputedStyle(select.closest('label') as Element).color).not.toBe(fg)
         expect.soft(computed.color, `#${id}: color`).toBe(fg)
-        expect.soft(rect(select).height, `#${id}: height`).toBe(rect(buffers).height)
+        expect.soft(rect(select).height, `#${id}: height`).toBe(rect(examples).height)
       }
       // `#encoding` STANDS ON THE BUTTONS' LINE.
       const centre = (el: Element) => (rect(el).top + rect(el).bottom) / 2
-      expect(Math.abs(centre(byId('encoding')) - centre(buffers))).toBeLessThan(1)
+      expect(Math.abs(centre(byId('encoding')) - centre(examples))).toBeLessThan(1)
     })
 
     it('every select’s options take the palette’s background and text colour, the speed select’s too', async () => {

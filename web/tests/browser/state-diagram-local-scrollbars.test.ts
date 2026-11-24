@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { page } from 'vitest/browser'
-import { diagram, frame, SHELL, stateIdle, tmPane, until } from './harness'
+import { page, userEvent } from 'vitest/browser'
+import type { TmProgram } from '../../src/types'
+import { controlState, diagram, diagramChoice, frame, until } from './harness'
+import { mountTmFixture } from './tm-fixture'
 
 /**
  * The state diagram's local level under classic scroll bars, which take their width out of the box they scroll:
@@ -10,45 +12,38 @@ import { diagram, frame, SHELL, stateIdle, tmPane, until } from './harness'
  * decision 11).
  */
 
-/** Ten states with no dots in their names, so the diagram shows the local level alone. */
-const MACHINE = `tapes 1
-start s
+/**
+ * A rule on the one tape: what it reads, what it writes (`*` keeps the cell), how the head moves and the state it goes
+ * to, by index.
+ */
+const rule = (read: string, write: string, move: 'L' | 'R' | 'S', next: number) => ({
+  read: [read],
+  write: [write === '*' ? null : write],
+  moves: [move],
+  next,
+})
 
-state s:
-  [0] -> write [1], move [S], goto q7
-  [1] -> write [1], move [S], goto q5
-  [#] -> write [0], move [S], goto q9
-state q1:
-  [0] -> write [*], move [L], goto q9
-state q2:
-  [0] -> write [*], move [S], goto s
-state q3:
-  [0] -> write [0], move [S], goto q4
-  [1] -> write [0], move [S], goto q1
-state q4:
-  [0] -> write [0], move [L], goto q1
-  [1] -> write [1], move [R], goto q8
-  [#] -> write [*], move [R], goto q9
-state q5:
-  [0] -> write [*], move [S], goto q2
-  [1] -> write [0], move [L], goto q6
-  [#] -> write [*], move [R], goto q5
-state q6:
-  [0] -> write [1], move [L], goto q8
-  [1] -> write [0], move [L], goto q1
-  [#] -> write [*], move [S], goto q4
-state q7:
-  [0] -> write [1], move [L], goto q9
-  [1] -> write [0], move [L], goto q3
-state q8:
-  [0] -> write [*], move [R], goto q9
-  [1] -> write [1], move [R], goto q7
-  [#] -> write [1], move [R], goto q9
-state q9:
-  [0] -> write [0], move [S], goto q5
-  [1] -> write [0], move [L], goto q1
-  [#] -> write [1], move [S], goto q3
-`
+/** Ten states, `s` and `q1` to `q9` at their own indices, each an instruction of its own, listed by its name. */
+const MACHINE: TmProgram = {
+  states: [
+    [rule('0', '1', 'S', 7), rule('1', '1', 'S', 5), rule('#', '0', 'S', 9)],
+    [rule('0', '*', 'L', 9)],
+    [rule('0', '*', 'S', 0)],
+    [rule('0', '0', 'S', 4), rule('1', '0', 'S', 1)],
+    [rule('0', '0', 'L', 1), rule('1', '1', 'R', 8), rule('#', '*', 'R', 9)],
+    [rule('0', '*', 'S', 2), rule('1', '0', 'L', 6), rule('#', '*', 'R', 5)],
+    [rule('0', '1', 'L', 8), rule('1', '0', 'L', 1), rule('#', '*', 'S', 4)],
+    [rule('0', '1', 'L', 9), rule('1', '0', 'L', 3)],
+    [rule('0', '*', 'R', 9), rule('1', '1', 'R', 7), rule('#', '1', 'R', 9)],
+    [rule('0', '0', 'S', 5), rule('1', '0', 'L', 1), rule('#', '1', 'S', 3)],
+  ].map((rules, i) => ({ name: i === 0 ? 's' : `q${i}`, accept: false, rules, instr: i })),
+  alphabet: ['_', '0', '1', '#'],
+  tapes: 1,
+  width: 4,
+  start: 0,
+  listing: ['s', ...Array.from({ length: 9 }, (_, i) => `q${i + 1}`)],
+  labels: [],
+}
 
 const level = () => diagram().querySelector('.local-level') as HTMLElement
 /** The whole drawing, at the size it was laid out at. */
@@ -84,17 +79,16 @@ async function resize(width: number, height = 2000): Promise<void> {
 
 beforeAll(async () => {
   await page.viewport(1280, 2400)
-  document.body.innerHTML = SHELL
-  const view = await (await import('../../src/main')).ready
-  await until(stateIdle, 'the app to settle')
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'fn f(n) { n } f(1)' } })
-  await until(stateIdle, 'the app to settle on a program')
-  tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => tmPane().querySelector('.term-editor .cm-content') !== null, 'the copy to mount its editor')
-  const editor = tmPane().querySelector('.term-editor .cm-content') as HTMLElement
-  const copy = (await import('@codemirror/view')).EditorView.findFromDOM(editor)
-  copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: MACHINE } })
-  await until(() => group().querySelector('.local-node[title="s"]') !== null, 'the copy to draw the level around s')
+  const { host, pane } = mountTmFixture(MACHINE, ['t'], { width: 1280, height: 2000 })
+  // NAMED AS THE APP'S FIRST TM VIEW IS, so the harness's readers of that view's diagram read this one.
+  host.dataset.leaf = 'tm-0'
+  // ON ITS START, `s`, READING A BLANK, WHICH NO RULE OF `s` READS.
+  pane.render(
+    { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: null },
+    controlState(false, 'step 0 of 0', false, false, false),
+  )
+  await userEvent.click(diagramChoice('local') as HTMLButtonElement)
+  await until(() => group().querySelector('.local-node[title="s"]') !== null, 'the level around s')
   new MutationObserver(() => {
     layouts += 1
   }).observe(group(), { childList: true })

@@ -1,7 +1,7 @@
 # Grammars
 
-Tree-sitter grammars for redextape's text formats, one per format. The site colours its editors
-with them, and Neovim, Helix and Zed can use them too.
+Tree-sitter grammars for redextape's text formats, one per format. The site colours its source
+editor with the first, and Neovim, Helix and Zed can use all four.
 
 | Grammar | Extension | What a file holds |
 |---|---|---|
@@ -16,9 +16,9 @@ grammar leaves out, how it's checked and the full editor setup.
 
 ## Where they're used
 
-On the site, `web/src/colour.ts` loads each grammar's committed `.wasm` and
-`queries/highlights.scm` through `web-tree-sitter`. They colour the source editor and the editors
-for the λ, rxm and Turing machine copies.
+On the site, `web/src/colour.ts` loads `tree-sitter-redextape`'s committed `.wasm` and
+`queries/highlights.scm` through `web-tree-sitter`, and they colour the source editor. The λ, rxm
+and TM grammars colour external editors only.
 
 In other editors the grammars do all the colouring. The language server, `redextape-lsp`, sends no
 semantic tokens, so where it runs as well the two don't compete. Of the setups below, only the

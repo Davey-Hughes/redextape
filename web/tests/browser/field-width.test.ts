@@ -8,7 +8,6 @@ import { SessionClient } from '../../src/session-client'
 import { STYLE_IDS } from '../../src/skin'
 import { chromiumOnly } from './engine'
 import {
-  controlledMenu,
   enterWidth,
   examplesButton,
   isShown,
@@ -735,26 +734,5 @@ describe('the width box’s arrows in each style and theme', () => {
     } finally {
       await wear(was[0] as string, was[1] as string)
     }
-  })
-})
-
-/** Last in the file: the copy it makes takes `tm-0`'s place. */
-describe('the width box in a copy’s view', () => {
-  /**
-   * **A COPY RUNS AT THE WIDTH ITS HEADER RECORDS**, so a view showing one offers no width (design decision 19): its
-   * bar, on screen, draws one select, the speed's, and no box.
-   */
-  it('is absent from a view showing a TM copy', async () => {
-    await under('binary', SUM)
-    const pane = tmPane()
-    expect(isShown(widthBox()), 'precondition: the program’s view offers it').toBe(true)
-    const more = pane.querySelector<HTMLButtonElement>('button.view-more') as HTMLButtonElement
-    await userEvent.click(more)
-    await until(() => controlledMenu(more).matches(':popover-open'), 'the view menu to open')
-    await userEvent.click(controlledMenu(more).querySelector<HTMLElement>('button.detach') as HTMLElement)
-    await until(() => pane.querySelector('.view-status') !== null, 'the copy’s badge')
-    expect(isShown(bar()), 'the copy’s bar is on screen').toBe(true)
-    const drawn = [...bar().querySelectorAll('select, input')].filter(isShown)
-    expect(drawn, 'and draws no width box').toEqual([bar().querySelector('.controls select.speed')])
   })
 })

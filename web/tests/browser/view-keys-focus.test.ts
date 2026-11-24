@@ -1,11 +1,10 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import {
   armed,
   focusInPage,
   holdsFocus,
-  host,
   mounted,
   notice,
   SHELL,
@@ -312,47 +311,6 @@ describe('the focus after a view key', () => {
       expect(tabs(), 'hiding the view on the page did not select another').toEqual(['lambda-0, selected', 'rxm-0'])
       expect(mounted()).toEqual(['lambda-0'])
       expect(viewOfFocus(), 'the focus is not in the view that took the page').toBe('lambda-0')
-    })
-  })
-
-  /** A copy's own editor, in the view that shows the copy: a λ copy's, and a machine copy's. */
-  describe('in a copy’s editor', () => {
-    it.each([
-      ['a λ copy', 'lambda-0', '.term-editor', '2'],
-      ['a machine copy', 'tm-0', '.cm-editor', '3'],
-    ])('stays in the editor of %s with its caret, and leaves with its view', async (_what, leaf, editor, own) => {
-      await start()
-      const more = (host(leaf) as HTMLElement).querySelector('button.view-more') as HTMLElement
-      await userEvent.click(more)
-      const menu = document.getElementById(more.getAttribute('aria-controls') ?? '') as HTMLElement
-      await until(() => menu.matches(':popover-open'), 'the view’s menu')
-      await userEvent.click(menu.querySelector('button.detach') as HTMLElement)
-      await until(() => (host(leaf) as HTMLElement).querySelector(editor) !== null, 'the copy’s editor')
-      const copy = EditorView.findFromDOM(
-        (host(leaf) as HTMLElement).querySelector(editor) as HTMLElement,
-      ) as EditorView
-      const text = copy.state.doc.toString()
-      expect(text.length, 'precondition: the copy has text to put a caret in').toBeGreaterThan(5)
-      copy.focus()
-      copy.dispatch({ selection: { anchor: 5 } })
-      await until(() => copy.hasFocus, 'the copy’s editor to take the focus')
-      // A KEY THAT KEEPS THE COPY'S VIEW.
-      await viewKey('4')
-      expect(mounted()).toEqual(['source', 'lambda-0', 'tm-0'])
-      expect(copy.hasFocus, 'the key took the focus out of the copy’s editor').toBe(true)
-      expect(copy.state.selection.main.head, 'the caret is not where it was').toBe(5)
-      expect(copy.state.doc.toString(), 'the key changed the copy').toBe(text)
-      await viewKey('4')
-      // THE KEY THAT HIDES IT: the first view that is not the source takes the focus (`workspace.ts`'s `defaultFocus`).
-      expect(copy.hasFocus, 'precondition: the focus is in the copy’s editor').toBe(true)
-      await viewKey(own)
-      expect(mounted()).not.toContain(leaf)
-      expect(document.activeElement, 'the focus fell to <body>').not.toBe(document.body)
-      expect(viewOfFocus(), 'the focus is not in the focused view').toBe(mounted().find((l) => l !== 'source'))
-      await viewKey(own)
-      expect(mounted()).toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
-      const back = EditorView.findFromDOM((host(leaf) as HTMLElement).querySelector(editor) as HTMLElement)
-      expect(back?.state.doc.toString(), 'the copy’s editor did not come back with its text').toBe(text)
     })
   })
 })

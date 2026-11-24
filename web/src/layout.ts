@@ -10,10 +10,8 @@ export type Dir = 'row' | 'column'
  * session is absent because the runtime pairing lives in `panes.ts`, keyed by `LeafId`, and that
  * absence is what keeps this module free of `SessionRegistry` and therefore testable as a value.
  *
- * **NOR IS A BINDING STORED HERE.** A binding is meaningless without the buffer it names, so the two are
- * persisted together under `redextape.buffers` (`buffers-store.ts`'s `PersistedBuffers`, 5d-ii-d design
- * §4.1): "this key is absent or garbage" then degrades to no bindings at all rather than to a tree full of
- * names nothing can resolve, and no reconciliation pass has to exist.
+ * **NOR IS A BINDING STORED HERE.** Every view opens on the program at a page load, so a stored or linked tree
+ * names no session, and never one nothing can resolve.
  *
  * EVERY OPERATION RETURNS A NEW TREE. Nothing here mutates its argument — the caller holds one tree
  * and replaces it, which is what makes an undo or a persistence write a matter of keeping the old
@@ -32,11 +30,8 @@ export type LayoutNode =
  *
  * 0.1 STANDS FOR WIDTH, MEASURED (`pnpm test:probe:floor`, `tests/browser/pane-floor.test.ts`), not merely
  * chosen. `source`'s editor keeps mounting and running at the floor at all three window sizes the probe
- * imposes — nothing destroyed or hidden, only scrolled. λ's DEFAULT view is `.term`, a plain element with
- * `white-space: pre-wrap` — not a `ScratchEditor` at all, so it wraps instead of overflowing horizontally.
- * λ only gains `source`'s editor machinery, and by extension `source`'s measured floor behaviour, once
- * forked into a scratch buffer — a state the probe does not exercise directly, so that half is inference
- * by symmetry rather than a direct measurement.
+ * imposes — nothing destroyed or hidden, only scrolled. λ's view is `.term`, a plain element with
+ * `white-space: pre-wrap`, so it wraps instead of overflowing horizontally.
  *
  * HEIGHT IS THE VIEW'S OWN (Plan 7 part 4's spec §9.1): a TM view's open panels share its height through
  * flex, each down to a floor, so a drag shrinks its δ table with the pane until the floors are reached, and

@@ -20,7 +20,7 @@ describe('the workspace menu', () => {
     await until(stateIdle, 'the first compile')
   })
 
-  // **THE GLYPH IS NOT IN THE NAME**, as on `copies 2 ▾`; §6 records a workspace button without the `▾` as an
+  // **THE GLYPH IS NOT IN THE NAME**, as on `examples ▾`; §6 records a workspace button without the `▾` as an
   // inconsistency rather than a decision. A bare `▾` in the accessible name reads as "down-pointing triangle".
   it('carries a ▾ that the accessible name does not', () => {
     const button = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement

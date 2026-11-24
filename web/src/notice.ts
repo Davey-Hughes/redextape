@@ -1,8 +1,8 @@
 /**
  * THE NOTICE LINE AND THE LIVE REGION — Plan 7 part 2 spec §11, and the notice float design for where it is drawn.
  *
- * **ONE VISIBLE NOTICE AT A TIME, AND ONE POLITE LIVE REGION FOR THE WHOLE APP.** Every refusal, every copy
- * change and every layout change is said here, once, in words: shown floating over the header (`floatInRun`), where
+ * **ONE VISIBLE NOTICE AT A TIME, AND ONE POLITE LIVE REGION FOR THE WHOLE APP.** Every refusal, every gesture's
+ * result and every layout change is said here, once, in words: shown floating over the header (`floatInRun`), where
  * it moves nothing on the page, and written to a visually hidden `role="status"` element so a screen reader hears it.
  *
  * **A NEW NOTICE REPLACES THE OLD ONE, ACTION AND ALL.** A notice lasts `NOTICE_MS`, or until the next one;
@@ -44,8 +44,7 @@ export type NoticeAction = {
  * on it, and nothing reports whether a call acted.
  *
  * `main.ts`'s base16 import keeps the one a palette removal drew, so the next import ends that removal's *undo*, and
- * an undo never writes an old half over a newer import (Plan 7 part 6b spec §8.5). `replies.ts` keeps the one saying a
- * copy did not build, and ends it when a build of that copy lands.
+ * an undo never writes an old half over a newer import (Plan 7 part 6b spec §8.5).
  */
 export type Notice = { dismiss(): void }
 
@@ -70,12 +69,12 @@ export type Notices = {
    */
   dismiss(): void
   /**
-   * What the line says when no notice is up — Plan 7 part 2 spec §11's one lasting condition, *copies are
-   * not being saved*.
+   * What the line says when no notice is up — its one lasting condition, that the program is not being saved
+   * (`unsaved.ts`).
    *
    * **A RESTING STATE RATHER THAN A NOTICE THAT NEVER EXPIRES, BECAUSE A NOTICE IS REPLACED.** A
    * persistent notice still goes the moment anything else is said, and nearly every gesture says
-   * something — a copy created, a view closed. The condition it describes lasts, so the line returns to
+   * something — an example picked, a view closed. The condition it describes lasts, so the line returns to
    * it: every other notice shows over it for its `NOTICE_MS`, and when that one goes, this comes back.
    * `null` clears it, which is what a write that succeeds does. It offers `hide`, which takes it off the line until
    * the condition says something else.
@@ -187,14 +186,13 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
    * Draw `text` as the line's whole contents, with an optional action, or empty it for `null`.
    *
    * **IT CAN BE HOLDING THE FOCUS, AND THEN IT OWES IT SOMEWHERE** — Plan 7 part 2 spec §11, and the
-   * accessibility list's item 1. The line's actions are *undo*s — of a copy's delete, an imported
-   * palette's removal, an example's pick and a link's open — each on a notice that lasts eight seconds; a
+   * accessibility list's item 1. The line's actions are the resting sentence's `hide` and *undo*s, of an imported
+   * palette's removal, an example's pick and a link's open, each on a notice that lasts eight seconds; a
    * user who tabs to one and waits, or uses it, or is still on it when any other gesture makes a notice,
    * has the button taken out from under them by the very next repaint. The action's own `fallback` takes
    * the focus then, where it names one — the settings button a palette's removal was made from,
    * `examples ▾` for a pick, the share button for an open — and `fallback` otherwise: what the app hands
-   * over, the control that lists the copies, which is where a copy's undo that did not happen leaves
-   * the user.
+   * over, the settings button, a header control drawn at every width.
    *
    * **THE SAME ACTION AGAIN KEEPS ITS BUTTON, AND ONLY THE WORDS CHANGE** — Plan 7 part 6a spec §5.5: a link's clamps
    * redraw the open's notice with the open's `undo`, hundreds of milliseconds after the open, while a user may be
@@ -301,18 +299,17 @@ export function createNotices(line: HTMLElement, live: HTMLElement, fallback?: (
       if (text === resting) return
       resting = text
       if (text !== null && text !== hidden) hidden = null
-      // **SAID ONCE A PAGE LOAD, NOT ONCE A CYCLE.** `resting` alone suppresses only a repeat while the
-      // condition still holds — and it does not hold continuously: `localStorage` refuses a write by
-      // SIZE, so a user typing into a copy near the quota gets a write every 300 ms, some succeeding and
-      // some not. Each failure after a success would be a fresh announcement of a sentence the user has
-      // already heard, which is the per-keystroke chatter §11's link rule exists to forbid. The line
-      // still tracks the condition exactly; only the announcement is once.
+      // **SAID ONCE A PAGE LOAD, NOT ONCE A CYCLE.** `resting` alone suppresses only a repeat while the condition
+      // still holds — and it does not hold continuously: `localStorage` refuses a write by SIZE, so a user typing
+      // near the quota gets writes that succeed and fail by turns. Each failure after a success would be a fresh
+      // announcement of a sentence the user has already heard, which is the per-keystroke chatter §11's link rule
+      // exists to forbid. The line still tracks the condition exactly; only the announcement is once.
       // **SAID AT ONCE, SHOWN WHEN THE LINE IS FREE.** A condition that has just begun is worth hearing
       // when it begins, so it goes to the live region whatever is on screen; the line itself is not
       // taken from under a notice the user may be reading, and `dismiss` paints this when that notice
-      // ends. Without the split, a gesture that both fails to save AND says something of its own — a
-      // copy created, which persists and then reports — would leave the condition unsaid for the eight
-      // seconds its own notice holds the line.
+      // ends. Without the split, a gesture that both fails to save AND says something of its own — an
+      // example picked, whose program is written and which then says so — would leave the condition unsaid for
+      // the eight seconds its own notice holds the line.
       if (text !== null && !said.has(text)) {
         said.add(text)
         say(text)

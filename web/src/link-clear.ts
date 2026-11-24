@@ -46,7 +46,7 @@ export function escapeClears(p: EscapePress): boolean {
 /**
  * What a click on which keeps the link: a control, a view's or panel's header, an editor, the λ term map (a click
  * there navigates), and the λ view's fold and open toggles. NOT A DIAGRAM NODE OR A RUNTIME BOX, buttons that link
- * or not as a row does (a copy's link nothing), so the gesture count decides for them as it does for rows.
+ * or not as a row does, so the gesture count decides for them as it does for rows.
  */
 const KEEPS = [
   'button:not(.local-node, .program-box)',
@@ -145,7 +145,7 @@ export function wireLinkClear(root: HTMLElement, on: { unpin(): void; gestures()
   // ON THE DOCUMENT, IN THE BUBBLE PHASE: an armed view key stops its Escape in the capture phase on the window, and an
   // editor's command or a TM view's width box that used the key prevents it, so this acts on none of them.
   doc.addEventListener('keydown', (e) => {
-    // EVERY KEY PRESS IN THE EDITORS COMES THIS WAY: the work below is for Escape alone.
+    // EVERY KEY PRESS IN THE EDITOR COMES THIS WAY: the work below is for Escape alone.
     if (e.key !== 'Escape') return
     const a = doc.activeElement
     const focus: EscapeFocus =

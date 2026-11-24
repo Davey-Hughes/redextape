@@ -6,7 +6,7 @@ import type { RuleView, StateView, TmProgram, TmState } from '../../src/types'
  */
 
 /** A rule that touches no tape and goes to state `next`. */
-export const go = (next: number): RuleView => ({ read: [null], write: [null], moves: ['S'], next })
+const go = (next: number): RuleView => ({ read: [null], write: [null], moves: ['S'], next })
 
 /** A state with one such rule per target, built for instruction `instr`. `halt` accepts; nothing else does. */
 export const state = (name: string, instr: number | null, ...next: number[]): StateView => ({
@@ -72,14 +72,6 @@ export const COMPILED: TmProgram = {
   start: at('pc0'),
   listing: ['mov\tr0, a0', 'call\tf', 'halt', 'ret'],
   labels: [['f', 3]],
-}
-
-/** The same machine as a copy would hold it: no map, so no `instr`, no listing. */
-export const COPY: TmProgram = {
-  ...COMPILED,
-  states: COMPILED.states.map((s) => ({ ...s, instr: null })),
-  listing: [],
-  labels: [],
 }
 
 /** A machine small enough to compare by identity, with a state so a `StateIndex` over it is non-empty. */

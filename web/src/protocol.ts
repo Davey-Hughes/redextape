@@ -16,10 +16,8 @@ import type {
   RxmWindow,
   Span,
   TmProgram,
-  TmScratchStatus,
   TmState,
   TmStatus,
-  ValueRun,
 } from './types'
 
 /**
@@ -99,8 +97,7 @@ export const CLIF_WINDOW: ClifWindow = { values: 64, frames: 8, cells: 16, boxes
  *     charged for 253 frames. The ring is charged 5.14 bytes for each byte it holds, because `SPAN_BYTES`
  *     is (its doc).
  *
- * A full TM ring retains 29.3 MB (the TM row above), and a full λ ring 7.9 MB (the source λ ring at exhaustion
- * that `buffer-affordability.test.ts`'s first case prints).
+ * A full TM ring retains 29.3 MB (the TM row above).
  *
  * `tmFrameBytes` charges nothing for the ring's own two parallel arrays — `History`'s `#frames` and
  * `#sizes` are 8 bytes an entry each, about 16 B/frame here, and more on a ring that evicts, whose arrays
@@ -139,12 +136,11 @@ export const HISTORY_BYTES = 32 * 1024 * 1024
  *
  * **THAT OVERSHOOT DOES NOT FLIP THIS BOOLEAN, AND THE REASON IS NOT THAT THE THRESHOLD NAMED A
  * DIFFERENT READING.** It is that this boolean cannot reach the bytes that overshoot. Dropping an
- * unfocused pane's history frees `History` entries on the main thread; the module baseline and the
- * session arena live in a worker and are unchanged by whether the main thread kept a frame. Flipping
- * it `true` here would apply a remedy to a cost it provably cannot reduce — the same standard §4.5
- * applies to a linking affordance in a detached pane. The remedy for three module baselines is fewer
- * threads or one shared instance, and decision 3 bought those bytes deliberately, for damage
- * containment; whoever revisits that decision inherits this number.
+ * unfocused pane's history frees `History` entries on the main thread; the module baseline and the session arena live
+ * in a worker and are unchanged by whether the main thread kept a frame. Flipping it `true` here would apply a remedy
+ * to a cost it provably cannot reduce. The remedy for three module baselines is fewer threads or one shared instance,
+ * and decision 3 bought those bytes deliberately, for damage containment; whoever revisits that decision inherits this
+ * number.
  *
  * **NOTHING READS THIS, AND THAT IS THE POINT OF WRITING IT DOWN.** No code drops a leg's history when
  * its pane loses focus; whatever first does inherits the decision and its evidence instead of
@@ -239,26 +235,11 @@ export const FRAME_OVERHEAD_BYTES = 64
 export const EXTEND_STEPS = 100_000
 export const EXTEND_CELLS = 100_000
 
-/**
- * Steps a TM buffer's value run takes between yields, so an edit waits at most one chunk to supersede it.
- *
- * **MEASURED, NOT CHOSEN.** `web/tests/browser/tm-buffer-cost.test.ts` measures the step rate this is set from, and
- * one command runs that probe:
- *
- *     cd web && pnpm run test:probe:tm-buffer
- *
- * On `let x = 40; x + 2` reduced through `single-tape`, fifteen chunks of 500,000 steps took 7.6 ms at the median
- * and 7.8 ms at most. One more doubling measured 15.2 ms at the median, past the 10 ms the design allows a chunk.
- */
-export const VALUE_CHUNK = 500_000
-
 export type Leg = 'lambda' | 'rxm' | 'tm' | 'clif'
 
 /**
- * Every leg but CLIF: the legs a compile records at once and a copy can hold. CLIF records only while shown.
- *
- * **A NARROWING, NOT AN ENTRY THAT REFUSES**: a table only a copy reads (`BUILD`, `COPY_FACTS`, `BLANK_COPY`) is keyed
- * by this, so a CLIF copy is a type error where one would be built, rather than an entry no route reaches.
+ * Every leg but CLIF: the legs a compile records at once (`record-loop.ts`'s `recordBuild`). CLIF records only while
+ * shown.
  */
 export type CopyLeg = Exclude<Leg, 'clif'>
 
@@ -304,8 +285,8 @@ export type LegFrame = { lambda: LambdaState; rxm: RxmState; tm: TmState; clif: 
  *   * `memory-full`  — the words saved across call frames reached their cap.
  *
  * Each is `depth-refused`'s case, not `capped`'s: raising the step cap leaves the machine exactly as full, so there
- * is no continue. A value of its own each, rather than one `refused` with the cap beside it, so the sentences that
- * say which cap — `controls.ts`'s `doneText`, `readout.ts`'s `STOPPED` — are switches `tsc` holds to every one.
+ * is no continue. A value of its own each, rather than one `refused` with the cap beside it, so the sentence that
+ * says which cap, `controls.ts`'s `doneText`, is a switch `tsc` holds to every one.
  */
 export type RecordEnd = 'ended' | 'capped' | 'depth-refused' | 'budget' | 'stack-full' | 'heap-full' | 'memory-full'
 
@@ -377,10 +358,10 @@ export function endOf(run: RunStatus | null): RecordEnd {
  * here (TS2366) until someone decides what it ends as. A `Capped` status naming no cap cannot occur — `RxmStatus`
  * names one exactly when the run is capped — and reads as the step cap.
  *
- * **HERE AND NOT IN `session-worker.ts`**, where the app calls it, as `forkable` is (its call site there says why):
- * the coverage gate cannot see the worker (that file's module doc: v8 coverage does not attach to a dedicated worker's
- * context), so a branch written there moves none of the gate's numbers. `Running` occurs, at a `budget` stop, and maps
- * to `ended` without throwing, for `endOf`'s reason: so that `extendLeg` raises no cap on a run that was not capped.
+ * **HERE AND NOT IN `session-worker.ts`**, where the app calls it: the coverage gate cannot see the worker (that file's
+ * module doc: v8 coverage does not attach to a dedicated worker's context), so a branch written there moves none of the
+ * gate's numbers. `Running` occurs, at a `budget` stop, and maps to `ended` without throwing, for `endOf`'s reason: so
+ * that `extendLeg` raises no cap on a run that was not capped.
  */
 export function rxmRecordEnd(status: Pick<RxmStatus, 'run' | 'cap'>): RecordEnd {
   if (status.run !== 'Capped') return 'ended'
@@ -459,42 +440,6 @@ export const LEG_FRAME_BYTES: { readonly [K in Leg]: (frame: LegFrame[K]) => num
 }
 
 /**
- * The largest machine, in δ rules, that may be opened in an editor.
- *
- * **MEASURED, NOT CHOSEN.** Emit, structured clone, `tmScratch` parse and the editor's mount were priced
- * across the corpus (`tm-fork-cost.test.ts`); this is the largest round count whose four costs total
- * under the 250 ms an initiated gesture may take. `list20` is **11,802 rules** and clears it; `list60`
- * is **94,182** and does not. **Those are RULE counts**, not lines or δ-table rows: a row is a state or
- * a rule, and `list60`'s 33,699 states + 94,182 rules make 127,881 rows.
- *
- * **RULES RATHER THAN BYTES, BECAUSE THE COUNT IS ANSWERABLE BEFORE ANYTHING IS EMITTED.** `TmProgram`
- * is projected once per compile and both threads hold it, so the refusal costs a reduce rather than a
- * 7.8 MB allocation that is then discarded. Bytes per rule is stable at 55-61 across a 280x range, so
- * a rule bound is a byte bound within about ten percent.
- *
- * **AND IT IS A REFUSAL, NEVER A TRUNCATION, WHICH IS WHERE THIS DIVERGES FROM `LAMBDA_BYTE_BUDGET`.**
- * A truncated term is still a readable term and that budget trims and shows it. A truncated `.tm` file
- * is not a machine: it either fails to parse or parses into a different one, missing its tail states.
- */
-export const MAX_FORK_RULES = 50_000
-
-/** How many δ rules a projected machine has, summed across its states. */
-export function ruleCount(p: TmProgram): number {
-  return p.states.reduce((n, s) => n + s.rules.length, 0)
-}
-
-/**
- * Whether this machine may be forked into an editable buffer.
- *
- * A TYPE PREDICATE, so a caller that passes the check has a non-null `TmProgram` without a second
- * check. A declined leg has no `TmProgram`, and every consumer would otherwise repeat the null test
- * beside this one.
- */
-export function forkable(p: TmProgram | null): p is TmProgram {
-  return p !== null && ruleCount(p) <= MAX_FORK_RULES
-}
-
-/**
  * The most λ nodes a view asks the session worker to lay out (spec §4.5). `while4`'s peak, the largest
  * in the spec's measured corpus, is 9,763; a term past this is drawn as its recorded frame text, with a
  * notice naming its size.
@@ -534,16 +479,6 @@ export type RunRequest =
    * only for a run that carries one, once the other legs have posted their `result`, so a compile never waits on it.
    */
   | { kind: 'run'; gen: number; src: string; encoding: string; width?: number; clif: Listing | null }
-  /**
-   * Build a copy of `leg` from that leg's TEXT and record it: a λ fork (5d-i design §4.3), a TM copy (5d-iv design
-   * §4.4) or an rxm copy (Plan 7 part 5 spec §7). A `ScratchBuffers` buffer sends the leg it was minted on.
-   *
-   * **`step` IS READ FOR λ ALONE**: the frame a λ pane was showing, to which the worker reduces `src`, the source's
-   * step-0 term, before forking (5d-iii design §4.1); an edit sends 0, the text being the term. A machine's text IS its
-   * program, run from its first configuration, so a TM or rxm copy has no step to replay to. **NO `encoding`**: a λ
-   * copy has no `ty` to decode against (5d-i decision 2), and a TM or rxm copy decodes by its own header.
-   */
-  | { kind: 'scratch'; gen: number; leg: CopyLeg; src: string; step: number }
   /**
    * Record further. For a `capped` leg the worker raises the cursor cap first; for a `budget` leg it
    * simply allows another `HISTORY_BYTES` and resumes. `epoch` is the leg's, as `rewind`'s doc says.
@@ -636,11 +571,8 @@ export function keepDecided(prev: ResultLegs | null, next: ResultLegs): ResultLe
   return mapLegs<ResultLegs>((leg) => keepDecidedPart(prev[leg], next[leg]))
 }
 
-/**
- * `keepDecided`'s rule for one part: `prev` when its value is decided and `next`'s is `Unfinished`, else `next`. An rxm
- * copy's reading takes it too (`replies.ts`'s `rxm-value` arm), since a copy's value comes in no `result`.
- */
-export function keepDecidedPart<P extends { readonly value: Decoded | null }>(prev: P, next: P): P {
+/** `keepDecided`'s rule for one part: `prev` when its value is decided and `next`'s is `Unfinished`, else `next`. */
+function keepDecidedPart<P extends { readonly value: Decoded | null }>(prev: P, next: P): P {
   return prev.value !== null && prev.value !== 'Unfinished' && next.value === 'Unfinished' ? prev : next
 }
 
@@ -695,15 +627,12 @@ export type LegStatus = {
  */
 export type LegProgram = { rxm: RxmCompiled; tm: TmCompiled; clif: ClifCompiled }
 
-/**
- * What a CLIF view is handed: the listing, or why there is none. `null` while it is being built. **NO TEXT**, unlike
- * `RxmCompiled` and `TmCompiled`: a CLIF view offers no copy, so it has nothing to seed one from.
- */
+/** What a CLIF view is handed: the listing, or why there is none. `null` while it is being built. */
 export type ClifCompiled = { readonly listing: ClifListing } | { readonly error: string }
 
 /**
  * A session's machine in the form a TM view is handed one: `compiled`'s `programs.tm`, which the session keeps as
- * `SessionEntry.programs.tm`. A TM copy's entry holds one built from its own reply.
+ * `SessionEntry.programs.tm`.
  *
  * **`program` AND `tapeNames` ARE `TmPane.setProgram`'s TWO ARGUMENTS, AND THEY ARE ONE VALUE BECAUSE
  * THEY ARE ONLY MEANINGFUL TOGETHER.** `TmProgram` says `tapes: 5` and nothing about what any of them is
@@ -714,160 +643,21 @@ export type ClifCompiled = { readonly listing: ClifListing } | { readonly error:
 export type TmCompiled = {
   readonly program: TmProgram
   readonly tapeNames: string[]
-  /**
-   * The machine as `.tm` text, or `null` when it is over `MAX_FORK_RULES`, when the program's result type is a
-   * function (`tmResultDecodable` is `false`), which a `.tm` header's `result` line cannot name, and on a TM copy,
-   * which offers no copy of itself. **`null` IS THE ONLY FACT BEHIND *WHETHER* THE CONTROL IS OFFERED**: a second
-   * encoding of one fact is how a control comes to be offered for a fork that cannot happen.
-   *
-   * **BESIDE `program` BECAUSE `TmPane.setForkAvailable`'s decision (5d-iv design §4.3) needs it the moment a TM pane
-   * exists**, and a view built after the reply is seeded from the entry. Not a second nullable envelope: a machine
-   * can exist and still have no text.
-   */
-  readonly text: string | null
-  /**
-   * Whether the program's result type has a decoding a `.tm` header's `result` line can name — `false` only for a
-   * function-valued program (`ty::is_decodable`'s answer, `redextape-core`). **READ ONLY WHEN `text` IS `null`**, to
-   * tell "the type has no decoding" apart from "the machine is over `MAX_FORK_RULES`":
-   * `CopyEditor.setForkAvailable`'s third argument, worded into *edit a copy*'s disabled reason by `#refreshDetach`.
-   */
-  readonly tmResultDecodable: boolean
 }
 
 /**
- * The rxm listing a session compiled, and the text *edit a copy* seeds a copy from — `TmCompiled`'s shape for the rxm
- * leg, and for its reason: the view that offers a copy needs both, and a view built after the reply is seeded from
- * the session's entry.
+ * The rxm listing a session compiled, kept on its entry so that a view built after the reply is seeded from it.
  */
 export type RxmCompiled = {
   /** No `states`: a `TmProgram` has every `RxmProgram` field, so without this a TM machine would pass as this one. */
   readonly program: RxmProgram & { readonly states?: never }
-  /**
-   * The program as `.rxm` text, or `null` on a copy, which offers no copy of itself, and for text longer than
-   * `session.rs`'s `MAX_SCRATCH_RXM_BYTES`, which no copy could build. As with `TmCompiled.text`, `null` is the only
-   * fact behind a refusal: the view words its reason from the listing's instruction count.
-   *
-   * **NO `tmResultDecodable` BESIDE IT.** A function-valued program's rxm text is still `Some`, headerless
-   * (`RxmHeader::for_type` answers `None` and `rxm_text` falls back to `print_rxm`): the rxm leg's header is
-   * optional, unlike TM's, so it has no such refusal to word.
-   */
-  readonly text: string | null
 }
 
 export type RunReply =
   /**
    * The program did not analyze, so there is no session at all.
-   *
-   * SHARED WITH THE `scratch` REQUEST, WHICH IS A REUSE AND NOT A STRETCH. `lambdaScratch(src)`
-   * answers `{ diagnostics, scratch: null }` for text that did not parse, and "there is nothing to
-   * step, and here is why" is the same claim this variant already makes for a program that did not
-   * analyze — same shape, same consumer obligation (clear the panes, show the diagnostics). A second
-   * `no-scratch` variant would be two names for one state, which is what a renderer then has to switch
-   * on twice.
    */
   | { kind: 'no-session'; gen: number; diagnostics: Diagnostic[] }
-  /**
-   * A λ scratchpad exists — `compiled`'s counterpart for a session with ONE leg and no compile behind
-   * it (5d-i design §4.1, §4.3).
-   *
-   * A SEPARATE VARIANT RATHER THAN `compiled` WITH FIVE NULLS, and that is 5d-i decision 2 restated on
-   * the wire. `compiled` carries a TM status, a machine, its tape names, `declinedSpan` and `linkIndex`; a
-   * `LambdaScratch` has no TM leg, no `SourceMap` and no `ty`, so every one of those would be a
-   * fabricated field on a message about a session that provably cannot have them — the shape §3.3
-   * refuses at the type level and `session.rs`'s `Session::tm` prices. A consumer that receives this one
-   * cannot even ask the wrong question.
-   *
-   * NO `result` EVER FOLLOWS IT, unlike `compiled`. `result` carries `lambdaLeg(session).value`, which
-   * reads `lambdaValue` — the method §3.3 puts off this type. The frames and their `RecordEnd` are the
-   * whole answer for a scratchpad; there is no decoded value to arrive later.
-   *
-   * **`text` IS THE STRING THAT BUILT THE SCRATCH.** The editor is seeded from it rather than from a
-   * second print that could disagree, which is what keeps the box, the scratch's step 0 and the term
-   * the user forked one object instead of three that agree until they do not. For a build at step 0 —
-   * an edit, a paused copy resumed — that string is the request's own `src`, as it was typed, unless it
-   * is longer than the byte budget; past step 0, and for text over the budget, it is the worker's print
-   * of the term (`session.rs`'s `lambda_scratch_at`).
-   *
-   * **IT IS NULLABLE DEFENSIVELY AND IS NEVER `null` ON THIS REPLY.** The type mirrors
-   * `session::ForkedAt`, where `scratch` and `text` are one fact — null together or neither. But
-   * `copy-build.ts`'s `buildCopy` posts `no-session` and returns once `scratch` is null, so the only path
-   * that reaches `scratch-compiled` has already proved both are present. **Unparseable text and a
-   * term over budget do not arrive here as a null `text`; they do not arrive here at all** — they
-   * take `no-session`, which carries the diagnostics and has no `text` field. A reader hunting for a
-   * live null case on this variant will not find one.
-   */
-  | {
-      kind: 'scratch-compiled'
-      gen: number
-      lambda: LambdaStatus
-      text: string | null
-      /**
-       * The copy's step-0 frame, as `compiled`'s `first` carries the program's and for its reason; `null` where the λ
-       * leg is not available. **THE COPY'S FIRST `frames` CHUNK STARTS AT STEP 1.**
-       */
-      first: LambdaState | null
-      /** The step-0 tree at `LAMBDA_TREE_NODES`, `null` beside a `null` frame; transferred, as `lambda-tree`'s is. */
-      lambdaTree: LambdaTreeWire | null
-    }
-  /**
-   * A TM scratch was built — 5d-iv design §4.4, and `scratch-compiled`'s counterpart rather than a
-   * widening of it.
-   *
-   * **A SEPARATE ARM BECAUSE THE PAYLOADS SHARE NO FIELD.** `scratch-compiled` carries a
-   * `LambdaStatus` and the text the fork was built from; this carries a `TmScratchStatus` — no
-   * `total_steps` — and a machine. Folding them would put a union inside the arm and a switch in every
-   * consumer to open it.
-   *
-   * **`tmProgram` IS NOT NULLABLE HERE, WHERE `compiled`'s `programs.tm` IS.** A `TmScratch` exists only for text
-   * that parsed to a machine, so the δ-table always has a program to render; text that did not parse
-   * takes `no-session`, carrying the diagnostics, exactly as it does for λ.
-   *
-   * **AND THERE IS NO `text` ECHO.** λ needs one because the worker computes the term at step k and
-   * the main thread has never seen it. Here the main thread SENT the text, so echoing it would return
-   * up to `MAX_FORK_RULES` rules of string to the sender that already holds it.
-   */
-  | {
-      kind: 'tm-scratch-compiled'
-      gen: number
-      tm: TmScratchStatus
-      tmProgram: TmProgram
-      tapeNames: string[]
-      /** The copy's step-0 frame, as on `scratch-compiled`. */
-      first: TmState | null
-    }
-  /**
-   * How far a TM buffer's value run has got, and its value once it has finished — posted after every chunk.
-   *
-   * **ONLY FOR A FILE WITH A HEADER.** `tmScratch` builds a value run for no other, because decoding needs the
-   * header's `result` type, and a buffer with no header never hears this reply.
-   *
-   * `value` IS `Unfinished` WHILE `run.run` IS `Running`, so a consumer can render either field alone.
-   */
-  | { kind: 'tm-value'; gen: number; run: ValueRun; value: Decoded }
-  /**
-   * An rxm copy was built: its status, its listing and its value — `tm-scratch-compiled`'s counterpart.
-   *
-   * **THE VALUE COMES WITH THE BUILD**, where a TM copy's streams in on `tm-value`: `rxmScratch` runs the program to
-   * its end before it answers, as `compile` does (spec amendment 26). `rxm` is the same `RxmStatus` `compiled`
-   * carries, since every field of it is true of a copy. No `text` echo, for `tm-scratch-compiled`'s reason: the main
-   * thread sent the text.
-   */
-  | {
-      kind: 'rxm-scratch-compiled'
-      gen: number
-      rxm: RxmStatus
-      rxmProgram: RxmProgram
-      value: Decoded
-      /** The copy's step-0 frame, as on `scratch-compiled`. */
-      first: RxmState | null
-    }
-  /**
-   * An rxm copy's value after a `[continue]` — where a compiled session's arrives in `result`, which a copy never
-   * gets. Only a step cap can be continued, so this changes a value only for a copy whose build that cap stopped: a
-   * raise past it can decide the value, and after a rewind the cursor is under it again and reads `Unfinished`, which
-   * the page keeps a decided value against (`keepDecidedPart`).
-   */
-  | { kind: 'rxm-value'; gen: number; value: Decoded }
   /**
    * A session exists. Sent BEFORE any recording, so the panes can mount and show their declines
    * while the legs are still being stepped.
@@ -885,9 +675,8 @@ export type RunReply =
       gen: number
       statuses: { [K in Leg]: LegStatus[K] }
       /**
-       * Sent eagerly, with each program's text, for `linkIndex`'s reason below: a lazy fetch on the first *edit a copy*
-       * costs a round trip into a worker that is recording, which is when a user reaches for one. `MAX_FORK_RULES` and
-       * `session.rs`'s `MAX_SCRATCH_RXM_BYTES` bound the texts, which is what makes that affordable.
+       * Each leg's program as this compile built it, `null` for a leg that built none: the page keeps it on the
+       * session's entry, so a view built after this reply is seeded from it.
        */
       programs: { [K in keyof LegProgram]: LegProgram[K] | null }
       declinedSpan: Span | null

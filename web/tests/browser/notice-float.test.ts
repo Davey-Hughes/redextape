@@ -261,8 +261,8 @@ describe('a notice floats over the page', () => {
     { width: 1600, height: 900, preset: 'explorer', where: 'run' },
     { width: 1920, height: 1080, preset: 'explorer', where: 'run' },
     { width: 375, height: 800, preset: 'explorer', where: 'end' },
-    { width: 836, height: 800, preset: 'explorer', where: 'band' },
-    { width: 365, height: 800, preset: 'stage', where: 'band' },
+    { width: 751, height: 800, preset: 'explorer', where: 'band' },
+    { width: 525, height: 800, preset: 'stage', where: 'band' },
   ] as const)(
     'floats at the place it fits at $width×$height in $preset ($where), and moves nothing',
     { timeout: 30_000 },
@@ -321,9 +321,9 @@ describe('a notice floats over the page', () => {
       { width: 1600, height: 900, preset: 'explorer', where: 'end' },
       { width: 1920, height: 1080, preset: 'explorer', where: 'run' },
       { width: 1920, height: 1080, preset: 'debugger', where: 'run' },
-      { width: 848, height: 800, preset: 'debugger', where: 'band' },
+      { width: 763, height: 800, preset: 'debugger', where: 'band' },
       { width: 375, height: 800, preset: 'explorer', where: 'end' },
-      { width: 365, height: 800, preset: 'stage', where: 'band' },
+      { width: 525, height: 800, preset: 'stage', where: 'band' },
       { width: 1280, height: 800, preset: 'debugger', where: 'end' },
     ] as const) {
       await page.viewport(p.width, p.height)
@@ -491,10 +491,11 @@ describe('a notice floats over the page', () => {
   /**
    * **A DOUBLE-CLICK ON UNDO RUNS IT, AND ITS SECOND CLICK GOES NOWHERE** — the controller's call: the undo's own notice
    * takes its place, its words over `settings`, and takes clicks on them for `SECOND_CLICK_MS`, so the second click
-   * opens no menu and leaves the focus where the undo put it; after that a click there reaches `settings` again.
+   * opens no menu and leaves the focus where the undo put it; after that a click there reaches `settings` again. **AT
+   * 1200 PX** the run is narrower than the undo's own notice, so that notice ends over `settings` as the pick's does.
    */
-  it('swallows a double-click’s second click on the undo’s own notice at 1280 px, then lets clicks through', async () => {
-    await page.viewport(1280, 800)
+  it('swallows a double-click’s second click on the undo’s own notice at 1200 px, then lets clicks through', async () => {
+    await page.viewport(1200, 800)
     await until(() => noticeEl().hidden === true && stateIdle(), 'any notice before to end')
     const text = view.state.doc.toString()
     await pick('fact')
@@ -515,6 +516,11 @@ describe('a notice floats over the page', () => {
       document.removeEventListener('click', record, { capture: true })
     }
     await until(() => noticeElText() === 'put back the program', 'the undo’s own notice')
+    const words = noticeEl().querySelector('.notice-text') as HTMLElement
+    expect(
+      overlaps(words.getBoundingClientRect(), settings.getBoundingClientRect()),
+      'precondition: its words over settings',
+    ).toBe(true)
     expect(view.state.doc.toString(), 'the program the pick replaced').toBe(text)
     expect(clicks, 'clicks that reached settings').toEqual([])
     expect(settings.getAttribute('aria-expanded'), 'settings’s menu').toBe('false')

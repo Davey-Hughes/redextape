@@ -1,5 +1,4 @@
 import type { ControlState } from './controls'
-import type { EditablePane } from './editor-custody'
 import { fieldWidthControl } from './field-width'
 import { followedGridPanel } from './followed-grid-panel'
 import { n } from './format'
@@ -7,11 +6,10 @@ import { MachineViewChrome } from './machine-view-chrome'
 import type { PaneEvents } from './pane-chrome'
 import { createPanel, type Panel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
-import { valueLine } from './results'
 import { StateDiagram } from './state-diagram'
 import { focusedRows, highlight, linkedRows, StateIndex } from './state-table'
 import { tapeLabel, tapeRows } from './tape'
-import type { TmProgram, TmScratchStatus, TmState, ValueReading } from './types'
+import type { TmProgram, TmState } from './types'
 import { radioGroup } from './view-header'
 import type { GridRows, VirtualGrid } from './virtual-grid'
 import { DEFAULT_TM_DISPLAY, type TmDisplay } from './workspace'
@@ -23,24 +21,15 @@ export { OVERSCAN } from './virtual-grid'
 let gridsMinted = 0
 
 /**
- * The TM pane: a row per tape, a status line, a value line for a headered TM buffer, and the δ function as a
- * virtualized table.
+ * The TM pane: a row per tape, a status line, and the δ function as a virtualized table.
  *
  * EVERY TAPE, NOT ONE. §6.1's mockup shows a single tape; the lowering emits `TAPES = 5` and showing
  * them together is the point — you cannot watch STACK move while REG is read otherwise. A file reduced
  * through the single-tape stage has one tape, and so one row, labelled as the tapes it interleaves.
  *
  * THE TABLE IS VIRTUALIZED BECAUSE `list60` IS 127,881 ROWS (design §3.1).
- *
- * **`implements EditablePane`, AS `LambdaPane` DOES.** The clause is load-bearing rather than decorative:
- * `editor-custody.ts`'s casts to `EditablePane` go through `unknown` of necessity, so without this clause `tsc`
- * verifies nothing about whether this class actually satisfies the shape custody casts to — a renamed method would
- * pass silently. The members it inherits from `MachineViewChrome` (`setEditor`, `takeEditor`, `receiveEditor`,
- * `holdsEditor`, `flushEditor`) hand off to `copy`, the `CopyEditor` this view shares with the rxm view, which carries
- * the clause too; `LambdaPane`'s members of the same names hold the arguments for their contracts, and `CopyEditor`'s
- * docs add what differs for a machine view.
  */
-export class TmPane extends MachineViewChrome implements EditablePane {
+export class TmPane extends MachineViewChrome {
   #status: HTMLElement
   /**
    * The status line's first row, `state · step · width` (`#drawStatus`), apart from the sentences after it so that
@@ -64,58 +53,11 @@ export class TmPane extends MachineViewChrome implements EditablePane {
   /**
    * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
    * below.
-   *
-   * **THE COLLAPSE IS NOT A FACT ABOUT THIS ELEMENT.** The text panel (`CopyEditor.textPanel`) wraps the copy
-   * editor's host directly and hides it with `hidden` — the same mechanism `LambdaPane` uses — so `#body` carries
-   * no class for this at all, and `#drawTable`'s own independence from a collapse follows from that host being a
-   * child of the text panel section, itself a sibling `#drawTable` never touches.
    */
   #body: HTMLElement
   #program: TmProgram | null = null
   #names: string[] = []
   #frame: TmState | null = null
-  /**
-   * The last `TmScratchStatus` a `tm-scratch-compiled` reply carried, or `null` on an attached pane —
-   * `#drawStatus`'s other input, alongside `#frame`/`#program`. See `setScratchStatus`'s doc for why
-   * this is stored rather than written straight to `#status`: composing that one element's text at one
-   * private writer is what stops whichever of its writers runs last from erasing what the others said.
-   *
-   * **CLEARED ON `setEditor(null)`, NOT ONLY SET IN `setScratchStatus`** — by this view's `editorUnmounted`,
-   * and not on `takeEditor()` (`CopyEditor.takeEditor`'s doc has why). A pane rebound off the scratch it
-   * was reporting for must stop narrating that scratch's header — `LambdaPane.setDetached`'s rule pointed the other
-   * way: there an editor must not outlive the fact that made it appear, here a sentence must not outlive the editor
-   * it describes.
-   *
-   * **THAT CLEAR REACHES ONLY THE PANE HOLDING THE EDITOR, AND A BUFFER'S STATUS REACHES EVERY PANE ON IT.**
-   * `replies.ts` fans the status out to every TM pane on the session and `pane-host.ts` seeds a new one from the
-   * entry, so with that clear alone a split pane that never held the editor would keep the buffer's status and value
-   * after being rebound to source, and a running count after its buffer was cooled. More clears follow the session
-   * instead of the editor: `pane-host.ts` reseeds the pane from the session it moves onto, through its selector (the
-   * same-leg `rebind` arm) or by a buffer's cool or retire (`reseedingSlots`), `setDetached(false)` clears on any
-   * route back to source, and `replies.ts`'s `worker-error` arm tells every pane on the buffer.
-   */
-  #scratch: TmScratchStatus | null = null
-  /**
-   * The value run's latest reading, or `null` before its first report and for a file with no header.
-   *
-   * **SHOWN ONLY WHILE `#scratch` IS SET.** Every caller that sets a status sets a reading with it (`replies.ts`'s
-   * `tm-scratch-compiled` arm, `pane-host.ts`'s seeding), so a reading can never outlive the status it was reported
-   * under onto the screen. The clears that follow the session (`#scratch`'s doc) clear both, because each of them
-   * stands for a session change, after which a seed or a reply sets both again.
-   */
-  #reading: ValueReading | null = null
-  /**
-   * The value line. **`role="status"` FROM CONSTRUCTION**, because it updates while nobody is looking at it, which
-   * is the one kind of text the accessibility list's item 6 (`#link-status`) found announcing nothing.
-   *
-   * **EMPTY RATHER THAN `hidden` WHEN IT HAS NOTHING TO SAY, AND `aria-busy="true"` WHILE ITS RUN IS `Running`.** A
-   * live region is announced from the accessibility tree, and `hidden` takes the element out of it, so a line that
-   * is unhidden in the same write that fills it can be missed. While the run is going the line changes after every
-   * `VALUE_CHUNK`, and a region that announced each count would talk over everything else; `aria-busy` holds the
-   * announcements until the run ends, and removing it announces the settled value once. An empty line takes no
-   * vertical space (`style.css`), except a headered copy's, which `#drawValue` marks to keep one line's room.
-   */
-  #value: HTMLElement
 
   /**
    * The rule table: a `VirtualGrid`, whose box is the rules panel's body. This view says what each row shows and does
@@ -160,16 +102,11 @@ export class TmPane extends MachineViewChrome implements EditablePane {
   constructor(
     host: HTMLElement,
     on: PaneEvents,
-    panels: { readonly rules?: boolean; readonly diagram?: boolean; readonly outline?: boolean } = {},
+    panels: { readonly rules?: boolean; readonly diagram?: boolean } = {},
     display: TmDisplay = DEFAULT_TM_DISPLAY,
     sizes: Shares = {},
   ) {
-    // THE COPY'S EDITOR, TEXT PANEL AND OUTLINE, AND THE MENU'S *FORMAT* AND *EDIT A COPY* (`copy-editor.ts`).
-    //
-    // **A TM VIEW'S OUTLINE IS ITS STATES**: the real server answers a `state` block per symbol at kind 5. Closed
-    // by default, like the source view's: a machine of 1,199 states is the ordinary case, and a list of them is not
-    // what a reader opened a TM view to see.
-    super(on, { what: 'the whole machine', noun: 'rules', outlineOpen: panels.outline ?? false })
+    super(on)
     this.#display = display
     this.#onDisplay = on.tmDisplay
     this.#status = document.createElement('div')
@@ -178,9 +115,6 @@ export class TmPane extends MachineViewChrome implements EditablePane {
     this.#line.className = 'tm-line'
     this.#stateName = document.createElement('span')
     this.#stateName.className = 'tm-state'
-    this.#value = document.createElement('div')
-    this.#value.className = 'tm-value'
-    this.#value.setAttribute('role', 'status')
     this.#tapes = document.createElement('div')
     this.#tapes.className = 'tapes'
     // THE READOUT LIVES ON THE STATUS LINE, NEVER IN THE STRIP (`#drawStatus` places it), so the bar holds no text
@@ -237,21 +171,11 @@ export class TmPane extends MachineViewChrome implements EditablePane {
       this.#syncDiagramReattach()
       if (had && this.#diagramReattach.hidden) this.#diagramPanel.toggle.focus()
     })
-    // *PROGRAM | LOCAL* AND *ARCS | CHIPS*, EACH DISABLED WITH ITS REASON WHERE IT CANNOT APPLY (umbrella rule 4): a
-    // machine with neither instructions nor dotted names has no program level (Plan 7 part 4 spec §7's third tier),
-    // and the edges' two renderings are the program level's.
     this.#levelChoice = radioGroup(
       {
         label: 'level',
         choices: [
-          {
-            value: 'program',
-            label: 'program',
-            disabled: () =>
-              this.#diagram.tier === 'none' && this.#program !== null
-                ? 'this machine has no program level: its states carry no instruction and no dotted name to group by'
-                : null,
-          },
+          { value: 'program', label: 'program' },
           {
             value: 'local',
             label: 'local',
@@ -269,6 +193,8 @@ export class TmPane extends MachineViewChrome implements EditablePane {
       },
       'diagram-mode',
     )
+    // *ARCS | CHIPS* DISABLED WITH ITS REASON WHERE IT CANNOT APPLY (umbrella rule 4): the edges' two renderings are
+    // the program level's.
     this.#edgesChoice = radioGroup(
       {
         label: 'edges',
@@ -299,30 +225,17 @@ export class TmPane extends MachineViewChrome implements EditablePane {
     })
     this.#diagramPanel.actions.append(this.#diagramReattach, this.#levelChoice.el, this.#edgesChoice.el)
 
-    // `#body` CARRIES EVERYTHING BELOW THE HEADING: THE STATUS LINE, THEN THE TEXT PANEL — design §4.1's "editor
-    // region above, today's tape rows and δ-table below". The line comes first in every TM view because it holds the
-    // step count the bar's step buttons move (the TM width design, decision 26); after the text panel, a copy's view
-    // would draw it a whole editor away from them. On an attached pane (no editor mounted) the panel starts `hidden`
-    // and contributes no box to the flow, so it is invisible until `setEditor` gives it something to show.
+    // `#body` CARRIES EVERYTHING BELOW THE HEADING: the status line, the tapes, the rules and the state diagram. The
+    // line comes first because it holds the step count the bar's step buttons move (the TM width design, decision 26).
     this.#body = document.createElement('div')
     this.#body.className = 'tm-pane'
-    this.#body.append(
-      this.#status,
-      this.copy.textPanel,
-      this.#value,
-      this.#tapes,
-      this.#rulesPanel.el,
-      this.#diagramPanel.el,
-      this.copy.outline,
-    )
+    this.#body.append(this.#status, this.#tapes, this.#rulesPanel.el, this.#diagramPanel.el)
     this.mount(host, this.#body)
     // THE REGIONS THAT SHARE THE VIEW'S HEIGHT (the view layouts spec §11.1), top to bottom. The rules take two
-    // shares and the diagram and the outline one each; a copy's text keeps its own height until a boundary is
-    // dragged beside it.
+    // shares and the diagram one.
     // IT KEEPS ITSELF: its listeners are on the regions and their headers, and nothing here reads it again.
     new PanelStack(
       [
-        this.textRegion(),
         {
           name: 'rules',
           label: 'rules',
@@ -339,7 +252,6 @@ export class TmPane extends MachineViewChrome implements EditablePane {
           panels: [this.#diagramPanel],
           bodies: () => [this.#diagramPanel.body],
         },
-        this.outlineRegion(),
       ],
       sizes,
       (next) => on.panelSizes?.(next),
@@ -450,132 +362,12 @@ export class TmPane extends MachineViewChrome implements EditablePane {
     this.#focused = this.#index === null ? new Set() : focusedRows(this.#index, states)
   }
 
-  /**
-   * Show or hide the `copy · not linked` status — 5d-i design §4.5's second surface, paired with the sentence
-   * `link-status.ts` puts in `#link-status`. Same name and same shape as `LambdaPane.setDetached`;
-   * that method's doc carries the naming argument, which is not repeated here.
-   *
-   * **THIS FILE HAS TWO UNRELATED MEANINGS OF "DETACHED".**
-   * `Follow`'s detach — the rule table's re-attach, the grid's `following`, `state-table.ts`'s own vocabulary — means
-   * THE USER SCROLLED THE δ-TABLE AWAY FROM THE CURRENT ROW, a scroll-position fact about one widget
-   * inside this pane, undone by the `follow current rule` button sitting a few lines above the table. 5d-i
-   * §4.5's detached means THIS PANE IS BOUND TO A SCRATCH SESSION and is outside the correspondence
-   * entirely, undone by rebinding it — through the pane's own selector, or by the retire that ends the
-   * buffer (5d-ii-c design §4.3). A recompile leaves a detached pane detached. They can be true
-   * independently and in any combination.
-   *
-   * The status reads `copy · not linked` (Plan 7 part 2 spec §12) and the two are not confusable ON
-   * SCREEN — the status sits in the header's `<h2>`, after the view's title, while the follow state
-   * is a button captioned `follow current rule` in the rules panel's header. In CODE they are one word
-   * apart, so the status lives in `header` rather than in anything containing "detach", and the `hidden` that
-   * `followed-grid-panel.ts` keeps on the re-attach has no connection to this method.
-   *
-   * **THE COPY'S EDITOR AND *EDIT A COPY* FOLLOW `detached` TOO**, in `copy` (`CopyEditor.setDetached`, whose doc
-   * has why): an editor cannot outlive the copy it edits, and a view already showing a copy has nothing left to copy.
-   */
-  override setDetached(detached: boolean): void {
-    super.setDetached(detached)
-    // A COPY RUNS AT THE WIDTH ITS HEADER RECORDS, so the program's width cannot apply to it, and a control that cannot
-    // apply is removed.
-    if (this.#width !== null) this.#width.el.hidden = detached
-    // A PANE ON SOURCE DESCRIBES NO BUFFER, so nothing a buffer told it may stay on screen, whichever route moved it
-    // there. Every route that moves a pane onto source reseeds it before this runs (`pane-host.ts`'s `SEED` doc lists
-    // them), so this clear is a second line behind that seed rather than what tells a moved pane.
-    // GUARDED, because `PaneSlot.render` calls this on every frame: once both are `null` it compares two fields
-    // and writes nothing.
-    if (!detached && (this.#scratch !== null || this.#reading !== null)) {
-      this.setScratchStatus(null)
-      this.setScratchValue(null)
-    }
-  }
-
   /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
   override setStepsShown(shown: boolean): void {
     super.setStepsShown(shown)
     if (shown === this.#stepsShown) return
     this.#stepsShown = shown
     this.#drawStatus()
-  }
-
-  protected override editorUnmounted(): void {
-    // THE SCRATCH STATUS GOES WITH THE EDITOR'S UNMOUNT — see `#scratch`'s own doc. Cleared on the unmount rather
-    // than left for whatever `render` happens next, because a caller reading `host.textContent` between the unmount
-    // and the next frame must not see a sentence about a machine this pane no longer shows. Not on `takeEditor`: a
-    // pane that gives its editor to another view of the copy still shows the copy (`CopyEditor.takeEditor`'s doc).
-    this.#scratch = null
-    this.#drawStatus()
-    this.#drawValue()
-  }
-
-  /**
-   * Render a scratch's status — the fields `TmState`/`TmProgram`'s own per-frame status line
-   * (`render`, above) has no counterpart for.
-   *
-   * **`header: false` GETS A SENTENCE, NOT A COLOUR** (the accessibility list's item 7). `parse_tm_full`
-   * explicitly does not treat a missing header as an error, so nothing upstream says this; the machine
-   * runs from blank tapes at `MIN_FIELD_WIDTH` and the user needs to know they are not watching the
-   * machine they pasted.
-   *
-   * **`width` AND `run` ARE NEVER GUARDED WITH `=== null` HERE**, unlike `TmStatus`'s pair. Both are
-   * plain, non-optional fields on `TmScratchStatus` — its own doc has the argument for why a `TmScratch`
-   * has no leg to decline the way a `Session` does — so a null check against either would be dead code
-   * guarding against a wire shape that cannot arrive.
-   *
-   * **THERE IS NO STEP TOTAL TO RENDER AND NONE IS INVENTED.** `TmScratchStatus` has no `total_steps`
-   * because a scratch is stepped rather than described-run; the results readout does not exist for a
-   * scratch at all, so nothing here needs to accommodate its absence.
-   *
-   * **STORES `s` AND CALLS `#drawStatus`; IT DOES NOT WRITE `#status` ITSELF.** `render`, below, is on the
-   * per-frame path and sets the line on both of its branches, so if each wrote `#status.textContent` itself,
-   * whichever ran next after a `tm-scratch-compiled` reply would erase this call's text before a single tape
-   * row was drawn — and `header: false` is the one thing the design says this pane must surface loudly.
-   * `#drawStatus` is the one place that composes the line's parts, the same idiom
-   * `LambdaPane.#refreshClaim`/`#refreshDetach` use: setters write private fields, one private refresher owns
-   * the DOM write.
-   *
-   * **`null` SAYS THE PANE SHOWS NO BUFFER'S FILE** — a rebind onto a session with no reading, or a buffer whose
-   * worker died. It is `setScratchValue(null)`'s twin, and `#scratch`'s doc lists the callers.
-   */
-  setScratchStatus(s: TmScratchStatus | null): void {
-    this.#scratch = s
-    this.#drawStatus()
-  }
-
-  /**
-   * Show the value run's latest reading, or an empty line for `null` — `setScratchStatus`'s shape: store, then let the
-   * one writer of the line compose it.
-   */
-  setScratchValue(reading: ValueReading | null): void {
-    this.#reading = reading
-    this.#drawValue()
-  }
-
-  /**
-   * The one writer of `#value`, its text, its `aria-busy` and its room alike. No scratch, no text: an attached pane
-   * shows no value run. See `#value`'s doc for why the line is emptied rather than hidden.
-   *
-   * **`has-value-run` KEEPS ONE LINE'S ROOM WHILE THE PANE SHOWS A HEADERED COPY**, reading or not: the first reading
-   * comes after the copy's first recording, and a line with no room until then would move the panels below it. A
-   * header is what gives a copy a value run. Every caller that sets a status sets a reading after it, so this sees it.
-   */
-  #drawValue(): void {
-    const line = this.#scratch === null ? null : valueLine(this.#reading)
-    this.#value.textContent = line ?? ''
-    this.#value.classList.toggle('has-value-run', this.#scratch?.header === true)
-    if (line !== null && this.#reading?.run.run === 'Running') this.#value.setAttribute('aria-busy', 'true')
-    else this.#value.removeAttribute('aria-busy')
-  }
-
-  /**
-   * Record the machine a fork would carry, its rule count, and whether its result type has a decoding a
-   * header can name — the three facts that word a refusal — `CopyEditor.setForkAvailable`, whose doc and
-   * `#refreshDetach`'s carry the rule behind it.
-   *
-   * **`resultDecodable` IS REQUIRED HERE**, where the shared method defaults it for the rxm view: a TM caller that left
-   * it out would have a function-valued program refused for its size, or not offered at all.
-   */
-  override setForkAvailable(text: string | null, rules: number, resultDecodable: boolean): void {
-    super.setForkAvailable(text, rules, resultDecodable)
   }
 
   render(frame: TmState | null, controls: ControlState): void {
@@ -623,20 +415,12 @@ export class TmPane extends MachineViewChrome implements EditablePane {
   }
 
   /**
-   * The one writer of `#status`. Composes four independent parts:
+   * The one writer of `#status`. Composes two independent parts:
    *
    *   * THE PER-FRAME PARTS — the state's name and `` `width ${n(width)}` `` — absent whenever there is no frame or
    *     no program to name a state in, the condition `render`'s own frame-null branch tests.
    *   * THE STEP READOUT between them (`stepControls`' `step`), alone before the first frame, as the strip shows it,
    *     and absent while the `steps` switch puts the steps on the one bar (`#stepsShown`).
-   *   * THE HEADERLESS SENTENCE, when `#scratch !== null && !#scratch.header` — `TmScratchStatus`'s own doc has the
-   *     argument for why this is worth a sentence: a headerless machine runs from blank tapes at `MIN_FIELD_WIDTH`
-   *     rather than the input the user pasted, and nothing else in the app can say so.
-   *   * THE REDUCED SENTENCE, `` `reduced: ${stages} · ${n(steps)} steps` ``, when `#scratch.reduction` is set: a
-   *     file reduced through one or more stages, whose recorded step count is the run's whole budget.
-   *
-   * **EMITTED ON THE FRAME-NULL BRANCH TOO**, right after a `tm-scratch-compiled` reply and before `resetLegs` has a
-   * first frame, when the sentence matters most. The width is stated once, inside the sentence, not repeated ahead.
    */
   #drawStatus(): void {
     const frame = this.#frame
@@ -674,15 +458,7 @@ export class TmPane extends MachineViewChrome implements EditablePane {
     if (this.#stepsShown && this.steps.step.textContent !== '') part(this.steps.step, this.#stepAtNewest)
     if (named) part(`width ${n(program.width)}`)
     this.#line.replaceChildren(...parts)
-    const scratch = this.#scratch
-    const headerless = scratch !== null && !scratch.header ? `no header — blank tapes at width ${n(scratch.width)}` : ''
-    const reduction = scratch?.reduction ?? null
-    const reduced = reduction === null ? '' : `reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`
-    const sentences = [headerless, reduced].filter((s) => s !== '').join(' · ')
-    this.#status.replaceChildren(
-      ...(parts.length === 0 ? [] : [this.#line]),
-      ...(sentences === '' ? [] : [parts.length === 0 ? sentences : ` · ${sentences}`]),
-    )
+    this.#status.replaceChildren(...(parts.length === 0 ? [] : [this.#line]))
   }
 
   /**

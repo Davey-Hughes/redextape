@@ -203,11 +203,11 @@ export function stepControls(
         //
         // **AND WHEN NONE OF THEM IS LIVE, THE SPEED SELECT IS** — a leg that is not available disables
         // all five at once (`controls.ts`'s unavailable branch returns every `can*` false AND no
-        // continue label), which is exactly the state a copy's worker throwing produces while the user
-        // is on that view's continue button. The select is never disabled: the workspace's speed is a
-        // setting, not a property of this leg. **OF THE SIX, THE SELECT IS THE NEAREST BEFORE THE CONTINUE
-        // BUTTON**, so `focus-handoff.ts`'s own `nearest` would hand it the focus in every case — which is
-        // the whole reason this list is written down instead.
+        // continue label), which is exactly the state a worker error produces while the user is on that
+        // view's continue button. The select is never disabled: the workspace's speed is a setting, not a
+        // property of this leg. **OF THE SIX, THE SELECT IS THE NEAREST BEFORE THE CONTINUE BUTTON**, so
+        // `focus-handoff.ts`'s own `nearest` would hand it the focus in every case — which is the whole
+        // reason this list is written down instead.
         handOff(extend, [forward, toNewest, play, back, restart, speed])
         extend.hidden = true
       } else {

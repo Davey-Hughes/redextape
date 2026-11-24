@@ -207,11 +207,7 @@ export async function recordBuild<H extends { [K in CopyLeg]: unknown }>(
  * The frame `leg`'s cursor stands on, counted against its allowance as a chunk's frames are; `null` where `gen` holds no
  * cursor for it, or one whose leg is not available. A build's reply carries it, and its recording starts at step 1.
  */
-export function firstFrame<K extends Leg, H>(
-  leg: RecordLeg<K, H>,
-  worker: RecordWorker,
-  gen: number,
-): LegFrame[K] | null {
+function firstFrame<K extends Leg, H>(leg: RecordLeg<K, H>, worker: RecordWorker, gen: number): LegFrame[K] | null {
   const held = leg.handle(gen)
   if (held === null || !leg.available(held)) return null
   const first = leg.frame(held)
@@ -221,7 +217,7 @@ export function firstFrame<K extends Leg, H>(
 
 /**
  * Record a leg further for `[continue]`: raise its cap when its run stopped there, then record on from the frame its
- * cursor stands on. Answers as `recordLeg` does, and turns a stale generation or a live thing without the leg away
+ * cursor stands on. Answers as `recordLeg` does, and turns a stale generation or a leg with nothing to step away
  * before it raises anything.
  *
  * **ONLY A `capped` END IS RAISED**, the cursor's own cap (`RecordEnd`'s doc): a `budget` stop is a run still going,

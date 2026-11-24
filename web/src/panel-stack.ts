@@ -44,8 +44,8 @@ export type StackRegion = {
   readonly el: HTMLElement
   /**
    * The share it has with nothing stored, or `null` for a region that keeps its own height until a boundary beside
-   * it is dragged: a copy's text, as tall as what it holds up to a cap, and the term map's canvas. Such a region is
-   * not `data-sized`, and `style.css` gives it a share only where it is.
+   * it is dragged: the source view's outline, as tall as what it lists up to a cap, and the term map's canvas. Such a
+   * region is not `data-sized`, and `style.css` gives it a share only where it is.
    */
   readonly share: number | null
   /**
@@ -137,7 +137,7 @@ export class PanelStack {
       r.el.dataset.region = r.name
       watch.observe(r.el, { attributes: true, attributeFilter: ['hidden', 'data-open'] })
       for (const p of r.panels) {
-        if (p.el !== r.el) watch.observe(p.el, { attributes: true, attributeFilter: ['hidden', 'data-open'] })
+        if (p.el !== r.el) watch.observe(p.el, { attributes: true, attributeFilter: ['data-open'] })
         const header = p.el.querySelector<HTMLElement>(':scope > .panel-header')
         if (header !== null) {
           this.#headers.set(p, header)
@@ -212,7 +212,7 @@ export class PanelStack {
 
   #isOpen(r: StackRegion): boolean {
     if (r.el.hidden) return false
-    return r.panels.length === 0 || this.#panelsOf(r).some((p) => !p.el.hidden && p.isOpen())
+    return r.panels.length === 0 || this.#panelsOf(r).some((p) => p.isOpen())
   }
 
   /** The panels drawn in `r` now. */
@@ -271,12 +271,6 @@ export class PanelStack {
       if (this.#alive(this.#live)) return
       // WHAT IT HAD MOVED IS KEPT, as a gesture that ends is. `#commit` comes back here once it holds none.
       this.#commit()
-      return
-    }
-    // A MAXIMISE ENDS WHEN ITS PANEL LEAVES THE VIEW: a copy's text panel is hidden when its editor is taken down,
-    // and every other panel would then be drawn closed for a panel nobody could see, with no pressed button to press.
-    if (this.#max?.el.hidden === true) {
-      this.#setMax(null)
       return
     }
     const max = this.#max

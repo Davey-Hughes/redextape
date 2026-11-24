@@ -1,4 +1,4 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { idle, paneOrThrow, SHELL, until } from './harness'
 
@@ -94,46 +94,9 @@ describe('the outline', () => {
     expect(outlineOf('lambda-0')).toBeNull()
   })
 
-  /**
-   * A TM view's symbols are its `state` blocks, of kind 5. The panel is withdrawn while the view shows
-   * the program, because there is no document to outline.
-   */
-  it('is withdrawn from a TM view until it holds a copy', async () => {
-    const panel = outlineOf('tm-0')
-    expect(panel, 'a TM view has an outline panel in its DOM').not.toBeNull()
-    expect(panel?.hidden, 'and it is withdrawn while the view shows the program').toBe(true)
-
-    const pane = paneOrThrow('tm-0')
-    pane.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => pane.querySelector('.term-editor') !== null, 'the copy to mount its editor')
-    await until(() => outlineOf('tm-0')?.hidden === false, 'the outline to appear with the editor')
-
-    openPanel('tm-0')
-    await until(() => rowsIn('tm-0').length > 0, "the TM copy's states to be listed")
-    // Every row is a state of the machine this copy holds.
-    const editorHost = pane.querySelector<HTMLElement>('.term-editor')
-    const text = EditorView.findFromDOM(editorHost as HTMLElement)?.state.doc.toString() ?? ''
-    for (const row of rowsIn('tm-0')) expect(text).toContain(`state ${row.textContent}`)
-  })
-
-  /**
-   * The jump works in a copy as well as in the source view — a different code path, because a copy's
-   * editor is a `ScratchEditor` that reveals into itself rather than into `main.ts`'s view.
-   */
-  it("moves a copy's caret when one of its rows is clicked", async () => {
-    const pane = paneOrThrow('tm-0')
-    const editorHost = pane.querySelector<HTMLElement>('.term-editor')
-    const editor = EditorView.findFromDOM(editorHost as HTMLElement)
-    if (editor == null) throw new Error('the TM copy has no editor')
-
-    openPanel('tm-0')
-    await until(() => rowsIn('tm-0').length > 0, 'the rows')
-
-    const last = rowsIn('tm-0').at(-1)
-    const name = last?.textContent ?? ''
-    last?.click()
-
-    const sel = editor.state.selection.main
-    expect(editor.state.doc.sliceString(sel.from, sel.to)).toBe(name)
+  /** **NOR DOES A TM OR RXM VIEW HAVE ONE**: neither holds an editor, so there is no document of its own to list. */
+  it('is absent from a TM or rxm view', () => {
+    expect(outlineOf('tm-0'), 'the TM view').toBeNull()
+    expect(outlineOf('rxm-0'), 'the rxm view').toBeNull()
   })
 })

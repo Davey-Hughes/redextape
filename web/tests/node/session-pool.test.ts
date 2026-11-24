@@ -4,10 +4,6 @@ import { type FakePort, fakePort, noSessionReply } from './session-fixtures'
 
 /**
  * A pool over recording fakes, plus every port it has ever spawned IN SPAWN ORDER.
- *
- * `ports` IS APPEND-ONLY AND IS NEVER PRUNED ON UNBIND, deliberately: a terminated port has to stay
- * reachable for the assertions that a later bind spawned a NEW one rather than handing back the dead
- * one, and for the assertions that unbinding one session left the others' ports alone.
  */
 function harness(): { pool: SessionPool; ports: FakePort[] } {
   const ports: FakePort[] = []
@@ -36,18 +32,18 @@ describe('SessionPool', () => {
   it('spawns one worker per session', () => {
     const { pool, ports } = harness()
     pool.bind('source', () => {})
-    pool.bind('lambda-scratch', () => {})
+    pool.bind('second', () => {})
     expect(ports.length).toBe(2)
     expect(ports[0]).not.toBe(ports[1])
     expect(pool.size).toBe(2)
     expect(pool.has('source')).toBe(true)
-    expect(pool.has('lambda-scratch')).toBe(true)
+    expect(pool.has('second')).toBe(true)
   })
 
   it("a session's client posts to that session's port and to no other", () => {
     const { pool, ports } = harness()
     const source = pool.bind('source', () => {})
-    pool.bind('lambda-scratch', () => {})
+    pool.bind('second', () => {})
     source.request(source.supersede(), 'let x = 1; x', 'unary')
     expect(ports[0]?.sent).toEqual([{ kind: 'run', gen: 1, src: 'let x = 1; x', encoding: 'unary', clif: null }])
     expect(ports[1]?.sent).toEqual([])
@@ -58,14 +54,14 @@ describe('SessionPool', () => {
   it('delivers a reply to the session whose port carried it', () => {
     const { pool, ports } = harness()
     const onSource = vi.fn()
-    const onScratch = vi.fn()
+    const onSecond = vi.fn()
     const source = pool.bind('source', onSource)
-    const scratch = pool.bind('lambda-scratch', onScratch)
+    const second = pool.bind('second', onSecond)
     source.request(source.supersede(), 'a', 'unary')
-    scratch.request(scratch.supersede(), 'b', 'unary')
+    second.request(second.supersede(), 'b', 'unary')
 
     ports[1]?.deliver(noSessionReply(1))
-    expect(onScratch).toHaveBeenCalledTimes(1)
+    expect(onSecond).toHaveBeenCalledTimes(1)
     expect(onSource).not.toHaveBeenCalled()
   })
 
@@ -76,23 +72,13 @@ describe('SessionPool', () => {
   it('gives each session its own generation counter, starting over at 1', () => {
     const { pool, ports } = harness()
     const source = pool.bind('source', () => {})
-    const scratch = pool.bind('lambda-scratch', () => {})
+    const second = pool.bind('second', () => {})
     expect(source.supersede()).toBe(1)
-    expect(scratch.supersede()).toBe(1)
+    expect(second.supersede()).toBe(1)
     source.request(1, 'a', 'unary')
-    scratch.request(1, 'b', 'unary')
+    second.request(1, 'b', 'unary')
     expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'a', encoding: 'unary', clif: null })
     expect(ports[1]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'b', encoding: 'unary', clif: null })
-  })
-
-  // 5d-iii design §4.1: the step the pane was showing rides the wire beside the seed text, so
-  // the λ entry of `session-worker.ts`'s `BUILD` can replay to it before forking — see `RunRequest`'s
-  // `scratch` doc in `protocol.ts` for what `step` means.
-  it('carries the fork step on the wire', () => {
-    const { pool, ports } = harness()
-    const client = pool.bind('lambda-scratch', () => {})
-    client.scratch(client.supersede(), 'lambda', '\\y. y', 7)
-    expect(ports[0]?.sent).toEqual([{ kind: 'scratch', gen: 1, leg: 'lambda', src: '\\y. y', step: 7 }])
   })
 
   // A `SessionClient` takes exactly one `onReply` at construction, so a second bind cannot be
@@ -103,95 +89,5 @@ describe('SessionPool', () => {
     expect(() => pool.bind('source', () => {})).toThrow(/already has a worker/)
     expect(ports.length).toBe(1)
     expect(pool.size).toBe(1)
-  })
-
-  it('terminates the worker on unbind and forgets the session', () => {
-    const { pool, ports } = harness()
-    pool.bind('source', () => {})
-    pool.unbind('source')
-    expect(ports[0]?.terminated).toBe(1)
-    expect(pool.size).toBe(0)
-    expect(pool.has('source')).toBe(false)
-  })
-
-  // THE NODE-TIER HALF OF THE ISOLATION CLAIM, and the cheap half: it shows the pool holds separate
-  // handles. `tests/browser/pool-isolation.test.ts` is the half that shows the separation is real at
-  // the thread level, which no fake can.
-  //
-  // THIS IS ALSO 5d-ii-c §4.3's RETIRE PATH IN MINIATURE — retiring a buffer terminates its worker
-  // while the source session and the other buffers keep running, so "unbind one, the rest live" is not
-  // a tidiness property, it is the mechanism that path is built on.
-  it('unbinding one session leaves every other session running', () => {
-    const { pool, ports } = harness()
-    const source = pool.bind('source', () => {})
-    pool.bind('lambda-scratch', () => {})
-    pool.bind('tm-scratch', () => {})
-
-    pool.unbind('lambda-scratch')
-
-    expect(ports[1]?.terminated).toBe(1)
-    expect(ports[0]?.terminated).toBe(0)
-    expect(ports[2]?.terminated).toBe(0)
-    expect(pool.size).toBe(2)
-    expect(pool.has('source')).toBe(true)
-    expect(pool.has('tm-scratch')).toBe(true)
-    // Still usable, not merely still listed: a surviving entry whose port stopped accepting posts
-    // would satisfy every assertion above.
-    source.request(source.supersede(), 'still here', 'unary')
-    expect(ports[0]?.sent.at(-1)).toEqual({ kind: 'run', gen: 1, src: 'still here', encoding: 'unary', clif: null })
-  })
-
-  // See `unbind`'s doc for why this is idempotent where `bind` throws.
-  it('unbinding a session that has no worker does nothing', () => {
-    const { pool, ports } = harness()
-    pool.bind('source', () => {})
-    expect(() => pool.unbind('lambda-scratch')).not.toThrow()
-    expect(ports[0]?.terminated).toBe(0)
-    expect(pool.size).toBe(1)
-  })
-
-  it('unbinding twice terminates once', () => {
-    const { pool, ports } = harness()
-    pool.bind('source', () => {})
-    pool.unbind('source')
-    pool.unbind('source')
-    expect(ports[0]?.terminated).toBe(1)
-  })
-
-  // `terminate` + RESPAWN IS THE WHOLE RECOVERY STORY (5d-i design §4.2), so the respawn half has to
-  // be a fresh thread and not the dead one handed back. The generation restarting at 1 is the same fact
-  // from the client's side: a new `SessionClient` was built over a new port.
-  it('rebinding after unbind spawns a fresh worker', () => {
-    const { pool, ports } = harness()
-    const first = pool.bind('source', () => {})
-    first.request(first.supersede(), 'a', 'unary')
-    pool.unbind('source')
-
-    const second = pool.bind('source', () => {})
-    expect(ports.length).toBe(2)
-    expect(ports[1]).not.toBe(ports[0])
-    expect(second).not.toBe(first)
-    expect(second.supersede()).toBe(1)
-    second.request(1, 'b', 'unary')
-    expect(ports[1]?.sent).toEqual([{ kind: 'run', gen: 1, src: 'b', encoding: 'unary', clif: null }])
-    // The dead port heard nothing after it was terminated.
-    expect(ports[0]?.sent.length).toBe(1)
-  })
-
-  // A reply arriving on a terminated session's port still reaches its handler here — the pool dropped
-  // the entry, but the listener the client registered in its constructor is still attached to the fake.
-  // A real `Worker.terminate()` stops the thread, so this cannot happen in the app; asserting it here
-  // pins that the pool's own bookkeeping does not depend on that.
-  it('a client whose session was unbound is unreachable from the pool', () => {
-    const { pool, ports } = harness()
-    const onSource = vi.fn()
-    const source = pool.bind('source', onSource)
-    source.request(source.supersede(), 'a', 'unary')
-    pool.unbind('source')
-    expect(pool.has('source')).toBe(false)
-    // The handle the caller still holds is not revoked — nothing can revoke a JS reference — so this
-    // documents the boundary rather than asserting silence: the POOL forgot it, the closure did not.
-    ports[0]?.deliver(noSessionReply(1))
-    expect(onSource).toHaveBeenCalledTimes(1)
   })
 })

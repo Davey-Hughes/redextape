@@ -1,9 +1,9 @@
 import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { LambdaTrees } from '../../src/lambda-trees'
-import { ruleCount } from '../../src/protocol'
 import { StateDiagram } from '../../src/state-diagram'
 import { TmPane } from '../../src/tm-pane'
+import type { TmProgram } from '../../src/types'
 import { clickWorkspaceItem, compile, linkAt, SHELL, stageTab, tick, until } from './harness'
 
 /**
@@ -11,8 +11,11 @@ import { clickWorkspaceItem, compile, linkAt, SHELL, stageTab, tick, until } fro
  * the worker for no tree. In the Stage preset every view but the shown one is off the page.
  */
 let view: EditorView
-/** The machine `beforeAll`'s own compile seeded a TM view with, before any view was hidden. */
-let baselineRules = -1
+/** The size of the machine `beforeAll`'s own compile seeded a TM view with, before any view was hidden. */
+let baselineSize = -1
+
+/** A machine's states and rules, counted together: enough to tell the machines of two different programs apart. */
+const sizeOf = (p: TmProgram): number => p.states.reduce((n, s) => n + 1 + s.rules.length, 0)
 
 /** Walk the whole virtualized δ table and report whether any row is painted linked. */
 async function anyLinkedRow(): Promise<boolean> {
@@ -49,7 +52,7 @@ describe('views off the page', () => {
     const setProgram = vi.spyOn(TmPane.prototype, 'setProgram')
     await compile(view, 'let x = 40; x + 2')
     const seeded = setProgram.mock.calls.at(-1)?.[0] ?? null
-    baselineRules = seeded === null ? -1 : ruleCount(seeded)
+    baselineSize = seeded === null ? -1 : sizeOf(seeded)
     setProgram.mockRestore()
     clickWorkspaceItem('[data-preset="stage"]')
     stageTab('lambda-0')?.click()
@@ -68,10 +71,9 @@ describe('views off the page', () => {
     expect(document.querySelector('[data-leaf="tm-0"] .state-row')).not.toBeNull()
     const seeded = setProgram.mock.calls.at(-1)?.[0] ?? null
     expect(seeded, 'the seeded program is not null').not.toBeNull()
-    expect(
-      seeded === null ? -1 : ruleCount(seeded),
-      "the seeded program is this compile's, not the stale one",
-    ).not.toBe(baselineRules)
+    expect(seeded === null ? -1 : sizeOf(seeded), "the seeded program is this compile's, not the stale one").not.toBe(
+      baselineSize,
+    )
   })
 
   // THE STATE DIAGRAM (Plan 7 part 4 spec §8) RIDES THE SAME SEED: its states are grouped when its view is handed a

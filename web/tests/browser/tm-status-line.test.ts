@@ -1,34 +1,32 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { bindingKey } from '../../src/view-header'
+import type { TmProgram } from '../../src/types'
 import {
   buttonOf,
   centreOf,
   chooseStyle,
-  copyShown,
+  controlState,
   isShown,
   leafEl,
   menuOfId,
-  paneOrThrow,
   picker,
-  pickInViewMenu,
   presetOf,
   pressed,
   SHELL,
   settled,
   stateIdle,
-  toggle,
   until,
 } from './harness'
+import { mountTmFixture } from './tm-fixture'
 
 /**
  * **THE TM VIEW'S BAR KEEPS ONE ROW, AND ITS STEP COUNT IS ON THE LINE UNDER IT** (the TM width design, decisions 25
  * to 28): the bar one row at 1280px in Explorer in each style at any count; the λ and rxm views' step text on their
- * bars; the line without it while the steps are on the one bar; a copy's line under its bar; in Explorer's two
- * columns on a phone, the line's height held while a run plays; and in a view as wide as a phone, the line one row
- * under a state name too long for it, only the name cut. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
+ * bars; the line without it while the steps are on the one bar; in Explorer's two columns on a phone, the line's
+ * height held while a run plays; and in a view as wide as a phone, the line one row under a state name too long for
+ * it, only the name cut. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const bar = (leaf: string) => leafEl(leaf).querySelector(':scope > .view-header') as HTMLElement
@@ -42,10 +40,34 @@ const nameOf = (el: HTMLElement) =>
 
 /** A state name wider than what a phone's line leaves it beside the step text and the width. */
 const LONG = 'scan_right_until_the_first_blank_cell'
-/** `tm-reduced-buffer.test.ts`'s machine that accepts after one step, its first state named `LONG`. */
-const MACHINE =
-  `tapes 5\nstart ${LONG}\nversion 1\nencoding unary\nwidth 4\nslots 1\nresult Nat\ntape 0 #1___#\n\n` +
-  `state ${LONG}:\n  [* * * * *] -> write [* * * * *], move [S S S S S], goto done\nstate done: accept\n`
+/**
+ * A machine of five tapes at width 4 that accepts after one step, its first state named `LONG`; each state is an
+ * instruction of its own, listed by its name.
+ */
+const MACHINE: TmProgram = {
+  states: [
+    {
+      name: LONG,
+      accept: false,
+      rules: [
+        {
+          read: [null, null, null, null, null],
+          write: [null, null, null, null, null],
+          moves: ['S', 'S', 'S', 'S', 'S'],
+          next: 1,
+        },
+      ],
+      instr: 0,
+    },
+    { name: 'done', accept: true, rules: [], instr: 1 },
+  ],
+  alphabet: ['_', '#', '1'],
+  tapes: 5,
+  width: 4,
+  start: 0,
+  listing: [LONG, 'done'],
+  labels: [],
+}
 
 /** `sum_to(5)`, whose TM run under binary is five digits long. */
 const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''
@@ -216,64 +238,27 @@ describe('the TM view’s status line while a run plays, in Explorer’s two col
   })
 })
 
-describe('the TM view’s status line in a copy’s view at 1280 px, in Explorer', () => {
-  /**
-   * **THE LINE IS UNDER THE BAR IN EVERY TM VIEW** (decision 26): a copy's view draws its text panel under the line,
-   * so the step count sits as near the step buttons as in the program's view. The program's view, which draws no text
-   * panel, gives the gap between its bar and its line; the copy's view, its text panel open, keeps that gap.
-   */
-  it('puts the line under the bar, at the program view’s gap, and the open text panel under the line', async () => {
-    presetOf('explorer')
-    const gapOf = () => statusOf().getBoundingClientRect().top - bar('tm-0').getBoundingClientRect().bottom
-    const text = () => leafEl('tm-0').querySelector<HTMLElement>('.tm-pane > .panel[data-panel="text"]') as HTMLElement
-    const editor = () => text().querySelector<HTMLElement>('.cm-editor')
-    expect(isShown(text()), 'precondition: the program’s view draws no text panel').toBe(false)
-    const programGap = gapOf()
-    await pickInViewMenu(leafEl('tm-0'), 'detach')
-    await until(() => copyShown(leafEl('tm-0')) && editor() !== null, 'the copy’s editor')
-    expect(text().dataset.open, 'precondition: the copy’s text panel is open').toBe('true')
-    expect(
-      (editor() as HTMLElement).getBoundingClientRect().height,
-      'precondition: its editor is drawn',
-    ).toBeGreaterThan(0)
-    expect(
-      Math.abs(gapOf() - programGap),
-      `the line ${gapOf()}px under the bar, the program’s ${programGap}px`,
-    ).toBeLessThan(1)
-    expect(text().getBoundingClientRect().top, 'the text panel under the line').toBeGreaterThanOrEqual(
-      statusOf().getBoundingClientRect().bottom,
-    )
-  })
-})
-
 describe('the TM view’s status line at a phone’s width, in a view as wide as the page', () => {
-  /**
-   * The TM view alone, as wide as the page, on a buffer holding `MACHINE`, which opens on step 0 in `LONG`. The other
-   * views are hidden at 1280px, where their toggles are drawn.
-   */
-  beforeAll(async () => {
-    await page.viewport(1280, 800)
-    presetOf('explorer')
-    for (const kind of ['lambda', 'rxm', 'source']) if (pressed().includes(kind)) await userEvent.click(toggle(kind))
-    expect(pressed(), 'precondition: the views shown').toEqual(['tm'])
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    document.querySelector<HTMLButtonElement>('.buffer-list button.new-tm')?.click()
-    const title = paneOrThrow('tm-0', 'no pane at').querySelector<HTMLButtonElement>('button.view-title')
-    if (title === null) throw new Error('no title-selector on the TM view')
-    const menu = () => document.getElementById(title.getAttribute('aria-controls') ?? '')
-    const item = () =>
-      menu()?.querySelector<HTMLButtonElement>(`button[data-binding="${bindingKey('tm', 'scratch-1')}"]`) ?? null
-    // THE MENU IS BUILT ON OPEN, so the wait opens it and reads it; a closed menu has no items to offer.
-    await until(() => {
-      if (menu()?.matches(':popover-open') === true) menu()?.hidePopover()
-      title.click()
-      return item() !== null
-    }, 'the buffer to be offered')
-    item()?.click()
-    await until(() => leafEl('tm-0').querySelector('.cm-editor') !== null, 'the buffer editor to mount')
-    const editor = EditorView.findFromDOM(leafEl('tm-0').querySelector('.cm-editor') as HTMLElement)
-    editor?.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: MACHINE } })
-    await until(() => statusOf().textContent?.startsWith(`${LONG} · `) === true, 'the machine on its first state')
+  /** A TM view of its own, over the app and as wide as the page, on `MACHINE` at step 0 in `LONG`. */
+  let host: HTMLElement
+  beforeAll(() => {
+    const fixture = mountTmFixture(MACHINE, ['0', '1', '2', '3', '4'], { width: innerWidth, height: 400 })
+    host = fixture.host
+    host.style.position = 'fixed'
+    host.style.inset = '0 auto auto 0'
+    host.style.width = '100%'
+    fixture.pane.render(
+      {
+        state: 0,
+        step: 0,
+        heads: [0, 0, 0, 0, 0],
+        window_start: [0, 0, 0, 0, 0],
+        window: ['_', '_', '_', '_', '_'],
+        source_node: null,
+        rule: 0,
+      },
+      controlState(false, 'step 0 of 1'),
+    )
   })
 
   it.each([
@@ -281,9 +266,9 @@ describe('the TM view’s status line at a phone’s width, in a view as wide as
     [320, 568],
   ])('at %i px, holds the state, the step and the width in that order on one row, only the name cut', async (w, h) => {
     await page.viewport(w, h)
-    const view = leafEl('tm-0').getBoundingClientRect()
+    const view = host.getBoundingClientRect()
     expect(view.width, 'precondition: the TM view is as wide as the page').toBeCloseTo(innerWidth, 0)
-    const status = statusOf()
+    const status = host.querySelector('.tm-status') as HTMLElement
     expect(status.textContent, 'the state, the step, the width').toMatch(
       new RegExp(`^${LONG} · step 0 of 1 · width 4$`),
     )

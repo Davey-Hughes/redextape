@@ -6,7 +6,6 @@ import {
   barStep,
   barTitle,
   clickWorkspaceItem,
-  editorsOf,
   host,
   linkAt,
   linkStatus,
@@ -23,14 +22,12 @@ import { clickToggle } from './user-event-fixture'
  * THE SURFACES THE VIEWS SHARE DO NOT READ A PARKED VIEW — the view layouts spec §5.3.
  *
  * A view a switch takes off the screen keeps its entry in the pane collection, so what keeps a view true still reaches
- * it: a reply about its session, a copy deleted under it. Four surfaces describe the views to the user instead, and
- * each reads the views of the tree on screen alone: the step bar's target, the running focuses, the link status line,
- * and the share popover's line about copies. A parked view has no tab and no place on the page, so a surface that
- * read one would drive, mark or count a view no one can see.
+ * it: a reply about its session. Two surfaces describe the views to the user instead, and each reads the views of the
+ * tree on screen alone: the step bar's target and the running focuses. A parked view has no tab and no place on the
+ * page, so a surface that read one would drive or mark a view no one can see.
  *
- * Each case parks a view with its toggle and reads one of them. Three filters hold the four: `main.ts`'s
- * `barTargetNow` for the bar; `draw.ts`'s `watched` for the running focuses; and `link-wiring.ts`'s `detachedPanes`
- * for the status line and the popover, which both read it.
+ * Each case parks a view with its toggle and reads one of them, through its filter: `main.ts`'s `barTargetNow` for
+ * the bar and `draw.ts`'s `watched` for the running focuses.
  *
  * **`watched` IS ASKED ONCE A LEG, AND EACH LEG HAS A CASE.** The λ leg's running focus is the mark in the source
  * editor. The TM leg's and the rxm leg's are marks in their own views, which are off the page with the view, so what
@@ -39,18 +36,14 @@ import { clickToggle } from './user-event-fixture'
  * file would pass.
  *
  * **THE CASES SHARE ONE PAGE, AND EACH PUTS IT BACK BEFORE IT STARTS** (`start`): Explorer and all four views, which
- * it then asserts, with the λ view on the program. The last case leaves the λ view on a copy, which is why it is last.
+ * it then asserts, with the λ view on the program.
  *
  * **THE GESTURES UNDER TEST ARE `userEvent`'S**: the toggle, pressed as `view-toggles.test.ts` presses it, since a
- * synthetic click reaches a handler a real pointer cannot; the bar's step button; and `share`. What only sets a case
- * up is `.click()` and `.focus()`.
+ * synthetic click reaches a handler a real pointer cannot; and the bar's step button. What only sets a case up is
+ * `.click()` and `.focus()`.
  */
 
 const FOUR = ['source', 'lambda-0', 'rxm-0', 'tm-0']
-/** `link-status.ts`'s `detachedText` for the one λ view on a copy, verbatim. */
-const SHOWS_A_COPY = 'λ view shows a copy — not linked to the program'
-/** `share-popover.ts`'s `copiesLine` for that view, verbatim. */
-const NOT_INCLUDED = 'copies are not included — the λ · copy 1 view will open on the program'
 
 let view: EditorView
 
@@ -63,8 +56,7 @@ const focusLambda = (): void => host('lambda-0')?.querySelector<HTMLElement>('bu
 const lambdaStep = (): string => host('lambda-0')?.querySelector('.step')?.textContent ?? ''
 /**
  * The source editor's running focus as `<claim>:<text>`, or `''` for none: the mark `highlight.ts`'s `focusMark`
- * paints, read as `running-focus.test.ts` reads it. Asked of the source view alone, since a copy's editor is a
- * `.cm-editor` too.
+ * paints, read as `running-focus.test.ts` reads it.
  */
 const sourceFocus = (): string => {
   const mark = host('source')?.querySelector('.is-focus-exact, .is-focus-within, .is-focus-coincident')
@@ -90,16 +82,6 @@ async function unpin(): Promise<void> {
   await until(() => !stateIdle(), 'the edit’s compile to start')
   await until(stateIdle, 'the program to compile again')
   expect(linkStatus(), 'the pin outlived the edit').toBe('')
-}
-
-/** Open the share popover with the pointer, read its line about copies, `null` where it has none, and shut it. */
-async function sharedCopies(): Promise<string | null> {
-  const menu = document.querySelector<HTMLElement>('#share-menu') as HTMLElement
-  await userEvent.click(document.querySelector<HTMLButtonElement>('#share') as HTMLButtonElement)
-  expect(menu.matches(':popover-open'), 'the share popover did not open').toBe(true)
-  const line = menu.querySelector('#share-copies')?.textContent ?? null
-  menu.hidePopover()
-  return line
 }
 
 /** Each case's start: Explorer and all four views, put back and then asserted, with the λ view on the program. */
@@ -227,30 +209,5 @@ describe('the surfaces the views share, with a view parked', () => {
     expect(stepOf('rxm-0'), 'the rxm leg moved while its view was parked').toContain('step 0 of ')
     expect(linkStatus(), 'the sentence did not come back with the view').toContain('the rxm run is here right now')
     await unpin()
-  })
-
-  /**
-   * **BOTH SURFACES READ ONE COUNT**, `link-wiring.ts`'s `detachedPanes`: the status line names each view showing a
-   * copy, and the share popover names the views a link will open on the program instead. A link carries the tree on
-   * screen alone (spec §4.7), so a parked view is not one of them.
-   *
-   * **SOFT WHERE THE VIEW IS PARKED**, so a parked view that is counted is reported in each place it shows.
-   */
-  it('leaves a parked view of a copy out of the link status line and the share popover', async () => {
-    start()
-    host('lambda-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => titleText('lambda-0') === 'λ · copy 1' && editorsOf('lambda-0') === 1, 'the copy and its editor')
-    expect(linkStatus(), 'precondition: the status line names the view showing a copy').toBe(SHOWS_A_COPY)
-    expect(await sharedCopies(), 'precondition: the share popover names the view showing a copy').toBe(NOT_INCLUDED)
-
-    await clickToggle('lambda')
-    expect(host('lambda-0'), 'precondition: the λ view is parked').toBeNull()
-    expect.soft(linkStatus(), 'the status line counts a parked view of a copy').toBe('')
-    expect.soft(await sharedCopies(), 'the share popover lists a parked view of a copy').toBeNull()
-
-    await clickToggle('lambda')
-    expect(titleText('lambda-0'), 'the view did not come back showing its copy').toBe('λ · copy 1')
-    expect(linkStatus()).toBe(SHOWS_A_COPY)
-    expect(await sharedCopies()).toBe(NOT_INCLUDED)
   })
 })

@@ -9,7 +9,6 @@ import { LEGS } from './legs'
 import type { SplitChoices } from './pane-chrome'
 import type { ClifCompiled, Leg, LegFrame, LegProgram, RecordEnd, RxmLeg } from './protocol'
 import type { SessionClient, SessionId } from './session-client'
-import type { Decoded, RxmStatus, TmScratchStatus, ValueReading } from './types'
 
 /**
  * One leg's live state on this side of the boundary: its history, how recording ended, and what the
@@ -86,11 +85,8 @@ export type ClifHold = {
 }
 
 /**
- * The legs one session owns — AT MOST ONE PER `Leg`.
- *
- * The content of "the source session offers source/λ/TM; a `LambdaScratch` offers only λ; a
- * `TmScratch` only TM" (5d-i design §2's decision 1, in the words of 5d-i's plan, T7), with the program
- * session's rxm leg and an rxm copy that offers only rxm, is which keys an entry's `legs` record has.
+ * The legs one session owns — AT MOST ONE PER `Leg`. Which keys an entry's `legs` record has is what the session
+ * offers: `options` and `pairs` below list a session under a leg exactly when it has that key.
  *
  * OPTIONAL RATHER THAN A UNION OF NAMED SHAPES. A union would make `legOf` switch on a session KIND
  * that nothing else in this file needs, and the switch would have to be re-derived at every call site
@@ -114,26 +110,8 @@ export type ClifHold = {
 export type SessionLegs = { [L in Leg]?: LegState<LegFrame[L]> }
 
 /**
- * What an rxm copy's views were last told about its run: the status and value its build reply carried, the value
- * replaced by any `rxm-value` a `[continue]` brings. `null` on every session that is not an rxm copy.
- */
-export type RxmScratchReading = { readonly status: RxmStatus; readonly value: Decoded }
-
-/**
- * What a TM buffer's panes were last told about the FILE rather than the machine: its status, and its value run's
- * latest reading, or `null` before the first `tm-value` reply and for a file with no header.
- */
-export type TmScratchReading = {
-  readonly status: TmScratchStatus
-  readonly value: ValueReading | null
-}
-
-/** A copy's reading, keyed by the leg it is a copy of: what `SessionEntry.readings` holds for it. */
-export type LegReading = { rxm: RxmScratchReading; tm: TmScratchReading }
-
-/**
- * One session: what it is called, whether it is inside the source correspondence, the legs it records
- * into, the machine its last compile produced, and the client that talks to its worker.
+ * One session: what it is called, the legs it records into, the machine its last compile produced, and the client
+ * that talks to its worker.
  *
  * THE CLIENT IS PER ENTRY BECAUSE THE GENERATION ALREADY IS. `SessionClient`'s `#gen`
  * (`session-client.ts`) is private and per instance, and generations are per session (5d-i design §3.2).
@@ -152,57 +130,34 @@ export type SessionEntry = {
    * A FIELD RATHER THAN A FUNCTION OF `id`, because the id is a map key and the label is UI text, and
    * a `Record<SessionId, string>` beside the registry would be a second place for the pairing to be
    * wrong — the failure `LegState`'s doc refuses. It also keeps `sessions.ts` free of the app's session
-   * names: a name is decided where its session is CREATED, which is `main.ts` for the source session
-   * and `scratch.ts` for a buffer, and is never decided here.
+   * names: a name is decided where its session is CREATED, which is `main.ts`, and is never decided here.
    */
   readonly label: string
-  /**
-   * Whether this session is OUTSIDE the source correspondence — 5d-i design §4.5's "detached".
-   *
-   * A PROPERTY OF THE SESSION, NOT OF THE PANE, which is why it lives here and not on `PaneSlot`. §3.3
-   * is the reason it is knowable at all: `linkIndex` and `sourceSpan` exist on no scratch type
-   * and §3.1 makes `source_node` `null` for every state a `TmScratch` renders, so "can this session
-   * participate in the sync anchor" is decided when the session is created and never changes. A pane
-   * is detached exactly when the session it is bound to is — which is what makes both §4.5 surfaces
-   * (the `copy · not linked` status and `link-status.ts`'s sentence) one lookup rather than a second flag to
-   * keep in step.
-   *
-   * NOT DERIVED FROM `id !== 'source'`. That comparison would put the app's naming convention inside
-   * the registry, and a registry that decides detachment by string-matching an id is one rename away
-   * from calling the source session detached.
-   */
-  readonly detached: boolean
   readonly client: SessionClient
   readonly legs: SessionLegs
   /**
    * Each leg's program as this session's views were last told it, or `null` where it has none: every session at
-   * construction, a leg that is unavailable, and for good a copy of another leg.
+   * construction, and a leg that is unavailable.
    *
    * **IT EXISTS BECAUSE A VIEW CAN BE CREATED AT ANY TIME AND A REPLY ARRIVES ONCE.** A view that comes to show the
    * session after the reply that told the others is seeded from here (`pane-host.ts`'s `SEED`, which `draw.ts` uses
    * for one shown after a compile it missed). Without it, a view built by a split, a pick or a layout restore, or
-   * moved by its selector, a cool or a retire, would show no program until something recompiled.
+   * moved by its selector, would show no program until something recompiled.
    *
-   * **WRITABLE, AS `readings` IS, BECAUSE BOTH ARE WHAT IS NOT KNOWN AT CONSTRUCTION.** `id`, `label`, `detached` and
-   * `client` are decided by whoever registers the session, and `legs` is a record whose contents move under a
-   * reference that does not; each entry here is a fact the worker sends back later, replaced whole each time. Kept
-   * here rather than on the leg's `LegState`, because a program is not a frame: it is set once per compile and does
-   * not change as the head moves.
+   * **WRITABLE, BECAUSE IT IS WHAT IS NOT KNOWN AT CONSTRUCTION.** `id`, `label` and `client` are decided by whoever
+   * registers the session, and `legs` is a record whose contents move under a reference that does not; each entry here
+   * is a fact the worker sends back later, replaced whole each time. Kept here rather than on the leg's `LegState`,
+   * because a program is not a frame: it is set once per compile and does not change as the head moves.
    *
    * **WRITTEN WHEREVER THE VIEWS ARE TOLD, WHICH IS WHY IT CANNOT GO STALE.** `replies.ts` stores and fans out in one
-   * call, so every arm that clears the views (`no-session`, `worker-error`) or replaces their program (`compiled`
-   * and a copy's build) leaves this holding what a view on screen shows. A retention that only ever grew would seed a
+   * call, so every arm that clears the views (`no-session`, `worker-error`) or replaces their program (`compiled`)
+   * leaves this holding what a view on screen shows. A retention that only ever grew would seed a
    * view created during an outage with a program no other view is displaying.
    *
    * **EVERY LEG'S KEY IS REQUIRED, `null` WHERE THERE IS NONE**, so "none" has one spelling: an absent key beside a
    * `null` one would be a third state, and a reader testing `!== null` would take it for a value.
    */
   programs: { [K in keyof LegProgram]: LegProgram[K] | null }
-  /**
-   * A copy's status and value, retained for `programs`' reason: a view of the copy built after the reply that told
-   * the others is seeded from here. `null`, never an absent key, for every leg the session is not a copy of.
-   */
-  readings: { [K in keyof LegReading]: LegReading[K] | null }
 }
 
 /**
@@ -229,27 +184,24 @@ export type PaneOption = { readonly leg: Leg; readonly id: SessionId; readonly l
 /**
  * Clear every leg this session has, and set each one's compile-time status.
  *
- * `reason` is what a leg's control strip reads (`controls.ts`'s `controlState` returns it straight as
- * `stepText` while `!available`) when there is no status for the leg to read one from — no
- * `LambdaStatus`, `RxmStatus`, `TmStatus` or TM copy's `TmScratchStatus` — i.e. when no leg compiled at
- * all. 5a design §6's error table says the panes "read 'not compiled'" for that case; an empty `reason`
- * would leave them reading nothing.
+ * `reason` is what a leg's control strip reads (`controls.ts`'s `controlState` returns it straight as `stepText` while
+ * `!available`) when there is no status for the leg to read one from — no `LambdaStatus`, `RxmStatus` or `TmStatus` —
+ * i.e. when no leg compiled at all. 5a design §6's error table says the panes "read 'not compiled'" for that case; an
+ * empty `reason` would leave them reading nothing.
  *
  * TAKES THE LEGS IT RESETS RATHER THAN A SESSION ID, and `SessionLegs` rather than the whole
  * `SessionEntry`, because a reset is exactly a statement about legs — it never touches the client. One
  * session's compile must not clear another session's histories, and the smallest parameter that makes
  * that impossible is this one.
  *
- * A STATUS FOR A LEG THE SESSION DOES NOT HAVE IS DROPPED, NOT FABRICATED. A `LambdaScratch` has no TM
- * leg to be "not compiled", and writing one so the record is square is the shape `session.rs`'s
- * `Session::tm` records the cost of. The caller passing a `TmStatus` for a λ-only session is not an error either —
- * it is what a caller with one reply shape and four session shapes will naturally do — so this is
+ * A STATUS FOR A LEG THE SESSION DOES NOT HAVE IS DROPPED, NOT FABRICATED: writing one so the record is square is the
+ * shape `session.rs`'s `Session::tm` records the cost of. A caller passing a status for a leg the session lacks is not
+ * an error either: each caller passes the statuses its one reply carries, whatever legs the entry has, so this is
  * silent rather than a throw.
  *
  * **ONE STATUS PER LEG, BY LEG, AND EACH ONLY ITS TWO FIELDS.** The body reads `available` and `reason` and nothing
- * else, so each caller passes whatever status its reply carries — a `LambdaStatus`, an `RxmStatus`, a `TmStatus`, or a
- * TM copy's `TmScratchStatus`, which shares those two fields with `TmStatus` and none of the others — without
- * fabricating fields this function never asks for. Keyed by `Leg`, a leg the caller has no status for is simply
+ * else, so each caller passes whatever status its reply carries — a `LambdaStatus`, an `RxmStatus` or a `TmStatus` —
+ * without fabricating fields this function never asks for. Keyed by `Leg`, a leg the caller has no status for is simply
  * left out.
  */
 export function resetLegs(
@@ -329,9 +281,6 @@ export type LegAvailability = { readonly available: boolean; readonly reason: st
  * A MODULE RATHER THAN STATE IN `main.ts`, AND THE REASON IS THE TEST RATHER THAN TIDINESS. A registry
  * that is a module is a registry a test can put two sessions in, and `PaneSlot` below is what makes
  * that test drive the SAME resolution the app's `draw()` does rather than a re-implementation of it.
- * How many sessions a fork produces must be asserted on POOL SIZE, which no DOM carries, so a test
- * driven entirely through the app cannot make that assertion however many panes it can reach: two
- * panes on two buffers showing the same term look exactly like two panes on one.
  *
  * TWO MAPS KEYED BY `SessionId` — THIS ONE AND `SessionPool`'s — AND THEY ARE NOT THE SAME FACT
  * WRITTEN TWICE. `SessionPool`'s own doc states the split from its side: the pool says what a session
@@ -341,23 +290,16 @@ export class SessionRegistry {
   /**
    * A `Map` RATHER THAN A FIELD PER SESSION, because the key is what the pool already holds (5d-i
    * design §3.2: `Map<SessionId, SessionClient>`) and because a registry with the sessions spelled out
-   * as named fields would have to be rewritten rather than extended the moment a scratch exists.
+   * as named fields would have to be rewritten rather than extended for a second one.
    *
-   * INSERTION ORDER IS THE SELECTOR'S ORDER, which is why nothing here sorts. `Map` iterates in
-   * insertion order, `main.ts` registers the source session first, and a scratch is created later by
-   * definition (§4.3: detaching forks an existing session), so "source, then the scratchpads in the
-   * order they were made" falls out without a comparator that would have to invent a rank for a name.
+   * INSERTION ORDER IS THE SELECTOR'S ORDER, which is why nothing here sorts: `Map` iterates in insertion order, so
+   * the sessions are listed as they were registered, without a comparator that would have to invent a rank for a name.
    */
   #entries = new Map<SessionId, SessionEntry>()
 
   /** How many sessions the registry holds. */
   get size(): number {
     return this.#entries.size
-  }
-
-  /** Is `id` registered? The question `add`'s throw makes a caller ask. */
-  has(id: SessionId): boolean {
-    return this.#entries.has(id)
   }
 
   /**
@@ -374,20 +316,6 @@ export class SessionRegistry {
   add(entry: SessionEntry): void {
     if (this.#entries.has(entry.id)) throw new Error(`session is already in the registry: ${entry.id}`)
     this.#entries.set(entry.id, entry)
-  }
-
-  /**
-   * Forget `id`. A no-op for a session the registry does not hold.
-   *
-   * IDEMPOTENT WHERE `add` THROWS, the same asymmetry `SessionPool.unbind` documents: a second `add`
-   * asks for something that cannot be honoured, a second `remove` asks for a state already true.
-   *
-   * IT DOES NOT TERMINATE A WORKER AND MUST NOT — that is `SessionPool.unbind`, and 5d-i design §4.2
-   * puts the thread's life in exactly one place. A caller retiring a session calls both; splitting them
-   * is what keeps this module free of `new Worker`.
-   */
-  remove(id: SessionId): void {
-    this.#entries.delete(id)
   }
 
   /**
@@ -444,23 +372,19 @@ export class SessionRegistry {
   /**
    * Every session a slot showing `leg` may be pointed at, in registration order.
    *
-   * THIS IS "THE SOURCE SESSION OFFERS source/λ/TM; A `LambdaScratch` OFFERS ONLY λ; A `TmScratch` ONLY
-   * TM" (5d-i decision 1, in the words of 5d-i's plan, T7), with the program session's rxm leg and an rxm
-   * copy that offers only rxm, evaluated from the session's side: a session appears in `options('lambda')`
-   * exactly when it has a λ leg to render. There is no second table of which kind offers what — the legs
-   * an entry was built with ARE the answer, so the selector and the resolver cannot disagree about what
-   * is bindable.
+   * A session appears in `options('lambda')` exactly when it has a λ leg to render. There is no second table of which
+   * kind offers what — the legs an entry was built with ARE the answer, so the selector and the resolver cannot
+   * disagree about what is bindable.
    *
    * A FRESH ARRAY PER CALL. Accepted rather than cached: it is one array of small objects, and a cache
-   * would need invalidating on `add`/`remove`, which is a second fact to keep in step for a saving
+   * would need invalidating on `add`, which is a second fact to keep in step for a saving
    * nobody measured.
    *
    * **IT IS NOT ON THE PER-FRAME PATH.** `PaneSlot.render` pushes `pairs()` below, so `draw()` never
    * reaches here; `pairs()`'s own doc carries the allocation argument, since it is the call that IS on
    * the path. This one is a registry query with no production caller — it is kept because it is
-   * `pairs()` for one leg, stated directly, and because `tests/node/sessions.test.ts` and
-   * `tests/node/scratch.test.ts` ask a registry what one leg offers without building a whole render
-   * pass to find out.
+   * `pairs()` for one leg, stated directly, and because `tests/node/sessions.test.ts` asks a registry what one leg
+   * offers without building a whole render pass to find out.
    */
   options<K extends Leg>(leg: K): BindingOption[] {
     const out: BindingOption[] = []
@@ -526,7 +450,6 @@ export type PaneView<T> = {
    * the pane happens to render.
    */
   setBindings(options: PaneOption[], current: Binding<Leg>): void
-  setDetached(detached: boolean): void
   /**
    * **`choices` RIDES THE CALL THAT MOUNTS THE CONTROL, WHICH IS WHY IT IS HERE AND NOT ON A SETTER OF
    * ITS OWN.** The split control is the split menu (`view-header.ts`'s `viewMenu`), built on open from a
@@ -622,9 +545,8 @@ export function legControlState<K extends Leg>(
  * same-leg pick to `transport.ts` (whose own comparison is a THROW, so this class's `rebind` is only
  * ever handed a session bindable at this leg, and by a check rather than by an argument), and answers a
  * cross-leg pick by changing the LEAF's kind — `setLeafKind`, keeping its place and size — and letting
- * `applyLayout` build a fresh entry: a different `PaneSlot`, on the picked leg, a different pane class,
- * the same host, and the old view's editor taken off on the way out (a λ copy's into custody, a TM or
- * rxm copy's destroyed). A leg change is a new slot rather than a mutated one, so `K` never has to
+ * `applyLayout` build a fresh entry: a different `PaneSlot`, on the picked leg, a different pane class
+ * and the same host. A leg change is a new slot rather than a mutated one, so `K` never has to
  * change: the pane and the slot are replaced together, and `Binding<K>`'s type property is what makes
  * that replacement checked rather than something it stands in the way of.
  */
@@ -668,23 +590,21 @@ export class PaneSlot<K extends Leg> {
   }
 
   /**
-   * Paint the pane from `leg`, and refresh the two chrome facts that follow the binding.
+   * Paint the pane from `leg`, and refresh the selector, which follows the binding.
    *
    * `leg` IS A PARAMETER AND IT IS `resolve`'s OWN OUTPUT — see `resolve` for why the two are split.
    * Passing the wrong session's leg is possible and passing the wrong LEG KIND is not, which is
    * `Binding<K>`'s property doing the only work it can do here.
    *
-   * THE SELECTOR AND THE `copy · not linked` STATUS ARE REFRESHED HERE, NOT AT REBIND TIME. Both are
-   * functions of the binding and of the registry, and the registry changes under a slot that did not
-   * move — a session added or retired elsewhere changes what this pane may be pointed at. Driving them
-   * from the one per-frame call means there is no second path that could leave a selector listing a
-   * session that no longer exists; both setters are no-ops when nothing changed, which is the same guard
-   * `viewHeader`'s setters already state for the same path.
+   * THE SELECTOR IS REFRESHED HERE, NOT AT REBIND TIME. It is a function of the binding and of the registry, and
+   * the registry changes under a slot that did not move — a session added elsewhere changes what this pane may be
+   * pointed at. Driving it from the one per-frame call means there is no second path that could leave a selector
+   * listing a session that no longer exists; the setter is a no-op when nothing changed, the guard `viewHeader`'s
+   * `setBindings` states for the same path.
    */
   render(reg: SessionRegistry, pane: PaneView<LegFrame[K]>, leg: LegState<LegFrame[K]>): void {
     const b = this.#binding
     pane.render(leg.hist.current ?? null, legControlState(reg, b, leg))
     pane.setBindings(reg.pairs(), b)
-    pane.setDetached(reg.entryOf(b.session).detached)
   }
 }

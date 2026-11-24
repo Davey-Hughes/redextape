@@ -75,7 +75,6 @@ describe('view keys under an open popover', () => {
   /** The header's popovers: each is beside its button, outside the views, and no rebuild touches it. */
   it.each([
     ['the workspace menu', '#workspace'],
-    ['copies', '#buffers'],
     ['examples', '#examples'],
     ['share', '#share'],
     ['about', '#about'],
@@ -84,9 +83,7 @@ describe('view keys under an open popover', () => {
     await start()
     const button = document.querySelector(selector) as HTMLElement
     const menu = await press(button)
-    // SO THAT THERE IS A FOCUS TO HAND BACK. Five of the six take the focus as they open; the copies menu with no copy
-    // leaves it on its button, where this case would pass with nothing handed anywhere, and `Tab` goes into it.
-    if (!menu.contains(document.activeElement)) await userEvent.keyboard('{Tab}')
+    // SO THAT THERE IS A FOCUS TO HAND BACK: each takes the focus as it opens.
     expect(menu.contains(document.activeElement), 'precondition: the focus is inside the popover').toBe(true)
     await viewKey('4', UNARMED)
     expect(open(), 'the popover stayed open over a page the key changed').toEqual([])

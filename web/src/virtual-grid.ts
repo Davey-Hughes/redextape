@@ -164,12 +164,10 @@ export class VirtualGrid {
     })
 
     // A ROW TAKES NO FOCUS ON `mousedown`; THE GRID TAKES IT WHEN THE CLICK LANDS (Plan 7 part 4 spec, amendment
-    // 18), SO A ROW'S CLICK DOES NOT DEPEND ON `focus-draw.ts` HOLDING A DRAW. Focusing the grid draws its view, and
-    // the draw replaces every row: drawn between the press and the release, it removes the row under the pointer, and
-    // Chrome sent no `click` for a press whose element was removed before its release, on a notice's button (the
-    // roadmap's Plan 7 part 6a-ii entry, its I2). A focus move taken at the press would draw once the press has ended,
-    // but a press `focus-draw.ts` ends early queues that draw at that end, before the row's release; with no focus
-    // moved until the click there is no such draw to hold. **IT ALSO KEEPS A PRESS FROM STARTING A TEXT SELECTION IN
+    // 18). Focusing the grid draws its view, and the draw replaces every row: drawn between the press and the release,
+    // it would remove the row under the pointer, and Chrome sends no `click` for a press whose element was removed
+    // before its release (the roadmap's Plan 7 part 6a-ii entry, its I2). With no focus moved until the click, no such
+    // draw comes between them. **IT ALSO KEEPS A PRESS FROM STARTING A TEXT SELECTION IN
     // THE ROWS**, which no rule makes unselectable: a double press would select a word. The primary button only, so a
     // middle button still scrolls.
     this.#rowsEl.addEventListener('mousedown', (event) => {

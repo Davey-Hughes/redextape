@@ -24,7 +24,6 @@ function fakePane<T>(): PaneView<T> & { frames: (T | null)[] } {
       frames.push(frame)
     },
     setBindings(_o: PaneOption[], _c: Binding<Leg>) {},
-    setDetached(_d: boolean) {},
     setLayoutControls(_canClose: boolean, _canSplit: boolean) {},
     setStepsShown(_shown: boolean) {},
   }
@@ -55,22 +54,22 @@ describe('PaneCollection', () => {
   it('selects by leg AND session, which is what stops one session repainting another', () => {
     const panes = new PaneCollection()
     panes.add(lambdaEntry('a', 'source'))
-    panes.add(lambdaEntry('b', 'lambda-scratch'))
+    panes.add(lambdaEntry('b', 'second'))
 
     expect(panes.ofSession('lambda', 'source').map((p) => p.id)).toEqual(['a'])
-    expect(panes.ofSession('lambda', 'lambda-scratch').map((p) => p.id)).toEqual(['b'])
+    expect(panes.ofSession('lambda', 'second').map((p) => p.id)).toEqual(['b'])
   })
 
   it('follows a rebind rather than caching the binding it was added with', () => {
     const panes = new PaneCollection()
     const entry = lambdaEntry('a', 'source')
     panes.add(entry)
-    expect(panes.ofSession('lambda', 'lambda-scratch')).toEqual([])
+    expect(panes.ofSession('lambda', 'second')).toEqual([])
 
-    entry.slot.rebind('lambda-scratch')
+    entry.slot.rebind('second')
 
     expect(panes.ofSession('lambda', 'source')).toEqual([])
-    expect(panes.ofSession('lambda', 'lambda-scratch').map((p) => p.id)).toEqual(['a'])
+    expect(panes.ofSession('lambda', 'second').map((p) => p.id)).toEqual(['a'])
   })
 
   // For a leg with no pane, the answer `active` has to give is `undefined` rather than a throw — see
@@ -98,7 +97,7 @@ describe('PaneCollection', () => {
     expect(() => panes.add(lambdaEntry('a', 'source'))).toThrow(/already/)
   })
 
-  it('is idempotent on remove, mirroring SessionRegistry.remove', () => {
+  it('is idempotent on remove', () => {
     const panes = new PaneCollection()
     panes.add(lambdaEntry('a', 'source'))
     panes.remove('a')
@@ -189,27 +188,28 @@ describe('active', () => {
 
   /**
    * **A READER MAY REFUSE THE PANE FOCUSED LAST, AND THEN THE ONE FOCUSED BEFORE IT ANSWERS** — `draw.ts`'s running
-   * focuses refuse a view showing a copy. `b` is the pane focused before the refused `c`, and `a` is first in
-   * insertion order: a collection that kept only the last mark per leg could fall back to `a` and nothing better.
+   * focuses refuse a view the tree on screen does not hold. `b` is the pane focused before the refused `c`, and `a`
+   * is first in insertion order: a collection that kept only the last mark per leg could fall back to `a` and nothing
+   * better.
    */
   it('answers the most recently focused pane the reader accepts, passing over one it refuses', () => {
     const panes = new PaneCollection()
     panes.add(lambdaEntry('a', 'source'))
     panes.add(lambdaEntry('b', 'source'))
-    panes.add(lambdaEntry('c', 'scratch-1'))
-    const onSource = (e: PaneEntry<'lambda'>) => e.slot.binding.session === 'source'
+    panes.add(lambdaEntry('c', 'source'))
+    const arranged = (e: PaneEntry<'lambda'>) => e.id !== 'c'
     panes.markActive('b')
     panes.markActive('c')
     expect(panes.active('lambda')?.id).toBe('c')
-    expect(panes.active('lambda', onSource)?.id).toBe('b')
+    expect(panes.active('lambda', arranged)?.id).toBe('b')
   })
 
   it('falls back to insertion order among the panes the reader accepts', () => {
     const panes = new PaneCollection()
-    panes.add(lambdaEntry('a', 'scratch-1'))
+    panes.add(lambdaEntry('a', 'source'))
     panes.add(lambdaEntry('b', 'source'))
     panes.markActive('a')
-    expect(panes.active('lambda', (e) => e.slot.binding.session === 'source')?.id).toBe('b')
+    expect(panes.active('lambda', (e) => e.id !== 'a')?.id).toBe('b')
     expect(panes.active('lambda', () => false)).toBeUndefined()
   })
 
@@ -251,19 +251,6 @@ describe('shown', () => {
     expect(panes.shown('lambda', onPage('c'))?.id).toBe('c')
   })
 
-  it('is the most recently focused pane on the page that the reader accepts', () => {
-    const panes = new PaneCollection()
-    panes.add(lambdaEntry('a', 'source'))
-    panes.add(lambdaEntry('b', 'source'))
-    panes.add(lambdaEntry('c', 'scratch-1'))
-    panes.markActive('b')
-    panes.markActive('c')
-    const onSource = (e: PaneEntry<'lambda'>) => e.slot.binding.session === 'source'
-    expect(panes.shown('lambda', onPage('a', 'b', 'c'), onSource)?.id).toBe('b')
-    expect(panes.shown('lambda', onPage('a', 'c'), onSource)?.id).toBe('a')
-    expect(panes.shown('lambda', onPage('c'), onSource)).toBeUndefined()
-  })
-
   it('is undefined when no pane on the leg is on the page', () => {
     const panes = new PaneCollection()
     panes.add(lambdaEntry('a', 'source'))
@@ -276,12 +263,12 @@ describe('shown', () => {
 describe('storedPanels', () => {
   it('storedPanels passes the stored names and leaves the rest out', () => {
     const stored = new Map([
-      ['rules', false],
-      ['outline', true],
+      ['listing', false],
+      ['heap', true],
     ])
-    expect(storedPanels(['rules', 'diagram', 'outline'], (name) => stored.get(name))).toStrictEqual({
-      rules: false,
-      outline: true,
+    expect(storedPanels(['listing', 'registers', 'heap'], (name) => stored.get(name))).toStrictEqual({
+      listing: false,
+      heap: true,
     })
   })
 })

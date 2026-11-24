@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import type { InstrLeg } from '../../src/link'
 import { createLinkWiring, type LinkWiring } from '../../src/link-wiring'
 import type { PaneCollection } from '../../src/panes'
-import type { SessionRegistry } from '../../src/sessions'
 
 /** What a click on an rxm instruction or a TM state pins, and what the status line then says. */
 
@@ -13,7 +12,6 @@ const MINTED_PC = 1
 const OWNERLESS = 'this instruction has no source construct'
 const STATES = [10, 11]
 const INSTRS = [20, 21]
-const COPY = 'a copy'
 
 /**
  * A link wiring over the views given, none by default, whose index owns one instruction. `steps`, when given, collects
@@ -24,15 +22,12 @@ function wiring(views: Record<string, unknown[]> = {}, steps?: string[]) {
   const links = createLinkWiring({
     view: () => ({ dispatch: () => steps?.push('source mark') }) as unknown as EditorView,
     statusHost: status,
-    sessions: { entryOf: (session: string) => ({ detached: session === COPY }) } as unknown as SessionRegistry,
     panes: { of: (leg: string) => views[leg] ?? [] } as unknown as PaneCollection,
     draw: () => {
       steps?.push('draw')
       if (steps !== undefined) status.textContent = 'a new sentence'
     },
     announce: () => steps?.push('announcement'),
-    viewTitle: () => '',
-    arranged: () => true,
   })
   links.setIndex({
     nodeForInstr: (pc: number) => (pc === OWNED_PC ? NODE : null),
@@ -108,14 +103,13 @@ describe('setLinkTo', () => {
   })
 })
 
-/** A wiring over a program view and a copy view on each linked leg; `taken` empties what each view's `setLink` got. */
+/** A wiring over two views on each linked leg, a split; `taken` empties what each view's `setLink` got. */
 function wiringOverViews(steps?: string[]) {
   const calls: Record<string, [rows: readonly number[], scrollTo: boolean][]> = {}
-  const view = (name: string, session: string) => {
+  const view = (name: string) => {
     const own: [readonly number[], boolean][] = []
     calls[name] = own
     return {
-      slot: { binding: { session } },
       pane: {
         setLink: (rows: readonly number[], scrollTo: boolean) => {
           steps?.push('view')
@@ -125,15 +119,15 @@ function wiringOverViews(steps?: string[]) {
     }
   }
   const views = {
-    rxm: [view('rxm', 'the program'), view('rxm copy', COPY)],
-    tm: [view('tm', 'the program'), view('tm copy', COPY)],
+    rxm: [view('rxm'), view('rxm split')],
+    tm: [view('tm'), view('tm split')],
   }
   const { links } = wiring(views, steps)
   const taken = () => Object.fromEntries(Object.entries(calls).map(([name, got]) => [name, got.splice(0)]))
   return { links, taken }
 }
 
-const CLEARED = { rxm: [[[], false]], 'rxm copy': [[[], false]], tm: [[[], false]], 'tm copy': [[[], false]] }
+const CLEARED = { rxm: [[[], false]], 'rxm split': [[[], false]], tm: [[[], false]], 'tm split': [[[], false]] }
 
 describe('the fan-out', () => {
   it.each<{ origin: string; click: (links: LinkWiring) => void; rxm: boolean; tm: boolean }>([
@@ -146,9 +140,9 @@ describe('the fan-out', () => {
     c.click(links)
     expect(taken()).toStrictEqual({
       rxm: [[INSTRS, c.rxm]],
-      'rxm copy': [[[], c.rxm]],
+      'rxm split': [[INSTRS, c.rxm]],
       tm: [[STATES, c.tm]],
-      'tm copy': [[[], c.tm]],
+      'tm split': [[STATES, c.tm]],
     })
   })
 
@@ -157,9 +151,9 @@ describe('the fan-out', () => {
     links.linkInstr(OWNED_PC, 'clif')
     expect(taken()).toStrictEqual({
       rxm: [[[OWNED_PC], true]],
-      'rxm copy': [[[], true]],
+      'rxm split': [[[OWNED_PC], true]],
       tm: [[STATES, true]],
-      'tm copy': [[[], true]],
+      'tm split': [[STATES, true]],
     })
   })
 

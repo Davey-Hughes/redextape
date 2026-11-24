@@ -1,19 +1,18 @@
 import { showWorkerError } from './banner'
-import { counted, n } from './format'
+import { n } from './format'
 import { LEG_NAME, LEGS } from './legs'
-import type { CopyLeg as CopyableLeg, Leg, RecordEnd, ResultLegs } from './protocol'
-import { endedLine, noSessionRows, type Row, resultRows, valueLine } from './results'
-import type { SessionEntry } from './sessions'
+import type { Leg, RecordEnd, ResultLegs } from './protocol'
+import { noSessionRows, type Row, resultRows } from './results'
 import type { Diagnostic } from './types'
 import type { ReadoutSwitch } from './workspace'
 
 /**
- * THE READOUT — Plan 7 part 2 spec §9: value and steps for the focused view's session, as one line (the
- * strip). The inspector shows the same facts one per line.
+ * THE READOUT — Plan 7 part 2 spec §9: the program's value and steps, as one line (the strip). The inspector
+ * shows the same facts one per line.
  *
- * **THE PROGRAM'S RESULT IS STORED, NOT RENDERED ON ARRIVAL.** The strip shows whichever session the
- * focused view shows, so a focus change has to be able to put the program back without a recompile.
- * `replies.ts` hands the result here and `draw()` renders it.
+ * **THE PROGRAM'S RESULT IS STORED, NOT RENDERED ON ARRIVAL.** `draw()` renders it with the frame's other facts,
+ * so a frame with no reply behind it, a switch between the strip and the inspector among them, draws it again
+ * without a recompile. `replies.ts` hands the result to `main.ts` and `draw()` renders it.
  *
  * **`#results[data-state]` IS THE PROGRAM'S COMPILE STATE** — `running` while a compile is in flight,
  * `idle` after — whatever the strip is describing; the browser tests wait on it.
@@ -83,7 +82,7 @@ const PINNED = '(pinned)'
  * and TM legs to their end, so the result counts the whole run; the recording the views step through can stop on its
  * history budget well before that end. Read off the result alone, the readout would say nothing of it while the TM
  * view's step line says `history is full`. The step named is `hist.newestStep`, which is that step line's `of N`,
- * and the words are `STOPPED`'s.
+ * and its words are `HISTORY_FULL_WORDS`.
  *
  * **IT FOLLOWS THE RECORDING, WHICH `draw.ts` HANDS OVER ON EVERY FRAME.** While *keep recording* runs a leg on, its
  * `done` is `null` and the row is gone; it comes back, further on, only if the history fills again, and not once the
@@ -114,7 +113,7 @@ function programResultRows(r: Extract<ProgramResult, { kind: 'result' }>, record
   for (const l of LEGS) {
     const leg = recording[l]
     if (HISTORY_FULL_ROW[l] && leg.done === 'budget' && (leg.pending ?? leg.clifHold?.linkStep) === undefined)
-      full.set(LEG_NAME[l], `${STOPPED.budget} at ${n(leg.hist.newestStep)}`)
+      full.set(LEG_NAME[l], `${HISTORY_FULL_WORDS} at ${n(leg.hist.newestStep)}`)
   }
   return rows.flatMap((row) => {
     const fact = row.label === 'steps' ? full.get(row.leg) : undefined
@@ -149,127 +148,11 @@ export function programSegments(r: ProgramResult | null, recording: ProgramRecor
   return LEGS.filter((l) => rows.some((row) => row.leg === LEG_NAME[l])).map((l) => leg(LEG_NAME[l]))
 }
 
-const STOPPED: Readonly<Record<RecordEnd, string>> = {
-  ended: '',
-  capped: 'spent its step budget',
-  'depth-refused': 'the term is deeper than the reducer allows',
-  budget: 'history is full',
-  'stack-full': 'the call stack is full',
-  'heap-full': 'the heap is full',
-  'memory-full': 'its saved call frames are full',
-}
-
 /**
- * What a copy's line reads of its leg (`copyLegOf`): how far its recording has got, how it stopped, and whether it has
- * a status yet.
- *
- * **EVERY LEG'S LINE TAKES IT, NOT ONLY λ'S, WHOSE FACTS ARE ALL ON ITS LEG.** A machine copy's reading holds only what
- * the worker's replies retained, so without the leg a copy still building would say nothing but its name where a λ copy
- * says `building…`, a stepping copy would report no count, and a copy whose thread threw would
- * read as a bare name for the rest of the page load: the `worker-error` arm clears the retained reading and writes the
- * reason onto the LEG (spec §13).
+ * What a recording that filled its history says: the words the step line gives the same stop (`controls.ts`'s
+ * `doneText`), so the readout and a machine view's step line name it alike.
  */
-export type CopyLeg = {
-  readonly newestStep: number
-  readonly done: RecordEnd | null
-  readonly status: { readonly available: boolean; readonly reason: string }
-}
-
-/**
- * What a copy's line reads besides its leg, keyed by leg: `SessionEntry.readings`, which holds a machine copy's
- * reading, and nothing under λ, whose copy's facts are all on its leg. The copy functions take the record and index it
- * with their own leg, because `tsc` cannot pair a lone reading with a leg its caller holds as a union.
- */
-export type CopyReadings = SessionEntry['readings'] & { readonly lambda?: undefined }
-
-/**
- * Why a copy's recording stopped short, in `STOPPED`'s words, or nothing for one that ended or is still going. A copy
- * records into the history budget its leg has (`HISTORY_BYTES`) and can stop on it as on a cap, and without `done` its
- * line would give the count and say nothing of it. It names no step where the program's readout names one: a copy's
- * count already is the newest step its recording holds.
- */
-function stopped(leg: CopyLeg): string[] {
-  const why = leg.done === null ? '' : STOPPED[leg.done]
-  return why === '' ? [] : [why]
-}
-
-/**
- * Each leg's facts about an available copy, after its name, one per element: how far its recording has got, in its
- * leg's unit, and why it stopped, then what its reading adds.
- */
-const COPY_FACTS: { readonly [K in CopyableLeg]: (reading: CopyReadings[K], leg: CopyLeg) => string[] } = {
-  lambda: (_reading, leg) => [counted(leg.newestStep, 'reduction'), ...stopped(leg)],
-  // Its value came with its build (spec amendment 26) and reads as its view's value line reads.
-  rxm: (reading, leg) => [
-    counted(leg.newestStep, 'instruction'),
-    ...stopped(leg),
-    ...(reading === null ? [] : [endedLine(reading.value)]),
-  ],
-  tm: (reading, leg) => {
-    const facts = [counted(leg.newestStep, 'transition'), ...stopped(leg)]
-    const value = valueLine(reading?.value ?? null)
-    if (value !== null) facts.push(value)
-    const reduction = reading?.status.reduction ?? null
-    if (reduction !== null) facts.push(`reduced: ${reduction.stages.join(', ')} · ${n(reduction.steps)} steps`)
-    return facts
-  },
-}
-
-/** A copy's facts after its name: its leg's reason while the leg is not available, else `COPY_FACTS`' for its leg. */
-function copyFacts<K extends CopyableLeg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string[] {
-  return leg.status.available ? COPY_FACTS[kind](readings[kind], leg) : [leg.status.reason]
-}
-
-/**
- * A copy's facts, one per element, the copy's name first.
- *
- * **THE PARTS ARE THE SOURCE AND THE JOINED LINE IS DERIVED, NOT THE OTHER WAY ROUND.** The strip wants one
- * line and the inspector wants one row per fact (spec §9), and the obvious shortcut — split the strip's
- * line back on its own ` · ` — is wrong: a TM copy's reduced-file sentence CONTAINS a ` · `
- * (`reduced: <stages> · <n> steps`), so the round trip cuts it in half. One list, two renderings.
- */
-export function copyParts<K extends CopyableLeg>(
-  kind: K,
-  name: string,
-  readings: Pick<CopyReadings, K>,
-  leg: CopyLeg,
-): string[] {
-  return [name, ...copyFacts(kind, readings, leg)]
-}
-
-export function copySegments<K extends CopyableLeg>(
-  kind: K,
-  name: string,
-  readings: Pick<CopyReadings, K>,
-  leg: CopyLeg,
-): string[] {
-  return [copyParts(kind, name, readings, leg).join(' · ')]
-}
-
-/**
- * What a machine copy's row in the copies menu says below its name: its readout line without the name, so a copy that
- * halted with a value (an rxm copy's can be a fault), is still running its value run, filled its history, or has not
- * built yet reads there as it reads in the strip, in the strip's words.
- *
- * **A MACHINE COPY HAS NO TERM.** The row's second line is a λ copy's current term, and a `null` there reads `no term
- * yet` — "nothing has come back" — which is not true of a copy that has run to `value: 6`. What such a copy holds is
- * its run, and its readout already says what became of it.
- */
-export function copyRow<K extends CopyableLeg>(kind: K, readings: Pick<CopyReadings, K>, leg: CopyLeg): string {
-  return copyFacts(kind, readings, leg).join(' · ')
-}
-
-/**
- * A leg's live state as a copy's readout reads it — how far its recording has got, how it ended, and whether it has a
- * status yet. One shape for every leg, and every copy's line reads all of it.
- */
-export function copyLegOf(leg: {
-  readonly hist: { readonly newestStep: number }
-  readonly done: RecordEnd | null
-  readonly status: { readonly available: boolean; readonly reason: string }
-}): CopyLeg {
-  return { newestStep: leg.hist.newestStep, done: leg.done, status: leg.status }
-}
+const HISTORY_FULL_WORDS = 'history is full'
 
 /**
  * One line of the inspector: what it is, and what it says.
@@ -313,19 +196,6 @@ export function programRows(r: ProgramResult | null, recording: ProgramRecording
 }
 
 /**
- * A copy's rows: its name is the first row's label, and every other fact is a row of its own.
- *
- * **BUILT FROM THE SAME PARTS LIST THE SEGMENT IS** (`copyParts`' doc), so the two readouts cannot
- * disagree about a copy and no ` · ` inside a fact is mistaken for a separator between two.
- */
-export function copyRows(parts: readonly string[]): InspectorRow[] {
-  const [name, first, ...rest] = parts
-  if (name === undefined) return []
-  if (first === undefined) return [{ label: name, value: '' }]
-  return [{ label: name, value: first }, ...rest.map((value) => ({ label: '', value }))]
-}
-
-/**
  * The two shapes a readout can draw, as THUNKS rather than two arrays.
  *
  * **BECAUSE `show` RUNS ON EVERY RECORDED FRAME DURING PLAYBACK**, and each shape costs a walk of
@@ -358,18 +228,18 @@ export function createReadout(host: HTMLElement): {
       // A reset here would be a second mechanism for one fact.
     },
     show(program, lines) {
-      // **WHAT THIS LINE IS DESCRIBING, SO THE STYLESHEET CAN TELL.** `#results[data-state]` is the
-      // PROGRAM's compile state and stays that whatever the strip shows (spec §9) — but the rule that
-      // dims a running compile hangs off the same element, and a copy's readout has nothing to do with
-      // the program recompiling. `style.css` scopes the dim to `[data-describes="program"]`.
+      // **WHETHER THIS LINE DESCRIBES A PROGRAM, SO THE STYLESHEET CAN TELL.** `#results[data-state]` is the
+      // PROGRAM's compile state (spec §9), and the rule that dims a running compile hangs off the same element; a
+      // call with no program yet, as the first frames of the program's own run make, has no readout for the dim to
+      // grey. `style.css` scopes the dim to `[data-describes="program"]`.
       //
       // **ABOVE EVERY EARLY RETURN**, so no return can leave the attribute unwritten or stale: below the
-      // `error` arm's, a copy's `'copy'` would survive into a program error.
+      // `error` arm's, a `'none'` would survive into a program error, and a recompile under it would not dim.
       //
       // COMPARED BEFORE IT IS WRITTEN, because `show` runs on every frame during playback and an
       // unconditional attribute write is a style invalidation per frame for a value that almost never
       // changes.
-      const describes = program === null ? 'copy' : 'program'
+      const describes = program === null ? 'none' : 'program'
       if (host.dataset.describes !== describes) host.dataset.describes = describes
       if (program?.kind === 'error') {
         if (rendered === '\x00error') return

@@ -163,7 +163,7 @@ describe('removing a half', () => {
   })
 
   // BY THE KEYBOARD, FROM WHERE THE REMOVAL LEFT THE FOCUS: the line's undo is the next stop after `settings`, and the
-  // focus goes back there when it is used, not to the copies button the line falls back to for a copy's undo.
+  // focus goes back there when it is used, as the undo names it.
   it('is undone exactly: the half as it was stored, adjusted included, and the focus is back on settings', async () => {
     const settings = document.querySelector('#settings')
     expect(document.activeElement).toBe(settings)

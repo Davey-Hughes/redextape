@@ -1,17 +1,13 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
-import { makeCopy } from './editor-view-fixture'
-import { idle, markersIn, paneOrThrow, retype, SHELL, until } from './harness'
+import { idle, SHELL, until } from './harness'
 
 /**
  * **HOVER, THROUGH THE APP** — Plan 7 part 3c, design §8.6 and §11.2.
  *
  * Every case runs through the real app rather than a unit around `Language::hover`, among them pointer
- * hover over a `.rxt` `Nat` literal, pointer hover over a TM rule naming its goto target, `F2` at the caret
- * opening the same tooltip a pointer would, and — this file's centrepiece — a λ copy answering NOTHING,
- * from either input, with that silence shown able to fail rather than merely asserted (the λ case's own
- * doc has the sabotage that shows it).
+ * hover over a `.rxt` `Nat` literal and `F2` at the caret opening the same tooltip a pointer would.
  *
  * **KEYS ARRIVE THROUGH `userEvent`, NOT A SYNTHETIC `KeyboardEvent`.** `lsp-navigation.test.ts`
  * dispatches its own `KeyboardEvent` and this file deliberately does not copy it: a synthetic event
@@ -55,58 +51,6 @@ const RANGE_PROGRAM = 'let x = 42;\nx'
 /** Where the `4` of `42` sits in `RANGE_PROGRAM` — `NAT_OFFSET` above, one character wider. */
 const RANGE_NAT_START = 8
 
-/** `redextape-core`'s own `a_rule_hovers_with_what_it_does_in_words` fixture — MACHINE's first rule
- * reads `a`, writes `b`, moves right and goes to `q1`, and its second rule is every one of those
- * reversed, which is what proves a rule's own facts vary with the rule under the cursor rather than
- * being hardcoded from whichever rule an implementation happened to read first. */
-const MACHINE =
-  'tapes 1\nstart q0\n\nstate q0:\n  [a] -> write [b], move [R], goto q1\n  [b] -> write [a], move [L], goto q0\nstate q1: accept\n'
-
-/**
- * A λ document `redextape_core::hover::rxt` WOULD answer for, and the real `Language::Lambda.hover`
- * never does — the fixture the sabotage in Plan 7 part 3c's roadmap entry runs this same file against.
- *
- * **`λx. 42` — THE OBVIOUS FIXTURE — DOES NOT WORK.** Fed to `redextape_core::hover::rxt`,
- * `parse_for_nav` cannot lex the leading `λ` at all and answers `None` at every offset — the Nat literal
- * after it is never reached. A Nat literal `rxt`'s error recovery CAN reach needs to lead a statement,
- * which is what `let x = 42;` gives it: `hover::rxt` answers `Some` on offsets 8 and 9 (the `4` and the
- * `2`). Because everything before the digits is ASCII, offset 8 means the same thing in a Rust byte
- * offset and a CodeMirror/JS UTF-16 offset — no conversion for this file to get wrong.
- *
- * **THE DIAGNOSTIC RANGE MUST NOT OVERLAP THE LITERAL'S OWN RANGE.** `42\nλx. x` puts its `parse_lambda`
- * error at `0..0` — the SAME character the literal starts on once digits are widened out from a
- * zero-width diagnostic. The caret there sits inside `@codemirror/lint`'s own diagnostic-hover range, and
- * lint's tooltip and ours are both hosted through the same `hoverPlugin` machinery: a view update from
- * lint's tooltip rendering is indistinguishable, to `HoverPlugin.update`, from the CodeMirror race
- * `retryUntilTooltipOpens` already routes around, and it raced this file's LSP tooltip out on every
- * attempt rather than occasionally. `let x = 42;` parses "let" as an unbound λ VARIABLE (juxtaposition
- * makes `let x` a valid application), so `parse_lambda`'s "unbound variable `let`" diagnostic lands on
- * `0..3` — nowhere near the literal at `8..10` — while the fallback still answers for the literal.
- * This is this file's settle signal for "the copy's edit reached the server": diagnostics arrive on
- * the same round trip hover would.
- *
- * **THE BINDER `y` DOES NOT DISCRIMINATE UNDER THE SABOTAGE.** `λ` is two UTF-8 bytes, so the binder
- * sits at byte offset 14 — inside `offset 10..18 -> None`, the range `hover::rxt`'s fallback answers
- * `None` at whether or not the sabotage is active. A pointer hover there passes either way, which is
- * why it is kept below only as a SMOKE CHECK — it still catches an accidental hover leak elsewhere in
- * the copy — and is documented as one rather than left to read as the assertion that proves the gap.
- * The assertion that does is a pointer hover on the Nat literal itself, at `LAMBDA_NAT_OFFSET`: a
- * position measured to answer `Some` under the fallback, and the position the keyboard half uses.
- *
- * **THAT POINTER HOVER CANNOT TARGET A `.tok-nat` SPAN, BECAUSE THERE IS NO SUCH SPAN.** Unlike `.rxt`
- * and `.tm`, the λ tree-sitter grammar (`grammars/tree-sitter-redextape-lambda/grammar.js`) has exactly
- * one leaf rule, `identifier` (letters, `_` and `$` to start, alphanumerics after) — no digit may START a
- * token, and the grammar has no number rule at all, so `42` parses as bare, uncaptured text sitting
- * between two `identifier` tokens; its own `highlights.scm` has no capture that could paint a digit run
- * either way, and the DOM there is plain, unwrapped text. So the pointer half of this case cannot
- * `querySelector` its way to the discriminating position; it hovers PIXEL COORDINATES instead, computed
- * from `EditorView.coordsAtPos` through `contentCoordsAt` below — the same mechanism a real pointer uses,
- * landing where no span exists to hand it a target.
- */
-const LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK = 'let x = 42;\nλy. y\n'
-/** Where the `4` of `42` sits in `LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK` — see its own doc. */
-const LAMBDA_NAT_OFFSET = 8
-
 const tooltipTextOf = (v: EditorView): string | null => v.dom.querySelector('.cm-hover-answer')?.textContent ?? null
 
 /**
@@ -123,8 +67,7 @@ async function caretTo(v: EditorView, pos: number): Promise<void> {
 /**
  * The pixel position of the character at `pos` in `v`, relative to `.cm-content` — what
  * `userEvent.hover`'s `position` option needs to land a POINTER gesture on an offset that owns no
- * `.tok-*` span of its own, the way `LAMBDA_NAT_OFFSET` in the λ copy does not (see
- * `LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK`'s own doc).
+ * `.tok-*` span of its own.
  */
 function contentCoordsAt(v: EditorView, pos: number): { x: number; y: number } {
   const content = v.dom.querySelector<HTMLElement>('.cm-content')
@@ -180,25 +123,6 @@ async function retryUntilTooltipOpens(v: EditorView, gesture: () => Promise<void
   }
   await gesture()
   await until(() => tooltipTextOf(v) !== null, 'a tooltip to open')
-}
-
-/**
- * Repeat `gesture` on `v` several times, asserting AFTER EVERY ONE that no tooltip has opened.
- *
- * **THIS RETRIES THE GESTURE, NEVER THE ASSERTION — the opposite loop from `retryUntilTooltipOpens`
- * above.** That helper loops UNTIL an assertion holds; looping the same way here would let a tooltip
- * that opens on attempt 3 of 5 be silently retried away by attempt 4's empty result. Every iteration's
- * `expect` runs on its own and can fail the test outright — the repetition exists only to rule out
- * "this one attempt happened not to land," the same CodeMirror race `retryUntilTooltipOpens` names,
- * pointed the other way: that race can as easily eat a REAL open as a wanted one, so a single attempt
- * finding nothing is weaker evidence than several agreeing.
- */
-async function assertNeverOpens(v: EditorView, gesture: () => Promise<void>, attempts = 5): Promise<void> {
-  for (let i = 0; i < attempts; i++) {
-    await gesture()
-    await new Promise((r) => setTimeout(r, 400))
-    expect(tooltipTextOf(v), `attempt ${i + 1} of ${attempts}: a tooltip opened where λ must answer nothing`).toBeNull()
-  }
 }
 
 describe('hover, through the app', () => {
@@ -265,93 +189,6 @@ describe('hover, through the app', () => {
   })
 
   /**
-   * **THE TM VIEW GETS THE WHOLE ROW, AND THE HOVER'S TARGET IS ASSERTED ON SCREEN BEFORE THE POINTER MOVES.**
-   * The four-view tree puts rxm beside TM (Plan 7 part 5 spec §3, row 4), and in half of this suite's 414px viewport
-   * `MACHINE`'s first rule runs past the copy's editor, with `q1` right of the viewport, where nothing answers a hit
-   * test. `userEvent.hover` would then scroll it into view as part of the gesture, the span moving up a line with the
-   * editor's sideways scroll, and the pointer would land on the second rule, whose tooltip reads `goto q0`. So
-   * `rxm-0` is closed through its own `✕` first, which gives TM the whole row, and the precondition is the fact the
-   * gesture needs: the point at the centre of `q1` hits `q1`.
-   */
-  it('pointer hover over a TM rule names the goto target', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="rxm-0"] button.view-close')?.click()
-    await until(() => document.querySelector('[data-leaf="rxm-0"]') === null, 'the rxm view to close')
-    const pane = paneOrThrow('tm-0')
-    const editor = await makeCopy(pane)
-    retype(editor, MACHINE)
-
-    // Wait for tree-sitter to colour the goto target specifically — `q1` names it unambiguously,
-    // where `.tok-statename` also matches `start q0`'s target and the second rule's `goto q0`. The first
-    // would hover as a bare state reference (`hover::tm`'s SECOND branch only answers a state's
-    // DEFINITION) and answer nothing at all; the second would answer its own rule's row, whose goto is
-    // `q0`. Either would break this case for a reason that has nothing to do with what it claims to test.
-    const gotoTarget = (): HTMLElement | undefined =>
-      [...editor.dom.querySelectorAll<HTMLElement>('.tok-statename')].find((el) => el.textContent === 'q1')
-    await until(() => gotoTarget() !== undefined, "the rule's goto target to be coloured")
-    const span = gotoTarget()
-    if (span === undefined) throw new Error('no .tok-statename span reading q1')
-    const at = span.getBoundingClientRect()
-    const hit = document.elementFromPoint((at.left + at.right) / 2, (at.top + at.bottom) / 2)
-    expect(hit !== null && span.contains(hit), `q1 is not on screen to hover: its box is ${JSON.stringify(at)}`).toBe(
-      true,
-    )
-
-    await retryUntilTooltipOpens(editor, () => userEvent.hover(span))
-    expect(tooltipTextOf(editor)).toContain('q1')
-
-    await userEvent.unhover(span)
-  })
-
-  /**
-   * **THE CENTREPIECE.** `Language::hover`'s own doc says `.rxlambda` answers `None` because
-   * `LambdaTerm` carries no span on any variant — a designed gap, not an oversight — and this is what
-   * proves the assertions below can actually fail rather than passing against any implementation that
-   * happens to answer nothing. The failure is produced by temporarily changing `Language::Lambda`'s
-   * arm in `crates/redextape-lsp/src/language.rs` to `redextape_core::hover::rxt(src, offset)`,
-   * rebuilding the wasm, and rerunning this file — recorded in the roadmap entry for the task that
-   * added this file, not asserted here, because a permanent test cannot carry a temporary edit.
-   *
-   * **TWO POINTER SUB-CASES, AND ONLY ONE OF THEM DISCRIMINATES.** The Nat literal at
-   * `LAMBDA_NAT_OFFSET` is where `hover::rxt`'s fallback answers `Some` — a pointer hover there fails
-   * under the sabotage and only under the sabotage, same as the `F2` sub-case below. The binder `y` is
-   * a SMOKE CHECK, not a discriminating assertion: it hovers a real span for good measure, but sits at
-   * a byte offset the fallback answers `None` at regardless, so it cannot itself catch the sabotage —
-   * see `LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK`'s own doc for the measurement.
-   */
-  it('shows no tooltip anywhere in a λ copy, by pointer or by F2', async () => {
-    const pane = paneOrThrow('lambda-0')
-    const editor = await makeCopy(pane)
-    retype(editor, LAMBDA_WOULD_ANSWER_UNDER_THE_FALLBACK)
-    await until(() => markersIn(pane) > 0, "the λ copy's edit to reach the server")
-
-    // POINTER, over the Nat literal itself — LAMBDA_NAT_OFFSET, the exact position `hover::rxt`'s
-    // fallback answers `Some` at. THIS IS THE HALF THAT DISCRIMINATES: it fails under the sabotage. No
-    // `.tok-nat` span exists to hover here (see the fixture's own doc), so this targets pixel coordinates,
-    // relative to `.cm-content`, through `contentCoordsAt` rather than `querySelector`.
-    const content = editor.dom.querySelector<HTMLElement>('.cm-content')
-    if (content === null) throw new Error('no .cm-content to hover over')
-    await assertNeverOpens(editor, async () => {
-      await userEvent.unhover(content)
-      await hoverOver(editor, LAMBDA_NAT_OFFSET)
-    })
-
-    // POINTER, over an ordinary token elsewhere in the document — a SMOKE CHECK, not a discriminating
-    // one (see this case's own doc above): it cannot fail under this sabotage, but still catches an
-    // accidental hover leak anywhere else in the copy.
-    const binderSpan = editor.dom.querySelector<HTMLElement>('.tok-binder')
-    if (binderSpan === null) throw new Error('no .tok-binder span to hover over — the term did not highlight')
-    await assertNeverOpens(editor, async () => {
-      await userEvent.unhover(binderSpan)
-      await userEvent.hover(binderSpan)
-    })
-
-    // KEYBOARD, with the caret on the Nat literal — `LAMBDA_NAT_OFFSET`, the same position the first
-    // pointer sub-case above targets, and the position this case exists to guard.
-    await caretTo(editor, LAMBDA_NAT_OFFSET)
-    await assertNeverOpens(editor, () => userEvent.keyboard('{F2}'))
-  })
-
-  /**
    * `lspHover`'s tooltip carries an `end`, mapped from the server's `Hover.range`: without one, vendored
    * `HoverPlugin.mousemove` defaults it to `pos` and takes its `pos == end` branch — closing the tooltip
    * the instant `posAtCoords` reads anything but the exact offset it opened at, including a pointer move
@@ -375,8 +212,8 @@ describe('hover, through the app', () => {
     // race `retryUntilTooltipOpens` documents — `HoverPlugin.update` clearing a tooltip on a geometry-only
     // update — which has nothing to do with what this case asserts.
     //
-    // **THE FIRST ATTEMPT CAN ALSO MISS BECAUSE THE EDITOR MOVED**, when the notice the λ copy case put
-    // up expires during it — the next case makes that miss happen on purpose.
+    // **THE FIRST ATTEMPT CAN ALSO MISS BECAUSE THE EDITOR MOVED** under the pointer — the next case makes that miss
+    // happen on purpose.
     await retryUntilTooltipOpens(view, async () => {
       await userEvent.unhover(content)
       await hoverOver(view, RANGE_NAT_START)
@@ -411,12 +248,11 @@ describe('hover, through the app', () => {
   })
 
   /**
-   * **A RETRIED HOVER AIMS WHERE THE FIRST ATTEMPT AIMED, AFTER THE EDITOR HAS MOVED UNDER THE POINTER.**
-   * The notice the λ copy case puts up lasts `NOTICE_MS`, eight seconds, and can expire during the move
-   * case's first attempt. The notice line collapsing lifts the editor 28.5 px under a pointer that has not
-   * moved, so `HoverPlugin.startHover` finds no character under `lastMove` when its 300 ms `hoverTime` runs
-   * out, and asks nothing. That miss is what `retryUntilTooltipOpens` is for, and each retry has to aim
-   * afresh, for the reason in `hoverOver`'s doc.
+   * **A RETRIED HOVER AIMS WHERE THE FIRST ATTEMPT AIMED, AFTER THE EDITOR HAS MOVED UNDER THE POINTER.** A line above
+   * the editor that collapses during the move case's first attempt lifts the editor under a pointer that has not moved,
+   * so `HoverPlugin.startHover` finds no character under `lastMove` when its 300 ms `hoverTime` runs out, and asks
+   * nothing. That miss is what `retryUntilTooltipOpens` is for, and each retry has to aim afresh, for the reason in
+   * `hoverOver`'s doc.
    *
    * Here a line above the editor collapses 100 ms after the first attempt's pointer arrives, ahead of the
    * 300 ms timer that attempt waits on, so the first attempt misses every time. The tooltip must still

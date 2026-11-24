@@ -35,8 +35,6 @@ import {
 import { showBanner } from './banner'
 import { schemeName } from './base16'
 import { createBase16Dialog } from './base16-dialog'
-import { bufferList } from './buffer-list'
-import { BUFFERS_STORAGE_KEY, parseBuffers, serializeBuffers } from './buffers-store'
 import { BUILD } from './build-info'
 import { watchIntent } from './clif-intent'
 import { ClifSync } from './clif-sync'
@@ -53,11 +51,9 @@ import {
 import { watchCutText } from './cut-text'
 import { lspLintRanges } from './diagnostics'
 import { createDraw } from './draw'
-import { createEditorCustody } from './editor-custody'
 import { KeymapSetting, keymapSlot } from './editor-keymap'
 import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
 import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples'
-import { createFocusDraw } from './focus-draw'
 import { focusHolder, handOff } from './focus-handoff'
 import { declineMark, focusMark, linkMark } from './highlight'
 import { icon } from './icons'
@@ -73,15 +69,14 @@ import {
   MAX_TREE_LEAVES,
   SOURCE_LEAF,
 } from './layout'
-import { retitleStage } from './layout-view'
-import { LEG_NAME, LEGS } from './legs'
+import { LEGS } from './legs'
 import { wireLinkClear } from './link-clear'
 import { createLinkWiring, LINK_KEY, type LinkWiring } from './link-wiring'
 import { LspClient } from './lsp-client'
 import { lspHover } from './lsp-hover'
 import { navKeymap } from './lsp-nav'
 import type { LanguageId } from './lsp-protocol'
-import { documentUri, LANGUAGE_LABEL } from './lsp-protocol'
+import { documentUri, LANGUAGE_IDS, LANGUAGE_LABEL } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
 import { createNotices, floatInRun, type Notice, type NoticeAction } from './notice'
 import { createOutlinePanel } from './outline'
@@ -90,23 +85,14 @@ import type { PaneChoice } from './pane-chrome'
 import { type AddRefused, createPaneHost, type LayoutEvent } from './pane-host'
 import { createPanel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
-import { type LeafId, legOfPane, PaneCollection, type PaneKind } from './panes'
-import { PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
-import type { ClifLoad, CopyLeg, Leg, LegProgram, Listing, RunReply } from './protocol'
+import { type LeafId, PaneCollection, type PaneKind } from './panes'
+import { forgetCopies, PROGRAM_STORAGE_KEY, parseProgram, type StoredProgram, serializeProgram } from './program-store'
+import type { ClifLoad, Leg, LegProgram, Listing, RunReply } from './protocol'
 import { CLIF_ABSENT, HISTORY_BYTES } from './protocol'
-import { copyLegOf, copyRow, createReadout, type ProgramResult } from './readout'
+import { createReadout, type ProgramResult } from './readout'
 import { createReplies, type UnseenViews } from './replies'
-import { BufferCapReached, type BufferRecord, MAX_WARM_BUFFERS, ScratchBuffers } from './scratch'
 import { type SessionId, SessionPool } from './session-client'
-import {
-  freshLeg,
-  holdClifLeg,
-  type LegReading,
-  legControlState,
-  rewindLeg,
-  type SessionLegs,
-  SessionRegistry,
-} from './sessions'
+import { freshLeg, holdClifLeg, legControlState, rewindLeg, type SessionLegs, SessionRegistry } from './sessions'
 import { decodeLink, isLink, type OpenedLink, type SharePayload } from './share-link'
 import { createShare } from './share-popover'
 import { LinkPositions, shortNotice } from './share-positions'
@@ -129,7 +115,7 @@ import {
 import { type BarTarget, barTarget, createStepBar } from './step-bar'
 import { createTransport } from './transport'
 import { assertTokenClasses } from './types'
-import { createUnsaved, type Refusal, refusalOf } from './unsaved'
+import { createUnsaved, refusalOf } from './unsaved'
 import { pairLabel, sourceViewHeader, viewMenu } from './view-header'
 import { HINT_ROWS, HINT_SENTENCE, type ViewKeyAction, wireViewKeys } from './view-keys'
 import {
@@ -252,21 +238,6 @@ async function main(): Promise<EditorView> {
   const keymapChoice = document.querySelector<HTMLSelectElement>('#keymap')
   const styleSelect = document.querySelector<HTMLSelectElement>('#style')
   const paletteSelect = document.querySelector<HTMLSelectElement>('#palette')
-  /**
-   * THE COPIES MENU'S BUTTON — Plan 7 part 2 spec §6's `copies N ▾`, queried here exactly as `#appearance`
-   * and `#reset-preset` are, because `bufferList` takes a button rather than building one (its own doc).
-   * The id stays `#buffers`: `buffer` is an internal name and spec §12 keeps those.
-   *
-   * **NO `aria-label`.** An `aria-label` REPLACES an element's contents as its accessible name, and the
-   * contents here are the readout: `bufferList.update` writes `copies 3 ▾` into them at every moment the
-   * count changes, precisely so the header states how many copies exist while the menu is closed. A label
-   * naming the control and not the count would make that readout inaudible to the one reader who cannot
-   * see it — the opposite of what an icon-only button's label does (`view-header.ts`'s `⋯` and `✕`;
-   * umbrella §4 rule 1), which SUPPLIES a name to a glyph that has none rather than hiding one the control
-   * is already stating. `aria-haspopup`/`aria-expanded` (both `bufferList`'s) are what announce that it
-   * opens something.
-   */
-  const buffersButton = document.querySelector<HTMLButtonElement>('#buffers')
   const examplesButton = document.querySelector<HTMLButtonElement>('#examples')
   const examplesMenu = document.querySelector<HTMLElement>('#examples-menu')
   const shareButton = document.querySelector<HTMLButtonElement>('#share')
@@ -302,7 +273,6 @@ async function main(): Promise<EditorView> {
     !keymapChoice ||
     !styleSelect ||
     !paletteSelect ||
-    !buffersButton ||
     !examplesButton ||
     !examplesMenu ||
     !shareButton ||
@@ -326,11 +296,11 @@ async function main(): Promise<EditorView> {
 
   // THE NOTICE LINE AND THE LIVE REGION (Plan 7 part 2 spec §11) — built before `init()`, because it
   // touches nothing but the DOM, so every refusal from here on has somewhere to go.
-  // THE FALLBACK IS THE COPIES BUTTON: a copy's *undo* is the line's usual action, and a user whose undo
-  // went away — expired, or replaced by another gesture's notice — is looking at the copies it was about.
-  // An imported palette's *undo* names its own, the settings button, and a picked example's names `examples ▾`
+  // THE FALLBACK IS THE SETTINGS BUTTON, A HEADER CONTROL DRAWN AT EVERY WIDTH: the resting sentence's `hide` names
+  // no control of its own, and hidden, the line holds nothing to keep the focus on. An action that does name one keeps
+  // it: a palette removal's *undo* the settings button, a picked example's `examples ▾`, an opened link's `share`
   // (`NoticeAction`'s `fallback`).
-  const notices = createNotices(noticeHost, liveHost, () => buffersButton)
+  const notices = createNotices(noticeHost, liveHost, () => settingsButton)
   floatInRun(noticeHost, headerRun)
 
   // Wired BEFORE `init()`. The toggle has nothing to do with wasm — it reads and writes `localStorage`
@@ -418,8 +388,7 @@ async function main(): Promise<EditorView> {
 
   /**
    * **THE KEYMAP SETTING — Plan 7 part 3 spec §9.** Built here, beside the settings that already
-   * live in this menu, and before `createTransport` below, because every editor the transport builds
-   * joins it at construction.
+   * live in this menu, and before the source editor below, which joins it at construction.
    *
    * **THE OPTIONS ARE WRITTEN IN JavaScript, LIKE `appearanceChoice`'s AND THE TWO SKIN SELECTS',
    * RATHER THAN IN `index.html`.** The words a control offers and the values it stores are the same
@@ -435,15 +404,8 @@ async function main(): Promise<EditorView> {
   })
 
   /**
-   * **BUILT HERE, BEFORE ANY PANE EXISTS, AND THE POSITION IS LOAD-BEARING.** `transport.ts`'s
-   * `lspDocument` thunk hands this to every copy's editor, and a pane can resolve that thunk while it is
-   * still being CONSTRUCTED: `TmPane` syncs the controls that need an editor, which refreshes its outline,
-   * which asks for symbols. With a restored workspace whose outline panel was left open, that happens on
-   * the first frame of the page.
-   *
-   * `createTransport` below takes it as a value, so building it after that call would not compile. The
-   * source view's own `symbols` closure is not checked that way: called before this line had run, it
-   * would throw out of `main()` before the page finished loading.
+   * **BUILT HERE, BEFORE ANY VIEW.** The source view's own `symbols` closure reads it, and called before this line had
+   * run it would throw out of `main()` before the page finished loading.
    *
    * Only `openDocument` needs `view`, and it stays below where `view` exists.
    */
@@ -594,8 +556,8 @@ async function main(): Promise<EditorView> {
         {
           action: {
             label: 'undo',
-            // THE REMOVAL WAS MADE FROM THE SETTINGS, SO THE FOCUS GOES BACK THERE, not to the copies button the line
-            // falls back to for a copy's undo.
+            // THE REMOVAL WAS MADE FROM THE SETTINGS, SO THE FOCUS GOES BACK THERE, named here rather than left to the
+            // line's own fallback, which answers for no gesture.
             fallback: () => settingsButton,
             run: () => {
               // THE CHOICE COMES BACK ONLY IF NO PALETTE WAS PICKED SINCE, BY THE GESTURE AND NOT BY THE VALUE: one the
@@ -633,39 +595,38 @@ async function main(): Promise<EditorView> {
   assertTokenClasses(tokenClasses() as string[])
 
   /**
-   * **THE COLOURER'S TWO APP-WIDE VALUES, BUILT BEFORE ANYTHING THAT CONSTRUCTS AN EDITOR, AND THE
-   * POSITION IS LOAD-BEARING FOR THE REASON `lspClient` ABOVE GIVES.** Every editor on the page takes
-   * a colourer resolved through `transport.ts`'s `events`, and a pane can resolve that while it is
-   * still being CONSTRUCTED — with a restored workspace whose outline panel was left open, on the first
-   * frame of the page. These are `const`s above every construction site.
+   * **THE COLOURER'S TWO APP-WIDE VALUES, BUILT BEFORE THE EDITOR THAT TAKES A COLOURER.** These are `const`s
+   * above its construction.
    *
    * **AFTER `await init()`, WHICH IS WHY THIS IS NOT BESIDE `lspClient` ITSELF.** `captureClasses()` is
    * a wasm export; called before the module is live it throws. `init()` is the line above the token
    * check, and everything that builds an editor is below this one, so this is the whole of the window
    * both constraints leave.
    *
-   * ONE REGISTRY FOR THE PAGE, so a grammar is fetched once rather than once per view — and a FAILED
-   * fetch is remembered as a failure, which is what keeps one broken `.wasm` from producing a notice per
-   * editor (`createGrammarRegistry`'s own doc, design §10).
+   * ONE REGISTRY FOR THE PAGE, so a grammar is fetched once and a FAILED fetch is remembered as a failure, which is
+   * what keeps one broken `.wasm` to one notice (`createGrammarRegistry`'s own doc, design §10).
    */
-  const captureTables = classMapFrom(captureClasses() as CaptureTable[])
+  // THE APP'S LANGUAGES' TABLES ALONE: the export holds one for every grammar, and the page colours only these.
+  const captureTables = classMapFrom(
+    (captureClasses() as CaptureTable[]).filter(([id]) => LANGUAGE_IDS.some((language) => language === id)),
+  )
   const grammars = createGrammarRegistry({
     onFailure: (id, reason) => notices.notify(`${LANGUAGE_LABEL[id]} is showing uncoloured: ${reason}`),
     // THE SHARED RUNTIME, SO THE SENTENCE IS NOT A LANGUAGE'S — `createGrammarRegistry`'s own doc has
-    // the mechanism. One `web-tree-sitter.wasm` that will not fetch leaves every editor uncoloured, and
-    // saying that once is both what design §10 asks for and what is true; three per-language notices
-    // for one cause would be neither.
-    onRuntimeFailure: (reason) => notices.notify(`every editor is showing uncoloured: ${reason}`),
+    // the mechanism. One `web-tree-sitter.wasm` that will not fetch leaves the source view uncoloured, and
+    // saying that, in `onFailure`'s words, is what design §10 asks for and what is true; a sentence naming a
+    // grammar would blame one that did not fail.
+    onRuntimeFailure: (reason) => notices.notify(`source is showing uncoloured: ${reason}`),
   })
   /**
-   * One colourer per editor, over the one registry and the one class map.
+   * The source editor's colourer, over the one registry and the one class map.
    *
    * **THE CEILING NOTICE IS WIRED HERE AND THIS IS THE ONLY PLACE THAT BUILDS A COLOURER.** Plan 7 part 3
-   * spec §10 gives a document over `COLOUR_CEILING_UNITS` one notice saying which editor is uncoloured,
-   * and keeps its diagnostics running, since at that size they take 135.2 ms in a worker, a lag rather
-   * than a freeze; the notice below says only that. The source editor's call site goes through this
-   * function rather than spelling the same fields out, and `onCeiling` is required on the type, so a
-   * colourer cannot be built without it.
+   * spec §10 gives a document over `COLOUR_CEILING_UNITS` one notice saying it is uncoloured,
+   * and keeps its diagnostics running, since in a worker they lag rather than freeze the page; the notice
+   * below says only that. The source editor's call site goes through this function rather than spelling
+   * the same fields out, and `onCeiling` is required on the type, so a colourer cannot be built without
+   * it.
    *
    * THE WORDS ARE `onFailure`'s ABOVE, one clause changed. Both sentences say the same thing about the
    * same editor and differ only in why, which is the umbrella's rule that every user-visible word is
@@ -689,7 +650,7 @@ async function main(): Promise<EditorView> {
   /** The widths a run can be pinned to, read once: what the width boxes take, and what a stored or linked width may be. */
   const widths = fieldWidths() as number[]
 
-  /** The stored program's raw text, or `null` where storage refuses the read, guarded as the copies' read is. */
+  /** The stored program's raw text, or `null` where storage refuses the read, which reads as a first visit. */
   const readProgramStorage = (): string | null => {
     try {
       return localStorage.getItem(PROGRAM_STORAGE_KEY)
@@ -697,6 +658,7 @@ async function main(): Promise<EditorView> {
       return null
     }
   }
+  forgetCopies()
   /**
    * THE PROGRAM STORAGE OPENS ON — Plan 7 part 6a spec §4.4: the stored one if `parseProgram` takes it, otherwise the
    * first-load example under the default encoding. A refusal is silent, since it cannot be told from a first visit
@@ -779,59 +741,51 @@ async function main(): Promise<EditorView> {
    * THE SESSION REGISTRY — the container 5d-i decision 1 presupposes (5d-i design §3.2b).
    *
    * IT IS A `SessionRegistry` FROM `sessions.ts`, NOT A `Map` DECLARED HERE, AND THE REASON THE REGISTRY IS A
-   * MODULE IS A TEST: HOW MANY SESSIONS A FORK PRODUCES is asserted on pool size, which no DOM query reaches
-   * regardless of how many panes exist to watch it. A registry that is a module is a registry a test can put
-   * two sessions in. `SessionRegistry`'s own doc carries the argument in full.
+   * MODULE IS A TEST: a registry that is a module is a registry a test can put two sessions in. `SessionRegistry`'s own
+   * doc carries the argument in full.
    */
   const sessions = new SessionRegistry()
 
   /**
-   * The session compiled from the editor's text — the only one that will ever have a `SourceMap` behind it (5d-i
-   * §3.3: `linkIndex` and `sourceSpan` exist on no scratch type).
+   * The session compiled from the editor's text, the one session the registry holds.
    */
   const SOURCE_SESSION: SessionId = 'source'
 
-  // **A BUFFER'S SESSION ID AND LABEL ARE NOT DECLARED HERE.** 5d-ii-c decision 1 makes a fork mint a
-  // buffer per call, so there is no fixed name for this file to write down before the session exists —
-  // `ScratchBuffers.fork` mints id and label together, and `SessionEntry.label`'s doc draws the line: a
-  // session is named where it is CREATED, never in the registry that holds it.
-  //
-  // THE LABEL IS WHAT THE TITLE-SELECTOR PUTS IN FRONT OF A USER, after the leg's name, which is why a
-  // buffer's is words (`copy 2`, shown as `λ · copy 2`) rather than its id —
-  // `tests/browser/view-title.test.ts` asserts the pairs are told apart by their labels and not by colour
-  // or position. The program session's label is `program` (Plan 7 part 2 spec §12); its id stays `source`.
+  // THE LABEL IS WHAT THE TITLE-SELECTOR PUTS IN FRONT OF A USER, after the leg's name, which is why it is a word
+  // rather than the session's id: the program session's label is `program` (`λ · program`, Plan 7 part 2 spec §12);
+  // its id stays `source`. `SessionEntry.label`'s doc draws the line: a session is named where it is CREATED, never in
+  // the registry that holds it.
   //
   // A `//` BLOCK RATHER THAN `/** */`: it documents no declaration, and a doc comment is read as
   // documenting whatever comes next — here `let draw`, which it says nothing about.
 
   /**
-   * BOTH `let`, NOT `const` — DECLARED HERE SO `transport` BELOW CAN CLOSE OVER THEM THROUGH THUNKS
-   * BEFORE EITHER IS ASSIGNED. `transport.events(...)` builds the click handlers the panes are
-   * CONSTRUCTED with, so `transport` has to exist before any pane does — but `linkWiring`
-   * (`link-wiring.ts`) takes `panes`, `arranged` and `viewTitle` as values, all built below
-   * `createTransport`, and `draw` (`draw.ts`) takes `linkWiring` as one, so neither can be built until
-   * after those are. `createTransport` therefore sees only thunks for both (`transport.ts`'s own doc has
-   * the reason `linkWiring` needs one at all, not only `draw`). Assigned once each, in that order, below.
+   * BOTH `let`, NOT `const` — DECLARED HERE SO `transport` BELOW CAN CLOSE OVER THEM THROUGH THUNKS BEFORE EITHER IS
+   * ASSIGNED. `transport.events(...)` builds the click handlers the panes are CONSTRUCTED with, so `transport` has to
+   * exist before any pane does — but `linkWiring` (`link-wiring.ts`) takes `panes` as a value, built below
+   * `createTransport`, and `draw` (`draw.ts`) takes `linkWiring` as one, so neither can be built until after those are.
+   * `createTransport` therefore sees only thunks for both (`transport.ts`'s own doc has the reason `linkWiring` needs
+   * one at all, not only `draw`). Assigned once each, in that order, below.
    */
   let draw: () => void
   let linkWiring: LinkWiring
 
   /**
    * THE PROGRAM'S LAST RESULT (Plan 7 part 2 spec §9) — stored by `replies.ts`'s `setProgram`, rendered by
-   * `draw()` into the strip's readout while the focused view shows the program.
+   * `draw()` into the strip's readout.
    */
   let program: ProgramResult | null = null
   const readout = createReadout(results)
 
   /**
-   * ONE WORKER PER SESSION (5d-i design §4.2), AND THE ONLY THING HERE THAT MAY SPAWN OR TERMINATE ONE.
+   * ONE WORKER PER SESSION (5d-i design §4.2), SPAWNED ON A SESSION'S FIRST BIND AND NEVER ENDED.
    *
-   * A SESSION'S THREAD IS CREATED WHERE ITS CLIENT IS AND DIES WHERE ITS CLIENT DOES.
+   * A SESSION'S THREAD IS CREATED WHERE ITS CLIENT IS.
    *
    * WHY IT IS WORTH A CLASS AT ALL: the pool's reason is damage containment, not tidiness. A wasm call
    * that aborts leaves a wasm-bindgen borrow taken and poisons the module permanently, and a worker's
    * print-stack ceiling drops after its first deep print and stays down — both are properties of the
-   * THREAD, so one worker holding three sessions shares both. `SessionPool`'s own doc carries the
+   * THREAD, so one worker holding several sessions shares both. `SessionPool`'s own doc carries the
    * measurements; this call site is just where the policy lands.
    *
    * THE FACTORY IS THIS FILE'S HALF OF THE SPLIT, and it is exactly the two decisions the pool must
@@ -853,42 +807,11 @@ async function main(): Promise<EditorView> {
     () => draw(),
   )
 
-  /**
-   * THE SCRATCH BUFFERS, OF EVERY LEG — 5d-i design §4.3's fork, and the thing that makes a
-   * second session reachable.
-   *
-   * ONE OBJECT RATHER THAN A `fork`/`retire` PAIR OF CLOSURES HERE, and the reason is the test the
-   * plan names: how many sessions a fork produces has to be asserted on POOL SIZE, which is not
-   * reachable from the DOM. The pool-size assertion needs `tests/node`, whatever the DOM can show.
-   * `scratch.ts` is a module a test can drive with two slots and fake ports; this line is the app
-   * taking the same object.
-   *
-   * THE REPLY HANDLER IS THE BUFFERS' OWN, NOT `onReply`. A buffer has one leg, no results pane, no
-   * link index and no `compiled` reply, so routing its replies to `onReply` (`replies.ts`) would mean
-   * `if (session === …)` guards inside a function whose whole point (see its doc) is that a reply
-   * belongs to the session whose worker sent it. Two handlers, one per session kind, is the same split
-   * 5d-i §3.2 draws at the port.
-   *
-   * IT NAMES THE BUFFER THE REPLY CAME FROM. `ScratchBuffers` curries each buffer's own id in at
-   * `pool.bind`, so the name arrives with the reply and this file has none to supply.
-   */
-  const scratchpad = new ScratchBuffers({
-    registry: sessions,
-    pool,
-    historyBytes: HISTORY_BYTES,
-    onReply: (session: SessionId, reply: RunReply) => replies.onScratchReply(session, reply),
-  })
-
-  // THE SOURCE SESSION, AND NOT THE ONLY ENTRY THE APP HOLDS. A restored page warms the buffers
-  // its restored bindings name, below, so a session the user forked on a previous page load can be in
-  // the registry before the first `applyLayout()` — created by a reload rather than by a click. A buffer
-  // ends (5d-ii-c design §4.3) only where `ScratchBuffers.retire` is called — **which is the header list's
-  // retire handler below, and nothing else in `src/`** (5d-ii-c decision 2: one ending, explicit, on a
-  // control the user aims at).
+  // THE SOURCE SESSION, THE ONE ENTRY THE APP HOLDS.
   //
   // **THE SELECTOR IS ON SCREEN FROM THE FIRST PAINT.** The title-selector lists `(leg, session)` PAIRS,
   // and this one entry has all three legs, so it contributes three pairs on its own, and `viewHeader`'s
-  // `paint` makes a title a selector rather than plain text from two pairs up, with nothing forked.
+  // `paint` makes a title a selector rather than plain text from two pairs up.
   //
   // ASSEMBLED HERE, BELOW `pool`, because an entry owns its client and the client cannot exist before its
   // worker does. The legs are initialised inline because a session's legs and its client are one thing,
@@ -896,41 +819,33 @@ async function main(): Promise<EditorView> {
   // before any pane is constructed — `transport.events(...)` below resolves through the registry, and
   // although every handler it builds runs later, `entryOf` would throw if one somehow fired first.
   //
-  // `detached: false`, AND IT IS THE ONLY ENTRY THAT MAY SAY SO. This is the session with a
-  // `SourceMap` behind it; 5d-i §3.3 puts `linkIndex` and `sourceSpan` on no scratch type, so every
-  // buffer's entry is `detached: true` by construction — `ScratchBuffers.fork` writes the
-  // literal and nothing derives it, for the reason `SessionEntry.detached`'s own doc gives.
-  //
   // THE REPLY HANDLER NAMES ITS SESSION. Nothing on the wire does (5d-i §3.2 — the port is the id), so the
   // binding between a client and the legs its frames land in is made here, at the one place that
   // knows both. `pool.bind` is what pairs that handler with a thread; this file never sees the port.
   sessions.add({
     id: SOURCE_SESSION,
     label: 'program',
-    detached: false,
     // A LINK'S POSITIONS HEAR EACH REPLY AFTER THE APP HAS TAKEN IT IN, so a frames reply's frames are in their ring.
     client: pool.bind(SOURCE_SESSION, (reply: RunReply) => {
       replies.onReply(SOURCE_SESSION, reply)
       positions.onReply(reply)
     }),
-    // EVERY LEG, AND THE `satisfies` IS WHAT SAYS SO. `SessionLegs` makes each leg optional because a copy
-    // has one (its own doc), so a leg left out of this literal would still typecheck, and the program would
-    // have no such leg to record, to bind a view to, or to offer in a selector. `Required` makes a leg with no
-    // entry here a type error instead (`legs.ts` has the class of bug).
+    // EVERY LEG, AND THE `satisfies` IS WHAT SAYS SO. `SessionLegs` makes each leg optional (its own doc), so a leg
+    // left out of this literal would still typecheck, and the program would have no such leg to record, to bind a view
+    // to, or to offer in a selector. `Required` makes a leg with no entry here a type error instead (`legs.ts` has the
+    // class of bug).
     legs: {
       lambda: freshLeg('lambda', HISTORY_BYTES, { available: false, reason: '' }),
       rxm: freshLeg('rxm', HISTORY_BYTES, { available: false, reason: '' }),
       tm: freshLeg('tm', HISTORY_BYTES, { available: false, reason: '' }),
       clif: freshLeg('clif', HISTORY_BYTES, { available: false, reason: '' }),
     } satisfies Required<SessionLegs>,
-    // NOTHING COMPILED YET, AND THIS SESSION IS THE ONE THAT EVER WILL — `compiled` is the reply the
-    // scratch types cannot send (5d-i §4.1), so the scratchpad's own entry states the same `null` and keeps
-    // it. See `SessionEntry.programs` for what reads this and when.
+    // NOTHING COMPILED YET: `compiled` fills each leg's program. See `SessionEntry.programs` for what reads this and
+    // when.
     programs: { rxm: null, tm: null, clif: null },
-    readings: { rxm: null, tm: null },
   })
   /** The λ trees the views draw (spec §4) — one cache, asked through each session's own client. */
-  const trees = new LambdaTrees((id) => (sessions.has(id) ? sessions.entryOf(id).client : undefined))
+  const trees = new LambdaTrees((id) => sessions.entryOf(id).client)
   /** `replies.ts`'s `UnseenViews`: views it adds, and `draw()` seeds from their session and removes. */
   const unseen: UnseenViews = new WeakSet()
   /**
@@ -967,24 +882,13 @@ async function main(): Promise<EditorView> {
 
   /**
    * TRANSPORT, BEFORE ANY PANE — its `events(...)` is what each pane is constructed with, so it has
-   * to exist first. `scratchpad` is a real value (constructed above, and nothing later reassigns it);
-   * `draw` and `linkWiring` are thunks, for the reason the `let`s above give.
+   * to exist first. `draw` and `linkWiring` are thunks, for the reason the `let`s above give.
    */
   const transport = createTransport({
-    lspClient,
-    // READ AT BLUR, not captured, so toggling the setting takes effect without remounting an editor. Not while a
-    // rebuild that gives the focus back is under way: that blur is not the user's (`focusKept`'s doc).
-    formatOnBlur: () => formatOnBlur && !focusKept,
-    // A VALUE, NOT A THUNK — an editor JOINS the setting rather than reading it. Its own doc says why.
-    keymap: keymapSetting,
-    // A VALUE, NOT A THUNK — built above `transport` for the ordering reason the doc on `captureTables` and
-    // `grammars` gives.
-    colour: colourFor,
     sessions,
-    scratchpad,
     draw: () => draw(),
-    // A THUNK OVER `ws`, WHICH `main()` DECLARES FURTHER DOWN, and safe for the reason `onBuffersChanged`
-    // below is: the player reads it only during playback, long after `main()` has run.
+    // A THUNK OVER `ws`, WHICH `main()` DECLARES FURTHER DOWN, and safe because the player reads it only during
+    // playback, long after `main()` has run.
     speed: () => ws.speed,
     setSpeed: (s: Speed) => {
       ws = { ...ws, speed: s }
@@ -1008,17 +912,6 @@ async function main(): Promise<EditorView> {
       choose: (listing) => chooseClifListing(listing),
     },
     linkWiring: () => linkWiring,
-    // A THUNK FOR THE SAME REASON `draw` IS ONE, one step further down the file: `refreshBuffers` is
-    // declared below, after the header list it refreshes, which is itself declared after `paneHost`.
-    // The body is not evaluated until a fork actually happens.
-    onBuffersChanged: () => refreshBuffers(),
-    // A THUNK FOR THE SAME REASON AS THE LINE ABOVE, ONE STEP FURTHER: `persistBuffers` is declared
-    // beside `writeBuffersStorage`, below this call, because it reads `panes` and `scratchpad`.
-    onBuffersPersist: () => persistBuffers(),
-    notify: (text: string) => notices.notify(text),
-    // A CLOSURE OVER `custody`, WHICH IS BUILT BELOW AFTER THE PANE COLLECTION IT READS, and read only at a press of
-    // `↺`, long after `main()` has run.
-    flushEdit: (session: SessionId) => custody.flush(session),
   })
 
   /**
@@ -1028,24 +921,6 @@ async function main(): Promise<EditorView> {
    * read it live, which is what makes them tolerant of it being empty at construction time.
    */
   const panes = new PaneCollection()
-
-  /**
-   * WHERE EACH SCRATCH EDITOR IS AND WHERE IT BELONGS — `editor-custody.ts`'s own doc has the argument
-   * for why the two maps behind this (`editorOwner`, the claims; `heldEditors`, the editors in custody)
-   * and the two functions that read them live there rather than as four names in this scope.
-   *
-   * `panes` IS HANDED OVER EMPTY, exactly as `linkWiring` below takes it: `applyLayout` is the only
-   * thing that ever populates the collection, and nothing in that module reads it before `applyLayout`'s
-   * first call has run. `applyLayout` is `pane-host.ts`'s, and it is the caller that knows a layout
-   * tree exists — custody is told what happened (`hold`, `claim`, `dropClaimsOn`) and asked to settle
-   * (`reconcile`), never handed the tree.
-   *
-   * `collapsedOf` READS `scratchpad`, THE ONE FIELD `reconcileEditors` NEEDS FROM IT. `scratchpad` is
-   * constructed above and never reassigned, so a plain closure over it is a value in the same sense
-   * `panes` and `sessions` are; `editor-custody.ts`'s own doc has the argument for why this is a
-   * function and not the whole `ScratchBuffers` object.
-   */
-  const custody = createEditorCustody({ panes, sessions, collapsedOf: (session) => scratchpad.collapsedOf(session) })
 
   /**
    * THE SOURCE PANE'S HOST, PRE-SEEDED RATHER THAN LEFT TO `hostFor`'s GENERIC BRANCH. `#editor` is the
@@ -1059,10 +934,9 @@ async function main(): Promise<EditorView> {
    * **`#link-status` DOES NOT MOVE IN HERE BESIDE IT.** This host ships a close control, and `hostFor`'s
    * detach-not-destroy rule takes the whole subtree out of the document when the source leaf closes;
    * `createLinkWiring` captures the status element once at construction, so every write after that close
-   * would land in a node that had left the page. Of the line's two jobs, the views-show-copies sentence is
-   * app-wide, and what is pinned is about a construct lit in every view rather than about this one. So it
-   * stays where `index.html` declares it — inside `footer.strip`, after `#results` (spec §9), outside
-   * every host `hostFor` can detach.
+   * would land in a node that had left the page. What is pinned is about a construct lit in every view rather than
+   * about this one, so the line stays where `index.html` declares it — inside `footer.strip`, after `#results`
+   * (spec §9), outside every host `hostFor` can detach.
    */
   const sourceHost = document.createElement('section')
   sourceHost.className = 'pane'
@@ -1073,8 +947,7 @@ async function main(): Promise<EditorView> {
    * THE SOURCE VIEW'S OWN `✕` — `splitLeaf`'s doc records why source is refused a SPLIT
    * and not a close: there is one editor, so there is nothing to duplicate into, but closing the source
    * pane is exactly `hostFor`'s detach-not-destroy rule doing its job — the editor and its text wait in
-   * `hosts` and come back intact the moment the leaf does. `reset preset`
-   * (`tests/browser/two-lambda-panes.test.ts`'s "keeps the program" test) brings it back at the cost of
+   * `hosts` and come back intact the moment the leaf does. `reset preset` brings it back at the cost of
    * every other pane on the page; a split from any other view's menu (`tests/browser/pane-picker.test.ts`)
    * brings it back at no cost, and the header's `source` toggle brings it back too.
    *
@@ -1097,9 +970,7 @@ async function main(): Promise<EditorView> {
    */
   const layoutChanged = (e: LayoutEvent): void => {
     const say = (c: PaneChoice): string =>
-      c.kind === 'source'
-        ? 'source'
-        : pairLabel({ leg: c.kind, label: sessions.has(c.session) ? sessions.entryOf(c.session).label : 'a copy' })
+      c.kind === 'source' ? 'source' : pairLabel({ leg: c.kind, label: sessions.entryOf(c.session).label })
     if (e.kind === 'added') notices.notify(`view added — ${say(e.shows)}`)
     else if (e.kind === 'closed') notices.notify(`view closed — ${say(e.showed)}`)
     else notices.notify(`view now shows ${say(e.shows)}`)
@@ -1143,8 +1014,6 @@ async function main(): Promise<EditorView> {
     notices.notify(`no room to split ${title} — close a view or ${remedy}`)
   }
   const sourceMenu = viewMenu(sourceHeader.actions, {
-    // The source view always has its editor, so unlike a copy's this never comes and goes —
-    // `setFormattable(true)` is set once below rather than tracked.
     format: () => {
       const asked = view.state.doc
       lspClient
@@ -1166,20 +1035,14 @@ async function main(): Promise<EditorView> {
   })
   const sourceLayout = { update: (canClose: boolean, canSplit: boolean) => sourceMenu.setLayout(canClose, canSplit) }
   sourceHost.append(sourceHeader.el, editorHost)
-  /**
-   * THE PAGE'S ONE PRESS STATE, AND THE DRAW EVERY VIEW'S `focusin` MAKES THROUGH IT: at once, or once a pointer press
-   * in progress has ended (`focus-draw.ts`). The source view's listener below and `pane-host.ts`'s `hostFor` share
-   * this one, so a press that moves the focus between them is the same press to both.
-   */
-  const focusDraw = createFocusDraw(() => draw())
-  // THE SOURCE VIEW CAN HOLD THE FOCUS TOO (spec §3: `focused` is any leaf) — it drives the readout. Not
-  // `markActive`: that one is per leg, and the source view is on neither (`hostFor`'s own comment in
-  // `pane-host.ts` has the argument, and the one for drawing through `focusDraw`).
+  // THE SOURCE VIEW CAN HOLD THE FOCUS TOO (spec §3: `focused` is any leaf): the Stage shows the focused view, and
+  // a rebuild that takes the focus off the page gives it back there. Not `markActive`: that one is per leg, and the
+  // source view is on neither (`hostFor`'s own comment in `pane-host.ts` has the argument).
   sourceHost.addEventListener('focusin', () => {
     if (ws.focused === SOURCE_LEAF) return
     ws = { ...ws, focused: SOURCE_LEAF }
     persistWorkspace()
-    focusDraw()
+    draw()
   })
 
   // `localStorage` ACCESS IS GUARDED, same reason and same shape as `readAppearanceStorage`/
@@ -1202,117 +1065,11 @@ async function main(): Promise<EditorView> {
     }
   }
 
-  // A FAILED READ IS SILENT, for `parseBuffers`'s own stated reason: it is indistinguishable from a
-  // first visit, and a banner on every load after a schema bump is worse than what it reports.
-  const readBuffersStorage = (): string | null => {
-    try {
-      return localStorage.getItem(BUFFERS_STORAGE_KEY)
-    } catch {
-      return null
-    }
-  }
-  /** The notice line's resting sentence about storage, in two halves: the copies' and the program's (`unsaved.ts`). */
+  /**
+   * The notice line's resting sentence about storage, the program's (`unsaved.ts`). **A RESTING STATE, NOT A NOTICE**:
+   * every notice is replaced by the next gesture's, and a refused write lasts as long as the storage's condition does.
+   */
   const unsaved = createUnsaved((line) => notices.rest(line))
-
-  /**
-   * Say that copies are no longer being saved.
-   *
-   * **THE NOTICE LINE'S RESTING STATE RATHER THAN A BANNER OR A NOTICE**, because the notice line is the
-   * surface that already carries the other things this app has to tell a user about a gesture that did
-   * not produce a visible change — a refused copy, a refused resume — and `banner.ts` is the wasm-load
-   * and worker-spawn failure surface, which this is not. **A NOTICE WOULD NOT LAST, WHICH IS WHY THIS IS
-   * `rest` AND NOT `notify`** (`notice.ts`'s `Notices.rest`): every notice is replaced by the next one,
-   * and nearly every gesture makes one — a copy created, a view closed — so the one condition here that
-   * genuinely lasts would have been on screen for about one gesture. As a resting state it is what the
-   * line says whenever nothing else is being said, for as long as the condition holds, and it is said in
-   * the live region the moment it begins.
-   *
-   * **AND IT IS TAKEN BACK WHEN A WRITE SUCCEEDS**, which is what `writeBuffersStorage` does below: the
-   * user may have cleared storage or deleted copies since, and a warning that outlives its condition
-   * teaches a reader to ignore the line. Setting it twice with the same words is a no-op, so "reported
-   * twice" is not a state this can reach.
-   * The wording leads with the CONSEQUENCE and not the exception: `QuotaExceededError` is true and useless,
-   * and what the user needs to know is that closing the tab now loses work. The cause follows in words —
-   * the storage is full, or blocked (`unsaved.ts`'s `refusalOf`) — because the remedies differ.
-   *
-   * **IT NEEDS ONLY `notices`, WHICH EXISTS BEFORE `init()`**, so no caller has to be ordered after
-   * `linkWiring` and `draw()`, both `let`s that stay `undefined` until further down this function.
-   *
-   * **HALF OF ONE SENTENCE** (Plan 7 part 6a spec §4.3): the program's writer below reports into the same
-   * resting line, and `unsaved.ts` words whichever of the two is failing.
-   */
-  const reportStorageFailure = (why: Refusal): void => {
-    unsaved.refused('copies', why)
-  }
-
-  /**
-   * **THIS WRITER REPORTS WHERE THE LAYOUT'S WRITER SWALLOWS, AND THE ASYMMETRY IS DESIGN §4.8.** That
-   * one's comment reads "the layout still works for the rest of this page load, it just will not survive
-   * a reload" — a fair trade for a preference. A buffer is WORK, and a user told nothing finds out at
-   * the next reload, by absence.
-   *
-   * **`hasBuffers` IS THE PAYLOAD'S OWN ANSWER TO "IS THERE ANYTHING TO LOSE", HANDED IN RATHER THAN
-   * RE-DERIVED FROM `raw`.** `persistBuffers` already has `PersistedBuffers` in hand before it stringifies
-   * it; parsing `raw` back here to ask the same question would be a second, slower way to say what the
-   * caller already knows. **THE GUARD EXISTS BECAUSE `refreshBuffers()`'s FIRST CALL, AT THE END OF
-   * `main()`'s START-UP, WRITES A PAYLOAD FOR EVERY USER, AN EMPTY ONE FOR A USER WHO HAS NEVER FORKED**
-   * — see the doc on `refreshBuffers`'s own `persistBuffers()` call. Design §4.8's argument for reporting
-   * at all is "a lost buffer is work"; read the other way, no buffers means no work, and a user with
-   * nothing to lose must not be told their (nonexistent) buffers are not being saved.
-   */
-  const writeBuffersStorage = (raw: string, hasBuffers: boolean): void => {
-    try {
-      localStorage.setItem(BUFFERS_STORAGE_KEY, raw)
-      // THE CONDITION ENDED, SO THE WARNING DOES — its copies half: `reportStorageFailure`'s own doc has the
-      // argument, and a program that is still not being saved keeps its own half.
-      unsaved.saved('copies')
-    } catch (thrown) {
-      if (hasBuffers) reportStorageFailure(refusalOf(thrown))
-    }
-  }
-
-  /**
-   * Write the buffers to storage — called at every moment the payload would say something different:
-   * a fork, a retire and its undo, a recorded term, an edit, a collapse, a rebind, and each `applyLayout()`
-   * (`pane-host.ts`), which is where a view is built or dropped, the first of them turning restored bindings
-   * into real panes.
-   *
-   * **`applyLayout()` WRITES WHETHER OR NOT IT BUILT OR DROPPED A VIEW**, as it writes the workspace: once
-   * a gesture, a Stage tab's and a divider's included.
-   *
-   * A WARM AND A COOL REACH IT TOO AND CHANGE NOTHING IT WRITES, which is a fact about the FORMAT
-   * rather than a redundant call: `snapshot` does not carry `warm`, because a buffer's temperature on
-   * the next page load is decided by which panes come back (`ScratchBuffers.snapshot`'s own doc). They
-   * arrive here through `refreshBuffers`, which the temperature handler shares with the retire handler
-   * line for line — see that function for why the uniformity is worth one write that says the same
-   * thing twice.
-   *
-   * THE BINDINGS ARE READ OFF THE PANES AT WRITE TIME rather than tracked separately, because
-   * `PaneCollection` already holds them and a second copy is a second thing to be wrong — the same
-   * argument `panes.ts` makes for reading bindings through the slot instead of indexing by session.
-   *
-   * **`SOURCE_SESSION` IS OMITTED RATHER THAN STORED, WHICH IS WHAT MAKES THE ABSENT-KEY CASE THE
-   * DEFAULT CASE.** A pane on the source session is what every leaf gets from `applyLayout`'s
-   * `?? SOURCE_SESSION` when nothing names it, so writing those entries down would be persisting the
-   * fallback — and `parseBuffers` would then have to reject them, since it refuses a binding naming a
-   * session no restored buffer holds.
-   *
-   * **NOT CALLED FROM `draw()`.** It runs per frame during playback, and `JSON.stringify` over every
-   * buffer's text on every one of those frames is precisely the cost `buffers-store.ts`'s two-key split
-   * exists to avoid, reintroduced on a different path.
-   */
-  const persistBuffers = (): void => {
-    const bindings: Record<LeafId, SessionId> = {}
-    for (const p of panes.all()) {
-      if (p.slot.binding.session !== SOURCE_SESSION) bindings[p.id] = p.slot.binding.session
-    }
-    // `payload` IS BUILT ONCE AND READ TWICE — for the bytes `writeBuffersStorage` writes and for
-    // whether it has anything in it worth a report on the way out. `writeBuffersStorage`'s own doc has
-    // the argument for why that second question travels as a boolean rather than being re-asked of
-    // `raw` inside the catch.
-    const payload = scratchpad.snapshot(bindings)
-    writeBuffersStorage(serializeBuffers(payload), payload.buffers.length > 0)
-  }
 
   /**
    * What a reload would open on: the last program a write stored, or the one storage opened on while none has been —
@@ -1325,28 +1082,27 @@ async function main(): Promise<EditorView> {
    * Store the program — as each compile posts, with what it posted and the listing in force, and at each listing chosen
    * (Plan 7 part 6a spec §4.3).
    *
-   * **A REFUSED WRITE IS REPORTED ONLY WHILE THE PROGRAM DIFFERS FROM WHAT A RELOAD WOULD RESTORE** (spec row 17), as
-   * the copies' writer reports only when there are copies to lose (`hasBuffers`, above). A program a reload would not
-   * give back is work not yet saved; the first-load example, or a stored program only looked at, is not — so a visitor
-   * on blocked storage who only looks at the example sees no resting line, and one who edits it is told from their
-   * first edit's write on. **COMPARED AT EVERY WRITE RATHER THAN LATCHED**, so an edit undone before its write never
-   * counts, and a program edited away and back is taken back off the line: a reload would restore exactly what the page
-   * shows. That refines row 17's "changed from what was loaded", under which a change once made was reported for the
-   * rest of the page load.
+   * **A REFUSED WRITE IS REPORTED ONLY WHILE THE PROGRAM DIFFERS FROM WHAT A RELOAD WOULD RESTORE** (spec row 17). A
+   * program a reload would not give back is work not yet saved; the first-load example, or a stored program only looked
+   * at, is not — so a visitor on blocked storage who only looks at the example sees no resting line, and one who edits
+   * it is told from their first edit's write on. **COMPARED AT EVERY WRITE RATHER THAN LATCHED**, so an edit undone
+   * before its write never counts, and a program edited away and back is taken back off the line: a reload would
+   * restore exactly what the page shows. That refines row 17's "changed from what was loaded", under which a change
+   * once made was reported for the rest of the page load.
    */
   const writeProgramStorage = (program: StoredProgram): void => {
     try {
       localStorage.setItem(PROGRAM_STORAGE_KEY, serializeProgram(program))
       restorable = program
-      unsaved.saved('program')
+      unsaved.saved()
     } catch (thrown) {
       const differs =
         program.text !== restorable.text ||
         program.encoding !== restorable.encoding ||
         program.width !== restorable.width ||
         program.listing !== restorable.listing
-      if (differs) unsaved.refused('program', refusalOf(thrown))
-      else unsaved.saved('program')
+      if (differs) unsaved.refused(refusalOf(thrown))
+      else unsaved.saved()
     }
   }
 
@@ -1440,8 +1196,7 @@ async function main(): Promise<EditorView> {
    *
    * **A CLOSE OR A RESET LEAVES `ws.focused` NAMING A LEAF THAT IS GONE.** The WRITE repairs it too
    * (`serializeWorkspace` falls back to `defaultFocus`), but a repair at the write alone would leave memory
-   * and storage disagreeing, and the readout, which resolves `focused` through `panes.get`, would quietly
-   * fall back to the program while some other view had the focus.
+   * and storage disagreeing.
    */
   const focusedLeaf = (): LeafId => (leaves(tree).some((l) => l.id === ws.focused) ? ws.focused : defaultFocus(tree))
 
@@ -1455,8 +1210,7 @@ async function main(): Promise<EditorView> {
    * would inherit the closed view's panel state — from memory, since the write had already dropped it.
    * The same clicks would then behave differently depending on whether the page had been reloaded in
    * between. A λ or TM view's display is kept per leaf beside its panels and is dropped here for the same
-   * reason. `editor-custody.ts`'s `editorOwner` records the identical hazard for claims and answers it
-   * the same way, in `applyLayout`'s creation pass.
+   * reason.
    */
   const normaliseWorkspace = (): void => {
     const live = liveLeaves(tree, ws.arrangements)
@@ -1502,7 +1256,6 @@ async function main(): Promise<EditorView> {
   const paneHost = createPaneHost({
     root,
     panes,
-    custody,
     transport,
     sourceSession: SOURCE_SESSION,
     sourceLayout,
@@ -1533,7 +1286,6 @@ async function main(): Promise<EditorView> {
     // `draw: () => draw()` above already takes for the same reason.
     viewTitle: (id) => viewTitle(id),
     persist: persistWorkspace,
-    persistBindings: persistBuffers,
     setFocused: (id: LeafId) => {
       if (ws.focused === id) return
       ws = { ...ws, focused: id }
@@ -1554,94 +1306,12 @@ async function main(): Promise<EditorView> {
     layoutChanged,
     refused,
     draw: () => draw(),
-    focusDraw,
     // THE SESSION QUESTIONS `pane-host.ts` ASKS OF THE REGISTRY, ANSWERED HERE BECAUSE THIS FILE IS WHERE
     // THE REGISTRY IS — that module's own doc argues why it takes these rather than the registry it would
     // otherwise need. `entryOf` throws for a session nothing registered, which is the policy `legOf`
     // already sets for the same class of wiring bug.
     programOf: <K extends keyof LegProgram>(session: SessionId, leg: K) => sessions.entryOf(session).programs[leg],
-    readingOf: <K extends keyof LegReading>(session: SessionId, leg: K) => sessions.entryOf(session).readings[leg],
-    // AND ITS SESSION QUESTION OF `ScratchBuffers`, ANSWERED HERE FOR THE SAME REASON — this file is where
-    // `ScratchBuffers` is, and `pane-host.ts` takes a function from a `SessionId` to one value rather than
-    // the class itself. `editorSeed` answers `null` for everything that is not a warm buffer, which is
-    // every session that reaches it on the source leg.
-    scratchSeedOf: (session: SessionId) => scratchpad.editorSeed(session),
   })
-
-  /**
-   * **RESTORE ORDER — design §4.9, and the order is load-bearing.** Buffers first so that every id a
-   * binding could name exists; bindings second, into `pendingBinding`, which the first `applyLayout()`
-   * below reads; warming third and last, because a warm reaches `draw()`, which is not assigned until
-   * much further down this function — see the warming loop's own comment, at the end of `main()`.
-   *
-   * HERE, BESIDE `seedLeafCounter`, FOR ITS REASON: a restore is a moment ids the app did not mint itself can
-   * enter, and both of these are exactly that. (An opened link's tree is the other, through `showWorkspace`, and it
-   * keeps no bindings.) It sits BELOW `createPaneHost` rather than beside `seedLeafCounter` only because
-   * `seedBinding` is that object's method.
-   *
-   * **A NULL HERE IS EVERY FAILURE AT ONCE, AND THAT IS THE POINT** (`buffers-store.ts`'s
-   * `parseBuffers`): nothing stored, a version bump, unparseable JSON, a duplicate id, a stale counter,
-   * a binding naming a buffer that is not in the payload. All of them land on "no buffers and no
-   * bindings", which is a fresh page, reached without a line of reconciliation.
-   *
-   * **ONE FAILURE IS NOT AMONG THEM AND IS REFUSED HERE INSTEAD: A BINDING THAT NAMES A LEAF WHOSE
-   * PANE KIND DISAGREES WITH THE BUFFER'S OWN LEG.** `parseBuffers` cannot catch it — the payload is a
-   * `Record<LeafId, SessionId>` and carries no leg, deliberately (design §4.1), so validating it would
-   * need the layout tree, which that module is free of on purpose. `SessionRegistry.legOf` throws for a
-   * leg a session lacks — so a binding that reached a `tm` leaf naming a λ-only buffer (or a `lambda`
-   * leaf naming a TM-only one) would build a `PaneSlot` requesting a leg that buffer's session does not
-   * have, and `draw.ts`'s per-pane loop has no `try`/`catch`: the first frame throws and takes every
-   * subsequent one with it. `tests/browser/buffer-restore.test.ts` seeds exactly that binding.
-   *
-   * **`applyLayout` WRITES THE BUFFERS AS WELL AS THE TREE**, so a pick that changes a bound leaf's KIND
-   * stores no binding the tree disagrees with (`tests/browser/bindings-stored.test.ts` has the pick). The
-   * guard is for a payload that disagrees with its tree all the same — a hand-edited one, or one a build
-   * from before that stored — and it is what makes one harmless rather than fatal; the first
-   * `applyLayout()` then drops the binding from storage, because the pane it named is on the
-   * source session.
-   *
-   * **THE LEAF AND THE NAMED BUFFER MUST AGREE ON A LEG, WHICH IS THE INVARIANT AND NOT `l.pane ===
-   * 'lambda'`.** `ScratchBuffers` mints a `tm` buffer (`fork`/`forkBlank`, given `'tm'`), so "a buffer is
-   * λ-only" is not a fact this guard can lean on. Checking only the LEAF's pane kind, with no look at the
-   * NAMED BUFFER's own `leg`, would both under- and over-refuse: it would drop every legitimate `tm`-leaf
-   * binding on a `tm` leaf, and it would ADMIT a hand-edited payload pairing a `tm`-leg buffer's id with a
-   * `lambda` leaf's binding, which reaches `pane-host.ts`'s `applyLayout`, builds `PaneSlot('lambda',
-   * session)` for a session whose only leg is `tm`, and throws out of `SessionRegistry.legOf` in the first
-   * `draw()` — the crash class `buffer-restore.test.ts`'s own `SEEDED` fixture pins from the mirrored
-   * direction (a `lambda`-leg buffer bound to a `tm` leaf). `legOfLeaf`/`legOfBuffer` below check the
-   * invariant: the binding survives only when both legs agree.
-   */
-  const restoredBuffers = parseBuffers(readBuffersStorage())
-  /**
-   * The restored bindings the tree can actually take — what the warming loop below warms, and what the
-   * claiming loop below `applyLayout()` gives an editor home (see that loop's own comment for why it is
-   * not here beside `seedBinding`, though both read this same list).
-   */
-  const restoredBindings: [LeafId, SessionId][] = []
-  /**
-   * The restored bindings a link opened whole at start-up dropped (Plan 7 part 6a spec §5.3, row 14): read against the
-   * stored tree they were written with, and seeded nowhere, so no copy is warmed. The open's *undo* moves them back.
-   */
-  const droppedBindings: [LeafId, SessionId][] = []
-  if (restoredBuffers !== null) {
-    scratchpad.restore(restoredBuffers)
-    const legOfLeaf = new Map(
-      leaves(storedWorkspace.tree).flatMap((l) => {
-        const leg = legOfPane(l.pane)
-        return leg === null ? [] : [[l.id, leg] as const]
-      }),
-    )
-    const legOfBuffer = new Map(restoredBuffers.buffers.map((b) => [b.id, b.leg] as const))
-    for (const [leaf, session] of Object.entries(restoredBuffers.bindings)) {
-      if (legOfLeaf.get(leaf) !== legOfBuffer.get(session)) continue
-      if (startLink?.kind === 'whole') {
-        droppedBindings.push([leaf, session])
-        continue
-      }
-      restoredBindings.push([leaf, session])
-      paneHost.seedBinding(leaf, session)
-    }
-  }
 
   // `sourceHost`'s own doc above has the argument for why this file builds that host rather than leaving
   // it to `hostFor`'s generic branch, and for why the seeding has to happen before `applyLayout` first
@@ -1656,7 +1326,7 @@ async function main(): Promise<EditorView> {
    * **THE GLYPH IS WRITTEN HERE AS WELL AS IN `index.html`**, because this replaces the button's whole
    * content on every preset change — a span placed only in the markup would survive exactly until the
    * first one. `aria-hidden`, so the accessible name is the preset's name alone: a bare `▾` in a spoken
-   * sentence reads as "down-pointing triangle" (spec §12), and `copies ▾` already does it this way.
+   * sentence reads as "down-pointing triangle" (spec §12), and `examples ▾` does it the same way.
    */
   const paintWorkspaceButton = (): void => {
     const caret = document.createElement('span')
@@ -2009,12 +1679,7 @@ async function main(): Promise<EditorView> {
     // one mounted, and `focusPane` on a detached host does nothing; `focusView` records the focus BEFORE the
     // rebuild so the stage mounts the view this line means. `defaultFocus` rather than `focusedLeaf()`
     // because the leaf the user was in may not exist in `defaultLayout()`'s tree at all.
-    //
-    // **`resetViews`, WHICH IS `focusView` IN THAT ORDER, AND MORE — THE NOTICE IS WHY.** `defaultLayout()` re-mints
-    // leaf ids a view on a copy may already hold, and `applyLayout` keeps a pane whose id and kind survive — so views
-    // would stay on their copies while the notice said the default views were back. `resetViews` rebuilds each of
-    // them on the program, as a fresh preset's views are; the copies themselves stay in the copies menu.
-    paneHost.resetViews(defaultFocus(tree))
+    paneHost.focusView(defaultFocus(tree))
     notices.notify(`${presetName(preset)} reset — the default views are back`)
   })
 
@@ -2146,15 +1811,15 @@ async function main(): Promise<EditorView> {
    * another encoding by hand does not put the earlier one back either — so a pick's encoding and width are the
    * notice's `undo` to put back, and otherwise the picker's and the width boxes' to change.
    *
-   * **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE**, as a delete's undo does: the
+   * **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE**, as an open's undo does: the
    * source editor, where the program came back — or, where no view shows the source and the editor is off the page,
    * `examples ▾`, where the pick was made. An editor off the page takes no focus, and `examples ▾` takes it then
    * whether or not the focus was on the undo. **AN UNDO THAT GOES UNUSED GIVES THE FOCUS THERE TOO**: one the focus is
    * on when it runs out, or is drawn over by a notice with no action of its own, names `examples ▾` as its `fallback`,
-   * and not the copies button the notice line falls back to for a copy's undo, which has nothing to do with the program.
+   * and not the line's own, `settings`, which has nothing to do with the program.
    *
-   * **AND IT SAYS SO, ONCE THE FOCUS HAS MOVED**, on the notice line and in the live region, as a delete's undo says
-   * `… restored at step 0`: umbrella §4's rule that a gesture's result is said in the one live region. Said after the
+   * **AND IT SAYS SO, ONCE THE FOCUS HAS MOVED**, on the notice line and in the live region, as an open's undo says
+   * `put back the program`: umbrella §4's rule that a gesture's result is said in the one live region. Said after the
    * focus lands, so the sentence is not spoken over by the editor or the button taking it.
    */
   const openExample = (example: Example): void => {
@@ -2226,7 +1891,6 @@ async function main(): Promise<EditorView> {
       menu: shareMenu,
       payload: sharePayload,
       base: () => `${location.origin}${location.pathname}`,
-      copies: () => LEGS.flatMap((leg) => linkWiring.detachedPanes()[leg].copies),
       // `undefined` OUTSIDE A SECURE CONTEXT, though the DOM's types say otherwise: the clipboard is exposed only there.
       clipboard: () => navigator.clipboard as Clipboard | undefined,
       notify: (text) => notices.notify(text),
@@ -2235,18 +1899,17 @@ async function main(): Promise<EditorView> {
 
   /**
    * What an open replaced, for its *undo* to put back (spec §5.5): the program; and where the link opened whole, the
-   * workspace and each view that showed a copy, by leaf and copy.
+   * workspace.
    */
   type Replaced = {
     readonly program: StoredProgram
     readonly workspace: Workspace | null
-    readonly copies: readonly (readonly [LeafId, SessionId])[]
   }
 
   /**
    * Put `next` in force as the workspace: the tree and the rest of it, its switches applied, the inspector and the
-   * source outline open or shut as it says, and every view built again from it on the program (`PaneHost.rebuildViews`,
-   * whose doc has why every view and not only those showing a copy). The copies stay in the copies menu (row 14).
+   * source outline open or shut as it says, and every view built again from it on the program
+   * (`PaneHost.rebuildViews`).
    */
   const showWorkspace = (next: Workspace): void => {
     const { tree: nextTree, ...rest } = next
@@ -2259,13 +1922,10 @@ async function main(): Promise<EditorView> {
     sourceRegions.unmaximise()
     sourceRegions.setSizes(ws.panelSizes[SOURCE_LEAF] ?? {})
     paneHost.rebuildViews(focusedLeaf())
-    refreshBuffers()
   }
 
   /**
-   * Undo an open — spec §5.5: the program as it ran, and where it opened whole the tree, the workspace and
-   * each view that showed a copy, moved back onto it as a delete's undo moves them (`PaneHost.moveBack`). A copy the
-   * open left cold, at start-up, is warmed first; one the cap refuses stays paused, and its views on the program.
+   * Undo an open — spec §5.5: the program as it ran, and where it opened whole the tree and the workspace.
    *
    * **USED, IT IS WITHDRAWN BY THE EDIT IT MAKES**, as any edit that changes the program withdraws it; one that changes
    * nothing leaves nothing a later notice could offer it again for.
@@ -2280,32 +1940,10 @@ async function main(): Promise<EditorView> {
   const undoOpen = (before: Replaced): void => {
     shareMenu.hidePopover()
     replaceProgram(before.program)
-    const paused: string[] = []
-    if (before.workspace !== null) {
-      showWorkspace(before.workspace)
-      for (const session of new Set(before.copies.map(([, s]) => s))) {
-        const name = scratchpad.nameOf(session)
-        // A COPY DELETED SINCE THE OPEN HAS NOTHING TO COME BACK TO.
-        if (name === null) continue
-        try {
-          scratchpad.warm(session)
-        } catch (e) {
-          if (!(e instanceof BufferCapReached)) throw e
-          paused.push(name)
-          continue
-        }
-        const leaves = before.copies.filter(([, s]) => s === session).map(([leaf]) => leaf)
-        paneHost.moveBack(leaves, SOURCE_SESSION, session)
-      }
-      refreshBuffers()
-      draw()
-    }
+    if (before.workspace !== null) showWorkspace(before.workspace)
     view.focus()
     if (!view.hasFocus) shareButton.focus()
-    const put = before.workspace === null ? 'put back the program' : 'put back the program and the workspace'
-    notices.notify(
-      paused.length === 0 ? put : `${put} — ${paused.join(', ')} paused, ${MAX_WARM_BUFFERS} copies are running`,
-    )
+    notices.notify(before.workspace === null ? 'put back the program' : 'put back the program and the workspace')
   }
 
   /**
@@ -2368,10 +2006,7 @@ async function main(): Promise<EditorView> {
       listing: clifListing,
     }
     if (opened.kind === 'whole') {
-      const copies = panes
-        .all()
-        .flatMap((p) => (p.slot.binding.session === SOURCE_SESSION ? [] : [[p.id, p.slot.binding.session] as const]))
-      const before: Replaced = { program, workspace: { tree, ...ws }, copies }
+      const before: Replaced = { program, workspace: { tree, ...ws } }
       replaceProgram({ text: opened.program, encoding: opened.encoding, width: opened.width, listing: opened.listing })
       showWorkspace(opened.workspace)
       announceOpen(opened, before)
@@ -2383,308 +2018,8 @@ async function main(): Promise<EditorView> {
           width: opened.width,
           listing: opened.listing,
         })
-      announceOpen(opened, { program, workspace: null, copies: [] })
+      announceOpen(opened, { program, workspace: null })
     }
-  }
-
-  /**
-   * Undo a delete — spec §10. The copy comes back under its own id and name, COLD, and is warmed; a
-   * refusal at the cap leaves it paused, which is still a copy restored. The views the delete moved to
-   * the program move back if they still exist and still show the program, and the first of them mounts the
-   * copy's editor (`PaneHost.moveBack`) — before its build lands, and whether or not it builds.
-   */
-  const undo = (record: BufferRecord, shown: readonly LeafId[]): void => {
-    scratchpad.reinstate(record)
-    const name = scratchpad.nameOf(record.id) ?? `${LEG_NAME[record.leg]} ${record.label}`
-    try {
-      scratchpad.warm(record.id)
-    } catch (e) {
-      if (!(e instanceof BufferCapReached)) throw e
-      notices.notify(`${name} restored, paused — ${MAX_WARM_BUFFERS} copies are running`)
-      refreshBuffers()
-      draw()
-      // THE SAME DEBT AS THE SUCCESS PATH BELOW, AND THIS ARM OWES IT TOO: the undo button is gone
-      // either way, and a refusal is exactly when a user needs to see where they are. No view came
-      // back, so the copies button is the whole of the answer.
-      buffersButton.focus()
-      return
-    }
-    const moved = paneHost.moveBack(shown, SOURCE_SESSION, record.id)
-    const home = moved[0]
-    notices.notify(`${name} restored at step 0`)
-    refreshBuffers()
-    draw()
-    // **UNDO REMOVES THE CONTROL IT WAS ACTIVATED FROM, SO IT OWES THE FOCUS SOMEWHERE — spec §11, and
-    // the accessibility list's item 1 in the control this whole gesture exists for.** `notice.ts` tears
-    // the action button down before running this (it must: a second undo would throw), and a module that
-    // knows nothing about views cannot say where focus should land. The view the copy came back to is
-    // where the user's attention is; with no view to come back to, or only a parked one, the control that
-    // lists the copies is. `moveBack` answers a view of the tree on screen first, so `home` is a parked view
-    // only where no other shows the copy.
-    // AFTER `draw()`, because the view's title is rebuilt from the new binding by the frame above.
-    const back = home === undefined ? null : document.querySelector<HTMLElement>(`[data-leaf="${home}"] .view-title`)
-    if (back !== null) back.focus()
-    else buffersButton.focus()
-  }
-
-  /**
-   * What a WARM copy's row says it holds, under its name: a λ copy's current frame, as its text; a machine copy's run,
-   * as its readout line says it without the name (`readout.ts`'s `copyRow`). The copies menu's `term` below asks
-   * this, and only for a warm buffer (that doc has why).
-   *
-   * **A λ COPY WITH NO FRAME READS ITS LEG'S REASON WHILE THE LEG IS NOT AVAILABLE**, as its readout does
-   * (`readout.ts`'s `copyParts`): `building…` until its build is answered, `did not build` when that build
-   * failed, where `no term yet` would read the same for both. `null`, which reads `no term yet`, is left for a leg
-   * that is available with no frame yet: a build that landed, before its first frame has.
-   *
-   * **A MACHINE COPY HAS NO TERM, AND `null` FOR ONE WOULD READ AS `no term yet`.** A `TmState` is tape windows and a
-   * state index and an `RxmState` registers and a pc, so neither prints a term; but "no term yet" would say nothing
-   * had come back, under a copy that had run to its value. Its readout says what became of its run — a value, a
-   * fault, a cap, a value run still going, or that it has not built yet — so its row says the same, in the same words.
-   *
-   * **A BRANCH ON THE LEG IS WHAT KEEPS THIS FROM THROWING FOR A WARM TM BUFFER.** `legOf({ session, leg: 'lambda' })`
-   * unconditionally is a throw for any warm buffer whose entry has no `lambda` leg at all — every TM buffer, by the
-   * legs `ScratchBuffers` registers for one (`scratch.ts`) — and it would escape the `beforetoggle` handler, as a cold
-   * buffer's would if `term` below did not branch on `warm`.
-   */
-  const copyHolds = (session: SessionId, leg: CopyLeg): string | null => {
-    switch (leg) {
-      case 'lambda': {
-        const copy = sessions.legOf({ session, leg: 'lambda' })
-        return copy.hist.current?.text ?? (copy.status.available ? null : copy.status.reason)
-      }
-      case 'rxm':
-      case 'tm':
-        return copyRow(leg, sessions.entryOf(session).readings, copyLegOf(sessions.legOf({ session, leg })))
-    }
-  }
-
-  /**
-   * **THE HEADER'S BUFFER LIST — 5d-ii-c design §4.2's surface, and §4.4's poison recovery.** Without it
-   * the app could create buffers and end none, so a wedged worker could not be reclaimed and a failed fork
-   * would leave its pane on a copy that did not build, for good.
-   *
-   * **`paneCount` IS COMPUTED HERE AND LIVES ON NO OTHER TYPE, WHICH IS WHY `BufferInfo` AND
-   * `BufferRow` ARE TWO TYPES.** `ScratchBuffers` answers what buffers exist; `PaneCollection` answers
-   * which panes are bound to one. Putting the count on `BufferInfo` would give `scratch.ts` a
-   * `PaneCollection` dependency for a number only the header renders — and this file already holds both
-   * objects, so the join costs one `map` at the one place that is not a second reader of either.
-   *
-   * A THUNK BUILT PER OPEN, NOT A VALUE: `bufferList` calls this on `beforetoggle` (its own doc), so
-   * the `ofSession` scan runs once per gesture rather than on every frame that repaints the header.
-   *
-   * `paneHost.reseedingSlots()` HANDS OVER EVERY PANE'S SLOT, NOT THE λ ONES AND NOT ONLY THOSE ON THE PAGE — a Stage
-   * tab that is not selected and a view a switch parked have a slot each — and each one tells its TM pane what
-   * the session it moves onto holds (that member's doc has why). `retire` rebinds only the
-   * slots whose binding names the buffer it is ending (`scratch.ts`'s own rule, and
-   * `tests/node/scratch.test.ts` pins it against a TM slot that must not be dragged home), so filtering
-   * here would be this file restating a rule the callee enforces — and getting it wrong would be
-   * invisible, since the buffer would end either way.
-   *
-   * **THE `custody.reconcile()` IS THIS HANDLER'S OWN OBLIGATION AND NOTHING ELSE WILL DISCHARGE IT.**
-   * A retire makes `!sessions.has(session)` true, and so does a cool: `retire` is `cool` followed by
-   * forgetting the `#buffers` record, so a cool through the temperature handler below drops a session
-   * from the registry exactly as a retire does, and needs the identical sweep. `editor-custody.ts`'s
-   * `reconcileEditors` is what then drops the claim and destroys an editor waiting in custody for it —
-   * the last reference to a live `EditorView`, with its own pending debounce, over a terminated worker.
-   * The retire lives in the list's own handler, so that is where the sweep obligation belongs, and this
-   * is that handler — the temperature handler carries the identical obligation independently, since a
-   * warm never needs it and a cool always does.
-   *
-   * `try`/`finally` FOR `applyLayout`'s REASON, IN ONE SENTENCE: `reconcile` throws deliberately
-   * (`LambdaPane.receiveEditor` refuses a second editor), and a throw escaping here would leave the
-   * header advertising a buffer that has gone and the rebound panes unpainted — a disagreement worse
-   * than the one being reported. The exception still leaves this handler.
-   */
-  const buffers = bufferList(
-    buffersButton,
-    () =>
-      scratchpad.list().map((b) => ({
-        id: b.id,
-        label: b.label,
-        // `b.leg`, NOT THE LITERAL `'lambda'`: hard-coding `'lambda'` here would make a TM buffer's row
-        // read 0 panes always, so a row could say "orphan" while a TM pane was bound to it —
-        // `panes.ofSession`'s own generic parameter is what a caller narrows to answer any leg's question.
-        paneCount: panes.ofSession(b.leg, b.id).length,
-        /**
-         * **THE ROW'S ONE DISTINGUISHING FACT, JOINED HERE FOR `paneCount`'s REASON** — see
-         * `BufferRow.term` for why a row without it is a counter's output and a pane count, with every
-         * pane count alike at the cap, under a refusal telling the user to pick one. `ScratchBuffers`
-         * answers what buffers exist and the registry answers what each one currently holds; this file
-         * is the one place that holds both, so the join costs one property on a thunk that already runs
-         * once per open.
-         *
-         * `hist.current`, WHICH IS THE FRAME A PANE BOUND TO THIS BUFFER WOULD BE SHOWING — the head of
-         * the ring, not step 0 — so a row and a pane never disagree about the same buffer, and scrubbing
-         * a buffer's history changes what its row says next time the list opens.
-         *
-         * **`legOf` IS ASKED ONLY FOR A WARM BUFFER.** A cold buffer is in `#buffers` and in neither
-         * container (5d-ii-d design §4.2), and `SessionRegistry.entryOf` throws for an id it does not hold
-         * (`sessions.ts`'s `entryOf`, deliberately: a binding naming a session the registry does not hold
-         * "is a wiring bug, not a state the UI has an honest rendering for"). Unbranched, the first open of
-         * this list on a page that restored an orphan would throw out of a `beforetoggle` handler, which is
-         * a click.
-         *
-         * **THE BRANCH IS ON `warm` AND NOT ON A `try`.** A cold buffer is a state this app produces
-         * on purpose, so asking and catching would be treating a designed state as an exception — and
-         * it would also swallow the genuine wiring bug the throw exists to report.
-         *
-         * **A SECOND BRANCH, ON `b.leg`, IS `copyHolds`'s** — see its own doc for why a warm TM buffer
-         * needs it too, and what a machine copy's row says in place of a term.
-         */
-        term: b.warm ? copyHolds(b.id, b.leg) : null,
-        warm: b.warm,
-        leg: b.leg,
-      })),
-    (id) => {
-      // TYPING NOT YET SENT GOES INTO THE RECORD FIRST, or undo restores the copy without it (`EditorCustody.flush`).
-      custody.flush(id)
-      // WHAT UNDO NEEDS, READ BEFORE THE DELETE ENDS IT: the record, the name, and the views showing it.
-      const record = scratchpad.recordOf(id)
-      const name = scratchpad.nameOf(id) ?? 'a copy'
-      const shown = record === null ? [] : panes.ofSession(record.leg, id).map((p) => p.id)
-      scratchpad.retire(id, SOURCE_SESSION, paneHost.reseedingSlots())
-      try {
-        custody.reconcile()
-      } finally {
-        refreshBuffers()
-        draw()
-      }
-      // THE DELETE NOTICE ANSWERS THE CAP REFUSAL: it replaces any refusal on screen.
-      if (record !== null)
-        notices.notify(`${name} deleted`, { action: { label: 'undo', run: () => undo(record, shown) } })
-    },
-    (id, warm) => {
-      /**
-       * **WARMING CAN BE REFUSED AND COOLING CANNOT**, so only one arm has a catch. `ScratchBuffers.warm`
-       * raises `BufferCapReached` at the cap for the same reason `fork` does, and it reports through the
-       * same surface — a notice (`notice.ts`).
-       * A bare `catch` would swallow `SessionRegistry.add`'s and `SessionPool.bind`'s guards, which are
-       * wiring bugs; `instanceof` is what keeps a refusal a refusal.
-       */
-      const info = scratchpad.list().find((b) => b.id === id)
-      const name = scratchpad.nameOf(id) ?? 'a copy'
-      const shown = info === undefined ? 0 : panes.ofSession(info.leg, id).length
-      try {
-        if (warm) {
-          scratchpad.warm(id)
-        } else {
-          // TYPING NOT YET SENT IS KEPT, and stored with the pause below rather than after it (`EditorCustody.flush`).
-          custody.flush(id)
-          // **THE SLOTS ARGUMENT IS WHAT MAKES THE INVARIANT TRUE, AND THIS IS ITS ONLY REAL CALL
-          // SITE.** `cool` rebinds every pane on the buffer it sleeps, so "a cold buffer has no panes
-          // bound to it" is a property of what this line passes, not of `ScratchBuffers`. Hand it the
-          // same set the retire handler above hands `retire` — every pane's slot, on the page or off it —
-          // because a partial set strands exactly the panes it omits: `entryOf` throws for a session the
-          // registry no longer holds, and `draw()` resolves through it on the next frame.
-          scratchpad.cool(id, SOURCE_SESSION, paneHost.reseedingSlots())
-        }
-      } catch (e) {
-        if (!(e instanceof BufferCapReached)) throw e
-        notices.notify(e.message)
-        draw()
-        return
-      }
-      try {
-        custody.reconcile()
-      } finally {
-        refreshBuffers()
-        draw()
-      }
-      if (warm) notices.notify(`${name} resumed at step 0`)
-      else
-        notices.notify(
-          `${name} paused${shown === 0 ? '' : ` · ${shown === 1 ? '1 view now shows' : `${shown} views now show`} the program`}`,
-        )
-    },
-    (leg: CopyLeg) => {
-      /**
-       * **THE SECOND GESTURE — 5d-iv design §4.7.** `ScratchBuffers.fork` detaches a pane onto a copy of
-       * what it was showing, and is unavailable above the fork cap; `forkBlank` mints a warm, empty
-       * buffer on `leg` with no view to seed from and binds no pane, and is always available — "give me
-       * somewhere to paste a `.tm` or `.rxm` file" is a different intention from a fork, not the same door
-       * narrowed. `leg` IS TM OR RXM: the menu offers a blank copy on the legs whose copy is a whole machine or
-       * program (`buffer-list.ts`'s `BLANK_COPY`), and never on λ, whose copy is always made from a step of the
-       * program, through `fork`.
-       *
-       * `BufferCapReached`, NOT A BARE `catch` — the same standard the retire and temperature handlers
-       * above hold themselves to. The other throws `forkBlank` can reach are `SessionRegistry.add`'s and
-       * `SessionPool.bind`'s guards over their own invariants; showing one of those as a notice
-       * would swallow a wiring bug rather than report a refusal.
-       */
-      let id: SessionId
-      try {
-        id = scratchpad.forkBlank(leg)
-      } catch (e) {
-        if (!(e instanceof BufferCapReached)) throw e
-        notices.notify(e.message)
-        // NO `refreshBuffers()` ON THIS ARM — the header's count did not move, because that is the
-        // whole content of the refusal (`transport.ts`'s `detach` handler states the identical rule for
-        // `fork`'s own refusal).
-        return
-      }
-      // THE HEADER GAINED A BUFFER, AND `draw()` DOES NOT REACH ITS READOUT — the same split `fork`'s
-      // own success path draws (`transport.ts`): `refreshBuffers()` repaints the buffer-list button and
-      // persists the collection, `draw()` repaints every pane's own chrome, most importantly the
-      // binding selector that gains this buffer as a new option the instant it exists.
-      refreshBuffers()
-      draw()
-      notices.notify(`${scratchpad.nameOf(id) ?? 'a copy'} created`)
-    },
-  )
-
-  /**
-   * Put the header's readout back in step with how many buffers there are — called where that number can
-   * change, and at a warm or a cool, which cannot.
-   *
-   * **THE TEMPERATURE HANDLER CALLS THIS TOO, AND A WARM OR A COOL CANNOT MOVE THE COUNT.** This function
-   * reads `scratchpad.list().length` — every record this app holds, warm or cold — and `warm`/`cool` only
-   * flip a record's own `warm` flag; neither one adds a record nor removes one, so the number below is
-   * already correct before this call runs. It is called anyway, for uniformity with the retire path
-   * immediately above in this file: the temperature handler mirrors that handler's `custody.reconcile()` /
-   * `finally` / `refreshBuffers()` / `draw()` shape line for line (`buffers`' doc states why each
-   * handler's `custody.reconcile()` is its own obligation), and a guard here that skipped this one call for
-   * `cool` while keeping it for `retire` would be two near-identical handlers doing their shared cleanup
-   * differently over a distinction — whether the count moved — that this function's OTHER job does not
-   * care about: the readout below and the persisted payload it triggers are exactly as correct to
-   * recompute on a cool as on a retire, since both examine the count rather than assume it changed.
-   */
-  const refreshBuffers = (): void => {
-    const live = scratchpad.list().length
-    // **NO HIDE-AT-ZERO, AND NO FOCUS RESTORATION BESIDE IT — 5d-iv design §4.7.** A control that hides
-    // itself on click strands the keyboard (item 1 of the standing accessibility list), and the menu
-    // offers a blank copy and so is never empty, which removes the reason for a hide.
-    buffers.update(live)
-    /**
-     * **THE PERSIST RIDES ON THIS FUNCTION BECAUSE ITS CALLERS ARE ALREADY THE RIGHT SET.** It runs at a
-     * fork, a retire and its undo, an open's `showWorkspace`, and a warm/cool that cannot move the count
-     * but is called anyway for uniformity — and a fork, a retire and an undo are moments the stored
-     * payload would say something different (the others reach `persistBuffers` directly: a recorded
-     * term, an edit, a collapse, a rebind, and each `applyLayout()`, which is `pane-host.ts`'s). A
-     * `persistBuffers()` in the fork, retire and undo handlers instead would be three copies of a rule
-     * this function already states once, and a fourth in the temperature handler that writes the same
-     * bytes back.
-     *
-     * **AND IT IS WHY THE INITIAL CALL BELOW IS NOT THE LAST WRITE OF A PAGE LOAD.** This runs once
-     * during start-up, before `applyLayout()` has built a single pane, so the `bindings` it writes are
-     * empty by construction — correct for a fresh page and WRONG for a restored one, which would then
-     * persist a payload naming buffers but no panes and lose every binding at the next reload. The
-     * first `applyLayout()`, at the end of `main()`, writes them from the panes it has just built, which is
-     * what corrects it, and nothing can observe the intermediate: there is no `await` between here and
-     * there.
-     *
-     * **THIS CALL IS UNCONDITIONAL — EVERY PAGE LOAD, EVERY USER, INCLUDING ONE WHO HAS NEVER FORKED —
-     * AND SO IS THE WRITE.** `refreshBuffers()`'s own call below runs once at start-up with no guard
-     * on `live`, so on a page with no buffers this writes `{minted:0,buffers:[],bindings:{}}` — an
-     * empty payload, carrying nothing worth saving. Harmless: **THE REPORT `writeBuffersStorage`
-     * MAKES ON A FAILED WRITE IS WHAT IS GUARDED, NOT THE WRITE ITSELF.** `persistBuffers` hands that
-     * writer whether the payload it just built has any buffers in it, and the writer's catch checks that
-     * before it reports — design §4.8's "a lost buffer is work" read the other way: no buffers, no work,
-     * no report. A user sitting at storage quota who has never forked still pays for this call (a write
-     * that goes nowhere, silently) but not for a report that would be false in the only sense they would
-     * care about — they have no work here to lose.
-     */
-    persistBuffers()
   }
 
   /**
@@ -2693,24 +2028,18 @@ async function main(): Promise<EditorView> {
    * built above and `applyLayout` (`pane-host.ts`) is the only thing that ever populates it, so every
    * reader here resolves it live rather than at construction time.
    *
-   * **TWO CALLS REACH `draw()` BEFORE `applyLayout()` DOES.** `compile.schedule(loaded.text)` — this
+   * **A CALL REACHES `draw()` BEFORE `applyLayout()` DOES.** `compile.schedule(loaded.text)` — this
    * file's own start-up compile — is the first `draw()` of the app's life, ahead of the one inside
-   * `paneHost.applyLayout()` itself, reached through `client.supersede()`'s `onSupersede` callback. The
-   * restore's warming loop reaches it the same way, once per warmed session: `scratchpad.warm(session)`
-   * spawns a worker, and the spawn calls `client.supersede()` too. `draw()` calls
-   * `linkWiring.drawLink(...)`, which reaches `detachedPanes()` here — which reads `panes.of(leg)` — and
-   * `draw()`'s own body (`draw.ts`) reads `panes` too, whichever path reached it: `panes.active(…)` for
+   * `paneHost.applyLayout()` itself, reached through `client.supersede()`'s `onSupersede` callback.
+   * `draw()`'s body (`draw.ts`) reads `panes`, whichever path reached it: `panes.active(…)` for
    * each leg, `panes.all()`, `panes.of('lambda')` and `panes.shown('lambda', …)`.
    *
-   * **SAFE, AND FOR A REASON THAT HAS NOTHING TO DO WITH ORDERING.** `applyLayout` is the only thing
-   * that ever populates `panes`, so every one of those reads runs against a collection that is
-   * genuinely, honestly EMPTY at this point — not stale, not partially built. `panes.active(...)` is
-   * optional-chained everywhere it is called, `panes.all()`/`panes.of('lambda')` iterate zero entries,
-   * and `detachedPanes()` answers no view and no copy for every leg (its own doc: a leg with no view has
-   * nothing to say, the honest answer rather than a convenient one). The invariant is that nothing in this
-   * module MISBEHAVES for reading `panes` before `applyLayout`'s first call — every reader here resolves
-   * it live and every reader tolerates empty, which is what makes reading it early safe rather than
-   * merely unobserved.
+   * **SAFE, AND FOR A REASON THAT HAS NOTHING TO DO WITH ORDERING.** `applyLayout` is the only thing that ever
+   * populates `panes`, so every one of those reads runs against a collection that is genuinely, honestly EMPTY at this
+   * point — not stale, not partially built. `panes.active(...)` is optional-chained everywhere it is called, and
+   * `panes.all()`/`panes.of('lambda')` iterate zero entries. The invariant is that nothing in this module MISBEHAVES
+   * for reading `panes` before `applyLayout`'s first call — every reader here resolves it live and every reader
+   * tolerates empty, which is what makes reading it early safe rather than merely unobserved.
    *
    * `view` and `draw` are passed as thunks rather than the values themselves: `view` is not assigned until
    * the `EditorView` construction below, and `draw` (assigned via `createDraw` just below) calls
@@ -2720,12 +2049,9 @@ async function main(): Promise<EditorView> {
   linkWiring = createLinkWiring({
     view: () => view,
     statusHost: linkStatusHost,
-    sessions,
     panes,
     draw: () => draw(),
     announce: (t: string) => notices.announce(t),
-    viewTitle,
-    arranged,
   })
 
   // ASSIGNED HERE, NOT DECLARED HERE — see the `let draw` comment above for why the split is forced
@@ -2756,22 +2082,13 @@ async function main(): Promise<EditorView> {
     leaves: () => leaves(tree).length,
     sourceAvailable: () => !leaves(tree).some((l) => l.pane === 'source'),
     arranged,
-    // WRAPPED RATHER THAN PASSED AS `custody.hasEditor`, the same shape `editorHome` below uses for
-    // `custody.homeFor`: the methods read `panes`, `sessions` and the two custody maps through the
-    // closure `createEditorCustody` returns, and handing the reference over bare would work only
-    // because that object is not built with `this` in mind. This is the one call site that decides
-    // whether "move the editor here" appears at all — deferred-a11y item 11.
-    hasEditor: (session) => custody.hasEditor(session),
-    // THE READOUT'S INPUTS (spec §9) — which view is focused, and the program's stored result.
-    focused: focusedLeaf,
+    // THE READOUT'S INPUTS (spec §9) — the program's stored result.
     sourceSession: SOURCE_SESSION,
     readout,
     program: () => program,
-    nameOf: (s) => scratchpad.nameOf(s),
     stepsInView: () => ws.switches.steps === 'view',
     stage: () => ws.switches.views === 'stage',
     stepBar,
-    stageTabs: { update: () => retitleStage(root, viewTitle) },
   })
 
   /**
@@ -2783,10 +2100,7 @@ async function main(): Promise<EditorView> {
    * construction reads it, and `main.ts` does not assign `view` until the `EditorView` construction
    * below.
    *
-   * A recompile ends no buffer, so a compile is handed none of `scratchpad`, `panes`, `draw` and
-   * `reconcileEditors`, which a retire needs; of the registry it reads only the source session's own client.
-   * The custody argument for `reconcileEditors` lives at `editor-custody.ts`'s `reconcileEditors` and at
-   * its callers: `applyLayout`, and the buffer list's retire and temperature handlers above in this file.
+   * Of the registry a compile reads only the source session's own client.
    */
   const compile = createCompile({
     sessions,
@@ -2801,22 +2115,20 @@ async function main(): Promise<EditorView> {
   })
 
   /**
-   * THE TWO REPLY SWITCHES — `replies.ts`'s own doc has the case for their dependencies; this is only the
+   * THE REPLY SWITCH — `replies.ts`'s own doc has the case for its dependencies; this is only the
    * construction site. A PLAIN `const` RATHER THAN A `let` + THUNK LIKE `draw`/`linkWiring` ABOVE —
    * nothing calls `createReplies` before everything it needs already exists: `linkWiring` and `draw` are
    * both real values by this line, and both are passed bare below for exactly that reason. `view` is
    * passed as a thunk for the same reason `linkWiring`/`draw` themselves take it as one two blocks up.
    *
-   * `scratchpad` AND `sessions.add(...)` ABOVE ALREADY BUILT THEIR REPLY CALLBACKS AGAINST A NAME —
-   * `replies` — THAT DID NOT EXIST YET AT THAT POINT IN THE FILE, and that is the same forward
-   * reference this file already relies on for `draw`/`linkWiring` themselves: `(session, reply) =>
-   * replies.onScratchReply(session, reply)` and the source session's handler, which calls
-   * `replies.onReply(SOURCE_SESSION, reply)`, are arrow functions whose BODIES are not evaluated until
-   * a reply actually arrives, by which time this assignment has long since run.
+   * `sessions.add(...)` ABOVE ALREADY BUILT ITS REPLY CALLBACK AGAINST A NAME — `replies` — THAT DID NOT EXIST YET
+   * AT THAT POINT IN THE FILE, and that is the same forward reference this file already relies on for
+   * `draw`/`linkWiring` themselves: the source session's handler, which calls `replies.onReply(SOURCE_SESSION,
+   * reply)`, is an arrow function whose BODY is not evaluated until a reply actually arrives, by which time this
+   * assignment has long since run.
    */
   const replies = createReplies({
     sessions,
-    scratchpad,
     results,
     view: () => view,
     panes,
@@ -2824,23 +2136,9 @@ async function main(): Promise<EditorView> {
     trees,
     unseen,
     draw,
-    notify: (text: string) => notices.notify(text),
     setProgram: (r: ProgramResult) => {
       program = r
     },
-    // **IT TAKES THE REPLY'S OWN SESSION.** Every call site in `replies.ts` already holds the session the
-    // reply named, so the parameter costs nothing. THIS FILE KEEPS IT WHERE `compile.ts` TAKES NOTHING OF
-    // THE KIND, because `replies.ts` has two uses that are not retires: the three `*-scratch-compiled` arms
-    // MOUNT text onto the home pane, and `worker-error` unmounts from a pane whose session is still live
-    // and still bound.
-    //
-    // `noSessionReply`'s phantom-fork path ends no buffer, so this passes it neither a `sourceSession` for
-    // its panes to be sent back to nor a `reconcileEditors` sweep. `custody.reconcile` is reached on every
-    // layout gesture through `applyLayout`.
-    editorHome: (session: SessionId) => custody.homeFor(session),
-    // BARE, NOT A THUNK, for the reason the doc above gives for `links` and `draw`: `persistBuffers` is
-    // a real value hundreds of lines before this call.
-    onBuffersPersist: persistBuffers,
     clif: {
       loaded: (state) => {
         clifLoadState = state
@@ -2881,8 +2179,8 @@ async function main(): Promise<EditorView> {
         // to be airtight about the stale-index rule on every keystroke rather than only on clicks.
         // `mouseup` rather than `mousedown`, so a drag that selects text does not also link.
         EditorView.domEventHandlers({
-          // NO FLUSH HERE, UNLIKE A COPY'S. This editor posts `changeDocument` on every keystroke
-          // rather than on a debounce, so the server's copy is never behind what is on screen.
+          // NO FLUSH HERE. This editor posts `changeDocument` on every keystroke rather than on a debounce, so the
+          // server's copy is never behind what is on screen.
           blur: () => {
             if (!formatOnBlur || focusKept) return false
             const asked = view.state.doc
@@ -2921,7 +2219,7 @@ async function main(): Promise<EditorView> {
         // the surface.
         lintGutter(),
         // DEFERRED-ACCESSIBILITY ITEM 16. CodeMirror gives its content a `textbox` role and no
-        // name; on a workspace showing several editors at once they would all announce the same way.
+        // name, so without this it would be announced as a text box with nothing said of what it holds.
         EditorView.contentAttributes.of({ 'aria-label': 'source program editor' }),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return
@@ -3019,8 +2317,7 @@ async function main(): Promise<EditorView> {
 
   // **OPENED AFTER `view`**, which the diagnostics sink below dispatches to.
   // **THE SINK IS PART OF OPENING THE DOCUMENT**, so there is no router to keep in step and no way
-  // for this editor to receive another document's diagnostics. Every copy's editor opens its own the
-  // same way, from inside `ScratchEditor`.
+  // for this editor to receive another document's diagnostics.
   lspClient.openDocument(SOURCE_URI, 'redextape', loaded.text, {
     diagnostics: (ds) => {
       view.dispatch(setCmDiagnostics(view.state, lspLintRanges(ds, view.state.doc)))
@@ -3029,93 +2326,17 @@ async function main(): Promise<EditorView> {
       sourceOutline.refresh()
     },
   })
-  sourceMenu.setFormattable(true)
 
   compile.schedule(loaded.text)
-
-  // **THE START-UP CALL.** The report it can make is the notice line's resting state (`notice.ts`'s
-  // `Notices.rest`), set through `notices`, which is built before `init()` and needs neither `linkWiring`,
-  // `draw` nor `view`; and nothing clears the notice line on a keystroke. `persistBuffers` reads its
-  // bindings off `panes`, which `applyLayout()` — at the end of `main()` — is the only thing that fills, so
-  // the payload written here is provisional, and that call's own write is what corrects it. See
-  // `refreshBuffers`'s own doc.
-  refreshBuffers()
-
-  /**
-   * **WARM BOUND, COLD ORPHANS — 5d-ii-d design §4.2's restore policy, and the cap is what makes it a `try`.**
-   * A cap that dropped between releases can leave a restored page naming more warm buffers than it may
-   * now hold. Refusing is the honest answer (nothing is evicted); the buffer stays cold and stays
-   * listed, which is exactly the state the header list exists to make reachable.
-   *
-   * **THE THIRD STEP OF THE RESTORE, AND IT IS DOWN HERE RATHER THAN BESIDE THE OTHER TWO.** A warm spawns
-   * a worker, and the spawn's `client.supersede()` reaches `draw()` (`THE LINK STATE` comment above), which
-   * is not assigned until `createDraw` runs. The refusal is a notice (`notice.ts`), the surface the fork
-   * path and the header list's warm control both report through. Everything this loop does is before the
-   * first `applyLayout()` just below, which the restore requires too: `pendingBinding` is read there,
-   * not here.
-   *
-   * **NOT `cannot make a copy — …`.** `scratchpad.warm(session)` is what this loop calls, never `fork`. A
-   * restore is not a fork: nothing here was clicked, nothing here even runs in response to a gesture this
-   * page load has seen yet — it is `main()`'s own start-up code discovering that a cap lowered since a
-   * previous page's write left more warm buffers named than the current build allows.
-   * `ScratchBuffers.warm`'s `BufferCapReached` (`scratch.ts`'s `#refuseAtCap`) therefore carries no prefix,
-   * here or from the header list's own warm control above — `e.message` is the bare cap sentence, "all N
-   * copies are running; pause or delete one from the copies menu to make room", true and complete without
-   * naming a gesture that did not happen.
-   *
-   * **IT WALKS `restoredBindings` AND NOT `restoredBuffers.bindings`, WHICH IS THE POLICY AND NOT A
-   * TIDY-UP.** 5d-ii-d §4.2's rule is that a buffer a restored PANE names gets a worker; a binding the
-   * restore block above declined to seed — one naming a leaf whose leg is not the buffer's — has no pane
-   * and gets none, so the load cost stays exactly the workers the layout needs. A binding naming a leaf
-   * the tree does not hold at all is declined by the same line and for the same reason.
-   *
-   * `new Set(...)` BECAUSE TWO PANES MAY NAME ONE BUFFER. `warm` is idempotent for a buffer that is
-   * already warm, so the set is not what makes this correct — it is what stops a page with two panes on
-   * one buffer from spending a cap slot's worth of work per pane. Every value is a real buffer:
-   * `parseBuffers` refuses a payload whose bindings name a session no restored buffer holds.
-   *
-   * **THE RE-SEED IN THE CATCH IS WHAT KEEPS THE COLD-BUFFER INVARIANT TRUE ACROSS A REFUSAL.** A cold
-   * buffer must have no pane bound to it (`ScratchBuffers.cool`'s own doc) — `entryOf` throws for a
-   * session the registry does not hold, and `draw()` resolves through it on the next frame — but the
-   * binding for this buffer was seeded into `pendingBinding` by the restore block above, so
-   * `applyLayout`'s `?? SOURCE_SESSION` would not fire for it: the entry EXISTS, it just names a session
-   * that now does not. Overwriting the seed with `SOURCE_SESSION` produces exactly what that `??` would
-   * have, which is why `seedBinding` needs no deleting sibling.
-   */
-  for (const session of new Set(restoredBindings.map(([, s]) => s))) {
-    try {
-      scratchpad.warm(session)
-    } catch (e) {
-      if (!(e instanceof BufferCapReached)) throw e
-      notices.notify(e.message)
-      for (const [leaf, s] of restoredBindings) {
-        if (s === session) paneHost.seedBinding(leaf, SOURCE_SESSION)
-      }
-    }
-  }
 
   // THE FIRST RECONCILE. `applyLayout()` builds the panes the tree in force names, attaches every host
   // (including `sourceHost`, built above) into `#views`, persists the tree, and calls `draw()` itself at
   // its own end — near the end of `main()` (`applySwitches()` below runs a second), after everything
   // else is wired (`view` included: `linkWiring`/`draw`/`compile`/`replies` all close over it as a
-  // thunk; `draw()`'s own body reads `view()` directly, and has already done so above this line — once
-  // from `compile.schedule(loaded.text)`, and once per warmed session from the restore loop — both through
-  // `client.supersede()`). Those calls read `panes` too, and `applyLayout` is the only thing that ever
-  // populates `panes` (`THE LINK STATE` comment above), so they run against a collection that is
-  // genuinely empty: nothing before this line has BUILT a pane.
-  //
-  // **IT IS ALSO THE RESTORE'S OWN WRITE OF THE BINDINGS, WHICH NO GESTURE MAKES.** `persistBuffers` reads
-  // `bindings` off `panes.all()`, and until this call there were no panes — so the `refreshBuffers()`
-  // earlier in this function wrote a payload with an EMPTY `bindings` map. On a fresh page that is correct
-  // and this call rewrites the same bytes; on a restored page it would silently lose every binding at the
-  // next reload, which is the feature failing on its second use. `applyLayout` stores the bindings once it
-  // has built the panes (`pane-host.ts`).
-  //
-  // **IT IS ALSO WHAT MAKES STORAGE SELF-CORRECTING.** A binding naming a leaf the restored tree no longer
-  // holds is never consumed, and a buffer the cap refused to warm had its pane put back on the source
-  // session above — in both cases the pane that exists now disagrees with what was stored, and this write
-  // settles it in favour of the panes. Design §4.1's "no repair pass" holds because the repair is one
-  // ordinary write of the ordinary payload.
+  // thunk; `draw()`'s own body reads `view()` directly, and has already done so above this line, from
+  // `compile.schedule(loaded.text)` through `client.supersede()`). That call reads `panes` too, and
+  // `applyLayout` is the only thing that ever populates `panes` (`THE LINK STATE` comment above), so it runs
+  // against a collection that is genuinely empty: nothing before this line has BUILT a pane.
   paneHost.applyLayout()
   // **THE SWITCHES ARE APPLIED AFTER THE FIRST LAYOUT, NOT BEFORE IT** (spec §4). A restored workspace can
   // carry any of the eight combinations, and each of the three switches' consumers reads the tree or the
@@ -3123,70 +2344,12 @@ async function main(): Promise<EditorView> {
   // in the state the user left it in.
   applySwitches()
 
-  /**
-   * **GIVE EACH RESTORED BINDING'S SESSION AN EDITOR HOME, NOW THAT ITS PANE EXISTS.** 5d-ii-d design §4.7
-   * states the warm/mount pairing outright: "a cold buffer carries the flag unused; it takes effect when
-   * the buffer WARMS AND MOUNTS AN EDITOR." `editor-custody.ts`'s `editorHomeFor` resolves a session to a
-   * pane through `editorOwner`, and the gestures that write `editorOwner` (`pane-host.ts`'s wrapped
-   * `detach`, the moment a fork succeeds, and its `showEditor`, every later move) do not fire for a binding
-   * that arrives already on the page from storage.
-   *
-   * **NOT BESIDE `seedBinding`, ABOVE `applyLayout()`.** `applyLayout`'s pane-creation pass calls
-   * `custody.dropClaimsOn(l.id)` for every leaf THAT HAS NO PANE YET, on the premise stated in that call's
-   * own comment: "a pane built here is by definition not the pane that claimed anything... an id reaching
-   * this loop can only be INHERITING a claim, never restating one." Claiming before this line would break
-   * that premise — on a fresh page load EVERY leaf has no pane yet, so a claim made before `applyLayout()`
-   * runs is a claim the first `applyLayout()` call deletes as "stale" before the pane it names is ever
-   * built. Below the call, the pane exists and this loop is claiming the ordinary way: naming a pane
-   * already in `panes`.
-   *
-   * **A STALE CLAIM ON A CAP REFUSAL COSTS NOTHING, BY THE SAME RULE `editorHomeFor` ALREADY STATES.**
-   * The warming loop above can refuse a session's `warm` and reseed its leaf onto `SOURCE_SESSION`
-   * before this line runs, so the pane `applyLayout()` just built for that leaf is on `SOURCE_SESSION`,
-   * not the scratch. `editorHomeFor` checks the pane's OWN binding against the session it is asked
-   * about (`entry.slot.binding.session !== session`), so claiming that session for that leaf anyway
-   * resolves to no home forever — the same "stale owner resolves to no home" rule every other caller of
-   * `claim` already relies on, applied here rather than filtered out first.
-   *
-   * **IT IS NOT THE ONLY THING MAKING A RESTORED BUFFER'S EDITOR MOUNT, AND IT IS KEPT ANYWAY.**
-   * `pane-host.ts`'s creation pass calls `mountScratchEditor` for every view it builds, on every leg,
-   * which on this page load claims and mounts each restored binding's leaf from the buffer's own text
-   * before this line runs, because the warming loop above `applyLayout()` has already made these buffers
-   * warm. This loop is therefore belt-and-braces. On a binding whose `warm` the cap REFUSED, the pane was
-   * put back on `SOURCE_SESSION` and `editorSeed` answers `null` for a cold buffer, so nothing mounted,
-   * and the claim made here resolves to no home (the paragraph above). It stays because it is the
-   * statement of the restore's OWN obligation — that a binding read out of storage names an editor
-   * home — where the line above is about panes arriving.
-   *
-   * **THE `hasEditor` GUARD IS WHAT KEEPS THE TWO FROM DISAGREEING, AND WITHOUT IT TWO PANES ON ONE
-   * BUFFER WOULD MAKE THE EDITOR JUMP.** `claim` is last-write-wins, and `restoredBindings` can name one
-   * session twice — `parseBuffers` accepts a `bindings` map with two leaves pointing at one buffer
-   * deliberately (`tests/node/buffers-store.test.ts` pins it), and it is what a user who split a pane onto
-   * a buffer and reloaded actually stores. Unguarded, this loop would then overwrite the creation pass's
-   * claim with whichever leaf `Object.entries` yields LAST, while the editor stayed mounted on the pane
-   * the creation pass gave it — leaving a stale claim that the next `applyLayout()`'s sweep acts on by
-   * relocating a live editor the user did not move. That is the silent relocation `editor-custody.ts`'s
-   * `editorOwner` doc refuses in as many words. With the guard, the rule is one sentence and it holds
-   * from the first frame: **the editor mounts on the first view in TREE order bound to that buffer, and
-   * nothing moves it but a click.**
-   *
-   * **TREE ORDER, AND NOT THE ORDER `Object.entries` YIELDS**, which comes from the JSON key order in
-   * `localStorage` and has nothing to do with where the editor was before the reload, so a two-pane page
-   * would come back with its editor on the other pane for no reason a user could see. Tree order is not
-   * "where it was" either — nothing persists which pane held the editor, and 5d-ii-d design §4.7 puts the
-   * collapse flag on the BUFFER for the same reason — but it is stable across reloads, visible on screen,
-   * and it does not move afterwards. Restoring the pane an editor was on would be a fourth field in
-   * `redextape.buffers`, and is not added here.
-   */
-  for (const [leaf, session] of restoredBindings) if (!custody.hasEditor(session)) custody.claim(session, leaf)
-
   // THE START-UP LINK'S NOTICE, NOW THAT EVERYTHING IT CAN UNDO EXISTS (spec §5.3): what it replaced is what storage
-  // would have opened on — the program, and where it opened whole the workspace and the bindings it dropped.
+  // would have opened on — the program, and where it opened whole the workspace.
   if (startLink !== null) {
     announceOpen(startLink, {
       program: storedProgram,
       workspace: startLink.kind === 'whole' ? storedWorkspace : null,
-      copies: droppedBindings,
     })
   }
   // A LINK PASTED INTO AN OPEN PAGE (spec §5.3). Any other fragment is left alone.

@@ -8,7 +8,7 @@ import { rangeOf } from './lsp-text'
  *
  * **`Pick<LspClient, 'hover'>`, NOT THE WHOLE CLASS — `lsp-nav.ts`'s `NavContext` narrows its own
  * client the same way.** A tooltip asks one question; a type that could ask for the whole client
- * would let a future caller reach into `format` or `closeDocument` from a hover source, which is not
+ * would let a future caller reach into `format` or `changeDocument` from a hover source, which is not
  * a thing a hover source should be able to do.
  */
 export type HoverDeps = {
@@ -20,7 +20,7 @@ export type HoverDeps = {
  * The hover tooltip, for the pointer.
  *
  * The KEYBOARD path is not here — it is a binding in `lsp-nav.ts` calling `activateHover`, so that
- * both editors get it from the one place both already build their navigation keys.
+ * the editor gets it from the one place it builds its navigation keys.
  *
  * Plaintext, because that is what `lsp-client.ts` advertises: the value goes in as `textContent`,
  * which is also what stops a server answer from being able to inject markup.

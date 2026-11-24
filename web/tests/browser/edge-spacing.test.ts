@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { DEFAULT_STYLE, STYLE_IDS } from '../../src/skin'
-import { editorOf } from './editor-view-fixture'
 import {
   buttonOf,
   chooseOption,
@@ -11,8 +10,6 @@ import {
   inspector,
   menuOfId,
   mountAt,
-  paneByLeaf,
-  pick,
   rect,
   rem,
   space,
@@ -21,12 +18,11 @@ import {
 
 /**
  * NO TEXT RUN OR CONTROL SITS WITHIN 4 PX OF ITS PANE'S EDGES OR THE WINDOW'S, where it reads as clipped
- * (`docs/superpowers/specs/2026-11-14-edge-spacing-design.md`). A pane has no padding, so that its editors, tapes and
- * highlight bands run edge to edge; its rows — the header, the TM status line, a copy's value line — carry the gap
- * instead, and a row added without it fails here. What lies outside the views is held to the window's edges alone. Each
- * case asserts first that it measures something: the four views, items in each, a header wrapped at 390 px, and the
- * rows the design names, the wordmark and the strip among the items. ONE MOUNT FOR THE FILE, for the reason
- * `app.test.ts` gives.
+ * (`docs/superpowers/specs/2026-11-14-edge-spacing-design.md`). A pane has no padding, so that the source editor, the
+ * tapes and the highlight bands run edge to edge; its rows — the header, the TM status line — carry the gap instead,
+ * and a row added without it fails here. What lies outside the views is held to the window's edges alone. Each case
+ * asserts first that it measures something: the four views, items in each, a header wrapped at 390 px, and the rows the
+ * design names, the wordmark and the strip among the items. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const THRESHOLD = 4
@@ -422,11 +418,8 @@ describe('a panel header’s rules', () => {
   })
 })
 
-/**
- * Every header button that opens a popover, by id: the menus `index.html` declares, and `copies ▾`'s list, which
- * `buffer-list.ts` builds beside its button.
- */
-const HEADER_MENUS = ['workspace', 'buffers', 'examples', 'share', 'about', 'settings'] as const
+/** Every header button that opens a popover, by id: the menus `index.html` declares. */
+const HEADER_MENUS = ['workspace', 'examples', 'share', 'about', 'settings'] as const
 
 /** `HEADER_MENUS` is kept by hand, so a menu added to the header later would go unmeasured unless held to the header. */
 describe('the header menus measured', () => {
@@ -479,15 +472,12 @@ async function holdMenu(
 
 /**
  * The windows every header menu opens in: a tall phone; the narrowest, where the widest menus are wider than the room
- * beside their buttons; one short enough that a menu can be taller than the room below its button; and two between a
- * phone and a desktop, where the buffers list is too wide to open either way from its button.
+ * beside their buttons; and one short enough that a menu can be taller than the room below its button.
  */
 const MENU_WINDOWS = [
   [390, 844],
   [320, 568],
   [390, 500],
-  [480, 844],
-  [600, 844],
 ] as const
 
 describe('every header menu', () => {
@@ -609,10 +599,7 @@ async function gapBesideButtonWithoutGutter(id: string): Promise<number | null> 
 }
 
 /** Each menu that takes a gutter on the side it grows towards, and the window widths scanned for it, 1 px apart. */
-const GUTTER_SCANS = [
-  ['about', 200, 220],
-  ['buffers', 306, 330],
-] as const
+const GUTTER_SCANS = [['about', 200, 220]] as const
 
 /**
  * A MENU THAT FITS BESIDE ITS BUTTON WITH LESS THAN `THRESHOLD` TO SPARE IS HELD CLEAR OF THE WINDOW'S EDGE BY ITS
@@ -662,21 +649,4 @@ describe('every text run and control stands 4 px from its pane’s edges and the
       expect(contacts()).toEqual([])
     },
   )
-
-  it('at 1600 × 1000 with a TM copy and an rxm copy, each showing its value', async () => {
-    await at(1600, 1000, DEFAULT_STYLE)
-    for (const leaf of ['tm-0', 'rxm-0']) {
-      const pane = paneByLeaf(leaf)
-      await pick(pane, 'detach')
-      await until(() => editorOf(pane) !== null, `the ${leaf} copy’s editor`)
-    }
-    const value = (sel: string) => (document.querySelector(sel)?.textContent ?? '').startsWith('value:')
-    await until(() => value('.tm-value'), 'the TM copy’s value')
-    await until(() => value('.rxm-value'), 'the rxm copy’s value')
-    await frames()
-    const items = assertMeasured()
-    for (const sel of ['.tm-value', '.rxm-value'])
-      expect(textMeasuredIn(items, document.querySelector(sel)), `precondition: ${sel} is measured`).toBe(true)
-    expect(contacts()).toEqual([])
-  })
 })

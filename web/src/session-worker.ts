@@ -11,31 +11,26 @@
  * time and it is freed BEFORE the next compile, which makes a window with two sessions alive strictly
  * zero rather than merely bounded.
  *
- * **A WORKER CAN HOLD A `LambdaScratch` INSTEAD OF A `Session`, AND THE ONE-LIVE-SESSION INVARIANT
- * HOLDS FOR IT** (design §4.2). What `live` holds has more than one SHAPE; it has one OCCUPANT.
- * `claimLive` (`copy-build.ts`) runs at the top of every request that builds anything, so this thread owns exactly
- * one wasm handle at a time, whichever kind it is — which is the property §4.2 names as the reason
- * decision 3 (one worker per session) is safe, and the property `tests/browser/pool-isolation.test.ts`
- * asserts a shared worker cannot have. A scratchpad is a DIFFERENT WORKER holding a different single
- * handle, not a second handle in this one.
+ * **`claimLive` (`claim.ts`) RUNS AT THE TOP OF EVERY REQUEST THAT BUILDS ANYTHING**, so this thread owns one
+ * wasm handle at a time (design §4.2): the property §4.2 names as the reason decision 3 (one worker per session) is
+ * safe, and the property `tests/browser/pool-isolation.test.ts` asserts a shared worker cannot have.
  *
- * **ONE SESSION OR ONE COPY, PLUS, FOR A SESSION, AT MOST ONE CLIF STEPPER BUILT FROM IT AND DROPPED WITH IT.** The
- * stepper lives on the session's arm of `live`, is freed with the session or by a `clif` request, and is built only
- * while a CLIF view is shown, once the run's other legs have posted their `result`. `pkg-clif` is loaded when the page
- * asks, for a stepper or on intent, and never before, and a copy worker never loads it.
+ * **ONE SESSION, PLUS AT MOST ONE CLIF STEPPER BUILT FROM IT AND DROPPED WITH IT.** The stepper lives on `live`, is
+ * freed with the session or by a `clif` request, and is built only while a CLIF view is shown, once the run's other
+ * legs have posted their `result`. `pkg-clif` is loaded when the page asks, for a stepper or on intent, and never
+ * before.
  *
  * **LOGIC PUT HERE IS INVISIBLE TO THE COVERAGE GATE** — `vite.config.ts` excludes this module from
  * the `include` set for a measured instrumentation reason (v8 coverage does not attach to a dedicated
  * worker's context), so a new untested branch in this file moves none of the four numbers. That is
- * why the fork's POLICY — how many buffers a fork makes, which pane rebinds, when a buffer is
- * retired — lives in `scratch.ts` and only the wasm call it cannot make from the main thread
- * lives here.
+ * why the order a build runs in is `claim.ts`'s and `record-loop.ts`'s, and only the wasm calls and the
+ * state they touch live here.
  *
  * Section and decision citations here are the 5d-i design's unless they name another.
  */
-import init, { compile, lambdaScratchAt, rxmScratch, tapeNames, tmScratch } from '../../pkg/redextape_wasm.js'
+import init, { compile, tapeNames } from '../../pkg/redextape_wasm.js'
+import { type Claim, claimLive, liveHandle } from './claim'
 import { type ClifHandle, type ClifModule, clifLoader } from './clif-loader'
-import { buildCopy, type Claim, type CopyBuild, claimLive, liveHandle } from './copy-build'
 import { LEGS, perLeg, unhandled } from './legs'
 import type { LinkIndexWire } from './link'
 import type {
@@ -60,7 +55,6 @@ import {
   EXTEND_STEPS,
   endOf,
   FRAME_BYTES,
-  forkable,
   HISTORY_BYTES,
   keepDecided,
   keepInFlight,
@@ -70,7 +64,6 @@ import {
   RXM_WINDOW,
   rxmRecordEnd,
   TM_RADIUS,
-  VALUE_CHUNK,
 } from './protocol'
 import { extendLeg, type RecordLeg, type RecordWorker, recordBuild, recordFresh, rewindAndRecord } from './record-loop'
 import type {
@@ -84,10 +77,8 @@ import type {
   RxmWindow,
   Span,
   TmProgram,
-  TmScratchStatus,
   TmState,
   TmStatus,
-  ValueRun,
 } from './types'
 
 /**
@@ -119,26 +110,6 @@ type Session = {
   sourceSpan(node: number): Span | null
   linkIndex(byteBudget: number): LinkIndexWire
   /**
-   * `null` is load-bearing here: it is how the app learns a machine is over `MAX_FORK_RULES` or its TM
-   * leg declined, not a stand-in for "value not yet known". A caller that coalesced it away with `??`
-   * would silently paper over that boundary regression — so `onRun` below reads it and passes it
-   * through unchanged, never through `??`.
-   */
-  tmText(): string | null
-  /**
-   * Whether `tmText` would ever be non-`null` for this session — `false` only for a function-valued
-   * program. Read unconditionally, like `rxmText`, not behind `forkable`'s guard: it answers a question
-   * about the program's TYPE, not about `tmProgram`'s size, so it holds even when `tmText` itself was
-   * never asked for.
-   */
-  tmResultDecodable(): boolean
-  /**
-   * `null` for a program with no rxm leg, and for one whose text is longer than `session.rs`'s
-   * `MAX_SCRATCH_RXM_BYTES`, which no copy could build. Never a throw: `onRun` reads it unguarded and passes it
-   * through unchanged, as it does `tmText`.
-   */
-  rxmText(): string | null
-  /**
    * What a CLIF stepper is built from, the rxm program, its type and compile's rxm caps, or `null` for a program the
    * rxm leg declined. **`unknown`**: only `ClifSession`'s constructor reads it.
    */
@@ -146,113 +117,7 @@ type Session = {
   free(): void
 }
 
-/**
- * The wasm-bindgen `LambdaScratch`, described structurally for the reason `Session` above is — and it
- * is a STRICT SUBSET of `Session`'s λ part, which is design §3.3's table as a type.
- *
- * THE λ METHODS ARE `Session`'S, UNCHANGED, a λ copy being a λ cursor and nothing else, so `RECORDINGS.lambda` below
- * needs no second implementation and no cast: each λ method it calls is identical in name and signature on both
- * kinds, and a `Session` satisfies this type structurally. The ones named here are the ones this file calls.
- *
- * `lambdaValue`, `sourceSpan` AND `linkIndex` ARE ABSENT AND THAT IS THE POINT. They do not exist on
- * the generated class (`pkg/redextape_wasm.d.ts`), and on the Rust side `redextape-wasm`'s
- * `tests/browser.rs` pins their absence at compile time (`scratch_methods_that_must_not_exist`), so a
- * handler that reached for one would not compile here either. `lambdaLeg` below reaches for the first
- * two, which is why it is never called for a copy — see `onExtend`.
- */
-type LambdaScratchHandle = {
-  lambdaStatus(): LambdaStatus
-  lambdaState(byteBudget: number): LambdaState
-  stepLambda(): boolean
-  lambdaTree(step: number, nodeBudget: number): LambdaTreeWire
-  raiseLambdaCap(extra: number): void
-  rewindLambda(): void
-  free(): void
-}
-
-/**
- * The wasm-bindgen `TmScratch`, described structurally for the reason `Session` above is — and it is
- * `Session`'s TM part with `tmValue` gone, mirroring `LambdaScratchHandle` one type up.
- *
- * `tmStatus` RETURNS `TmScratchStatus`, NOT `TmStatus` — a different wire shape, not a narrower read of
- * the same one; see that type's own doc, on its Rust declaration in `redextape-wire`. `tmProgram` HAS NO
- * ABSENT-LEG CASE HERE, UNLIKE `Session.tmProgram`'s caller-side guard in `onRun`: `session.rs`'s
- * own doc on `TmScratch::tm_program` says so directly — there is no declined leg for a scratch to
- * have declined.
- *
- * NO `tmValue`, `sourceSpan`, OR `linkIndex`, for decision 2's reason: a `TmScratch` has no `ty`, no
- * lowering and no `SourceMap`. `tmLeg` below is exactly the function that reaches for the first of
- * those, which is why it is never called for a copy.
- */
-type TmScratchHandle = {
-  tmStatus(): TmScratchStatus
-  tmProgram(): TmProgram
-  tapeNames(): string[]
-  stepTm(): boolean
-  tmState(radius: number): TmState
-  raiseTmCap(extraSteps: number, extraCells: number): void
-  rewindTm(): void
-  free(): void
-}
-
-/**
- * The wasm-bindgen `TmValueRun`, described structurally for the reason `Session` above is: the run that reads a
- * headered TM buffer's value, beside the scratch rather than on it, for decision 2's reason (`session.rs`'s
- * `TmValueRun` doc).
- */
-type TmValueRunHandle = {
-  run(budget: number): ValueRun
-  value(): Decoded
-  free(): void
-}
-
-/**
- * The wasm-bindgen `RxmScratch`, described structurally for the reason `Session` above is: the rxm leg's seven methods.
- * A copy's rxm leg answers every one of them as a session's does (`session.rs`'s `RxmScratch`), so `RECORDINGS.rxm`
- * calls it as it calls a session. No `rxmText`, since a copy offers no copy of itself, and no `sourceSpan` or
- * `linkIndex`: a copy has no `SourceMap`.
- */
-type RxmScratchHandle = {
-  rxmStatus(): RxmStatus
-  rxmProgram(): RxmProgram
-  rxmState(window: RxmWindow): RxmState
-  stepRxm(): boolean
-  raiseRxmCap(extraSteps: number): void
-  rewindRxm(): void
-  rxmValue(): Decoded
-  free(): void
-}
-
-/** Each leg's copy, the wasm type that holds that leg alone. No CLIF entry: a CLIF view offers no copy. */
-type ScratchOf = { lambda: LambdaScratchHandle; rxm: RxmScratchHandle; tm: TmScratchHandle }
-
 type CompileResult = { diagnostics: Diagnostic[]; session: Session | null }
-
-/**
- * `lambdaScratchAt(src, step, byteBudget)`'s hand-built object — a handle and plain data, which
- * `lib.rs` assembles with `js_sys::Object` for the reason `compile`'s own doc gives.
- *
- * `scratch` AND `text` ARE NULL TOGETHER OR NEITHER (`session::ForkedAt`) — see `scratch-compiled`'s
- * doc in `protocol.ts`. `scratch: null` covers both text that did not parse and a term too large to
- * print at `LAMBDA_BYTE_BUDGET`; `buildCopy` answers either with `no-session`, the same claim
- * about a different producer.
- */
-type ForkedAtResult = { diagnostics: Diagnostic[]; scratch: LambdaScratchHandle | null; text: string | null }
-
-/**
- * `tmScratch(src)`'s hand-built object — a handle and plain data, the same assembly `lib.rs` gives
- * `compile` and `lambdaScratchAt` and for the identical reason.
- *
- * NO `text` FIELD, UNLIKE `ForkedAtResult`. `tmScratch` never echoes the source: the main thread SENT
- * `src` and already holds it — see `tm-scratch-compiled`'s doc in `protocol.ts`.
- */
-type TmScratchResult = { diagnostics: Diagnostic[]; scratch: TmScratchHandle | null; value: TmValueRunHandle | null }
-
-/**
- * `rxmScratch(src)`'s hand-built object: `scratch` is `null` for text that does not parse, is over
- * `MAX_SCRATCH_RXM_BYTES`, or has a label mistake, and the diagnostics name which.
- */
-type RxmScratchResult = { diagnostics: Diagnostic[]; scratch: RxmScratchHandle | null }
 
 /**
  * Exactly what this worker uses of its global scope.
@@ -300,48 +165,29 @@ function resultToCome(gen: number): ResultToCome {
 let runResult = resultToCome(0)
 
 /**
- * The ONE live session, with the generation that owns it: `copy-build.ts`'s `Occupant`, with a TM copy's value run.
+ * The ONE live session, with the generation that owns it: `claim.ts`'s `Occupant`, and what the worker keeps
+ * beside it.
  *
  * EVERY SESSION TOUCH GOES THROUGH THIS BINDING, never through a captured reference. A record loop
  * suspended at a yield can resume after its session has been freed; reading `live` each time means
  * it sees `null` (or a newer generation) and returns, instead of calling into a dangling handle and
  * raising "null pointer passed to rust" from a place no caller can see.
  *
- * **A DISCRIMINATED UNION, AND IT IS ONE OCCUPANT.** `kind` and a copy's `leg` say which wasm type this thread is
- * holding; the field is `session` in every arm because that is what a record loop steps, λ, TM or rxm
- * (§3.3; 5d-iv design §4.4). The invariant §4.2 rests on is about the CARDINALITY of this binding, which
- * is one, not about the type of what is in it — `claimLive` empties it before anything else is built.
- *
- * A TAG RATHER THAN A `tm`-SHAPED DUCK TEST (`'tmStatus' in live.session`). A tag is what makes the
- * checker refuse `live.session.tmStatus()` on a λ copy's arm at every call site rather than
- * only at the ones somebody remembered to guard — and the mirror image on a TM copy's arm for
- * `live.session.lambdaStatus()` — and §3.3's whole method split is a compile-time claim, a runtime
- * probe would restate it as a convention.
- *
- * **EVERY LEG ASKS WHAT KIND OF THING IS LIVE.** `TmScratchHandle` carries the TM methods the TM leg's
- * recording calls but none of the λ ones the λ leg's does — the reverse of `LambdaScratchHandle` — and
- * `RxmScratchHandle` carries the rxm leg's alone. See `liveHandle`.
+ * The invariant §4.2 rests on is about the CARDINALITY of this binding, which is one: `claimLive` empties it before
+ * anything else is built.
  */
-type Live =
-  | {
-      gen: number
-      kind: 'session'
-      session: Session
-      pinned: boolean
-      /**
-       * The CLIF stepper built from this session, with the listing it was built for, `null` while none is built: part
-       * of this occupant, not a second one, since `dropLive` frees it with the session.
-       */
-      clif: { session: ClifHandle; listing: Listing } | null
-    }
-  | { gen: number; kind: 'scratch'; leg: 'lambda'; session: LambdaScratchHandle }
-  | { gen: number; kind: 'scratch'; leg: 'tm'; session: TmScratchHandle; value: TmValueRunHandle | null }
-  | { gen: number; kind: 'scratch'; leg: 'rxm'; session: RxmScratchHandle }
+type Live = {
+  gen: number
+  session: Session
+  pinned: boolean
+  /**
+   * The CLIF stepper built from this session, with the listing it was built for, `null` while none is built: part of
+   * this occupant, not a second one, since `dropLive` frees it with the session.
+   */
+  clif: { session: ClifHandle; listing: Listing } | null
+}
 
 let live: Live | null = null
-
-/** The session's arm of `live`: what a `result` is read from. */
-type SessionLive = Extract<Live, { kind: 'session' }>
 
 /**
  * Bytes recorded per leg, and the allowance each is spending against. `[continue]` on a `budget`
@@ -383,7 +229,7 @@ let posted: ResultLegs | null = null
 const rewoundFrom: HeldLegs = perLeg(() => null)
 
 /** Each leg's part of a session's `result`, read off its cursor, or for CLIF off the stepper beside it. */
-const PART: { readonly [K in Leg]: (held: SessionLive) => ResultLegs[K] } = {
+const PART: { readonly [K in Leg]: (held: Live) => ResultLegs[K] } = {
   lambda: (held) => lambdaLeg(held.session),
   rxm: (held) => rxmLeg(held.session),
   tm: (held) => tmLeg(held.session),
@@ -391,7 +237,7 @@ const PART: { readonly [K in Leg]: (held: SessionLive) => ResultLegs[K] } = {
 }
 
 /** `rewoundFrom`'s part for `leg`, read as `postResult` reads it. */
-function holdPart<K extends Leg>(leg: K, held: SessionLive): void {
+function holdPart<K extends Leg>(leg: K, held: Live): void {
   rewoundFrom[leg] = PART[leg](held)
 }
 
@@ -421,16 +267,10 @@ function dropLive(): void {
   } catch {
     /* See the comment above: a session that cannot be freed is already unusable. */
   }
-  // THE VALUE RUN IS A SECOND HANDLE, FREED UNDER THE SAME RULE AND IN ITS OWN `try`, so a scratch that cannot be
-  // freed does not leak the run beside it.
+  // A SESSION'S CLIF STEPPER IS A SECOND HANDLE, FREED AFTER IT UNDER THE SAME RULE AND IN ITS OWN `try`, so a session
+  // that cannot be freed does not leak the stepper beside it.
   try {
-    if (held?.kind === 'scratch' && held.leg === 'tm') held.value?.free()
-  } catch {
-    /* As above. */
-  }
-  // A SESSION'S CLIF STEPPER IS FREED AFTER IT, under the same rule and in its own `try`, for the value run's reason.
-  try {
-    if (held?.kind === 'session') held.clif?.session.free()
+    held?.clif?.session.free()
   } catch {
     /* As above. */
   }
@@ -438,7 +278,7 @@ function dropLive(): void {
 
 /** Drop the live session's CLIF stepper, if it has one: nulled before freed, and freed in its own `try`, as above. */
 function dropClif(): void {
-  if (live?.kind !== 'session') return
+  if (live === null) return
   const held = live.clif
   live.clif = null
   try {
@@ -492,25 +332,19 @@ const claim: Claim = {
   },
 }
 
-/** What `leg`'s recording may step for `gen`, `liveHandle`'s answer for what is live. */
-function handleOf<K extends CopyLeg>(leg: K, gen: number): Session | ScratchOf[K] | null {
-  return liveHandle<Session, ScratchOf, K>(live, leg, gen)
-}
-
-/** What each leg's recording steps: a session, or the leg's copy; for CLIF, the session's CLIF stepper. */
-type HandleOf = { [K in CopyLeg]: Session | ScratchOf[K] } & { clif: ClifHandle }
+/** What each leg's recording steps: the session, and for CLIF the session's CLIF stepper. */
+type HandleOf = { [K in CopyLeg]: Session } & { clif: ClifHandle }
 
 /**
- * Each leg's pieces for `record-loop.ts`: a `Session`'s leg, or a copy's (`ScratchOf`), which carries that leg's
- * methods under `Session`'s names. Reached only through `onRun`'s `recordBuild`, `extend`, `rewind` and `onScratch`
- * below (`extend`'s doc).
+ * Each leg's pieces for `record-loop.ts`: a `Session`'s leg. Reached only through `onRun`'s `recordBuild`, `extend`
+ * and `rewind` below (`extend`'s doc).
  */
 const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, HandleOf[K]> } = {
   // The λ leg's recording is what decides its value, where TM's and rxm's replay a run `compile` already finished,
   // whose allowance costs history alone.
   lambda: {
     leg: 'lambda',
-    handle: (gen) => handleOf('lambda', gen),
+    handle: (gen) => liveHandle(live, gen),
     available: (s) => s.lambdaStatus().available,
     frame: (s) => s.lambdaState(FRAME_BYTES),
     bytes: LEG_FRAME_BYTES.lambda,
@@ -521,7 +355,7 @@ const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, HandleOf[K]> } = {
   },
   rxm: {
     leg: 'rxm',
-    handle: (gen) => handleOf('rxm', gen),
+    handle: (gen) => liveHandle(live, gen),
     available: (s) => s.rxmStatus().available,
     frame: (s) => s.rxmState(RXM_WINDOW),
     bytes: LEG_FRAME_BYTES.rxm,
@@ -532,7 +366,7 @@ const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, HandleOf[K]> } = {
   },
   tm: {
     leg: 'tm',
-    handle: (gen) => handleOf('tm', gen),
+    handle: (gen) => liveHandle(live, gen),
     available: (s) => s.tmStatus().available,
     frame: (s) => s.tmState(TM_RADIUS),
     bytes: LEG_FRAME_BYTES.tm,
@@ -545,7 +379,7 @@ const RECORDINGS: { readonly [K in Leg]: RecordLeg<K, HandleOf[K]> } = {
   // `EXTEND_STEPS` loop ticks rather than instructions, as the compiled program's own step cap does.
   clif: {
     leg: 'clif',
-    handle: (gen) => (live?.gen === gen && live.kind === 'session' ? (live.clif?.session ?? null) : null),
+    handle: (gen) => (live?.gen === gen ? (live.clif?.session ?? null) : null),
     available: () => true,
     frame: (s) => s.state(CLIF_WINDOW),
     bytes: LEG_FRAME_BYTES.clif,
@@ -568,7 +402,7 @@ function extend<K extends Leg>(leg: K, gen: number): Promise<boolean> {
 /** `rewindAndRecord` for `leg`, holding a session's part first when its generation has posted no `result`. */
 function rewind<K extends Leg>(leg: K, gen: number, toEpoch: number): Promise<void> {
   return rewindAndRecord(RECORDINGS[leg], worker, gen, toEpoch, () => {
-    if (posted === null && live?.kind === 'session') holdPart(leg, live)
+    if (posted === null && live !== null) holdPart(leg, live)
   })
 }
 
@@ -616,7 +450,7 @@ function rxmLeg(session: Session): RxmLeg {
  * `Unfinished`, and keep what it posted as `posted`. `onRun`, `onExtend` and the CLIF pass post here, `pinned` as the
  * session's `run` request carried a width.
  */
-function postResult(gen: number, held: SessionLive): void {
+function postResult(gen: number, held: Live): void {
   const read: ResultLegs = {
     lambda: PART.lambda(held),
     rxm: PART.rxm(held),
@@ -647,7 +481,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
     session.free()
     return
   }
-  live = { gen: req.gen, kind: 'session', session, pinned: req.width !== undefined, clif: null }
+  live = { gen: req.gen, session, pinned: req.width !== undefined, clif: null }
 
   const lambda = session.lambdaStatus()
   const rxm = session.rxmStatus()
@@ -658,15 +492,6 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   // GUARDED: `tmProgram` throws `TmAbsent` for a declined leg, and a throw lands in the listener's
   // `catch`, which drops the whole session.
   const tmProgram = tm.available ? session.tmProgram() : null
-  // THE GATE — `forkable` is imported from `protocol.ts` precisely so it is not written here, where the
-  // coverage gate cannot see it.
-  const tmText = forkable(tmProgram) ? session.tmText() : null
-  // UNGUARDED, LIKE `rxmText` BELOW: a fact about the program's type, answerable whether or not
-  // `tmText` itself was ever asked for — see this method's own doc on the worker's `Session` type.
-  const tmResultDecodable = session.tmResultDecodable()
-  // UNGUARDED, WHERE `rxmProgram` ABOVE IS GUARDED: `rxmText` answers `null` itself for a declined leg and for text
-  // over the copy ceiling, and cannot throw. Passed through unchanged, never through `??`, for `tmText`'s reason.
-  const rxmText = session.rxmText()
   // GUARDED FOR `tmProgram`'s REASON: `lambdaTree` throws for a declined λ leg.
   const lambdaTree = lambda.available ? session.lambdaTree(0, LAMBDA_TREE_NODES) : null
   // λ, THEN RXM, THEN TM (Plan 7 part 5 spec §5.4), `COPY_LEGS`' order, which is `LEG_NAME`'s less CLIF, which records
@@ -680,13 +505,10 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
         gen: req.gen,
         statuses: { lambda, rxm, tm, clif: clifCompileStatus(rxm, req.clif) },
         programs: {
-          rxm: rxmProgram === null ? null : { program: rxmProgram, text: rxmText },
+          rxm: rxmProgram === null ? null : { program: rxmProgram },
           // A COMPILE BUILDS NO CLIF LISTING: a CLIF view is handed one once its stepper is built.
           clif: null,
-          tm:
-            tmProgram === null
-              ? null
-              : { program: tmProgram, tapeNames: tapeNames() as string[], text: tmText, tmResultDecodable },
+          tm: tmProgram === null ? null : { program: tmProgram, tapeNames: tapeNames() as string[] },
         },
         declinedSpan: declinedSourceSpan(session, lambda),
         linkIndex: index,
@@ -715,8 +537,7 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
   )
 
   // Deliberate silence: superseded while recording ran. The generation that wanted this result is gone.
-  // The `kind` half is the type restating the `gen` half — see `liveHandle`'s doc for the argument.
-  if (live?.gen !== req.gen || live.kind !== 'session') return
+  if (live?.gen !== req.gen) return
   postResult(req.gen, live)
   result.settle()
   // AFTER THE RESULT, NOT BESIDE THE OTHER LEGS: nothing the other legs or the result do waits on the CLIF pass.
@@ -727,8 +548,8 @@ async function onRun(req: Extract<RunRequest, { kind: 'run' }>): Promise<void> {
  * The live session, when it is still `gen`'s and the CLIF leg still at `epoch`; else `null`, and the CLIF pass that
  * asks has been replaced: by a newer run, which dropped this session, or by a newer CLIF request.
  */
-function clifOwner(gen: number, epoch: number): SessionLive | null {
-  return live?.gen === gen && live.kind === 'session' && worker.epoch.clif === epoch ? live : null
+function clifOwner(gen: number, epoch: number): Live | null {
+  return live?.gen === gen && worker.epoch.clif === epoch ? live : null
 }
 
 /**
@@ -835,7 +656,7 @@ let clifIn = false
  * next `run` replaces it and drops the session before this thread reads another request.
  */
 async function onClif(req: Extract<RunRequest, { kind: 'clif' }>): Promise<void> {
-  if (live?.gen !== req.gen || live.kind !== 'session' || req.epoch <= epoch.clif) return
+  if (live?.gen !== req.gen || req.epoch <= epoch.clif) return
   epoch.clif = req.epoch
   recording.clif = false
   dropClif()
@@ -845,131 +666,6 @@ async function onClif(req: Extract<RunRequest, { kind: 'clif' }>): Promise<void>
   if (req.listing === null) return
   await runResult.posted
   await recordClif(req.gen, req.epoch, req.listing)
-}
-
-/** Each leg's copy as its build makes it: the handle, and what its reply or its free needs beside it. */
-type Made = {
-  lambda: { scratch: LambdaScratchHandle; text: string | null }
-  rxm: RxmScratchHandle
-  tm: { scratch: TmScratchHandle; value: TmValueRunHandle | null }
-}
-
-/**
- * Each leg's copy build, for `buildCopy`. Each reply is the leg's own `*-scratch-compiled`, and no `result` follows:
- * a `result` reads what a copy does not have (a `SourceMap`, a `ty`, the other legs), as each reply's doc in
- * `protocol.ts` says.
- *
- * **A COPY THAT BUILT HAS NO DIAGNOSTICS, ON ANY LEG**, so `buildCopy` posts none beside it. A λ copy parses a term
- * (its own print past step 0, `src` at step 0), and `parse_lambda` answers a term with no diagnostic beside it.
- * `tm::parse_tm_full` makes every diagnostic an error and builds no machine once there is one; a headerless file is
- * `tm.header: false` on the status, not a diagnostic. `rxm_scratch` builds no copy unless its diagnostics are empty.
- */
-const BUILD: { readonly [K in CopyLeg]: CopyBuild<K, Made[K]> } = {
-  // THE REPLAY TO THE FORKED STEP IS IN RUST, INSIDE `lambdaScratchAt`, NOT HERE: this file is reachable only from the
-  // browser tier, which the coverage gate cannot see.
-  lambda: {
-    build: (src, step) => {
-      const { diagnostics, scratch, text } = lambdaScratchAt(src, step, LAMBDA_BYTE_BUDGET) as ForkedAtResult
-      return { made: scratch === null ? null : { scratch, text }, diagnostics }
-    },
-    free: ({ scratch }) => scratch.free(),
-    occupy: (gen, { scratch }) => {
-      live = { gen, kind: 'scratch', leg: 'lambda', session: scratch }
-    },
-    // THE TREE BESIDE THE FRAME, `null` BESIDE A `null` ONE, for `onRun`'s reason: `lambdaTree` is not asked of a leg
-    // that is not available.
-    compiled: (gen, { scratch, text }, first) => ({
-      kind: 'scratch-compiled',
-      gen,
-      lambda: scratch.lambdaStatus(),
-      text,
-      first,
-      lambdaTree: first === null ? null : scratch.lambdaTree(0, LAMBDA_TREE_NODES),
-    }),
-    transfer: ({ lambdaTree }) => (lambdaTree === null ? [] : treeBuffers(lambdaTree)),
-  },
-  rxm: {
-    build: (src) => {
-      const { diagnostics, scratch } = rxmScratch(src) as RxmScratchResult
-      return { made: scratch, diagnostics }
-    },
-    free: (scratch) => scratch.free(),
-    occupy: (gen, scratch) => {
-      live = { gen, kind: 'scratch', leg: 'rxm', session: scratch }
-    },
-    // ITS VALUE RIDES THE BUILD REPLY: `rxmScratch` has run the program to its end (Plan 7 part 5 spec, amendment 26),
-    // so no value loop follows the recording as a TM copy's does.
-    compiled: (gen, scratch, first) => ({
-      kind: 'rxm-scratch-compiled',
-      gen,
-      rxm: scratch.rxmStatus(),
-      rxmProgram: scratch.rxmProgram(),
-      value: scratch.rxmValue(),
-      first,
-    }),
-  },
-  tm: {
-    build: (src) => {
-      const { diagnostics, scratch, value } = tmScratch(src) as TmScratchResult
-      return { made: scratch === null ? null : { scratch, value }, diagnostics }
-    },
-    free: ({ scratch, value }) => {
-      scratch.free()
-      value?.free()
-    },
-    occupy: (gen, { scratch, value }) => {
-      live = { gen, kind: 'scratch', leg: 'tm', session: scratch, value }
-    },
-    // Its own `tapeNames`, not the fixed export `onRun` posts: a reduced file's single-tape stage changes what its one
-    // tape is.
-    compiled: (gen, { scratch }, first) => ({
-      kind: 'tm-scratch-compiled',
-      gen,
-      tm: scratch.tmStatus(),
-      tmProgram: scratch.tmProgram(),
-      tapeNames: scratch.tapeNames(),
-      first,
-    }),
-    // A headered file's value, as `tm-value` after every chunk, in place of a session's `result`.
-    after: runValueLoop,
-  },
-}
-
-/**
- * Build `leg`'s copy. **GENERIC IN THE LEG, AS `extend` IS**: `tsc` checks this body with `K` abstract, so a build of
- * one leg paired with another leg's recording is refused, `buildCopy` taking both of one `K`.
- */
-function onScratch<K extends CopyLeg>(leg: K, req: Extract<RunRequest, { kind: 'scratch' }>): Promise<void> {
-  return buildCopy(BUILD[leg], RECORDINGS[leg], claim, () => latest, worker, req)
-}
-
-/**
- * Run a TM buffer's value run out in `VALUE_CHUNK` steps at a time, posting where it stands after each chunk.
- *
- * **AFTER THE FIRST RECORDING, NOT BESIDE IT.** Frames are what the pane draws first, so the first recording runs
- * before this loop starts. A `[continue]` that arrives while this loop is going is dispatched at its next yield: the
- * message listener starts `onExtend`, whose recording then takes turns with this loop, one `RECORD_CHUNK` of frames
- * against one `VALUE_CHUNK` of steps, each run whole between yields. The two step different cursors — the recording
- * the scratch's own through `stepTm`, this loop the `TmValueRun` beside it — so taking turns delays each by the
- * other's chunk and changes neither's result.
- *
- * **EVERY CHUNK STARTS WITH A GUARD LIKE THE TM LEG'S** (the TM entry's `handle`, which `recordLeg` asks before
- * every chunk), reading `live` rather than a captured handle, so an edit that replaced the scratch, or freed it, ends
- * this loop at its next chunk rather than stepping a freed run.
- *
- * **NO RE-ENTRY FLAG, BECAUSE A BUILD IS A GENERATION.** `BUILD.tm`'s `after` is the only caller and starts one loop
- * per build, and every build claims a new generation (`SessionClient.supersede` on the main thread, `latest = req.gen`
- * here), so one loop per build is one loop per run. A loop left over from an earlier build meets the guard above
- * at its next chunk and returns without stepping or posting.
- */
-async function runValueLoop(gen: number): Promise<void> {
-  for (;;) {
-    if (live?.gen !== gen || live.kind !== 'scratch' || live.leg !== 'tm' || live.value === null) return
-    const run = live.value.run(VALUE_CHUNK)
-    ctx.postMessage({ kind: 'tm-value', gen, run, value: live.value.value() })
-    if (run.run !== 'Running') return
-    await yieldToEventLoop()
-  }
 }
 
 async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<void> {
@@ -992,13 +688,13 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
   // instead of one more. Setting the allowance itself avoids that stacking in both cases.
   allowance[req.leg] = recorded[req.leg] + HISTORY_BYTES
 
-  // Written before `extend` asks whether what is live has the leg: harmless for a leg that never records, where asking
-  // first would put a `kind` test in front of the ordinary path.
+  // Written before `extend` asks whether the leg can record: harmless for a leg that never records, and asking first
+  // would ask `extend`'s question twice.
   const ran =
     req.leg === 'clif'
       ? ((await clifRecorded(req.gen, () => extend('clif', req.gen))) ?? false)
       : await extend(req.leg, req.gen)
-  // A SUPPRESSED CALL MUST NOT POST A RESULT. `ran === false` is a live thing without the leg, a leg that did not
+  // A SUPPRESSED CALL MUST NOT POST A RESULT. `ran === false` is a CLIF leg with no stepper, a leg that did not
   // compile, or a loop already in flight for this leg, which owns it — that loop posts its own frames, and its caller
   // any `result`, when it finishes. Posting one here too would answer with whatever partial state that other loop had
   // reached at this instant, then let the real loop's caller post a second, later `result` for the same generation
@@ -1008,18 +704,6 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
 
   // Deliberate silence: superseded while recording ran, same as `onRun`'s post-record check.
   if (live?.gen !== req.gen) return
-  // A SCRATCHPAD GETS NO `result`, AND THAT IS NOT AN OMISSION. `lambdaLeg` reads `lambdaValue` and
-  // `tmLeg` reads `tmValue`; §3.3 puts both off the scratch types because decoding is type-directed
-  // and a scratch has no `ty` to decode against. The frames this call just recorded, and their
-  // `RecordEnd`, are its whole answer; a headered TM buffer's value arrives separately, as the
-  // `tm-value` replies `runValueLoop` posts, which `[continue]` neither starts nor extends. An rxm copy's value is read
-  // off its cursor where its build's cap stopped the build's run, which a raise or a rewind moves, so it is posted
-  // again here, on its own.
-  if (live.kind === 'scratch' && live.leg === 'rxm') {
-    ctx.postMessage({ kind: 'rxm-value', gen: req.gen, value: live.session.rxmValue() })
-    return
-  }
-  if (live.kind !== 'session') return
   postResult(req.gen, live)
 }
 
@@ -1027,7 +711,7 @@ async function onExtend(req: Extract<RunRequest, { kind: 'extend' }>): Promise<v
  * Take one leg back to step 0 and record its first fill again, under the epoch the request carries (hidden-recording
  * spec §5.4): the `rewind` the page posts when ↺ finds the leg's step 0 dropped from its ring.
  *
- * **A STALE GENERATION, A LIVE THING WITHOUT THE LEG, OR A LEG THAT DID NOT COMPILE ANSWERS NOTHING**, the questions
+ * **A STALE GENERATION, A CLIF LEG WITH NO STEPPER, OR A LEG THAT DID NOT COMPILE ANSWERS NOTHING**, the questions
  * the leg's `handle` and `available` ask: a `Session`'s rewind throws for an absent leg, and a throw drops the session.
  * **NOR DOES AN EPOCH NO NEWER THAN THE LEG'S**: the loop in flight would not stop, and two loops would step a cursor.
  *
@@ -1043,9 +727,8 @@ async function onRewind(req: Extract<RunRequest, { kind: 'rewind' }>): Promise<v
 /**
  * Answer one `lambda-tree` request, synchronously, between record chunks (Plan 7 part 4 spec §4.1).
  *
- * **NOT A CLAIM ON `latest`.** A tree is a question about what a `run` or a λ `scratch` built, not a
- * new build, so it supersedes nothing; a request for a generation that is no longer live is dropped, as a
- * stale record loop's frames are.
+ * **NOT A CLAIM ON `latest`.** A tree is a question about what a `run` built, not a new build, so it supersedes
+ * nothing; a request for a generation that is no longer live is dropped, as a stale record loop's frames are.
  *
  * **A DECLINED λ LEG IS ASKED NOTHING.** `Session.lambdaTree` throws for an absent leg, and a throw here
  * lands in the listener's `catch`, which drops the whole session — a λ view on a TM-only program would
@@ -1056,9 +739,8 @@ async function onRewind(req: Extract<RunRequest, { kind: 'rewind' }>): Promise<v
  * `ArrayBuffer`, which nothing here reads again.
  */
 function onLambdaTree(req: Extract<RunRequest, { kind: 'lambda-tree' }>): void {
-  // A session, or a λ copy.
-  const held = handleOf('lambda', req.gen)
-  if (held === null || (live?.kind === 'session' && !live.session.lambdaStatus().available)) return
+  const held = liveHandle(live, req.gen)
+  if (held === null || !held.lambdaStatus().available) return
   const tree = held.lambdaTree(req.step, req.budget)
   ctx.postMessage({ kind: 'lambda-tree', gen: req.gen, tree }, treeBuffers(tree))
 }
@@ -1078,14 +760,6 @@ ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
       case 'run':
         latest = req.gen
         await onRun(req)
-        break
-      case 'scratch':
-        // `latest` IS CLAIMED HERE TOO, AND EACH BUILD'S ABANDON CHECK DEPENDS ON IT. `latest` is what a build
-        // compares itself against after its uninterruptible wasm call returns; a build that never recorded itself
-        // as the newest request would free its own copy every time, since `latest !== req.gen` would still name
-        // whatever ran before it.
-        latest = req.gen
-        await onScratch(req.leg, req)
         break
       case 'extend':
         await onExtend(req)

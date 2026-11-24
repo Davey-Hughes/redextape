@@ -9,10 +9,8 @@ alongside `tree-sitter-redextape` (the mini-language), `tree-sitter-redextape-la
 `redextape_core::tm::syntax` is the semantic source of truth and owns the canonical printer. This
 grammar produces a CST and never lowers it into anything.
 
-It colours two kinds of editor. `web/src/colour.ts` loads its committed
-`tree-sitter-redextape-tm.wasm` and `queries/highlights.scm` through `web-tree-sitter`, and the
-editor in the web app's TM view, where a TM copy is edited, is coloured from them. External editors
-take it as *Installing it in an editor* describes.
+It colours external editors, which take it as *Installing it in an editor* describes. The web app
+does not load it.
 
 ## The form, in one page
 
@@ -145,7 +143,7 @@ only. `MAX_MACHINE_STATES` in `tm/build.rs` caps the states a lowering builds at
 `docs/superpowers/notes/2026-10-17-code-history-probes.md` (under `state_cost_probe.rs`) records
 what an uncapped lowering cost.
 
-**A browser leg checks the artefact `web/` loads.** This crate compiles `parser.c` through `cc` and
+**A browser leg checks the committed `.wasm`.** This crate compiles `parser.c` through `cc` and
 has no wasm build, so the two sides meet in a file: `tests/golden.rs` prints one headered fixture,
 the program `1` lowered in unary through `printed_machine_with_header`, holds it to the printer's
 classification, and holds `grammars/capture-golden.json` equal to the captures this crate computes

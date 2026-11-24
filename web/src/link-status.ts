@@ -1,6 +1,4 @@
-import { LEG_NAME, LEGS, perLeg } from './legs'
 import { LINKED, LINKED_LEGS, type LinkedLeg } from './linked-legs'
-import type { Leg } from './protocol'
 
 /**
  * Why a pane is not showing a link, in words.
@@ -46,71 +44,14 @@ export type LambdaLinkState =
    * in Stage, whenever the view it shows is not a λ view: the others are off the page, and a view off
    * the page drew no tree this frame (`draw.ts`'s `createDraw`).
    *
-   * IT RENDERS AS NOTHING, and that is the same uniform-suppression rule `linkStatus` already applies
-   * to a DETACHED λ pane rather than a new exception: every λ clause explains why a term on screen
-   * does not show the link, and with no pane there is no term on screen for any of them to be about.
-   * `'declined'` is the member that could be argued to survive — it is a property of the program's
-   * lowering rather than of a pane — and it is suppressed here for the reason `linkStatus`'s own note
-   * gives for suppressing it under detachment: splitting the rule would put "is there a λ pane" in two
-   * places, and the sentence would still be read as an explanation of an empty pane that is not there.
-   *
-   * NOT SPELLED AS `detached`. A pane that does not exist is not a pane that is outside the source
-   * correspondence — `DetachedPanes` is read off a BINDING, and there is no binding to read.
+   * IT RENDERS AS NOTHING: every λ clause explains why a term on screen does not show the link, and with no pane
+   * there is no term on screen for any of them to be about. `'declined'` is the member that could be argued to
+   * survive — it is a property of the program's lowering rather than of a pane — and `draw.ts` answers `'absent'`
+   * before it asks about the lowering, so the line never reads as an explanation of an empty pane that is not there.
    */
   | 'absent'
 
-/**
- * WHICH VIEWS ARE OUTSIDE THE CORRESPONDENCE — per leg, how many views it has and the title of each one that shows
- * a copy. Views detach independently. 5d-i design §4.3: editing a source-derived λ view seeds a `LambdaScratch` and
- * rebinds THAT view; the program keeps running and every other view stays on it. So "λ detached, TM still linked"
- * is the ordinary state, not a corner — and since a leg holds any number of views, so is "one rxm view on a copy,
- * another on the program".
- *
- * A view shows a copy when it is bound to one: for `lambda` a `LambdaScratch`, which has no `SourceMap` and so no
- * `sourceSpan`/`linkIndex` (§3.3); for `tm` a `TmScratch`, whose every `TmState` carries `source_node: null`
- * (§3.1); for `rxm` an rxm copy, whose instructions have no owner (Plan 7 part 5 spec, amendment 28).
- *
- * **EVERY VIEW, NOT ONE BOOLEAN PER LEG READ OFF THE VIEW FOCUSED LAST.** With an rxm view on the program and a
- * second on a copy, such a boolean would name the rxm copy only while the copy's view was the one focused last, and
- * "rxm view" would not say which of the two it meant. `copies` holds every view showing a copy, and `views` is what
- * lets `linkStatus` tell a leg whose views all show copies from one that still has a view of the program.
- *
- * **THE TITLES ARE THE HEADERS' OWN** (`main.ts`'s `viewTitle`), which is how a leg with several views says which
- * of them shows a copy: `rxm · copy 1`.
- *
- * **A `Record` OVER `Leg`**, so a new leg is a required entry here and a type error at every literal that leaves it
- * out, rather than a view whose copy the status line never mentions (`legs.ts` has the class of bug).
- */
-export type DetachedPanes = Record<Leg, { readonly views: number; readonly copies: readonly string[] }>
-
-export type LinkStatus = {
-  /**
-   * A FIELD ON EVERY ARM, NOT AN ARM OF ITS OWN, and the choice is forced rather than stylistic.
-   *
-   * The `state` discriminant answers "what did the user pin, and did it resolve" — the pin is the
-   * subject of every one of `none`/`stale`/`ownerless`/`linked`. Detachment answers a different question about a
-   * different object: which PANES are bound to a scratch session. Both are true at once, so an arm
-   * would have to choose, and it would choose wrong in the case §4.3 makes ordinary — a detached λ
-   * pane with a live TM link would report `{state:'detached'}` and throw away the narration for the
-   * pane that is still inside the correspondence.
-   *
-   * It is also not ONE arm. A pane can be detached with nothing pinned, with a stale index, after a click
-   * that pinned nothing, or with a live link — four states this union already distinguishes — so the arm
-   * version is four more arms, and `linkStatus` would carry two parallel switches over the same four cases.
-   *
-   * NOT `'stale'` AND NOT `'none'`, which is the trap this field exists to avoid. `'stale'` says "linking
-   * resumes when this compiles", which is about the program's index; said of detachment, it would promise
-   * that a compile brings a copy's view back, and a compile ends no buffer, so it reattaches nothing.
-   * `'none'` says nothing is pinned, which is silent, and 5d-i design §4.5's whole obligation is that
-   * detachment must not be.
-   *
-   * OPTIONAL: absent means "every view attached". The app's builder, `link-wiring.ts`'s `drawLink`, fills
-   * it in on every arm, from `detachedPanes()`; the optionality is what the other producers of this type —
-   * this file's own tests among them — spend. Under `exactOptionalPropertyTypes` an optional property is
-   * never assigned `undefined`: a producer with no value leaves it out, and `drawLink` always has one.
-   */
-  detached?: DetachedPanes
-} & (
+export type LinkStatus =
   | { state: 'none' }
   | { state: 'stale' }
   /**
@@ -129,7 +70,6 @@ export type LinkStatus = {
        */
       legs: Readonly<Record<LinkedLeg, { emits: boolean; here: boolean }>>
     }
-)
 
 const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   shown: '',
@@ -140,119 +80,31 @@ const LAMBDA_TEXT: Record<LambdaLinkState, string> = {
   absent: '',
 }
 
-const ATTACHED: DetachedPanes = perLeg(() => ({ views: 0, copies: [] }))
-
-/**
- * Whether every view of a leg shows a copy — a leg with views and none of them on the program. Its own clauses
- * then describe no view of the program, and `linkStatus` suppresses them. A leg with no view is not detached:
- * there is no binding to read (`'absent'`'s doc).
- */
-const allCopies = (leg: DetachedPanes[Leg]): boolean => leg.views > 0 && leg.copies.length === leg.views
-
-/**
- * The detachment clause, or `''` when no view shows a copy.
- *
- * ONE CLAUSE FOR EVERY DETACHED VIEW, NOT THE SAME SENTENCE ONCE PER VIEW. "not linked to the program" is
- * one fact about one correspondence; emitting it either side of a `·` would read as two unrelated
- * failures, and the line is already carrying up to three other parts.
- *
- * "shows a copy" IS SAID IN THE SAME BREATH AS WHAT IT MEANS, deliberately. `copy · not linked` in the
- * view's header is the glanceable half, with the view's own title beside it to say which view. This
- * line is the authoritative narration (5d-i design §4.5), and a reader who has never made a copy cannot derive
- * "not linked to the program" from the word (Plan 7 part 2 spec §12's vocabulary).
- *
- * **A LEG WITH ONE VIEW IS NAMED BY ITS LEG, AND A LEG WITH MORE BY THE TITLE OF EACH VIEW SHOWING A COPY.**
- * `λ view shows a copy` is exact while the leg has one view; beside a second rxm view, "rxm view" would not say
- * which, so each view showing a copy is named as its header reads — `rxm · copy 1 view shows a copy`. A title two
- * views show is said once.
- *
- * **THE NAMES COME IN `LEGS`' ORDER AND ARE SAID WITH `LEG_NAME`**, rather than a sentence written out per
- * combination of legs, which a new leg would be in none of. One leg reads `λ view shows a copy`, two `λ and TM
- * views show copies`, and more than two join as a list does, `a, b and c`.
- */
-function detachedText(d: DetachedPanes): string {
-  const names: string[] = []
-  for (const leg of LEGS) {
-    const { views, copies } = d[leg]
-    for (const name of views === 1 ? copies.map(() => LEG_NAME[leg]) : copies) {
-      if (!names.includes(name)) names.push(name)
-    }
-  }
-  const last = names.pop()
-  if (last === undefined) return ''
-  if (names.length === 0) return `${last} view shows a copy — not linked to the program`
-  return `${names.join(', ')} and ${last} views show copies — not linked to the program`
-}
-
 /**
  * The `link-status` line's text. Empty means the line is blank, not that the line is absent.
- *
- * NOT AN EARLY RETURN PER ARM, which is what detachment costs: a detached view is a fact about views,
- * independent of what is pinned, so it has to be reachable from `none` and `stale` too —
- * `{state:'none'}` with a detached λ view is the case where this line goes from blank to speaking, which
- * is exactly §4.5's obligation.
- *
- * DETACHMENT LEADS, ahead of the coincidence. Ordered most-global first — the rule `draw.ts`'s
- * `createDraw` follows for the λ state (no view, then a declined program, then the view's own answer) —
- * because "this pane is not part of the correspondence" scopes every clause after it: those are about
- * the panes still inside.
- *
- * A LEG'S OWN CLAUSES ARE SUPPRESSED WHEN EVERY VIEW OF IT SHOWS A COPY, NOT MERELY PRECEDED. §4.5's standard
- * is that a thing that provably cannot work should not be presented as though it might. A λ view on a copy is
- * showing a scratch term, so "this construct has no node in the λ term at this step" describes a term that is
- * not on screen; a TM view on a copy renders states whose `source_node` is `null` by construction (§3.1), so
- * neither the coincidence nor the emits-no-states absence is a claim about anything the user is looking at.
- * The rxm leg's two clauses, its coincidence and its emits-no-instructions absence, go by the rxm entry the
- * same way.
- *
- * **A LEG WITH A VIEW OF THE PROGRAM KEEPS ITS CLAUSES, BESIDE ITS VIEWS ON COPIES.** They are about that view:
- * `draw.ts` reads each leg's running focus off a view of the program, and the λ link state off a view of the
- * program on the page, never off a view showing a copy.
- *
- * SUPPRESSION IS UNIFORM ACROSS `LambdaLinkState` RATHER THAN TRIAGED PER MEMBER. `'declined'` is the
- * one that could be argued to survive — it is a property of the program's lowering, not of the view —
- * but splitting the rule would put "does a λ view show the program" in two places, and the clause is still
- * being read as an explanation of an empty λ view that is not empty for that reason.
- *
- * `s.detached` ABSENT AND EMPTY ARE THE SAME OUTPUT — no view shows a copy either way. Collapsed here, in the one
- * function that reads the field, so no caller has to know which encoding it holds.
  */
 export function linkStatus(s: LinkStatus): string {
-  const detached = s.detached ?? ATTACHED
-  const parts: string[] = []
   // REFUSALS ARE NOT SAID HERE (Plan 7 part 2 spec §11): they are notices (`notice.ts`), shown and said in
   // the one live region, and this line carries the link sentence only.
-  const detachment = detachedText(detached)
-  if (detachment !== '') parts.push(detachment)
-  if (s.state === 'stale') {
-    // TRUE OF A DETACHED PANE TOO. A compile ends no buffer, so it reattaches nothing, but linking is a
-    // fact about the SOURCE program's index: it resumes when this compiles, for whichever pane is
-    // showing that session then, and a detached pane is one rebind away from being one.
-    parts.push('linking resumes when this compiles')
-  } else if (s.state === 'ownerless') {
-    parts.push('this instruction has no source construct')
-  } else if (s.state === 'linked') {
-    // REPORTED FIRST OF THE PIN'S OWN PARTS, AHEAD OF ANY ABSENCE BELOW — coincidence is live, present-tense news
-    // ("the run just reached what you pinned"), not a reason something is missing, and it is the state 5c exists to
-    // surface. A leg whose every view shows a copy has its own clauses suppressed, each leg by its own entry (this
-    // function's doc).
-    const off = perLeg((leg) => allCopies(detached[leg]))
-    for (const leg of LINKED_LEGS) {
-      if (!off[leg] && s.legs[leg].here) parts.push(LINKED[leg].here)
-    }
-    // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the rxm lowering bills nothing to —
-    // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
-    // one fact twice on the constructs that are most often clicked.
-    // A LEG WHOSE `emits` IS `null` IS NAMED IN NO ABSENCE CLAUSE: `LINKED`'s CLIF entry says why.
-    const nouns = LINKED_LEGS.flatMap((leg) => {
-      const noun = LINKED[leg].emits
-      return noun !== null && !off[leg] && !s.legs[leg].emits ? [noun] : []
-    })
-    if (nouns.length > 0) parts.push(`this construct emits no ${nouns.join(' or ')}`)
-    if (!off.lambda) {
-      const lambda = LAMBDA_TEXT[s.lambda]
-      if (lambda !== '') parts.push(lambda)
-    }
+  if (s.state === 'none') return ''
+  if (s.state === 'stale') return 'linking resumes when this compiles'
+  if (s.state === 'ownerless') return 'this instruction has no source construct'
+  const parts: string[] = []
+  // REPORTED FIRST, AHEAD OF ANY ABSENCE BELOW — coincidence is live, present-tense news ("the run just reached what
+  // you pinned"), not a reason something is missing, and it is the state 5c exists to surface.
+  for (const leg of LINKED_LEGS) {
+    if (s.legs[leg].here) parts.push(LINKED[leg].here)
   }
+  // ONE ABSENCE CLAUSE FOR THE TWO LOWERINGS, NOT TWO SIDE BY SIDE. A construct the rxm lowering bills nothing to —
+  // a transparent `let`, a `Lambda` — bills nothing to the machine built from it either, so two clauses would say
+  // one fact twice on the constructs that are most often clicked.
+  // A LEG WHOSE `emits` IS `null` IS NAMED IN NO ABSENCE CLAUSE: `LINKED`'s CLIF entry says why.
+  const nouns = LINKED_LEGS.flatMap((leg) => {
+    const noun = LINKED[leg].emits
+    return noun !== null && !s.legs[leg].emits ? [noun] : []
+  })
+  if (nouns.length > 0) parts.push(`this construct emits no ${nouns.join(' or ')}`)
+  const lambda = LAMBDA_TEXT[s.lambda]
+  if (lambda !== '') parts.push(lambda)
   return parts.join(' · ')
 }

@@ -25,12 +25,6 @@ import { userSplit } from './user-event-fixture'
  * **MEASURED ACROSS A FRAME, NOT SYNCHRONOUSLY.** `document.activeElement` read at the end of the click
  * handler still names the pre-open element on the broken path and the fixed one alike — the blur has not
  * happened yet. Every assertion below therefore waits two animation frames first.
- *
- * **WHAT IT DOES NOT COVER.** `⋯` → *move the editor here* is pinned where the editor-custody state it
- * needs already exists (`two-lambda-panes.test.ts`, "keeps the focus in the view that took the editor").
- * The copies menu's rows place focus deliberately and `buffer-list.test.ts` pins that ('bufferList: delete
- * and focus'); the rule they follow is §11's for deleting a copy (the next row, else the previous, else
- * `copies ▾`), not this one.
  */
 
 /** Where the focus is, named so a failure says it rather than printing an element. */
@@ -123,32 +117,6 @@ describe('a menu item hands the focus on', () => {
       'the pair in force',
     )
     expect(where(), 'picking the pair already in force stranded the focus').not.toBe('<body>')
-  })
-
-  /**
-   * **ANOTHER SESSION ON THE SAME LEG TAKES `rebind`'s OTHER ARM** — the one that returns early, before
-   * the `focusPane` the cross-leg arm below it calls. It needs no `focusPane(id)` of its own: it rebuilds
-   * no layout, so nothing detaches the element `hidePopover()` restores to, and the focus is fine without
-   * any handler doing anything. This case holds the arm at what it does.
-   */
-  it('the title menu, picking another session on the same leg', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    await until(
-      () => (document.querySelector('[data-leaf="lambda-0"] .view-title')?.textContent ?? '').includes('copy'),
-      'the copy',
-    )
-    // A SECOND λ VIEW, STILL ON THE PROGRAM — the one that can pick the copy.
-    await userSplit('lambda-0', bindingKey('lambda', 'source'))
-    const onProgram = [...document.querySelectorAll<HTMLElement>('[data-leaf]')].find(
-      (l) => (l.querySelector('.view-title')?.textContent ?? '').replace(/\s+/g, ' ').trim() === 'λ · program',
-    )
-    if (onProgram === undefined) throw new Error('no λ view on the program to pick the copy from')
-    await throughMenu(
-      `[data-leaf="${onProgram.dataset.leaf}"] button.view-title`,
-      (i) => i.find((b) => label(b).includes('copy')),
-      'onto the copy',
-    )
-    expect(where(), 'picking another session on the same leg stranded the focus').not.toBe('<body>')
   })
 
   it('the workspace menu, reset preset', async () => {

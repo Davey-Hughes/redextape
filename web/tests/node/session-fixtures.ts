@@ -1,5 +1,5 @@
 import type { Leg, LegFrame, RunReply, RunRequest } from '../../src/protocol'
-import type { ClientPort, PoolPort } from '../../src/session-client'
+import type { ClientPort } from '../../src/session-client'
 import { SessionClient } from '../../src/session-client'
 import type { PaneSlot, PaneView, SessionRegistry } from '../../src/sessions'
 import type { LambdaState } from '../../src/types'
@@ -24,26 +24,20 @@ export const lambdaFrame = (text: string, step = 0): LambdaState => ({
 })
 
 /**
- * A `PoolPort` with no thread behind it.
+ * A `ClientPort` with no thread behind it.
  *
  * THE WHOLE POINT OF `ClientPort` BEING STRUCTURAL (`session-client.ts`), one type up: the pool
- * is a map, a spawn on first bind and a `terminate` on unbind, and none of that needs a worker to
- * exercise. `terminated` is a COUNT rather than a boolean so a double-terminate is visible — the
- * failure a `has`-then-`delete` written in the wrong order would produce.
+ * is a map and a spawn on first bind, and none of that needs a worker to exercise.
  */
-export type FakePort = PoolPort & { sent: RunRequest[]; terminated: number; deliver: (r: RunReply) => void }
+export type FakePort = ClientPort & { sent: RunRequest[]; deliver: (r: RunReply) => void }
 
 export function fakePort(): FakePort {
   let handler: ((e: { data: RunReply }) => void) | null = null
   const p: FakePort = {
     sent: [],
-    terminated: 0,
     postMessage: (m: RunRequest) => p.sent.push(m),
     addEventListener: (_t: 'message', h: (e: { data: RunReply }) => void) => {
       handler = h
-    },
-    terminate: () => {
-      p.terminated += 1
     },
     deliver: (r: RunReply) => handler?.({ data: r }),
   }

@@ -4,7 +4,9 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import IS_EVEN from '../../src/examples/is-even.rxt?raw'
 import { CAP_CHARS } from '../../src/local-layout'
+import type { TmProgram } from '../../src/types'
 import {
+  controlState,
   diagram,
   diagramChoice,
   frame,
@@ -17,14 +19,15 @@ import {
   until,
   walkInParts,
 } from './harness'
+import { mountTmFixture } from './tm-fixture'
 
 /**
  * How the state diagram's local level is laid out (`docs/superpowers/specs/2026-11-16-state-diagram-tidy-design.md`):
- * names cut in the middle, labels clear of the nodes, the self-loops and each other, a rule per line and a tape per
- * line, the drawing centred in its panel, every state kept in a panel too narrow for them, and a drag that moves a
- * level its panel fits (decision 11). Measured on the level
- * the user's screenshot shows: `is_even(6)` under the binary encoding at step 276, whose five names share their first
- * eleven characters, and on hand-written copies for the shapes it lacks.
+ * names cut in the middle, labels clear of the nodes, the self-loops and each other, a rule per line, the drawing
+ * centred in its panel, every state kept in a panel too narrow for them, and a drag that moves a level its panel fits
+ * (decision 11). Measured on the level the user's screenshot shows: `is_even(6)` under the binary encoding at step 276,
+ * whose five names share their first eleven characters; and text measured again on a TM view of its own, whose names
+ * are a letter each.
  */
 
 let view: EditorView
@@ -86,15 +89,6 @@ async function levelWidth(width: number): Promise<void> {
   await page.viewport(width + chrome, 2400)
   await until(() => level().offsetWidth === width, `the level to be ${width} px wide`)
   await frame()
-}
-
-/** The TM view's own copy's editor, detached from the program first if it is not already. */
-async function copyEditor(): Promise<EditorView> {
-  const content = () => tmPane().querySelector<HTMLElement>('.term-editor .cm-content')
-  if (content() === null) tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => content() !== null, 'the copy to mount its editor')
-  const { EditorView } = await import('@codemirror/view')
-  return EditorView.findFromDOM(content() as HTMLElement) as EditorView
 }
 
 /** Whether two boxes overlap by more than half a pixel each way: a shared edge is not a meeting. */
@@ -293,17 +287,10 @@ describe("the screenshot's level", () => {
 })
 
 describe('a level taller than its panel', () => {
-  /** A state with eight states before it, which stack eight rows high in column −1. */
-  const HUB = `tapes 1\nstart s\n\nstate s:\n  [*] -> write [*], move [R], goto s\n${Array.from(
-    { length: 8 },
-    (_, i) => `state p${i}:\n  [*] -> write [*], move [R], goto s\n`,
-  ).join('')}`
-
   it('scrolls from its top to its bottom', async () => {
-    const copy = await copyEditor()
-    copy.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: HUB } })
-    await until(() => nodes().length === 9, 'the copy to compile and draw s and its eight predecessors')
-    await page.viewport(1280, 700)
+    // THE SCREENSHOT'S LEVEL IN A PANEL HALF ITS HEIGHT.
+    level().style.flex = 'none'
+    level().style.height = `${Math.floor(drawing().offsetHeight / 2)}px`
     try {
       await until(() => level().scrollHeight > level().clientHeight + 40, 'the level to be taller than its panel')
       level().scrollTop = 0
@@ -313,52 +300,51 @@ describe('a level taller than its panel', () => {
       await frame()
       expect(Math.round(margins().below)).toBeGreaterThanOrEqual(0)
     } finally {
-      await page.viewport(1280, 2400)
+      level().style.flex = ''
+      level().style.height = ''
     }
   })
 })
 
-describe('rules that touch two tapes (decision 5)', () => {
-  /** Two rules from `s` to `t`, each reading both tapes and writing the second, and a self-loop on `t`. */
-  const TWO = `tapes 2\nstart s\n\nstate s:\n  [0 0] -> write [* 1], move [R R], goto t\n  [1 1] -> write [* 0], move [R R], goto t\nstate t:\n  [* *] -> write [* *], move [S S], goto t\n`
-
-  it('sets them a tape a line, each rule apart from the next, clear of the boxes', async () => {
-    const copy = await copyEditor()
-    copy.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: TWO } })
-    await until(
-      () =>
-        nodes()
-          .map((n) => n.title)
-          .join() === 's,t',
-      'the copy to compile and draw s and t',
-    )
-    await frame()
-    const label = labels().find((l) => l.dataset.from !== l.dataset.to) as SVGTextElement
-    const lines = [...label.querySelectorAll('tspan')].map((t) => t.getBoundingClientRect())
-    // `REG:0 R` over `WORK:0/1 R`, then `REG:1 R` over `WORK:1/0 R`: four lines, the third set further down than the
-    // second and fourth are, which is where one rule ends and the next begins.
-    expect(lines).toHaveLength(4)
-    const down = lines.slice(1).map((r, i) => r.top - (lines[i]?.top ?? 0))
-    expect(down[0]).toBeGreaterThan(0)
-    expect(Math.abs((down[2] ?? 0) - (down[0] ?? 0))).toBeLessThan(0.5)
-    expect(down[1] ?? 0).toBeGreaterThan((down[0] ?? 0) + 2)
-    // NARROWER THAN ONE RULE'S TWO TAPES SET ON ONE LINE, in the label's own font.
-    const probe = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-    probe.classList.add('local-label')
-    probe.textContent = 'REG:0 R WORK:0/1 R'
-    label.parentNode?.append(probe)
-    const oneLine = probe.getBoundingClientRect().width
-    probe.remove()
-    expect(label.getBoundingClientRect().width).toBeLessThan(oneLine - 20)
-    for (const n of nodes()) expect(meets(label.getBoundingClientRect(), n.getBoundingClientRect())).toBe(false)
-  })
-})
-
 describe('text that measures differently after the level is laid out', () => {
+  /**
+   * A TM view of its own at the foot of the page, its level two states whose names are a letter each: in the fallback a
+   * font rule draws them in before its face loads, a letter is as wide, within the tolerance below, as in the face the
+   * level was laid out in, where a longer name would not be.
+   */
+  const SHORT: TmProgram = {
+    states: [
+      { name: 's', accept: false, rules: [{ read: [null], write: [null], moves: ['R'], next: 1 }], instr: 0 },
+      { name: 't', accept: true, rules: [], instr: 1 },
+    ],
+    alphabet: ['_'],
+    tapes: 1,
+    width: 4,
+    start: 0,
+    listing: ['s', 't'],
+    labels: [],
+  }
+  let host: HTMLElement
+  const shortLevel = () => host.querySelector('.local-level') as HTMLElement
+  const shortNodes = () => [...host.querySelectorAll<HTMLElement>('.local-node')]
+
+  beforeAll(async () => {
+    const fixture = mountTmFixture(SHORT, ['t'], { width: 600, height: 400 })
+    host = fixture.host
+    host.style.position = 'fixed'
+    host.style.inset = 'auto 0 0 auto'
+    fixture.pane.render(
+      { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: 0 },
+      controlState(false, 'step 0 of 1'),
+    )
+    await userEvent.click(host.querySelector('[data-panel="diagram"] .diagram-mode[data-value="local"]') as HTMLElement)
+    await until(() => shortNodes().length === 2, 'the level around s and t')
+  })
+
   /** Each node whose box is not as wide as its text: text clipped, or more than two pixels of room to spare. */
   function unfitted(): string[] {
     const off: string[] = []
-    for (const n of nodes()) {
+    for (const n of shortNodes()) {
       const range = document.createRange()
       range.selectNodeContents(n)
       const text = range.getBoundingClientRect().width
@@ -371,9 +357,9 @@ describe('text that measures differently after the level is laid out', () => {
 
   /** Lay the level out again through its panel's width, a pixel narrower and back. */
   async function relaid(): Promise<void> {
-    level().style.width = `${level().offsetWidth - 1}px`
+    shortLevel().style.width = `${shortLevel().offsetWidth - 1}px`
     await frames()
-    level().style.width = ''
+    shortLevel().style.width = ''
     await frames()
   }
 
@@ -391,7 +377,7 @@ describe('text that measures differently after the level is laid out', () => {
       document.fonts.add(face)
       await face.load()
       await until(() => unfitted().length === 0, 'the boxes to fit the text in the face that arrived')
-      expect(getComputedStyle(nodes()[0] as HTMLElement).fontFamily).toMatch(/Late Face/)
+      expect(getComputedStyle(shortNodes()[0] as HTMLElement).fontFamily).toMatch(/Late Face/)
     } finally {
       rule.remove()
       document.fonts.delete(face)
@@ -410,7 +396,7 @@ describe('text that measures differently after the level is laid out', () => {
       await userEvent.click(document.querySelector('#settings') as HTMLElement)
       await userEvent.selectOptions(select, 'terminal')
       await until(() => document.documentElement.dataset.style === 'terminal', 'the terminal style')
-      expect(getComputedStyle(nodes()[0] as HTMLElement).fontSize).toBe('18px')
+      expect(getComputedStyle(shortNodes()[0] as HTMLElement).fontSize).toBe('18px')
       await until(() => unfitted().length === 0, 'the boxes to fit the text in the new style')
     } finally {
       await userEvent.selectOptions(select, 'instrument')

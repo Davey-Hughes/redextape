@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { page } from 'vitest/browser'
 import { History } from '../../src/history'
 import { LambdaPane } from '../../src/lambda-pane'
 import type { PaneEvents } from '../../src/pane-chrome'
@@ -9,18 +10,18 @@ import { PaneSlot, SessionRegistry } from '../../src/sessions'
 import type { LambdaState, TmState } from '../../src/types'
 import { bindingKey } from '../../src/view-header'
 import { fakeClient, paint } from '../node/session-fixtures'
-import { newPaneHost, viewTitleOf } from './harness'
+import { newPaneHost, rect, SHELL, stateIdle, until, viewTitleOf } from './harness'
+import { chooseFromWorkspace, userSplit } from './user-event-fixture'
 
 /**
  * TWO PANES BOUND TO TWO DIFFERENT λ SESSIONS, RENDERING TWO DIFFERENT TERMS AT THE SAME TIME, in a real
- * DOM against the real `LambdaPane`. `two-lambda-panes.test.ts` holds that a user can get there through
- * `main()`; this file holds the resolution and the rendering.
+ * DOM against the real `LambdaPane`: the resolution and the rendering.
  *
  * THE REGISTRY IS BUILT HERE AND THE PRODUCTION PATH IS SHARED RATHER THAN RE-IMPLEMENTED.
  * The `draw()` that `draw.ts`'s `createDraw` builds is, for each pane, `slot.resolve(reg)` followed by
- * `slot.render(reg, pane, leg)` — the two calls `paint` below makes. Resolution, `controlState`, the
- * selector's option list and the `copy · not linked` status all live inside `PaneSlot.render`, so
- * nothing about what a binding MEANS is restated in this file.
+ * `slot.render(reg, pane, leg)` — the two calls `paint` below makes. Resolution, `controlState` and the
+ * selector's option list all live inside `PaneSlot.render`, so nothing about what a binding MEANS is restated in
+ * this file.
  *
  * `tests/node/sessions.test.ts` ASSERTS THE SAME CLAIM WITHOUT A DOM and is not redundant with this.
  * That tier drives recording fakes and says which binding resolved to which leg; this one says the
@@ -31,10 +32,10 @@ import { newPaneHost, viewTitleOf } from './harness'
  */
 
 const SOURCE: SessionId = 'source'
-const SCRATCH: SessionId = 'lambda-scratch'
+const SECOND: SessionId = 'second'
 
 /** A λ-only session whose single recorded frame prints `text`. The text is the discriminator. */
-function lambdaSession(id: SessionId, label: string, text: string, detached: boolean): SessionEntry {
+function lambdaSession(id: SessionId, label: string, text: string): SessionEntry {
   const hist = new History<LambdaState>(1_000_000)
   hist.push({ text, spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const leg: LegState<LambdaState> = {
@@ -48,11 +49,9 @@ function lambdaSession(id: SessionId, label: string, text: string, detached: boo
   return {
     id,
     label,
-    detached,
     client: fakeClient(),
     legs: { lambda: leg },
     programs: { rxm: null, tm: null, clif: null },
-    readings: { rxm: null, tm: null },
   }
 }
 
@@ -70,7 +69,6 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
   return {
     id,
     label,
-    detached: false,
     client: fakeClient(),
     legs: {
       lambda: { hist: lambdaHist, status: ok, done: null, playing: false, epoch: 0, gen: 0 },
@@ -80,7 +78,6 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
     // source session and its first `compiled` reply. The panes here are built directly rather than by
     // `pane-host.ts`, so nothing in this file reads it.
     programs: { rxm: null, tm: null, clif: null },
-    readings: { rxm: null, tm: null },
   }
 }
 
@@ -140,11 +137,11 @@ const events = (slot: PaneSlot<'lambda'>, after: () => void): PaneEvents => ({
   },
 })
 
-beforeEach(() => {
-  document.body.replaceChildren()
-})
-
 describe('the title-selector', () => {
+  beforeEach(() => {
+    document.body.replaceChildren()
+  })
+
   /**
    * Both panes are painted before either is asserted, and both are asserted before anything is rebound —
    * a "bind, read, rebind, read" sequence would pass on an implementation with one live session and a
@@ -156,13 +153,13 @@ describe('the title-selector', () => {
    */
   it('renders two different λ sessions side by side, at the same time', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'program', '(λx. x) 1', false))
-    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', '(λy. y y) 2', true))
+    reg.add(lambdaSession(SOURCE, 'program', '(λx. x) 1'))
+    reg.add(lambdaSession(SECOND, 'second', '(λy. y y) 2'))
 
     const leftHost = newPaneHost()
     const rightHost = newPaneHost()
     const left = new PaneSlot('lambda', SOURCE)
-    const right = new PaneSlot('lambda', SCRATCH)
+    const right = new PaneSlot('lambda', SECOND)
     const leftPane = new LambdaPane(
       leftHost,
       events(left, () => undefined),
@@ -183,42 +180,6 @@ describe('the title-selector', () => {
   })
 
   /**
-   * §5's JOINT DETACHMENT CASE: "bind a pane to a scratch, see both, rebind, see neither".
-   *
-   * BOTH HALVES, AND ONLY ONE PANE. The status must be gone after the rebind, not merely present before
-   * it; and the pane still bound to the source session must never have had one, which is §4.3's ordinary
-   * state (one pane detaches, the other keeps running against source).
-   */
-  it('says copy · not linked on the view bound to a scratch, and drops it on rebind', () => {
-    const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'program', 'a', false))
-    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
-
-    const attachedHost = newPaneHost()
-    const detachedHost = newPaneHost()
-    const attached = new PaneSlot('lambda', SOURCE)
-    const detached = new PaneSlot('lambda', SCRATCH)
-    const attachedPane = new LambdaPane(
-      attachedHost,
-      events(attached, () => undefined),
-    )
-    const detachedPane = new LambdaPane(
-      detachedHost,
-      events(detached, () => undefined),
-    )
-
-    paint(reg, attached, attachedPane)
-    paint(reg, detached, detachedPane)
-    expect(detachedHost.querySelector('h2')?.textContent).toContain('copy · not linked')
-    expect(attachedHost.querySelector('h2')?.textContent).toBe('λ · program')
-    expect(attachedHost.querySelector('h2')?.textContent).not.toContain('not linked')
-
-    detached.rebind(SOURCE)
-    paint(reg, detached, detachedPane)
-    expect(detachedHost.querySelector('h2')?.textContent).toBe('λ · program')
-  })
-
-  /**
    * THE CONTROL IS ABSENT WHILE IT COULD DO NOTHING, which is `step-controls.ts`'s stated idiom (added
    * and removed, never disabled) and §4.5's standard (a thing that provably cannot work should not be
    * presented as though it might).
@@ -228,14 +189,10 @@ describe('the title-selector', () => {
    * plain-text branch is unreachable in the running app (`main.ts`'s own comment on the registration says
    * so). What reaches it here is this file's λ-ONLY source session, a shape the app never builds. The
    * branch is worth holding, because `viewHeader` offers it and a later leg arrangement could reach it.
-   *
-   * ASSERTED IN BOTH DIRECTIONS AND BACK. A control that appears and never leaves passes the middle
-   * assertion; the third is what catches it, and it is reachable IN THIS FIXTURE — retiring a buffer
-   * takes this λ-only registry's options back down to one.
    */
-  it('is a menu only once a second session offers this leg, and plain text again when one is retired', () => {
+  it('is a menu only once a second session offers this leg', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'program', 'a', false))
+    reg.add(lambdaSession(SOURCE, 'program', 'a'))
 
     const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
@@ -248,20 +205,16 @@ describe('the title-selector', () => {
     expect(viewTitleOf(el)).toBeNull()
     expect(el.querySelector('h2 span.view-title')?.textContent).toBe('λ · program')
 
-    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
+    reg.add(lambdaSession(SECOND, 'second', 'b'))
     paint(reg, slot, pane)
     expect(viewTitleOf(el)).not.toBeNull()
     // NAMED BY TEXT, NOT BY COLOUR OR POSITION: the sessions are told apart by their labels — which is
     // also what a screen reader gets. An implementation that distinguished them any other way would leave
     // these strings unset.
-    expect(offered(el).map(([, text]) => text)).toEqual(['λ · program', 'λ · λ scratchpad'])
+    expect(offered(el).map(([, text]) => text)).toEqual(['λ · program', 'λ · second'])
     expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SOURCE))
     // THE TITLE SAYS IT OPENS A MENU: a button that opens something states it with `aria-haspopup`.
     expect(viewTitleOf(el)?.getAttribute('aria-haspopup')).toBe('menu')
-
-    reg.remove(SCRATCH)
-    paint(reg, slot, pane)
-    expect(viewTitleOf(el)).toBeNull()
   })
 
   /**
@@ -272,8 +225,8 @@ describe('the title-selector', () => {
    */
   it('rebinds the pane when a session is picked, and follows it back', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'program', 'from source', false))
-    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'from scratch', true))
+    reg.add(lambdaSession(SOURCE, 'program', 'from source'))
+    reg.add(lambdaSession(SECOND, 'second', 'from second'))
 
     const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
@@ -284,12 +237,11 @@ describe('the title-selector', () => {
     paint(reg, slot, pane)
     expect(term(el)).toBe('from source')
 
-    pickBinding(el, bindingKey('lambda', SCRATCH))
+    pickBinding(el, bindingKey('lambda', SECOND))
 
-    expect(slot.binding).toEqual({ session: SCRATCH, leg: 'lambda' })
-    expect(term(el)).toBe('from scratch')
-    expect(el.querySelector('h2')?.textContent).toContain('copy · not linked')
-    expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SCRATCH))
+    expect(slot.binding).toEqual({ session: SECOND, leg: 'lambda' })
+    expect(term(el)).toBe('from second')
+    expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SECOND))
 
     pickBinding(el, bindingKey('lambda', SOURCE))
     expect(term(el)).toBe('from source')
@@ -308,8 +260,8 @@ describe('the title-selector', () => {
    */
   it('keeps the focus on the title it was picked from', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'program', 'from source', false))
-    reg.add(lambdaSession(SCRATCH, 'copy 1', 'from scratch', true))
+    reg.add(lambdaSession(SOURCE, 'program', 'from source'))
+    reg.add(lambdaSession(SECOND, 'second', 'from second'))
 
     const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
@@ -323,7 +275,7 @@ describe('the title-selector', () => {
     title?.focus()
     expect(document.activeElement).toBe(title)
 
-    pickBinding(el, bindingKey('lambda', SCRATCH))
+    pickBinding(el, bindingKey('lambda', SECOND))
 
     expect(document.activeElement).not.toBe(document.body)
     expect(document.activeElement).toBe(el.querySelector('button.view-title'))
@@ -336,8 +288,8 @@ describe('the title-selector', () => {
   // equal one".
   it('does not rebuild when nothing changed, so an open menu survives a frame', () => {
     const reg = new SessionRegistry()
-    reg.add(lambdaSession(SOURCE, 'program', 'a', false))
-    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
+    reg.add(lambdaSession(SOURCE, 'program', 'a'))
+    reg.add(lambdaSession(SECOND, 'second', 'b'))
 
     const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
@@ -362,9 +314,9 @@ describe('the title-selector', () => {
    * a pair list from a session list: the legs are GROUPED, and a pair naming a leg its session does not
    * have is ABSENT rather than present-and-broken.
    *
-   * THE SCRATCH IS λ-ONLY AND THE SOURCE HAS BOTH, which is why the omission is observable at all.
+   * THE SECOND SESSION IS λ-ONLY AND THE SOURCE HAS BOTH, which is why the omission is observable at all.
    * `SessionRegistry.legOf` THROWS on a binding naming a leg the session lacks, so an option for
-   * `(tm, λ scratchpad)` would be an option that crashes the next render — the reason 5d-ii-b design
+   * `(tm, second)` would be an option that crashes the next render — the reason 5d-ii-b design
    * §3.2's axes are not independent and the reason this is one control rather than two.
    *
    * READ AS THE MENU'S ITEMS IN ORDER — the grouping is the order. The λ pairs come first because
@@ -374,7 +326,7 @@ describe('the title-selector', () => {
   it('lists both legs, grouped, and omits a pair the session has no leg for', () => {
     const reg = new SessionRegistry()
     reg.add(bothLegs(SOURCE, 'program', 'a'))
-    reg.add(lambdaSession(SCRATCH, 'λ scratchpad', 'b', true))
+    reg.add(lambdaSession(SECOND, 'second', 'b'))
 
     const el = newPaneHost()
     const slot = new PaneSlot('lambda', SOURCE)
@@ -385,8 +337,61 @@ describe('the title-selector', () => {
     paint(reg, slot, pane)
 
     const keys = offered(el).map(([key]) => key)
-    expect(keys).toEqual([bindingKey('lambda', SOURCE), bindingKey('lambda', SCRATCH), bindingKey('tm', SOURCE)])
-    // The scratch has no TM leg, so the pair is not in the list at all.
+    expect(keys).toEqual([bindingKey('lambda', SOURCE), bindingKey('lambda', SECOND), bindingKey('tm', SOURCE)])
+    // The second session has no TM leg, so the pair is not in the list at all.
     expect(keys.filter((k) => k.startsWith('tm:'))).toEqual([bindingKey('tm', SOURCE)])
+  })
+})
+
+/**
+ * **THE APP, MOUNTED ONCE AFTER THE CASES ABOVE**, which build their views by hand on a body they clear: the Debugger
+ * preset, its rxm view split right into a second view of the program, as `⋯` *split right* makes one.
+ */
+describe('a view narrower than its title', () => {
+  beforeAll(async () => {
+    await page.viewport(1280, 800)
+    document.body.innerHTML = SHELL
+    await (await import('../../src/main')).ready
+    await until(stateIdle, 'the first compile')
+    await chooseFromWorkspace('[data-preset="debugger"]')
+    const added = await userSplit('rxm-0', bindingKey('rxm', 'source'))
+    if (added === null) throw new Error('the split added no second rxm view')
+  })
+
+  /** The width of `text`'s own words, which a `Range` measures whatever its box clips. */
+  const textWidth = (text: Element): number => {
+    const range = document.createRange()
+    range.selectNodeContents(text)
+    return range.getBoundingClientRect().width
+  }
+
+  /**
+   * **THE TITLE IS CUT, ON ONE LINE AND INSIDE THE VIEW**, rather than wrapping word by word. The view is made
+   * narrower than its title's text by narrowing the page, which is asserted first, for each of the two views.
+   *
+   * **320 PX**: the two split views share the half of the row the rxm view had, so each is narrower there than its
+   * title's text, which the case waits for before it reads anything.
+   */
+  it('cuts the title with an ellipsis on one line, inside the view', async () => {
+    const views = [...document.querySelectorAll<HTMLElement>('.pane[data-kind="rxm"]')]
+    expect(views).toHaveLength(2)
+    const titled = (v: HTMLElement) => v.querySelector('.view-title-text') as HTMLElement
+    // EACH TITLE'S WIDTH ON ONE LINE, READ WHILE THE VIEWS STILL HAVE ROOM FOR IT.
+    await document.fonts.ready
+    const whole = views.map((v) => textWidth(titled(v)))
+    await page.viewport(320, 800)
+    await until(() => views.every((v, i) => rect(v).width < (whole[i] ?? 0)), 'the page to narrow the views')
+    for (const v of views) {
+      const text = titled(v)
+      expect(rect(text).height, 'the title is one line').toBeLessThan(
+        2 * Number.parseFloat(getComputedStyle(text).fontSize),
+      )
+      expect(text.scrollWidth, 'the title is cut').toBeGreaterThan(text.clientWidth)
+      expect(getComputedStyle(text).textOverflow, 'the cut ends in an ellipsis').toBe('ellipsis')
+      expect(rect(v.querySelector('.view-title')).right, 'the title stays inside its view').toBeLessThanOrEqual(
+        rect(v).right + 0.5,
+      )
+    }
+    await page.viewport(1280, 800)
   })
 })

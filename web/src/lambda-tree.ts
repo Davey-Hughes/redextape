@@ -163,10 +163,9 @@ export class Tree {
    * `f` (spec §5.2). **THE HINT IS THE ONLY THING THAT TELLS `false` FROM `0`** — `λt. λf. f` and
    * `λf. λx. x` are one term — and lowering always writes each with its own pair.
    *
-   * **A HINT'S TRAILING DIGITS ARE IGNORED.** Freshening is print-time only, so a lowered term's hints never
-   * carry them — but a copy made from the program is built by re-parsing printed text, and there the
-   * printed, freshened names (`x0`) ARE the hints. Without this a numeral in any copy whose printer had
-   * freshened its binders would never read as a chip.
+   * **A HINT'S TRAILING DIGITS ARE IGNORED.** Lowering (`lower.rs`) keeps a source name as its binder's hint, so a
+   * program's own binders reach here as written, digits included: under `t1` and `f1` a pair is read as under `t`
+   * and `f`.
    */
   chip(i: number): Chip | null {
     if (this.kind(i) !== KIND_ABS) return null

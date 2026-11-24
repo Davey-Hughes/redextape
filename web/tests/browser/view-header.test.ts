@@ -4,8 +4,8 @@ import type { Binding, PaneOption } from '../../src/sessions'
 import { bindingKey, pairLabel, sourceViewHeader, viewHeader } from '../../src/view-header'
 
 const PROGRAM_λ: PaneOption = { leg: 'lambda', id: 'source', label: 'program' }
+const PROGRAM_RXM: PaneOption = { leg: 'rxm', id: 'source', label: 'program' }
 const PROGRAM_TM: PaneOption = { leg: 'tm', id: 'source', label: 'program' }
-const COPY: PaneOption = { leg: 'lambda', id: 'scratch-1', label: 'copy 1' }
 
 afterEach(() => {
   document.body.replaceChildren()
@@ -39,13 +39,13 @@ describe('the title-selector', () => {
     const picks: Binding<Leg>[] = []
     const h = mount((b) => picks.push(b))
     // In `pairs()` order, which groups by leg (`SessionRegistry.pairs`), as the app always passes it.
-    h.setBindings([PROGRAM_λ, COPY, PROGRAM_TM], { leg: 'lambda', session: 'source' })
+    h.setBindings([PROGRAM_λ, PROGRAM_RXM, PROGRAM_TM], { leg: 'lambda', session: 'source' })
     h.el.querySelector<HTMLButtonElement>('button.view-title')?.click()
     const items = [...document.querySelectorAll<HTMLButtonElement>('.view-title-menu button')]
-    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'λ · copy 1', 'TM · program'])
+    expect(items.map((b) => b.textContent)).toEqual(['λ · program', 'rxm · program', 'TM · program'])
     expect(items.map((b) => b.dataset.binding)).toEqual([
       bindingKey('lambda', 'source'),
-      bindingKey('lambda', 'scratch-1'),
+      bindingKey('rxm', 'source'),
       bindingKey('tm', 'source'),
     ])
     expect(items[0]?.getAttribute('aria-current')).toBe('true')
@@ -69,19 +69,6 @@ describe('the title-selector', () => {
   })
 })
 
-describe('the status', () => {
-  it('says "copy · not linked" while detached, in words, and is removed when not', () => {
-    const h = mount()
-    h.setBindings([PROGRAM_λ, COPY], { leg: 'lambda', session: 'scratch-1' })
-    h.setDetached(true)
-    const status = h.el.querySelector<HTMLElement>('h2 .view-status')
-    expect(status?.textContent).toBe('copy · not linked')
-    h.setDetached(false)
-    expect(h.el.querySelector('.view-status')).toBeNull()
-    expect(h.el.querySelector('h2')?.textContent).toBe('λ · copy 1')
-  })
-})
-
 describe('the source view header', () => {
   it('is titled "source", as plain text', () => {
     const s = sourceViewHeader()
@@ -93,6 +80,6 @@ describe('the source view header', () => {
 describe('pairLabel', () => {
   it('spells the leg the way the menus do', () => {
     expect(pairLabel(PROGRAM_TM)).toBe('TM · program')
-    expect(pairLabel(COPY)).toBe('λ · copy 1')
+    expect(pairLabel(PROGRAM_RXM)).toBe('rxm · program')
   })
 })

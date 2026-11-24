@@ -134,9 +134,9 @@ export function liveLeaves(tree: LayoutNode, arrangements: Arrangements): Map<Le
  * was before a pick in its view's title, and a combination's default names `lambda-0`, `rxm-0` and `tm-0` whatever
  * those are by now. The view such a leaf named no longer exists, and a new one is built in its place either way.
  * Built under the old id, it would take that id's pane with it: `pane-host.ts`'s `applyLayout` drops a pane whose kind
- * is not its leaf's, so a TM view of a copy, parked under `rxm-0`, would be destroyed by the switch that showed the
- * rxm view — its editor, its place on the copy and what it had open. Under an id of its own, the new view is built
- * beside it, and the view that holds the old id stays parked like any other.
+ * is not its leaf's, so a TM view parked under `rxm-0` would be destroyed by the switch that showed the rxm view, and
+ * what it had open with it. Under an id of its own, the new view is built beside it, and the view that holds the old
+ * id stays parked like any other.
  *
  * **A PICK IN A TITLE STILL KEEPS ITS ID**: this is asked only of a tree a switch is about to enter.
  *

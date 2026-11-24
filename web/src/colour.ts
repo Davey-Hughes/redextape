@@ -7,24 +7,18 @@ import { Edit, Language, Parser, Query } from 'web-tree-sitter'
 import runtimeWasmUrl from 'web-tree-sitter/web-tree-sitter.wasm?url'
 import redextapeHighlights from '../../grammars/tree-sitter-redextape/queries/highlights.scm?raw'
 import redextapeWasmUrl from '../../grammars/tree-sitter-redextape/tree-sitter-redextape.wasm?url'
-import lambdaHighlights from '../../grammars/tree-sitter-redextape-lambda/queries/highlights.scm?raw'
-import lambdaWasmUrl from '../../grammars/tree-sitter-redextape-lambda/tree-sitter-redextape-lambda.wasm?url'
-import rxmHighlights from '../../grammars/tree-sitter-redextape-rxm/queries/highlights.scm?raw'
-import rxmWasmUrl from '../../grammars/tree-sitter-redextape-rxm/tree-sitter-redextape-rxm.wasm?url'
-import tmHighlights from '../../grammars/tree-sitter-redextape-tm/queries/highlights.scm?raw'
-import tmWasmUrl from '../../grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm?url'
 import type { LanguageId } from './lsp-protocol'
 import { tokenClassName } from './theme'
 import type { TokenClass } from './types'
 
 /**
- * The colourer, over `web-tree-sitter` and the four committed grammar `.wasm`.
+ * The colourer, over `web-tree-sitter` and the committed `redextape` grammar's `.wasm`.
  *
  * **INDICES HERE ARE UTF-16 CODE UNITS, NOT BYTES.** CodeMirror positions are UTF-16 code units too, so
  * a tree-sitter offset goes straight into a `Decoration` range. **`spans.ts`'s `byteToIndex` must not be
  * used here.** That conversion exists for the λ pane's frame spans, which `print_lambda_capped` writes
  * as byte offsets, and applying it to these would mis-place every span after the first non-ASCII
- * character — which in this app means every λ document.
+ * character.
  *
  * **WITH ONE EXCEPTION: A QUERY'S `startIndex`/`endIndex` ARE NOT IN THOSE UNITS.** They are 2 × UTF-16
  * code units while the `startIndex`/`endIndex` READ BACK off a captured node are plain code units.
@@ -59,21 +53,12 @@ export function classMapFrom(tables: readonly CaptureTable[]): Map<string, Map<s
 /**
  * The document size past which an editor goes uncoloured, in UTF-16 code units.
  *
- * THE LARGER OF THE SESSION'S TWO COPY CEILINGS, NOT A NUMBER OF THIS MODULE'S OWN: a TM copy's,
- * `MAX_SCRATCH_TM_BYTES` at 6,100,000, where an rxm copy's, `MAX_SCRATCH_RXM_BYTES`, is 5,200,000. A
- * document no copy will hold is not one worth parsing on the main thread.
+ * **A BOUND ON WHAT THE MAIN THREAD PARSES, NOT ON WHAT THE EDITOR HOLDS.** The source editor takes a program of
+ * any length; one past this is shown plain, with one notice saying so, while the LSP worker still serves its
+ * diagnostics. The gate is there to refuse the absurd, not to judge a program.
  *
- * **ONE CEILING FOR EVERY EDITOR, SO AN RXM DOCUMENT BETWEEN THE TWO IS STILL COLOURED**, though no rxm copy
- * builds it: refusing a document is the session's to say, and this gate only refuses the absurd. A ceiling
- * per language would be a second place for each copy's number to be kept.
- *
- * **THE UNITS DIFFER AND THE DIRECTION IS WHAT MAKES THAT SAFE.** `MAX_SCRATCH_TM_BYTES` counts UTF-8
- * bytes and `doc.length` counts UTF-16 code units, so these are not the same measurement of the same
- * document. UTF-16 units are never more than UTF-8 bytes for any text, so a document the session
- * accepted is always under this ceiling too: the mismatch can only ever make this gate more
- * permissive than the session's, never less. Reusing the number rather than converting is deliberate —
- * a conversion would need the whole document's bytes counted on every keystroke to answer a question
- * whose only job is to refuse the absurd.
+ * **IN CODE UNITS BECAUSE `doc.length` COUNTS THEM**, so the check reads a number the editor already holds rather
+ * than counting the document's bytes on every keystroke.
  */
 export const COLOUR_CEILING_UNITS = 6_100_000
 
@@ -86,51 +71,58 @@ type GrammarSource = { readonly wasmUrl: string; readonly highlights: string }
 
 const SOURCES: Record<LanguageId, GrammarSource> = {
   redextape: { wasmUrl: redextapeWasmUrl, highlights: redextapeHighlights },
-  redextape_lambda: { wasmUrl: lambdaWasmUrl, highlights: lambdaHighlights },
-  redextape_tm: { wasmUrl: tmWasmUrl, highlights: tmHighlights },
-  redextape_rxm: { wasmUrl: rxmWasmUrl, highlights: rxmHighlights },
 }
 
 export type LoadedGrammar = { readonly language: TsLanguage; readonly query: TsQuery }
 
-export type GrammarRegistry = { load(id: LanguageId): Promise<LoadedGrammar | null> }
+export type GrammarRegistry<K extends string = LanguageId> = { load(id: K): Promise<LoadedGrammar | null> }
 
 /** What a caught `unknown` says to a user. */
 const reasonOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /**
+ * The grammars a registry loads, by key: in place of the app's table, not added to it, so a test of grammars the app
+ * does not load names each `.wasm`. Required whenever the keys are not the app's, since its table has none of theirs.
+ */
+type SourcesFor<K extends string> = [K] extends [LanguageId]
+  ? { sources?: Record<K, GrammarSource> }
+  : { sources: Record<K, GrammarSource> }
+
+/**
  * Loads a grammar once per language and remembers the answer, including a failure.
  *
- * **A FAILED LOAD IS REMEMBERED AS A FAILURE.** Retrying per editor would multiply one broken fetch by
- * the number of views and produce one notice each. Design §10: that language shows uncoloured, one
- * notice, and the other three are unaffected because each grammar loads independently.
+ * **A FAILED LOAD IS REMEMBERED AS A FAILURE.** Retrying at each `load` would fetch a broken grammar again and report
+ * it again each time. Design §10: that language shows uncoloured, one notice, and any other language is unaffected
+ * because each grammar loads independently.
  *
- * **THE RUNTIME IS SHARED AND ITS FAILURE IS THEREFORE NOT A PER-LANGUAGE ONE — TWO CALLBACKS, NOT
- * ONE, AND THAT SPLIT IS THE WHOLE POINT.** `Parser.init` is memoised across every `load`, so a
- * `web-tree-sitter.wasm` that will not fetch rejects EVERY language's promise from the one cause. Put
- * through `onFailure` that would read as four coincidental per-language failures and produce four
- * notices, one per language, for one event — against design §10's one notice per failure.
- * `onRuntimeFailure` fires at most once per registry and says the thing that is actually true: nothing
- * on the page is coloured. Per-grammar independence below is untouched; only the shared step is folded.
+ * **THE RUNTIME IS SHARED AND ITS FAILURE IS THEREFORE NOT A PER-LANGUAGE ONE — TWO CALLBACKS, NOT ONE, AND THAT SPLIT
+ * IS THE WHOLE POINT.** `Parser.init` is memoised across every `load`, so a `web-tree-sitter.wasm` that will not fetch
+ * rejects EVERY language's promise from the one cause. Put through `onFailure` that would read as each language's
+ * grammar failing and produce a notice per language for one event — against design §10's one notice per failure.
+ * `onRuntimeFailure` fires at most once per registry and says the thing that is actually true: nothing on the page is
+ * coloured. Per-grammar independence below is untouched; only the shared step is folded.
  *
  * **NEITHER CALLBACK IS OPTIONAL.** An optional reporting hook is a notice the design promises and the
  * app can silently not have.
  */
-export function createGrammarRegistry(opts: {
-  onFailure: (id: LanguageId, reason: string) => void
-  onRuntimeFailure: (reason: string) => void
-  sources?: Partial<Record<LanguageId, GrammarSource>>
-  /**
-   * How the shared runtime is started, for a test that needs it to fail.
-   *
-   * `Parser.init` memoises its module in a module-level `Module3 ??=`, so once any test in a process has
-   * initialised the runtime successfully, a later `locateFile` pointing at nothing resolves from the cache
-   * and the shared-failure path above is unreachable. A seam over the whole step can reject; a seam over
-   * the path it reads cannot. Nothing in `src/` passes it.
-   */
-  initRuntime?: () => Promise<void>
-}): GrammarRegistry {
-  const cache = new Map<LanguageId, Promise<LoadedGrammar | null>>()
+export function createGrammarRegistry<K extends string = LanguageId>(
+  opts: {
+    onFailure: (id: K, reason: string) => void
+    onRuntimeFailure: (reason: string) => void
+    /**
+     * How the shared runtime is started, for a test that needs it to fail.
+     *
+     * `Parser.init` memoises its module in a module-level `Module3 ??=`, so once any test in a process has
+     * initialised the runtime successfully, a later `locateFile` pointing at nothing resolves from the cache
+     * and the shared-failure path above is unreachable. A seam over the whole step can reject; a seam over
+     * the path it reads cannot. Nothing in `src/` passes it.
+     */
+    initRuntime?: () => Promise<void>
+  } & SourcesFor<K>,
+): GrammarRegistry<K> {
+  // WITHOUT `sources` THE KEYS ARE THE APP'S: `SourcesFor` requires them for any other `K`.
+  const sources = (opts.sources ?? SOURCES) as Record<K, GrammarSource>
+  const cache = new Map<K, Promise<LoadedGrammar | null>>()
   let started: Promise<void> | null = null
   let runtimeReported = false
   const init = () => {
@@ -141,7 +133,7 @@ export function createGrammarRegistry(opts: {
     load(id) {
       const hit = cache.get(id)
       if (hit) return hit
-      const source = opts.sources?.[id] ?? SOURCES[id]
+      const source = sources[id]
       const p = (async () => {
         try {
           await init()
@@ -296,17 +288,15 @@ export const PARSE_SLICE_MS = 8
  * How far into a document the first screen's own parse reaches, in UTF-16 code units.
  *
  * **WHILE A SLICED PARSE IS PENDING, THE SCREEN IS COLOURED FROM A PARSE OF THE DOCUMENT'S START, UP TO THE END OF THE
- * LAST VISIBLE LINE, WHEN THAT IS AT MOST THIS FAR IN.** A copy's editor mounts showing its first lines, which would
+ * LAST VISIBLE LINE, WHEN THAT IS AT MOST THIS FAR IN.** The source editor mounts showing its first lines, which would
  * otherwise stand plain until the whole parse lands.
  *
  * **A BOUND, BECAUSE THIS PARSE RUNS IN ONE GO INSIDE AN UPDATE.** A screen further down than this shows plain text
- * until the whole parse lands. Text the grammars make more work of costs more: 31,995 units of one mnemonic repeated
- * took 14.5 ms as rxm.
+ * until the whole parse lands.
  *
- * **EXACT WHERE A LINE END IS A PLACE THE GRAMMAR CAN STOP.** That is the TM text form, and every item of an rxm text
- * is a line too. A program cut at a line end may be cut inside a bracket, and the parser then recovers as it can.
- * **A λ COPY'S TEXT IS ONE LINE**, so its last visible line ends where it does: one longer than this bound has no
- * first screen and is plain until its whole parse lands.
+ * **THE CUT IS AT A LINE END.** A program cut there may be cut inside a bracket, and the parser then recovers as it
+ * can. A last visible line that ends past this bound leaves no first screen: the text is plain until its whole parse
+ * lands.
  */
 export const FIRST_SCREEN_UNITS = 32_000
 
@@ -325,9 +315,9 @@ function marksOf(
 }
 
 /** What one editor's colourer needs: which language it holds, where grammars come from, and the map. */
-export type ColourOptions = {
-  languageId: LanguageId
-  registry: GrammarRegistry
+export type ColourOptions<K extends string = LanguageId> = {
+  languageId: K
+  registry: GrammarRegistry<K>
   classes: () => Map<string, Map<string, string>>
   /**
    * Say that this editor's document is past `COLOUR_CEILING_UNITS` — design §10's "no colour and no
@@ -337,7 +327,7 @@ export type ColourOptions = {
    * coverage figure: an optional call on `undefined` does nothing, and a test that runs that line still
    * records it covered.
    */
-  onCeiling: (id: LanguageId) => void
+  onCeiling: (id: K) => void
 }
 
 /**
@@ -370,7 +360,10 @@ export type ColourOptions = {
  * whole text. In slices the tree would be gone while those two ran, and a screen past the first would go plain. A
  * replacement by the same text, which is what a *format* that changes nothing dispatches, is not reparsed at all.
  */
-export function colourPluginClass(opts: ColourOptions, now: () => number = () => performance.now()) {
+export function colourPluginClass<K extends string = LanguageId>(
+  opts: ColourOptions<K>,
+  now: () => number = () => performance.now(),
+) {
   return class {
     decorations: DecorationSet = Decoration.none
     #view: EditorView
@@ -406,8 +399,8 @@ export function colourPluginClass(opts: ColourOptions, now: () => number = () =>
         })
         .catch(() => {
           // CAUGHT, NOT `void`ed: an unhandled rejection in a browser reaches
-          // `window.onunhandledrejection` and prints as an uncaught error. `ScratchEditor`'s blur handler
-          // and the `initialize` request in `LspClient.start` carry the same note, for the same reason.
+          // `window.onunhandledrejection` and prints as an uncaught error. The `initialize` request in
+          // `LspClient.start` carries the same note, for the same reason.
           //
           // A FETCH THAT FAILS DOES NOT REACH HERE: `createGrammarRegistry` catches it, reports it
           // through `onFailure` and RESOLVES with null. What can still reject is this continuation —
@@ -589,6 +582,6 @@ export function colourPluginClass(opts: ColourOptions, now: () => number = () =>
 }
 
 /** The colourer for one editor, whose language never changes. */
-export function treeSitterColour(opts: ColourOptions): Extension {
+export function treeSitterColour<K extends string = LanguageId>(opts: ColourOptions<K>): Extension {
   return ViewPlugin.fromClass(colourPluginClass(opts), { decorations: (v) => v.decorations })
 }

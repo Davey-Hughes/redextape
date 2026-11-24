@@ -168,8 +168,7 @@ const CHILD_STRIDE = 2
  *
  * IT THROWS ON A SHAPE MISMATCH RATHER THAN REPAIRING ONE. A model whose splits do not match the
  * rendered boxes means the caller took this path when it owed a `renderLayout`, which is a programming
- * error. `LambdaPane.receiveEditor` makes the same call for the same reason: a silent repair would absorb
- * a caller's defect as normal operation.
+ * error, and a silent repair would absorb a caller's defect as normal operation.
  */
 export function syncSizes(root: HTMLElement, tree: LayoutNode): void {
   const rendered = root.firstElementChild
@@ -347,25 +346,4 @@ export function renderStage(
   root.replaceChildren(box)
 
   if (heldLeaf !== undefined) tabs.find((t) => t.dataset.leaf === heldLeaf)?.focus()
-}
-
-/**
- * Bring each tab of a stage drawn under `root` up to its view's title — once per frame, from `draw()`.
- *
- * **A TAB IS BUILT WITH ITS VIEW'S TITLE, AND A VIEW'S TITLE CHANGES WITHOUT A REBUILD.** *Edit a copy*, a pick in
- * the title's menu and a move back to the program each rebind a view in place: its header repaints on the frame the
- * rebind draws, but `renderStage` runs only when the layout is applied, so without this the tab would go on naming
- * what the view showed before until another tab was selected. In Stage the tab names a view as its title does, so
- * the two are kept saying the same thing.
- *
- * **ONLY WHAT CHANGED IS WRITTEN**: this runs on every recorded frame during playback, and the element keeps its
- * identity, so a tab holding the focus keeps it.
- */
-export function retitleStage(root: HTMLElement, title: (id: LeafId) => string): void {
-  for (const tab of root.querySelectorAll<HTMLElement>('.stage-tab')) {
-    const id = tab.dataset.leaf
-    if (id === undefined) continue
-    const next = title(id)
-    if (tab.textContent !== next) tab.textContent = next
-  }
 }

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { moveInto } from '../../src/machine-row'
 import { PanelStack, type Shares } from '../../src/panel-stack'
-import { RxmPane } from '../../src/rxm-pane'
 import { collect } from './engine'
 import { boundary, frame, frames, hearLoops, panelOf, panelToggle, region, tick } from './harness'
 import {
@@ -916,46 +915,5 @@ describe.each(VIEWS)('the $kind view', (view) => {
     expect(await replacedAt(host, widths.wide), 'the replaced row follows the host no more').toBe('medium')
     await collected()
     expect(replaced.deref(), 'the replaced row').toBeUndefined()
-  })
-})
-
-describe('the rxm view', () => {
-  const view = VIEWS[0]
-
-  it('on a copy, parts the row from the outline in wide, each region meeting the boundary above it', async () => {
-    const { host, pane } = mount(view, view.wide + 40, { panels: { outline: true } })
-    if (!(pane instanceof RxmPane)) throw new Error('the first of VIEWS is not the rxm view')
-    pane.setEditor('g a b')
-    await frames()
-    /** The boundaries under the listing: the one above it parts it from the copy's text. */
-    const under = () => boundaryKeys(host).filter((k) => !k.endsWith('|listing'))
-    const middle = (el: HTMLElement) => el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
-    /** Each region begins nowhere below the boundary above it, the boundary taking the place of that gap. */
-    const meets = () => boundaryKeys(host).map((k) => `${k} 0`)
-    expect(getComputedStyle(region(host, 'outline')).display, "precondition: the copy's outline is drawn").not.toBe(
-      'none',
-    )
-    expect(arrangement(host), 'precondition: wide').toBe('wide')
-    expect(under()).toEqual(['listing|machine', 'machine|outline'])
-    // THE ROW'S LOWER NEIGHBOUR IS THE OUTLINE: the boundary lies between the two.
-    const parts = middle(boundary(host, 'machine', 'outline'))
-    expect(parts, 'the boundary is under the row').toBeGreaterThanOrEqual(row(host).getBoundingClientRect().bottom)
-    expect(parts, 'and over the outline').toBeLessThanOrEqual(region(host, 'outline').getBoundingClientRect().top)
-    expect(underBoundaries(host), 'wide').toEqual(meets())
-    await resize(host, Math.round((view.medium + view.wide) / 2))
-    expect(arrangement(host), 'precondition: medium').toBe('medium')
-    expect(under()).toEqual(['listing|machine', 'machine|heap', 'heap|outline'])
-    expect(underBoundaries(host), 'medium').toEqual(meets())
-    const taken = boundary(host, 'heap', 'outline')
-    taken.focus()
-    expect(document.activeElement, 'precondition: the boundary holds the focus').toBe(taken)
-    await resize(host, view.wide + 40)
-    expect(under()).toEqual(['listing|machine', 'machine|outline'])
-    expect(taken.isConnected, 'precondition: the switch took the boundary away').toBe(false)
-    expect(document.activeElement, 'the focus').toBe(panelToggle(host, 'heap'))
-    await resize(host, view.medium - 40)
-    expect(arrangement(host), 'precondition: narrow').toBe('narrow')
-    expect(under()).toEqual(['listing|machine', 'machine|stack', 'stack|heap', 'heap|outline'])
-    expect(underBoundaries(host), 'narrow').toEqual(meets())
   })
 })

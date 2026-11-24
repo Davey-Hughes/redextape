@@ -16,7 +16,6 @@ export type LinkedLeg = Exclude<Leg, 'lambda'>
 export type LinkedPane = {
   setLink(rows: number[], scrollTo: boolean): void
   setFocus(rows: number[]): void
-  setEditorAvailable(available: boolean): void
 }
 
 /**

@@ -1,6 +1,4 @@
-import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterEach, describe, expect, it } from 'vitest'
-import { icon } from '../../src/icons'
 import type { Dir } from '../../src/layout'
 import type { PaneChoice, SplitChoices } from '../../src/pane-chrome'
 import { bindingKey, viewMenu } from '../../src/view-header'
@@ -10,7 +8,7 @@ const CHOICES: SplitChoices = {
   options: [
     { leg: 'lambda', id: 'source', label: 'program' },
     { leg: 'tm', id: 'source', label: 'program' },
-    { leg: 'lambda', id: 'scratch-1', label: 'copy 1' },
+    { leg: 'rxm', id: 'source', label: 'program' },
   ],
   sourceAvailable: true,
   current: { leg: 'lambda', session: 'source' },
@@ -20,7 +18,7 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-const build = (over: Partial<Parameters<typeof viewMenu>[1]> = {}) => {
+const build = (over: Partial<Parameters<typeof viewMenu>[1]> = {}, { formats = true } = {}) => {
   const actions = document.createElement('div')
   document.body.append(actions)
   const log: string[] = []
@@ -28,8 +26,7 @@ const build = (over: Partial<Parameters<typeof viewMenu>[1]> = {}) => {
     split: (dir: Dir, c: PaneChoice) =>
       log.push(`split ${dir} ${c.kind === 'source' ? 'source' : bindingKey(c.kind, c.session)}`),
     close: () => log.push('close'),
-    editCopy: { run: () => log.push('edit'), what: 'the term at this step' },
-    claim: () => log.push('claim'),
+    ...(formats ? { format: () => log.push('format') } : {}),
     choices: () => CHOICES,
     ...over,
   })
@@ -43,23 +40,24 @@ const items = (a: HTMLElement) =>
 
 describe('the view menu', () => {
   it('offers only what applies, and no ⋯ at all when nothing does', () => {
-    const { actions, menu } = build()
+    const { actions, menu } = build({}, { formats: false })
     menu.setLayout(false, false)
     expect(moreOf(actions)).toBeNull()
     expect(actions.querySelector('button.view-close')).toBeNull()
     menu.setLayout(true, true)
-    menu.setCopy('ready')
-    expect(items(actions)).toEqual(['split right', 'split down', 'edit a copy'])
+    expect(items(actions)).toEqual(['split right', 'split down'])
     expect(actions.querySelector('button.view-close')?.getAttribute('aria-label')).toBe('close this view')
-    menu.setClaim(true)
-    menu.setCopy(null)
-    expect(items(actions)).toEqual(['split right', 'split down', 'move the editor here'])
     // AND BACK TO NOTHING — the first assertion above cannot fail on its own: every setter returns early
     // on the state it already holds, so a menu that has never had an item has never been synced at all.
     menu.setLayout(false, false)
-    menu.setClaim(false)
     expect(moreOf(actions)).toBeNull()
     expect(actions.querySelector('button.view-close')).toBeNull()
+  })
+
+  it('offers format from the start on a view that formats, before any of its other state changes', () => {
+    const { actions } = build()
+    expect(moreOf(actions), 'no ⋯ to reach format by').not.toBeNull()
+    expect(items(actions)).toEqual(['format'])
   })
 
   it('names ⋯ and ✕ in words, and states ⋯ opens a menu', () => {
@@ -76,7 +74,7 @@ describe('the view menu', () => {
     moreOf(actions)?.click()
     actions.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
     const pairs = [...actions.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button')]
-    expect(pairs.map((b) => b.textContent)).toEqual(['another view of this', 'TM · program', 'λ · copy 1', 'source'])
+    expect(pairs.map((b) => b.textContent)).toEqual(['another view of this', 'TM · program', 'rxm · program', 'source'])
     expect(document.activeElement).toBe(pairs[0])
     pairs[1]?.click()
     expect(log).toEqual([`split row ${bindingKey('tm', 'source')}`])
@@ -95,96 +93,18 @@ describe('the view menu', () => {
     moreOf(actions)?.click()
     actions.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
     const pairs = [...actions.querySelectorAll<HTMLButtonElement>('.view-menu-pairs button')]
-    expect(pairs.map((b) => b.textContent)).toEqual(['another view of this', 'TM · program', 'λ · copy 1'])
+    expect(pairs.map((b) => b.textContent)).toEqual(['another view of this', 'TM · program', 'rxm · program'])
     expect(actions.querySelector('.view-menu-pairs button[data-source]')).toBeNull()
-  })
-
-  it('disables edit a copy with its reason, rather than removing it, when the reason is a size', () => {
-    const { actions, menu } = build()
-    menu.setCopy({ reason: '60,000 rules — too large to open in an editor' })
-    const edit = actions.querySelector<HTMLButtonElement>('button.detach')
-    expect(edit?.disabled).toBe(true)
-    expect(edit?.getAttribute('aria-description')).toBe('60,000 rules — too large to open in an editor')
-    menu.setCopy('ready')
-    expect(edit?.disabled).toBe(false)
-    expect(edit?.querySelector('.view-menu-hint')?.textContent).toBe('the term at this step')
-  })
-
-  /**
-   * **THE HINT IS PART OF THE NAME.** Two adjacent inline spans with no space between them read as
-   * `edit a copythe term at this step` (`view-header.ts`'s `item` has the rule). Pinned here, where the
-   * item is built.
-   */
-  it('names the item and what it copies, as words a reader can hear', () => {
-    const { actions, menu } = build()
-    menu.setCopy('ready')
-    const edit = actions.querySelector<HTMLButtonElement>('button.detach')
-    expect(edit === null ? '' : computeAccessibleName(edit)).toBe('edit a copy the term at this step')
-    menu.setCopy({ reason: '60,000 rules — too large to open in an editor' })
-    expect(edit === null ? '' : computeAccessibleName(edit)).toBe(
-      'edit a copy 60,000 rules — too large to open in an editor',
-    )
   })
 
   it('runs each item, closing the menu first', () => {
     const { actions, menu, log } = build()
     menu.setLayout(true, true)
-    menu.setCopy('ready')
-    menu.setClaim(true)
     moreOf(actions)?.click()
-    actions.querySelector<HTMLButtonElement>('button.detach')?.click()
+    actions.querySelector<HTMLButtonElement>('button.format-doc')?.click()
     expect(actions.querySelector('.view-menu')?.matches(':popover-open')).toBe(false)
-    actions.querySelector<HTMLButtonElement>('button.claim-editor')?.click()
     actions.querySelector<HTMLButtonElement>('button.view-close')?.click()
-    expect(log).toEqual(['edit', 'claim', 'close'])
-  })
-
-  // THE CLAIM'S MENU ITEM KEEPS ITS OWN ICON rather than `disclose`'s — one glyph, one meaning.
-  it('move the editor here carries its own icon', () => {
-    const { actions, menu } = build()
-    menu.setClaim(true)
-    const path = actions.querySelector('button.claim-editor svg.icon path')
-    expect(path?.getAttribute('d')).toBe(icon('move-editor-here').querySelector('path')?.getAttribute('d'))
-    expect(path?.getAttribute('d')).not.toBe(icon('disclose').querySelector('path')?.getAttribute('d'))
-    expect(actions.querySelector('button.claim-editor .view-menu-label')?.textContent).toBe('move the editor here')
-  })
-
-  /**
-   * **WHAT THE REPEAT GUARD BUYS IS WRITES NOT MADE, SO THAT IS WHAT THIS COUNTS.** The menu is set on
-   * every frame `draw()` paints, and the items `sync` would re-append are the same elements it appended
-   * last time, built once at construction. So neither their identity nor the menu's open state can tell a
-   * guarded `sync` from an unguarded one: both survive `replaceChildren` with the same children. A
-   * `MutationObserver` on the list is what can.
-   */
-  it('writes nothing to the menu when the state repeats', () => {
-    const { actions, menu } = build()
-    menu.setLayout(true, true)
-    menu.setCopy('ready')
-    const list = actions.querySelector('.view-menu-main')
-    if (list === null) throw new Error('no menu list')
-    // `takeRecords`, NOT THE CALLBACK: a `MutationObserver` delivers its records in a microtask, so a
-    // counter incremented by the callback is still zero when a synchronous assertion reads it.
-    // `subtree` AND `characterData` TOO: `sync`'s writes on a repeat are not all on the list itself —
-    // the hint line's text is rewritten inside an item. Watching the list alone would leave the first
-    // assertion below unable to fail: the setters return early, so `sync` does not run, and if it did,
-    // its own guard would skip the only mutation that observer could see.
-    const observer = new MutationObserver(() => undefined)
-    observer.observe(list, { childList: true, subtree: true, characterData: true })
-    menu.setLayout(true, true)
-    menu.setCopy('ready')
-    menu.setClaim(false)
-    expect(observer.takeRecords()).toHaveLength(0)
-    // **A CHANGE THAT LEAVES THE SAME ITEMS IN PLACE REWRITES THE ITEM AND NOT THE LIST.** *edit a copy*
-    // going from offered to refused writes its reason line — that write is the point — while `sync`'s
-    // second guard keeps the list around it alone, which is what an open menu depends on.
-    menu.setCopy({ reason: '60,000 rules — too large to open in an editor' })
-    const afterReason = observer.takeRecords()
-    expect(afterReason.filter((r) => r.type === 'childList' && r.target === list)).toHaveLength(0)
-    expect(afterReason.length).toBeGreaterThan(0)
-    // AND A REAL CHANGE STILL REACHES IT.
-    menu.setClaim(true)
-    expect(observer.takeRecords().length).toBeGreaterThan(0)
-    observer.disconnect()
+    expect(log).toEqual(['format', 'close'])
   })
 })
 

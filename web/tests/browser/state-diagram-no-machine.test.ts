@@ -75,10 +75,8 @@ describe('the state diagram with no machine to draw', () => {
   })
 
   it('keeps the stored level shown, and arcs | chips enabled, with no machine to disable them for', async () => {
-    // Still on `HALF_TYPED` from the case above: no machine, so no groups and no tier — not §7's third
-    // tier, which is a machine that has one. `program` was never disabled for `tm-0`, since its source
-    // failing to compile is not a machine with no program level either — `tm-0` is the view bound to
-    // that source, not a copy of anything.
+    // Still on `HALF_TYPED` from the case above: no machine, so no groups to draw, and the level is still the one
+    // chosen. Only `local` disables *arcs | chips*, so with `program` chosen they stay enabled.
     expect(diagramChoice('program')?.getAttribute('aria-checked')).toBe('true')
     expect(diagramChoice('program')?.disabled).toBe(false)
     expect(diagramChoice('arcs')?.disabled).toBe(false)

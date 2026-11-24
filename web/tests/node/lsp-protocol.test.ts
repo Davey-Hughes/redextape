@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { KIND_ORDER } from '../../src/layout'
-import { documentUri, EXTENSION_OF_LANGUAGE, isResponse, LANGUAGE_IDS, LANGUAGE_OF_PANE } from '../../src/lsp-protocol'
+import { documentUri, EXTENSION_OF_LANGUAGE, isResponse, LANGUAGE_IDS } from '../../src/lsp-protocol'
 
 const LANGUAGE_RS = fileURLToPath(new URL('../../../crates/redextape-lsp/src/language.rs', import.meta.url))
 
@@ -13,9 +12,10 @@ describe('the language ids the client sends', () => {
    * and on screen a file with no problems in it.
    *
    * Read out of the Rust source rather than restated, so this fails when the server's list changes
-   * rather than when someone remembers to update a copy.
+   * rather than when someone remembers to update a copy. **A SUBSET, NOT AN EQUALITY**: the server
+   * matches the languages of every grammar the repository ships, and the app sends only the source's.
    */
-  it('are exactly the ids `Language::from_language_id` matches', () => {
+  it('are each an id `Language::from_language_id` matches', () => {
     const rust = readFileSync(LANGUAGE_RS, 'utf8')
     const body = rust.slice(rust.indexOf('pub fn from_language_id'))
     const end = body.indexOf('\n    }')
@@ -23,33 +23,21 @@ describe('the language ids the client sends', () => {
     const arms = [...body.slice(0, end).matchAll(/"([a-z_]+)"\s*=>\s*Some\(/g)].map((m) => m[1])
 
     expect(arms.length, 'the parse found no arms — the match block has been reshaped').toBeGreaterThan(0)
-    expect([...LANGUAGE_IDS].sort()).toEqual([...arms].sort())
+    expect(arms).toEqual(expect.arrayContaining([...LANGUAGE_IDS]))
   })
 
-  it('cover every pane kind that has an editor, CLIF with none, and every id has an extension', () => {
-    // EVERY `PaneKind`, rxm included: an rxm view's editor is an rxm copy's, which takes its language from here.
-    expect(Object.keys(LANGUAGE_OF_PANE).sort()).toEqual([...KIND_ORDER].sort())
-    expect(LANGUAGE_OF_PANE.rxm).toBe('redextape_rxm')
-    // A CLIF VIEW OFFERS NO COPY, SO IT HOLDS NO EDITOR, and its kind names no language.
-    expect(LANGUAGE_OF_PANE.clif).toBeNull()
-    for (const [kind, id] of Object.entries(LANGUAGE_OF_PANE))
-      if (kind !== 'clif') expect(LANGUAGE_IDS, kind).toContain(id)
+  it('each have an extension', () => {
     for (const id of LANGUAGE_IDS) expect(EXTENSION_OF_LANGUAGE[id]).toBeTruthy()
   })
 })
 
 describe('document URIs', () => {
   it('are per view, so two views on one language are two documents', () => {
-    const a = documentUri('v1', 'redextape_tm')
-    const b = documentUri('v2', 'redextape_tm')
-    expect(a).not.toEqual(b)
-    expect(a).toBe('redextape:///view/v1.tm')
+    expect(documentUri('v1', 'redextape')).not.toEqual(documentUri('v2', 'redextape'))
   })
 
-  it('carry each language extension', () => {
+  it('carry the language extension', () => {
     expect(documentUri('v1', 'redextape')).toBe('redextape:///view/v1.rxt')
-    expect(documentUri('v1', 'redextape_lambda')).toBe('redextape:///view/v1.rxlambda')
-    expect(documentUri('v1', 'redextape_rxm')).toBe('redextape:///view/v1.rxm')
   })
 })
 

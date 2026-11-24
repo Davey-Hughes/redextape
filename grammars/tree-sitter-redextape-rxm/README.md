@@ -11,10 +11,8 @@ and `print_rxm_with_mapped` write and classify. One of four grammars in this rep
 points call it — there is no separate `classify_rxm`. This grammar produces a CST and never lowers
 it into anything.
 
-It colours two kinds of editor. `web/src/colour.ts` loads its committed
-`tree-sitter-redextape-rxm.wasm` and `queries/highlights.scm` through `web-tree-sitter`, and the
-editor in the web app's rxm view, where an rxm copy is edited, is coloured from them. External
-editors take it as *Installing it in an editor* describes.
+It colours external editors, which take it as *Installing it in an editor* describes. The web app
+does not load it.
 
 ## The form, in one page
 
@@ -149,7 +147,7 @@ eight of them: `li`, `add`, `sub`, `cmpgt`, `cmpeq`, `jz`, `jmp` and `halt`.
 (`rxm generated leg: … spans compared`, shown with `--no-capture`), and the total moves with the
 seed.
 
-**A browser leg checks the artefact `web/` loads.** This crate compiles `parser.c` through `cc` and
+**A browser leg checks the committed `.wasm`.** This crate compiles `parser.c` through `cc` and
 has no wasm build, so the two sides meet in a file: `tests/golden.rs` prints one headered fixture
 through `printed_program_with_header`, holds it to the printer's classification, and holds
 `grammars/capture-golden.json` equal to the captures this crate computes for it.

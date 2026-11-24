@@ -910,11 +910,9 @@ impl Session {
     /// cannot name.
     ///
     /// **UNCONDITIONAL ON SIZE.** Asked, it prints, however many rules the machine has — `list60` is
-    /// 94,182 of them (127,881 is the δ-table's ROW count, states plus rules; see `protocol.ts`'s
-    /// `ruleCount`) and about 7.8 MB of text. The size decision belongs to the caller and lives in
-    /// `protocol.ts`'s `forkable`, for the reason that module's own constant records: the app needs the
-    /// rule count to WORD its refusal as well as to make it, so a threshold here would be a second home
-    /// for one number.
+    /// 94,182 of them (127,881 is the δ-table's ROW count, states plus rules) and about 7.8 MB of text.
+    /// A size decision belongs to the caller, which needs the rule count to WORD a refusal as well as to
+    /// make it, so a threshold here would be a second home for one number.
     ///
     /// **`None` FOR A FUNCTION-VALUED PROGRAM TOO, NOT ONLY FOR A DECLINED LEG.** `header.result` is
     /// `ty::ground(self.ty)` (`describe_at`'s own doc), and grounding a `Fun` leaves it a `Fun` — a type
@@ -943,11 +941,10 @@ impl Session {
     /// **ASKED OF `self.ty`, NOT THE TM LEG'S OWN HEADER**, so it reads the same whether or not that leg
     /// even built — a session with no TM leg still has a type, and the answer does not depend on which
     /// legs happened to lower. `tmText` folds this same question in for its own reason (it is one of the
-    /// facts behind its `None`, beside a declined leg); this exists separately because `tmText`'s `None`
-    /// also means "over `MAX_FORK_RULES`" once `protocol.ts`'s `forkable` withholds the call entirely —
-    /// a fact this crate cannot see — so a caller needs this to tell the two refusals apart and word
-    /// *edit a copy*'s disabled reason correctly (the umbrella's §4 rule: disabled with the reason that
-    /// is actually true).
+    /// facts behind its `None`, beside a declined leg); this exists separately because a caller that
+    /// withholds the call for the machine's size — a fact this crate cannot see — needs this to tell the
+    /// two refusals apart and word its disabled reason correctly (the umbrella's §4 rule: disabled with
+    /// the reason that is actually true).
     #[must_use]
     pub fn tm_result_decodable(&self) -> bool {
         redextape_core::ty::is_decodable(&self.ty)
@@ -1328,8 +1325,8 @@ pub fn rxm_scratch(src: &str) -> Scratched<RxmScratch> {
 /// status, listing and value off the handle; and the reply's clone back. `web/tests/browser/rxm-copy-cost.test.ts`
 /// prices the four together (`cd web && pnpm run test:probe:rxm-copy`), over generated files that halt on their first
 /// instruction, and prices every run the memory probe knows apart from that, since none of them grows with the text:
-/// a loop to the step cap, and `rxm-copy-corpus.ts`'s `CASES` and its `both` at `COPY_CAPS`' heap cap — the
-/// heaviest of those runs is what the figures below add, not the loop alone.
+/// a loop to the step cap, and the memory probe's worst cases, among them `both`, the heap filled and then locals
+/// saved, at `COPY_CAPS`' heap cap — the heaviest of those runs is what the figures below add, not the loop alone.
 ///
 /// FOUR RUNS, RELEASE BUILD, THIS CHECK OFF (`probe-rxm-copy`). In three of them 5,200,038 bytes stayed under the 250
 /// ms budget with `both` added while 5,400,000 was over it in two; in the fourth, 5,200,038 bytes stayed under and
@@ -1649,10 +1646,10 @@ pub fn tm_scratch(src: &str) -> TmScratched {
 
 /// The largest `.tm` text, in bytes, a TM scratch builds. Longer text is refused before it is parsed.
 ///
-/// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE** — the budget `MAX_FORK_RULES` in
-/// `web/src/protocol.ts` was measured against. A TM buffer's build pays four costs before its first frame: the
-/// text's structured clone to the worker, this parse, the `tm_program` projection, and that projection's clone
-/// back. `web/tests/browser/tm-buffer-cost.test.ts` prices the four together, and one command runs it:
+/// **MEASURED, NOT CHOSEN, AGAINST THE 250 MS AN INITIATED GESTURE MAY TAKE.** A TM buffer's build pays four costs
+/// before its first frame: the text's structured clone to the worker, this parse, the `tm_program` projection, and
+/// that projection's clone back. `web/tests/browser/tm-buffer-cost.test.ts` prices the four together, and one
+/// command runs it:
 ///
 /// ```text
 /// cd web && pnpm run test:probe:tm-buffer

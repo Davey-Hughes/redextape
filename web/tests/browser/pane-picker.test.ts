@@ -1,10 +1,9 @@
 import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import {
-  editorsInLeaf,
   lambdaLeaves,
   leafIds,
   leafKind,
@@ -23,19 +22,18 @@ import {
  * **THE SPLIT MENU, ACTING** — a split creates what it was asked to create, and the closed source pane has a
  * way back that keeps the layout the user built.
  *
- * A split that duplicates the pane it was performed on is the "another view of this" entry, first in
- * the split menu, and `two-lambda-panes.test.ts`, `layout-app.test.ts`, `layout-restore.test.ts` and
- * `pane-kind-switch.test.ts` take it. The two claims THIS file makes are the ones only the split menu's
- * other entries can make: a split can create a pane of a leg the splitting pane does not render, on a
- * session it is not bound to, and it can create the SOURCE pane, which `reset preset` brings back only
- * at the cost of every other pane on the page.
+ * A split that duplicates the pane it was performed on is the "another view of this" entry, first in the split menu,
+ * and `layout-app.test.ts`, `layout-restore.test.ts` and `pane-kind-switch.test.ts` take it. The two claims THIS file
+ * makes are the ones only the split menu's other entries can make: a split can create a pane of a leg the splitting
+ * pane does not render, and it can create the SOURCE pane, which `reset preset` brings back only at the cost of every
+ * other pane on the page. The last case holds that cost's other half: the pane `reset preset` brings back still holds
+ * the program.
  *
- * THE HARNESS IS `pane-kind-switch.test.ts`'s — `two-lambda-panes.test.ts`'s shell and one-mount-per-file
- * `beforeAll` (ES module imports are cached, so `main()` runs once per page and Vitest gives each test
- * FILE its own page), and a `beforeEach` that undoes the tree shape through `resetToFourViews` and puts
- * the source program back. Selectors are those files' verbatim: `button.detach` for the fork (the button
- * carries real text, not an `aria-label`), `aria-label` for the glyph-only layout controls, and the
- * title's `data-binding` (`bindingKey(leg, session)`) for the pair a view shows.
+ * THE HARNESS IS `pane-kind-switch.test.ts`'s — `SHELL` and a one-mount-per-file `beforeAll` (ES module imports are
+ * cached, so `main()` runs once per page and Vitest gives each test FILE its own page), and a `beforeEach` that undoes
+ * the tree shape through `resetToFourViews` and puts the source program back. Selectors are those files' verbatim:
+ * `aria-label` for the glyph-only layout controls, and the title's `data-binding` (`bindingKey(leg, session)`) for the
+ * pair a view shows.
  */
 
 let view: EditorView
@@ -183,42 +181,54 @@ describe('a split creates what the split menu was asked for', () => {
     expect(showing(created).tapes).toBe(showing('tm-0').tapes)
     expect(showing(created).tapes).not.toBe('')
   })
+})
 
+describe('a page whose last λ view is closed', () => {
   /**
-   * **THE SESSION HALF OF THE PICK, WHICH `creates a TM pane from a λ pane` CANNOT SEE.** Both panes there
-   * are on the source session, so an implementation that ignored `choice.session` and kept binding the
-   * new leaf to the session it was split FROM would pass it. Forking first puts the splitting pane on a λ
-   * copy, so `λ · program` names a session the pane performing the split is not on, and the new pane's
-   * own title-selector is what says which one it landed on.
+   * **A LEG WITH NO VIEW IS A LEGAL STATE.** `closeLeaf` refuses only the last leaf in the TREE, so a page's last λ
+   * view can be closed, and `draw.ts` and `link-wiring.ts` must not throw on an empty λ leg. A throw there would
+   * persist: `applyLayout` writes the tree to `localStorage` before it calls `draw()`, so the λ-less arrangement would
+   * be committed and a reload would come straight back to the dead app.
    *
-   * AND THE SPLITTING PANE IS ASSERTED UNMOVED: a split names the session of the leaf it CREATES, so an
-   * implementation that routed the pick through a rebind would satisfy the first assertion and swap the
-   * two panes' bindings behind it.
+   * IT DRIVES BOTH ENTRY POINTS, because they are reachable independently and one fix could plausibly miss either.
+   * `draw()` is the per-frame path (the TM transport below); `link-wiring.ts` is reached from the source editor's own
+   * `updateListener` on every keystroke, through `drawLink`, per leg, with no λ view to ask.
    */
-  it('starts the new pane on the session that was picked, not on the one that was split', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
-    // THE PAIR THIS FORK LANDED ON, CAPTURED BEFORE THE SPLIT. Each fork mints a name of its own (5d-ii-c
-    // decision 1), and the number depends on how many forks ran earlier in this FILE (one `main()` per
-    // page), so it is not a constant a test can write. Reading it here also sharpens the claim: the
-    // splitting pane is unmoved from THE BUFFER IT WAS ON, not merely still on something detached.
-    const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
-    expect(buffer).not.toBe(bindingKey('lambda', 'source'))
+  it('keeps working after the last λ view is closed, rather than throwing on every frame', async () => {
+    // UNHANDLED ERRORS ARE COLLECTED, NOT INFERRED FROM A GREEN ASSERTION. A throw inside a click handler or a
+    // CodeMirror update listener does not reject anything this test awaits — it surfaces as an `error` event on
+    // `window` and nothing else, so a test that only checked the DOM afterwards could pass while the app was throwing
+    // on every frame behind it.
+    const errors: string[] = []
+    const onError = (e: ErrorEvent) => errors.push(e.message)
+    window.addEventListener('error', onError)
+    try {
+      await userEvent.click(
+        document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-close') as HTMLButtonElement,
+      )
+      await until(() => lambdaLeaves().length === 0, 'the last λ view to close')
+      expect(leafIds()).toEqual(['source', 'rxm-0', 'tm-0'])
 
-    const before = leafIds()
-    splitVia('lambda-0', 'row', bindingKey('lambda', 'source'))
-    await until(() => leafIds().length === before.length + 1, 'the split to add a leaf')
+      // THE PER-FRAME PATH, DRIVEN ON PURPOSE AND ASSERTED ON ITS OUTPUT. A step of the TM view runs `draw()` — the
+      // function that would throw — and its step text is painted by that same pass, so a changed step text is
+      // evidence the repaint happened rather than evidence nothing crashed. `▶` RATHER THAN `◀`: a run opens on step
+      // 0 (`History`), so back is disabled and a press on it changes nothing.
+      const before = stepTextOf('tm-0')
+      expect(before).not.toBe('')
+      const forward = [...document.querySelectorAll<HTMLButtonElement>('[data-leaf="tm-0"] .controls button')].find(
+        (b) => b.textContent === '▶',
+      )
+      await userEvent.click(forward as HTMLButtonElement)
+      await until(() => stepTextOf('tm-0') !== before, 'the TM view’s step to move')
 
-    const created = leafIds().find((id) => !before.includes(id)) ?? ''
-    expect(created).not.toBe('')
-    expect(leafKind(created)).toBe('lambda')
-    expect(titleOf(created)?.dataset.binding).toBe(bindingKey('lambda', 'source'))
-    expect(document.querySelector(`[data-leaf="${created}"] h2`)?.textContent).not.toContain('not linked')
-    expect(document.querySelector(`[data-leaf="${created}"] h2`)?.textContent).toBe('λ · program')
-    // The pane the split was performed ON is still on the buffer it forked — this created a pane, it
-    // did not rebind one.
-    expect(titleOf('lambda-0')?.dataset.binding).toBe(buffer)
-    expect(document.querySelector('[data-leaf="lambda-0"] h2')?.textContent).toContain('copy · not linked')
+      // THE KEYSTROKE PATH, which reaches `link-wiring.ts` without going through `draw.ts` first.
+      view.dispatch({ changes: { from: view.state.doc.length, insert: ' + 0' } })
+      await until(stateIdle, 'the edited program to compile')
+
+      expect(errors).toEqual([])
+    } finally {
+      window.removeEventListener('error', onError)
+    }
   })
 })
 
@@ -336,5 +346,27 @@ describe('the closed source pane comes back through the split menu', () => {
     await until(() => !leafIds().includes('source'), 'the source pane to close')
 
     expect(labels('lambda-0', 'row')).toContain('source')
+  })
+})
+
+describe('the closed source pane comes back through reset preset', () => {
+  /**
+   * **THE PROGRAM IS STILL IN IT.** `reset preset` builds `defaultLayout()`'s tree, whose source leaf is the
+   * `SOURCE_LEAF` literal, so `hostFor` hands back the host the editor waited in while its leaf was out of the tree.
+   * A source leaf built on a fresh host would come back with an empty editor and the program out of reach.
+   */
+  it('keeps the program when the source pane is closed and restored', async () => {
+    const cm = document.querySelector<HTMLElement>('[data-leaf="source"] .cm-content')
+    if (cm === null) throw new Error('no source editor')
+    const before = cm.textContent ?? ''
+    expect(before.length).toBeGreaterThan(0)
+
+    document.querySelector<HTMLButtonElement>('[data-leaf="source"] button[aria-label="close this view"]')?.click()
+    await until(() => !leafIds().includes('source'), 'the source pane to close')
+
+    await resetToFourViews()
+    await until(() => leafIds().includes('source'), 'reset preset to bring the source pane back')
+
+    expect(document.querySelector('[data-leaf="source"] .cm-content')?.textContent).toBe(before)
   })
 })

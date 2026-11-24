@@ -13,13 +13,12 @@
  * Not every token has a consumer: `on-accent` is defined so its contrast is held.
  *
  * `tok-binder` IS THE ONE CLASS OUTSIDE THE MINI-LANGUAGE'S OWN THAT GETS A COLOUR RATHER THAN
- * `tok-neutral`, AND THE λ GRAMMAR IS WHY. `REDEXTAPE_LAMBDA` in `capture_map.rs` maps its captures to
- * exactly three classes — `Binder`, `Ident` and `Punct`. `tok-ident` is `fg` in every built-in variant and
- * `tok-punct` is `tok-neutral` or all but indistinguishable from it, so a λ editor whose binder also
- * drew `tok-neutral` would have two colours for three classes, with `λf` and `(` the same pixels. The
- * classes the TM and rxm forms add keep sharing `tok-neutral`: they arrive in editors that already colour
- * a keyword, a number and a state name apart. `palettes.test.ts`'s *keeps `tok-binder` apart from every
- * other token* is the gate, not this paragraph.
+ * `tok-neutral`, AND THE λ VIEW IS WHY. Its binders sit among names, `tok-ident`, and punctuation,
+ * `tok-punct`. `tok-ident` is `fg` in every built-in variant and `tok-punct` is `tok-neutral` or all but
+ * indistinguishable from it, so a λ view whose binder also drew `tok-neutral` would draw `λf` and `(` in the
+ * same pixels. The classes only the TM and rxm grammars reach share `tok-neutral`: the app loads neither
+ * grammar, so it draws none of them. `palettes.test.ts`'s *keeps `tok-binder` apart from every other token*
+ * is the gate, not this paragraph.
  */
 export const COLOUR_TOKENS = [
   'bg',

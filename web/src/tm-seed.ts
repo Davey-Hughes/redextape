@@ -1,30 +1,12 @@
-import { ruleCount, type TmCompiled } from './protocol'
-import type { TmScratchReading } from './sessions'
+import type { TmCompiled } from './protocol'
 import type { TmPane } from './tm-pane'
 
 /**
- * Tell a TM view its session's machine, or that it has none: the one spelling of the call, for `seedTm` and for
- * `replies.ts`'s tells, so that an argument `setProgram` comes to take reaches a view by every route.
+ * Tell a TM view what its session keeps: the machine and its tapes' names, or that it has none. A view comes to show a
+ * session after the replies that told the others: by being built, by a pick moving it, or by being shown after
+ * a compile it missed. Every such route, and `replies.ts`'s tells, tell it here, so that an argument
+ * `setProgram` comes to take reaches a view by every route.
  */
-export function tellTmProgram(pane: TmPane, compiled: TmCompiled | null): void {
+export function seedTm(pane: TmPane, compiled: TmCompiled | null): void {
   pane.setProgram(compiled?.program ?? null, compiled?.tapeNames ?? [])
-}
-
-/**
- * Tell a TM view everything its session holds — the machine, whether it may be forked, a copy's status and
- * value reading — and that it holds nothing where it does not.
- *
- * **ONE FUNCTION FOR EVERY MOMENT A VIEW NEEDS IT**, reached through `pane-host.ts`'s `SEED`, whose doc has the
- * moments and why each fact is pushed, `null`s included. Two copies of these four calls would be two chances for one
- * to forget a fact.
- */
-export function seedTm(pane: TmPane, compiled: TmCompiled | null, reading: TmScratchReading | null): void {
-  tellTmProgram(pane, compiled)
-  pane.setForkAvailable(
-    compiled?.text ?? null,
-    compiled === null ? 0 : ruleCount(compiled.program),
-    compiled?.tmResultDecodable ?? true,
-  )
-  pane.setScratchStatus(reading?.status ?? null)
-  pane.setScratchValue(reading?.value ?? null)
 }

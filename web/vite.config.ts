@@ -36,15 +36,8 @@ const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
  * set — the `pnpm test:probe*` scripts are what set it.
  *
  * **IT IS A MEASUREMENT WHOSE CONSOLE OUTPUT IS THE DELIVERABLE, AND A DELIVERABLE NOBODY READS ON EVERY PUSH IS
- * PURE COST.** The 5d-ii-d design §4.6's probe runs `MAX_WARM_BUFFERS` real wasm workers and builds as many 32 MiB
- * rings, and its TM case one more of each, deserialising every frame onto the main thread — about the half gigabyte
- * it exists to measure. The browser project has no `fileParallelism: false`, so under the default `include` that
- * peak could land concurrently with `session-memory.test.ts`'s and `frame-cost.test.ts`'s, in one origin, on every
- * push. `tm-fork-cost.test.ts` is far cheaper (ten compiles, no workers, each mounting a real CodeMirror editor to
- * time) but joins the same list because its console output is its deliverable too, not because it shares that
- * weight. `tm-buffer-cost.test.ts` joins it for the reason and for its weight: it parses every reduced file its
- * script emits seven times, files of up to 16,000,000 bytes, from a directory and a wasm build under `target/` that
- * only its script creates.
+ * PURE COST.** The browser project has no `fileParallelism: false`, so under the default `include` a probe would also
+ * time whatever other files ran beside it, in one origin, on every push.
  *
  * **AN ENV FLAG RATHER THAN A BARE `exclude`, BECAUSE A FILE OUTSIDE `include` CANNOT BE NAMED BACK IN.**
  * Vitest's positional filters select WITHIN the resolved include set, so `vitest run <path>` on an
@@ -60,19 +53,13 @@ const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
  * check can run before the file is ever fetched into the browser at all.
  *
  * NOT DELETED, NOT SKIPPED, AND NOT MOVED OUT OF `tests/browser/`: every probe here is a real test file
- * that must keep running against the real app under the same harness and the same Chromium flags —
- * 5d-ii-d §4.6's whole argument is that a cap like this is a measurement rather than an extrapolation, and a
- * measurement that cannot be re-run is an extrapolation with a date on it.
+ * that must keep running against the real app under the same harness and the same Chromium flags, so that a figure
+ * one of them set can be measured again.
  */
 const PROBE_FILES = [
-  'tests/browser/buffer-affordability.test.ts',
-  'tests/browser/tm-fork-cost.test.ts',
   'tests/browser/pane-floor.test.ts',
-  'tests/browser/tm-buffer-cost.test.ts',
   'tests/browser/lambda-tree-cost.test.ts',
   'tests/browser/lambda-expand-all-cost.test.ts',
-  'tests/browser/rxm-copy-cost.test.ts',
-  'tests/browser/rxm-copy-memory.test.ts',
   'tests/browser/record-cost.test.ts',
 ]
 const PROBE_EXCLUDE = process.env.REDEXTAPE_PROBE === undefined ? PROBE_FILES : []
@@ -374,13 +361,8 @@ function browserProject(
       // `tests/firefox/`, so nothing under `node_modules` or `.git` could match it anyway; the
       // moment that glob widens, the omission bites without a test to catch it.
       exclude: [...configDefaults.exclude, ...PROBE_EXCLUDE, ...(options.exclude ?? [])],
-      // `tm-buffer-cost.test.ts`'s run stamp, which `pnpm run test:probe:tm-buffer` sets and every other run
-      // leaves empty. A browser test cannot read `process.env` (`PROBE_FILES`' doc says why), so the probe
-      // learns its own run's stamp here, and refuses a corpus or a build under `target/` stamped by another.
       // `pointerCaptureRefused` tells `firefox-input.ts`'s guard whether this project refuses a pointer capture.
       provide: {
-        probeTmBufferRun: process.env.REDEXTAPE_PROBE_TM_BUFFER_RUN ?? '',
-        probeRxmCopyRun: process.env.REDEXTAPE_PROBE_RXM_COPY_RUN ?? '',
         pointerCaptureRefused: options.pointerCaptureRefused ?? false,
       },
       // Vitest serves its own tester HTML, so this project's `index.html` — and therefore its
@@ -412,35 +394,10 @@ export default defineConfig({
   ],
   define: { 'import.meta.env.VITE_COMMIT_HASH': JSON.stringify(process.env.COMMIT_HASH ?? '') },
   worker: { format: 'es' },
-  // `assetsInlineLimit` — WITHOUT THIS, ONE OF FOUR GRAMMAR `.wasm` FILES INLINES AND THE OTHER
-  // THREE DO NOT, FOR A REASON THAT HAS NOTHING TO DO WITH THE GRAMMARS THEMSELVES.
-  //
-  // `colour.ts` imports all four tree-sitter grammar `.wasm` with Vite's `?url` suffix. Three of
-  // them (`tree-sitter-redextape`, `tree-sitter-redextape-rxm`, `tree-sitter-redextape-tm`, each
-  // 8-17 KiB) land as hashed files under `dist/assets/`. `tree-sitter-redextape-lambda.wasm` is
-  // 2,514 bytes — under Vite's default `assetsInlineLimit` of 4096 — so it alone would be inlined
-  // into the JS bundle as a `data:application/wasm;base64,...` URI instead of being emitted.
-  //
-  // THE INLINED FORM IS NOT BROKEN, AND THIS ENTRY IS NOT A BUGFIX: it removes an inconsistency the
-  // size threshold introduces by accident, for three reasons:
-  //
-  // 1. LOAD-BEARING: THE THRESHOLD FLIPS BEHAVIOUR SILENTLY. If this grammar ever grows past 4096
-  //    bytes it becomes an emitted asset with no signal anywhere that its production loading path
-  //    just changed underneath a file nobody touched — an unchecked threshold that changes
-  //    behaviour is exactly the shape this repository removes on sight.
-  // 2. The design (see `colour.ts`) has each grammar load independently, so a grammar that fails
-  //    to load leaves only its language uncoloured, with one notice. An inlined grammar cannot
-  //    fail that way — it is already in the bundle — so λ alone has a different failure surface
-  //    from its three siblings.
-  // 3. Dev and production would differ for λ alone (dev never inlines), which makes a
-  //    λ-specific loading bug reproducible in only one of the two environments.
-  //
-  // A FUNCTION, NOT A BARE NUMBER, AND `false`/`undefined`, NOT `true`/`false`. Returning `false`
-  // means "never inline this file"; returning `undefined` means "fall through to Vite's own
-  // default rule" — omitting the fallthrough (returning `true`, or passing a bare number) would
-  // change behaviour for every other asset type this file ships (fonts, icons) rather than only
-  // `.wasm`.
   build: {
+    // A `.wasm` IS ALWAYS EMITTED AS ITS OWN FILE, NEVER INLINED AS A `data:` URL. Vite's default inlines an asset
+    // under a size threshold, so a `.wasm` crossing it would change how the built page loads it with no sign, and dev,
+    // which never inlines, would load it one way and the build another. `undefined` leaves other assets to Vite's rule.
     assetsInlineLimit: (filePath) => (filePath.endsWith('.wasm') ? false : undefined),
     rolldownOptions: {
       input: Object.fromEntries(PAGES.map((p) => [p, fileURLToPath(new URL(`${p}.html`, import.meta.url))])),

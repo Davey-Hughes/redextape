@@ -12,7 +12,7 @@ import { controlState, fixtureHost } from './harness'
 /**
  * A λ view's display settings (Plan 7 part 4 spec §5.1): the layout and the variables, chosen from its `⋯`
  * menu, reported so the app can keep them, "reset folds", and the reset a new binding makes. Panes are
- * built directly, as `lambda-pane-editor`'s are — nothing here needs `main()`.
+ * built directly: nothing here needs `main()`.
  */
 const host = (): HTMLElement => fixtureHost('lambda-display-fixture')
 
@@ -63,14 +63,12 @@ describe('a λ view’s display settings', () => {
   /**
    * **THE SETTINGS ARE IN THE MENU FROM CONSTRUCTION.** Every other item reaches the menu through a setter
    * that sees a change, so had the settings done the same, a view whose other state never leaves its first
-   * value — here a copy, which offers no *edit a copy*, with no editor to move to it — would have no `⋯` at
-   * all, and no way to its layout, its variables or "reset folds". The last line holds the header's order:
-   * `⋯` is mounted first, and the view's own action must still come before it.
+   * value would have no `⋯` at all, and no way to its layout, its variables or "reset folds". The last line holds
+   * the header's order: `⋯` is mounted first, and the view's own action must still come before it.
    */
   it('offers its settings from construction, on a view whose other items never apply', () => {
     const el = host()
     const pane = new LambdaPane(el, events())
-    pane.setDetached(true)
     pane.render(frame, CONTROLS)
     expect(el.querySelector('button.view-more')).not.toBeNull()
     expect(el.querySelector('.view-menu-group[aria-label="layout"]')).not.toBeNull()
@@ -287,7 +285,7 @@ describe('a λ view’s expand all', () => {
   it('outlives a new build and a new binding, which clear only the folds made by hand', async () => {
     const el = host()
     const pane = new LambdaPane(el, events())
-    const bind = (session: string) => pane.setBindings([option('source'), option('copy')], { leg: 'lambda', session })
+    const bind = (session: string) => pane.setBindings([option('source'), option('second')], { leg: 'lambda', session })
     bind('source')
     pane.setBuild(1)
     pane.render(frame, CONTROLS)
@@ -305,7 +303,7 @@ describe('a λ view’s expand all', () => {
     await userEvent.click(el.querySelector<HTMLElement>('.term-gutter[data-node="3"]') as HTMLElement)
     expect(folded(el)).toBe(1)
 
-    bind('copy')
+    bind('second')
     pane.renderTree({ kind: 'tree', tree: wireOf(`g ${big('c')} z`) })
     expect(folded(el), 'another session’s term: the same').toBe(0)
     await userEvent.click(more(el))
@@ -321,7 +319,7 @@ describe('a λ view’s folds across bindings', () => {
   it('keeps its folds while bound to one session, and starts another from the automatic policy', () => {
     const el = host()
     const pane = new LambdaPane(el, events())
-    const bind = (session: string) => pane.setBindings([option('source'), option('copy')], { leg: 'lambda', session })
+    const bind = (session: string) => pane.setBindings([option('source'), option('second')], { leg: 'lambda', session })
     bind('source')
     pane.render(frame, CONTROLS)
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
@@ -335,7 +333,7 @@ describe('a λ view’s folds across bindings', () => {
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
     expect(lines(), 'the same binding, one frame later').toBe(1)
 
-    bind('copy')
+    bind('second')
     pane.renderTree({ kind: 'tree', tree: wireOf(WIDE) })
     expect(lines(), 'another session’s term').toBe(open)
   })

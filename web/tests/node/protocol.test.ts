@@ -6,7 +6,6 @@ import {
   clifFrameBytes,
   endOf,
   FRAME_OVERHEAD_BYTES,
-  forkable,
   type HeldLegs,
   keepDecided,
   keepInFlight,
@@ -14,20 +13,18 @@ import {
   LEG_FRAME_BYTES,
   type Leg,
   lambdaFrameBytes,
-  MAX_FORK_RULES,
   OWNER_BYTES,
   REDEX_SPAN_BYTES,
   type ResultLegs,
   RXM_WORD_BYTES,
   type RxmLeg,
-  ruleCount,
   rxmFrameBytes,
   rxmRecordEnd,
   SPAN_BYTES,
   type TmLeg,
   tmFrameBytes,
 } from '../../src/protocol'
-import type { Classified, ClifState, Decoded, LambdaState, RxmStatus, TmProgram, TmState } from '../../src/types'
+import type { Classified, ClifState, Decoded, LambdaState, RxmStatus, TmState } from '../../src/types'
 import { frameOf } from './rxm-fixtures'
 import { spanBytes } from './span-bytes'
 
@@ -138,56 +135,6 @@ describe('lambdaFrameBytes', () => {
       owner: { Exact: 3 },
     }
     expect(lambdaFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 2 + REDEX_SPAN_BYTES + OWNER_BYTES)
-  })
-})
-
-/** A program with exactly `n` rules, spread over ten states so the reduce has something to reduce. */
-function programOf(n: number): TmProgram {
-  const states = Array.from({ length: 10 }, (_, i) => ({
-    name: `q${i}`,
-    accept: false,
-    rules: [] as TmProgram['states'][number]['rules'],
-    instr: null,
-  }))
-  for (let i = 0; i < n; i++) {
-    states[i % 10]?.rules.push({ read: [null], write: [null], moves: ['S'], next: 0 })
-  }
-  return { states, alphabet: ['_'], tapes: 1, width: 4, start: 0, listing: [], labels: [] }
-}
-
-describe('the fork cap', () => {
-  it('counts every rule across every state, not the states', () => {
-    expect(ruleCount(programOf(0))).toBe(0)
-    expect(ruleCount(programOf(1))).toBe(1)
-    expect(ruleCount(programOf(37))).toBe(37)
-  })
-
-  it('admits a program at the cap and refuses one rule past it', () => {
-    expect(forkable(programOf(MAX_FORK_RULES - 1))).toBe(true)
-    expect(forkable(programOf(MAX_FORK_RULES))).toBe(true)
-    expect(forkable(programOf(MAX_FORK_RULES + 1))).toBe(false)
-  })
-
-  /**
-   * A DECLINED LEG IS NOT FORKABLE, AND THE `null` ARM IS WHY THE PREDICATE TAKES A NULLABLE.
-   * A declined leg has no `TmProgram`, so every caller would otherwise write the same
-   * null check beside every call — which is the second place for it to be wrong.
-   */
-  it('refuses a null program without the caller checking', () => {
-    expect(forkable(null)).toBe(false)
-  })
-
-  /**
-   * THE CAP MUST SIT BETWEEN THE TWO CORPUS PROGRAMS THE DESIGN NAMES (§3.1), AND THIS ASSERTS THE
-   * PROPERTY RATHER THAN THE NUMBER. A future re-measurement may move `MAX_FORK_RULES`; moving it
-   * outside this interval would silently change which demo programs can be forked at all, which is
-   * the fact the figure exists to control.
-   */
-  it('sits between list20 and list60', () => {
-    // **THESE BOUNDS ARE RULE COUNTS**, because this constant gates on rules alone; a δ-table ROW is a
-    // state OR a rule.
-    expect(MAX_FORK_RULES).toBeGreaterThan(11_802) // list20's rules — must be forkable
-    expect(MAX_FORK_RULES).toBeLessThan(94_182) // list60's rules — must be refused
   })
 })
 

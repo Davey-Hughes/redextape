@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { RunReply } from '../../src/protocol'
-import type { PoolPort, SessionId } from '../../src/session-client'
+import type { ClientPort, SessionId } from '../../src/session-client'
 import { SessionPool } from '../../src/session-client'
 
 /**
- * POOL ISOLATION — decision 3's whole claim (design §2, §4.2), which a single-worker pool fails.
- * Everything else about `SessionPool` (the map, the throw, the idempotent unbind, the per-session
- * generation) is satisfied by a pool that hands the same thread to everyone;
- * `tests/node/session-pool.test.ts` covers that logic and cannot see this.
+ * POOL ISOLATION — decision 3's whole claim (design §2, §4.2), which a single-worker pool fails. Everything else about
+ * `SessionPool` (the map, the throw, the per-session generation) is satisfied by a pool that hands the same thread to
+ * everyone; `tests/node/session-pool.test.ts` covers that logic and cannot see this.
  *
  * THE MECHANISM IS NOT A DEEP PRINT. §5 asks to "poison one session's worker with a deep print and
  * assert the other two still step", and the poison it names is the one `depth-cap.test.ts`'s
@@ -17,37 +16,30 @@ import { SessionPool } from '../../src/session-client'
  * `lambdaState(FRAME_BYTES)` alike — so a deep term reports a `Depth` cut instead of aborting, and a
  * test written around that mechanism would assert nothing.
  *
- * SO THIS DRIVES THE DAMAGE THAT IS REACHABLE, in two halves, and both are stronger than the deep
- * print because neither depends on how deep a print the engine survives:
- *
- *   1. **Co-tenancy is not survivable at all.** `session-worker.ts` holds ONE live session and frees
- *      it at the top of every `run` (`dropLive`, called before `compile`). Two sessions sharing a
- *      thread therefore do not merely share damage — the second compile frees the first session's
- *      handle out from under a record loop still posting frames for it. §4.2 names that invariant as
- *      the reason decision 3 is safe; this is that sentence as an assertion.
- *   2. **The cure has to be local.** `terminate` + respawn is the only fix for both findings in
- *      `SessionPool`'s doc — a poisoned module cannot be asked to clean itself up, since `free()`
- *      throws too. On a shared thread the cure is worse than the damage: terminating the scratchpad
- *      takes the source session with it, which is precisely 5d-ii-c §4.3's retire path killing the
- *      thing it is supposed to return the user to.
+ * SO THIS DRIVES THE DAMAGE THAT IS REACHABLE, which is stronger than the deep print because it does not depend on
+ * how deep a print the engine survives: **co-tenancy is not survivable at all.** `session-worker.ts` holds ONE live
+ * session and frees it at the top of every `run` (`dropLive`, called before `compile`). Two sessions sharing a thread
+ * therefore do not merely share damage — the second compile frees the first session's handle out from under a record
+ * loop still posting frames for it. §4.2 names that invariant as the reason decision 3 is safe; this is that sentence
+ * as an assertion.
  *
  * Section and decision citations here are the 5d-i design's unless they name another.
  */
 
 const SOURCE: SessionId = 'source'
-const LAMBDA_SCRATCH: SessionId = 'lambda-scratch'
-const TM_SCRATCH: SessionId = 'tm-scratch'
+const SECOND: SessionId = 'second'
+const THIRD: SessionId = 'third'
 
 /**
  * A pool over REAL `session-worker.ts` threads, and every worker it has spawned in spawn order.
  *
- * `workers` IS APPEND-ONLY: a terminated worker stays in the list so a test can assert that a later
- * bind produced a NEW thread rather than handing back the dead one.
+ * `workers` IS WHAT A TEST ENDS: the pool keeps its threads for the page's life, so a test terminates each one it
+ * spawned.
  */
 function realPool(): { pool: SessionPool; workers: Worker[] } {
   const workers: Worker[] = []
   const pool = new SessionPool(
-    (): PoolPort => {
+    (): ClientPort => {
       const w = new Worker(new URL('../../src/session-worker.ts', import.meta.url), { type: 'module' })
       workers.push(w)
       return w
@@ -117,7 +109,7 @@ function answer(r: RunReply): string {
 }
 
 describe('SessionPool isolation', () => {
-  // HALF ONE: three sessions, three programs, three answers, in flight together. Every request is
+  // Three sessions, three programs, three answers, in flight together. Every request is
   // posted before any reply is awaited — sequencing them would let a shared worker finish each
   // session before the next one clobbered it, and pass.
   //
@@ -128,8 +120,8 @@ describe('SessionPool isolation', () => {
     const { pool, workers } = realPool()
     try {
       const source = open(pool, SOURCE)
-      const lambdaScratch = open(pool, LAMBDA_SCRATCH)
-      const tmScratch = open(pool, TM_SCRATCH)
+      const second = open(pool, SECOND)
+      const third = open(pool, THIRD)
       expect(pool.size).toBe(3)
       // Three DISTINCT threads. The cheapest possible statement of decision 3, and the first thing a
       // shared-worker pool fails — kept above the behavioural assertions so a failure here says
@@ -138,8 +130,8 @@ describe('SessionPool isolation', () => {
 
       const [a, b, c] = await Promise.all([
         source.run('let x = 40; x + 2'),
-        lambdaScratch.run('let x = 1; x + 2'),
-        tmScratch.run('let x = 8; x + 8'),
+        second.run('let x = 1; x + 2'),
+        third.run('let x = 8; x + 8'),
       ])
 
       expect(answer(a)).toBe('42')
@@ -148,7 +140,7 @@ describe('SessionPool isolation', () => {
       // Each session recorded its OWN frames rather than merely receiving a correct final value: a
       // reply stream carrying another session's frames is the shared-worker failure one step before
       // it reaches the decoded answer.
-      for (const s of [source, lambdaScratch, tmScratch]) {
+      for (const s of [source, second, third]) {
         expect(s.seen.filter((r) => r.kind === 'compiled').length, kinds(s.seen)).toBe(1)
         expect(
           s.seen.some((r) => r.kind === 'frames' && r.leg === 'lambda'),
@@ -156,45 +148,7 @@ describe('SessionPool isolation', () => {
         ).toBe(true)
       }
     } finally {
-      for (const id of [SOURCE, LAMBDA_SCRATCH, TM_SCRATCH]) pool.unbind(id)
-    }
-  })
-
-  // HALF TWO: the cure is local. `terminate` is the only recovery from a poisoned module (see this
-  // file's header and `SessionPool`'s doc), and 5d-ii-c §4.3 fires it from a retire — so a pool
-  // where terminating one session stops the others has no recovery path at all, it has a way to kill
-  // the app.
-  //
-  // THE SURVIVORS MUST STEP AFTER THE TERMINATE, NOT MERELY BE LISTED. `pool.size` and `pool.has`
-  // both stay correct on a shared worker: the map entry survives, the thread under it does not. Only
-  // a fresh run through the surviving sessions can tell those apart, which is why each one compiles a
-  // DIFFERENT program afterwards and is checked for its own new answer.
-  it('terminating one session leaves the others stepping', { timeout: 120_000 }, async () => {
-    const { pool, workers } = realPool()
-    try {
-      const source = open(pool, SOURCE)
-      const lambdaScratch = open(pool, LAMBDA_SCRATCH)
-      const tmScratch = open(pool, TM_SCRATCH)
-
-      // Everyone healthy first, so a later failure cannot be blamed on a session that never worked.
-      expect(answer(await lambdaScratch.run('let x = 1; x + 1'))).toBe('2')
-
-      pool.unbind(LAMBDA_SCRATCH)
-      expect(pool.size).toBe(2)
-      expect(pool.has(LAMBDA_SCRATCH)).toBe(false)
-
-      const [a, c] = await Promise.all([source.run('let x = 2; x + 3'), tmScratch.run('let x = 9; x + 1')])
-      expect(answer(a)).toBe('5')
-      expect(answer(c)).toBe('10')
-
-      // AND THE RESPAWN HALF, which is the other side of §4.2's "terminate + respawn resets both":
-      // the id is free again and binding it gets a working thread, not the terminated one.
-      const reborn = open(pool, LAMBDA_SCRATCH)
-      expect(answer(await reborn.run('let x = 20; x + 1'))).toBe('21')
-      expect(workers.length).toBe(4)
-      expect(new Set(workers).size).toBe(4)
-    } finally {
-      for (const id of [SOURCE, LAMBDA_SCRATCH, TM_SCRATCH]) pool.unbind(id)
+      for (const w of workers) w.terminate()
     }
   })
 })

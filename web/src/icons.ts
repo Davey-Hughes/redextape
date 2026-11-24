@@ -13,10 +13,8 @@
  */
 export type IconName =
   | 'disclose'
-  | 'move-editor-here'
   | 'more'
   | 'close'
-  | 'edit'
   | 'play'
   | 'pause'
   | 'to-newest'
@@ -32,16 +30,12 @@ export type IconName =
 const PATHS: Readonly<Record<IconName, string>> = {
   // A chevron pointing right; a panel's style sheet rotates it down when the panel is open.
   disclose: 'M6 3.5 L10.5 8 L6 12.5',
-  // An arrow landing on a line: "put it here".
-  'move-editor-here': 'M8 2.5 V10 M4.5 6.5 L8 10 L11.5 6.5 M3 13.5 H13',
-  // `⋯`, a view's menu. Hack, Instrument's monospace face, lacks it (part 1's roadmap entry lists `✎`;
-  // `⋯` and `✕` get the same treatment so the three read as one set). Three dots: zero-length segments with
-  // round caps are dots of the stroke's width, so it is drawn at stroke width 2.
+  // `⋯`, a view's menu. Hack, Instrument's monospace face, lacks it, and `✕` is drawn too so the two read as one
+  // set. Three dots: zero-length segments with round caps are dots of the stroke's width, so it is drawn at stroke
+  // width 2.
   more: 'M3.5 8 h0.01 M8 8 h0.01 M12.5 8 h0.01',
   // `✕`, closing a view — drawn rather than typed, for `more`'s reason.
   close: 'M4 4 L12 12 M12 4 L4 12',
-  // `✎`, editing a copy — Hack lacks it (part 1's roadmap entry).
-  edit: 'M10.5 2.5 L13.5 5.5 L6 13 H3 V10 Z',
   // `⏵`: Hack lacks it (part 1's roadmap entry), and `⏸` joins it so the play toggle's two faces match.
   play: 'M5 3.5 L12.5 8 L5 12.5 Z',
   pause: 'M5.5 3.5 V12.5 M10.5 3.5 V12.5',

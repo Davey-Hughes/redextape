@@ -6,7 +6,6 @@ import { splitLeaf } from '../../src/layout'
 import { encodeLink, type SharePayload } from '../../src/share-link'
 import { bindingKey } from '../../src/view-header'
 import { PRESETS, serializeWorkspace } from '../../src/workspace'
-import { storedBindings } from './copy-text-fixture'
 import {
   fourViews,
   fourViewWorkspace,
@@ -25,12 +24,12 @@ import { userSplit } from './user-event-fixture'
 
 /**
  * **A LINK PASTED INTO AN OPEN PAGE, AND ITS UNDO** — Plan 7 part 6a spec §5.3 and §5.5, heard as `hashchange`. The
- * page opens on `let x = 40; x + 2` in Explorer, and a second λ view is put on a copy first, beside the λ view of the
- * program. A whole link replaces the program and the workspace and builds every view again on the program — the λ
+ * page opens on `let x = 40; x + 2` in Explorer, and a second λ view is split off the λ view first, a view the link's
+ * tree lacks. A whole link replaces the program and the workspace and builds every view again on the program — the λ
  * view its tree shares too, so it is drawn as the link says; its `undo` puts back the program, the workspace and the
- * copy's view, and goes at the next edit or encoding chosen. A link whose workspace cannot be read opens the program
- * alone; one that cannot be read at all changes nothing; any other fragment is left alone. ONE MOUNT FOR THE FILE, for
- * the reason `app.test.ts` gives.
+ * view the split added, and goes at the next edit or encoding chosen. A link whose workspace cannot be read opens the
+ * program alone; one that cannot be read at all changes nothing; any other fragment is left alone. ONE MOUNT FOR THE
+ * FILE, for the reason `app.test.ts` gives.
  *
  * **THE LINKS CARRY SHORT PROGRAMS, NOT EXAMPLES**: no case here is about a recording, and at a tenth of a core,
  * taking in an example's λ frames would hold the page's main thread past the seconds the open's `undo` is offered for.
@@ -62,9 +61,8 @@ const leaves = () => [...document.querySelectorAll<HTMLElement>('.pane[data-leaf
 const panelOpen = (where: string) => document.querySelector<HTMLElement>(`${where} .panel`)?.dataset.open
 
 let view: EditorView
-/** The copy, as its binding reads, and the leaf of the view added to show it. */
-let copy = ''
-let copyLeaf = ''
+/** The leaf of the λ view the split added, which the link's tree lacks. */
+let added = ''
 
 /** Paste `fragment` into the address bar, as far as the page can tell: a `hashchange`. */
 async function paste(fragment: string, until_: () => boolean, what: string): Promise<void> {
@@ -81,36 +79,21 @@ beforeAll(async () => {
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await until(() => stateIdle() && readout() === 3, 'the first compile')
-  // A COPY, THEN A VIEW OF IT, THEN THE λ VIEW BACK ON THE PROGRAM: the copy's view is one the link's tree lacks.
-  document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-  await until(() => shows('lambda-0') !== bindingKey('lambda', 'source'), 'the copy')
-  copy = shows('lambda-0')
-  copyLeaf = (await userSplit('lambda-0', 'same')) ?? ''
-  expect(noticeText(), 'the split of the λ view was refused').toBe('view added — λ · copy 1')
-  await userEvent.click(
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.view-title') as HTMLButtonElement,
-  )
-  await userEvent.click(
-    document.querySelector<HTMLButtonElement>(
-      `[data-leaf="lambda-0"] [popover] button[data-binding="${bindingKey('lambda', 'source')}"]`,
-    ) as HTMLButtonElement,
-  )
-  await until(() => shows('lambda-0') === bindingKey('lambda', 'source'), 'the λ view back on the program')
+  // A SECOND λ VIEW, SPLIT OFF THE λ VIEW: one the link's tree lacks.
+  added = (await userSplit('lambda-0', 'same')) ?? ''
+  expect(noticeText(), 'the split of the λ view was refused').toBe('view added — λ · program')
 })
 
 describe('a whole link pasted into an open page', () => {
   it('replaces the program and its encoding, and clears the fragment', async () => {
-    expect(shows(copyLeaf)).toBe(copy)
+    expect(leaves(), 'precondition: the λ view the split added').toContain(added)
     await until(() => lambdaLayout() !== 'flat', 'the λ tree')
     expect(lambdaLayout()).toBe('code')
-    // THE COPY'S VIEW IS STORED AS BOUND TO IT, which a reload on the link's tree would read as a leaf id's collision.
-    expect(storedBindings()).toHaveProperty(copyLeaf)
     await paste(await encodeLink(LINK), () => noticeText() === 'opened a shared link', 'the open')
     expect(view.state.doc.toString()).toBe(LINKED)
     expect(picker().value).toBe('binary')
     expect(location.hash).toBe('')
     expect(undoButton()?.textContent).toBe('undo')
-    expect(storedBindings()).toEqual({})
   })
 
   it("replaces the workspace, building every view again on the program in the link's display", async () => {
@@ -124,16 +107,16 @@ describe('a whole link pasted into an open page', () => {
     expect(lambdaLayout()).toBe('outline')
     expect(panelOpen('#inspector')).toBe('false')
     expect(panelOpen('[data-leaf="source"]')).toBe('true')
-    expect(document.querySelector('#buffers')?.textContent).toBe('copies 1 ▾')
   })
 
   // **THE UNDO IS USED BEFORE ANY WAIT ON THE LINK'S COMPILE**, which would spend the seconds it is offered for.
-  it('puts back the program, the workspace and the copy’s view on undo', async () => {
+  it('puts back the program, the workspace and the view the split added, on undo', async () => {
     await userEvent.click(undoButton() as HTMLButtonElement)
     expect(view.state.doc.toString()).toBe('let x = 40; x + 2')
     expect(picker().value).toBe('unary')
     expect(workspaceName()).toBe('Explorer ▾')
-    expect(shows(copyLeaf)).toBe(copy)
+    expect(leaves(), 'the undo put back no view the split added').toContain(added)
+    expect(shows(added)).toBe(bindingKey('lambda', 'source'))
     expect(shows('lambda-0')).toBe(bindingKey('lambda', 'source'))
     expect(panelOpen('#inspector')).toBe('true')
     expect(panelOpen('[data-leaf="source"]')).toBe('false')

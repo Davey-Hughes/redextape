@@ -1,16 +1,16 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { KEYMAP_KEY } from '../../src/editor-prefs'
-import { editorHost, idle, inNormalMode, SHELL, until } from './harness'
+import { idle, inNormalMode, SHELL, until } from './harness'
 
 /**
  * **THE KEYMAP SETTING, THROUGH THE APP** — spec §9.
  *
- * Four claims, in the order the page can show them: the setting is read back from STORAGE at mount
- * rather than from the control; `Esc` belongs to vim and does not move the focus out of the editor;
- * an editor built while the setting is *vim* gets vim too, including a copy's; and the switch reaches
- * every editor already on screen without a reload, which is the whole reason there is a `Compartment`.
+ * Three claims, in the order the page can show them: the setting is read back from STORAGE at mount
+ * rather than from the control, so the editor built then is built in vim; `Esc` belongs to vim and does
+ * not move the focus out of the editor; and the switch reaches the editor already on screen without a
+ * reload, which is the whole reason there is a `Compartment`.
  *
  * **REAL TIMERS, DELIBERATELY.** The suite's widget-level template opens with `vi.useFakeTimers()`;
  * this file mounts `main()`, which awaits a wasm fetch, and a fake clock plus an awaited fetch
@@ -38,15 +38,6 @@ const TWO_LINES = 'let x = 40;\nx + 2'
 let view: EditorView
 
 const keymapChoice = () => document.querySelector<HTMLSelectElement>('#keymap')
-
-/** The copy's own CodeMirror view, once a fork has mounted one under the λ pane. */
-function copyView(): EditorView {
-  const host = editorHost()
-  if (host === null) throw new Error('no copy editor mounted under [data-leaf="lambda-0"]')
-  const found = EditorView.findFromDOM(host)
-  if (found === null) throw new Error('no CodeMirror view mounted under the copy editor host')
-  return found
-}
 
 /**
  * Put the caret at `pos` in the source editor and confirm the editor actually holds the focus.
@@ -130,17 +121,10 @@ describe('the keymap setting', () => {
     )
   })
 
-  it('gives a copy editor built under the setting the same keymap', async () => {
-    document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-    await until(() => editorHost() !== null, 'the copy editor to mount')
-    expect(inNormalMode(copyView()), 'the copy editor is not in vim normal mode').toBe(true)
-  })
-
-  it('switches every editor on screen to the default keymap, live, and remembers it', async () => {
+  it('switches the editor on screen to the default keymap, live, and remembers it', async () => {
     setKeymapControl('default')
     expect(localStorage.getItem(KEYMAP_KEY), 'the choice was not written to storage').toBe('default')
     expect(inNormalMode(view), 'the source editor kept vim after the setting changed').toBe(false)
-    expect(inNormalMode(copyView()), 'the copy editor kept vim after the setting changed').toBe(false)
     await caretTo(0)
     await userEvent.keyboard('j')
     expect(view.state.doc.line(1).text, '`j` did not reach the document under the default keymap').toBe(
@@ -152,14 +136,12 @@ describe('the keymap setting', () => {
   it('switches back to vim without a reload', async () => {
     // **THE PRECONDITION IS WHAT MAKES THIS TEST ABLE TO FAIL ON ITS OWN.** It runs after the one
     // above, on the same page, and "took vim back" is satisfied by an editor that never left it — so
-    // without these two lines a defect that stops the setting reaching any editor at all passes here
+    // without this line a defect that stops the setting reaching any editor at all passes here
     // while failing only its predecessor.
     expect(inNormalMode(view), 'precondition: the source editor should be off vim by now').toBe(false)
-    expect(inNormalMode(copyView()), 'precondition: the copy editor should be off vim by now').toBe(false)
     setKeymapControl('vim')
     expect(localStorage.getItem(KEYMAP_KEY)).toBe('vim')
     expect(inNormalMode(view), 'the source editor did not take vim back').toBe(true)
-    expect(inNormalMode(copyView()), 'the copy editor did not take vim back').toBe(true)
     await caretTo(0)
     const before = view.state.doc.toString()
     await userEvent.keyboard('j')
@@ -167,7 +149,7 @@ describe('the keymap setting', () => {
 
     // AND RE-SELECTING THE MODE ALREADY IN FORCE COSTS NOTHING — asserted against the STATE OBJECT,
     // because a `reconfigure` that changes nothing still produces a new `EditorState` and still runs
-    // every editor's configuration resolution. Read back-to-back with no await between them, so
+    // the editor's configuration resolution. Read back-to-back with no await between them, so
     // nothing else on the page can have dispatched in the gap.
     const stateBefore = view.state
     setKeymapControl('vim')

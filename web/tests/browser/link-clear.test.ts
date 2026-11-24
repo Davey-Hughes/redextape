@@ -22,8 +22,8 @@ import {
 } from './harness'
 
 /**
- * Clearing the link (`docs/superpowers/specs/2026-11-17-link-clear-design.md`): a click on empty space in a view, a
- * view showing a copy included, clears the pin and every mark of it and leaves linking on; a click that links, or on a
+ * Clearing the link (`docs/superpowers/specs/2026-11-17-link-clear-design.md`): a click on empty space in a view
+ * clears the pin and every mark of it and leaves linking on; a click that links, or on a
  * control or a view's chrome, and a press that moves more than 4 px, clear nothing; Escape clears it with the focus in
  * a view, and not in an editor or with a menu or dialog open. A click clears at once, the first of a double-click too, and
  * a Shift-click clears nothing.
@@ -32,9 +32,6 @@ import {
  */
 
 const SAMPLE = 'let x = 40; x + 2'
-
-/** A copy's machine: no dots in its names, so its diagram shows the local level alone. */
-const MACHINE = `tapes 1\nstart s\n\nstate s:\n  [*] -> write [*], move [R], goto t\nstate t:\n  [*] -> write [*], move [R], goto u\nstate u: accept\n`
 
 let view: EditorView
 
@@ -45,22 +42,17 @@ const rxmRow = (pc: number) =>
 const tmLinked = () => tmPane().querySelectorAll('.state-row.is-linked').length
 const rxmLinked = () => rxmPane().querySelectorAll('.rxm-row.is-linked').length
 const level = () => diagram().querySelector('.local-level') as HTMLElement
-const tmShowsCopy = () => tmPane().querySelector('.term-editor') !== null
 
 /** Whether the pin of `x + 2` is drawn everywhere it draws: the source, the λ term, the rxm listing, the rule table. */
-const pinned = () =>
-  sourceLinked() === 'x + 2' && rxmLinked() > 0 && lambdaMark('linked') !== null && (tmShowsCopy() || tmLinked() > 0)
+const pinned = () => sourceLinked() === 'x + 2' && rxmLinked() > 0 && lambdaMark('linked') !== null && tmLinked() > 0
 
-/**
- * Whether nothing is pinned and nothing draws a pin: every mark gone, and the status line saying no more than that a
- * view shows a copy, which it says pinned or not.
- */
+/** Whether nothing is pinned and nothing draws a pin: every mark gone, and the status line saying nothing. */
 const cleared = () =>
   sourceLinked() === null &&
   rxmLinked() === 0 &&
   tmLinked() === 0 &&
   lambdaMark('linked') === null &&
-  /^(.* — not linked to the program)?$/.test(linkStatus())
+  linkStatus() === ''
 
 /** Pin `x + 2` with a real click on the rxm instruction it lowered to, and wait for every view to draw it. */
 async function pin(): Promise<void> {
@@ -236,8 +228,7 @@ beforeAll(async () => {
 })
 
 describe('a click on empty space in a view', () => {
-  // THE PROGRAM'S RULE TABLE HAS NO ROOM BELOW ITS ROWS, whose states fill it; a copy's short machine leaves some, and
-  // the copy's cases below click there.
+  // THE RULE TABLE IS NOT AMONG THEM: the program's states fill it, which leaves no room below its rows to click.
   const surfaces: { name: string; at: () => Spot }[] = [
     { name: 'the tapes', at: () => pointIn(tmPane().querySelector('.tapes') as HTMLElement, blank, 'tape') },
     { name: 'the program level of the diagram', at: () => pointIn(diagram(), blank, 'room beside the program') },
@@ -494,15 +485,10 @@ describe('a pin made outside the rxm listing', () => {
   })
 })
 
-describe('a view showing a copy', () => {
+describe('the program’s TM view on its local level', () => {
   beforeAll(async () => {
-    tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => tmPane().querySelector('.term-editor .cm-content') !== null, 'the copy to mount its editor')
-    const copy = (await import('@codemirror/view')).EditorView.findFromDOM(
-      tmPane().querySelector('.term-editor .cm-content') as HTMLElement,
-    )
-    copy?.dispatch({ changes: { from: 0, to: copy.state.doc.length, insert: MACHINE } })
-    await until(() => level().querySelectorAll('.local-node').length === 3, 'the copy to draw its three states')
+    await userEvent.click(diagramChoice('local') as HTMLElement)
+    await until(() => level().querySelector('.local-node') !== null, 'the local level around the current state')
   })
 
   const background = () => pointIn(level(), (u) => u.closest('.local-node') === null, 'background')
@@ -511,24 +497,6 @@ describe('a view showing a copy', () => {
     await pin()
     const seen = await watch(() => clickAt(background()))
     expect(seen.find((s) => s.click)?.cleared, `cleared by the click (${trace(seen)})`).toBe(true)
-  })
-
-  it('clears it on a click below its rule table’s last row', async () => {
-    await pin()
-    await clickAt(pointIn(panelOf(tmPane(), 'rules'), blank, 'room below the rules'))
-    await until(cleared, 'every mark of the pin to go')
-  })
-
-  it('clears it at once on a click on a node of its diagram, which links nothing', async () => {
-    await pin()
-    const seen = await watch(() => userEvent.click(level().querySelector('.local-node') as HTMLElement))
-    expect(seen.find((s) => s.click)?.cleared, `cleared by the click (${trace(seen)})`).toBe(true)
-  })
-
-  it('clears it on a click on a row of its rule table, which links nothing', async () => {
-    await pin()
-    await userEvent.click(stateTable().querySelector('.state-row') as HTMLElement)
-    await until(cleared, 'every mark of the pin to go')
   })
 
   it('clears it at a double-click’s first click on its diagram’s background, which moves the diagram no more', async () => {

@@ -154,15 +154,15 @@ describe('a first load, in a window wider than it is tall', () => {
     chromiumOnly(ctx, 'forced colours are CDP’s Emulation.setEmulatedMedia, which only Chromium has')
     // **THE POINTER STAYS WHERE THE FILE BEFORE THIS ONE LEFT IT**, and forced colours edge a button under it in
     // `Highlight`, so the edges read below are the resting ones only once it is off every button they name.
-    const read = [...toggles(), document.querySelector('#buffers') as HTMLElement]
+    const read = [...toggles(), document.querySelector('#examples') as HTMLElement]
     await userEvent.unhover(read[0] as HTMLElement)
-    await until(() => !read.some((b) => b.matches(':hover')), 'the pointer off the toggles and copies')
+    await until(() => !read.some((b) => b.matches(':hover')), 'the pointer off the toggles and examples')
     await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] })
     try {
       expect(matchMedia('(forced-colors: active)').matches, 'precondition: forced colours').toBe(true)
       expect(getComputedStyle(toggles()[0] as HTMLButtonElement).boxShadow, 'precondition: no underline').toBe('none')
       const highlight = token('Highlight')
-      const button = getComputedStyle(document.querySelector('#buffers') as HTMLElement).borderTopColor
+      const button = getComputedStyle(document.querySelector('#examples') as HTMLElement).borderTopColor
       expect(highlight, 'precondition: Highlight is not the edge forced colours give a header button').not.toBe(button)
       const names = { [highlight]: 'Highlight', [button]: 'a button’s' }
       expect(toggles().map((b) => [b.dataset.shows, b.getAttribute('aria-pressed'), edges(b, names)])).toEqual([

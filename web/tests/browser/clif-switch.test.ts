@@ -28,9 +28,8 @@ let ear: ReturnType<typeof hearSessionWorkers>
 let view: EditorView
 
 /**
- * Mount the app, its first compile settled. **A RELOAD IS A FRESH `main` ON THE SAME STORE**, as
- * `rxm-copy-restore.test.ts` reloads: a query string gives a new module instance, and `localStorage` is left as the
- * first instance wrote it.
+ * Mount the app, its first compile settled. **A RELOAD IS A FRESH `main` ON THE SAME STORE**: a query string gives a
+ * new module instance, and `localStorage` is left as the first instance wrote it.
  */
 let mounts = 0
 async function mount(): Promise<EditorView> {

@@ -14,10 +14,10 @@ import { boundary, controlState, drag, frame, heightOf, region } from './harness
 /**
  * THE REGIONS THAT DO NOT START WITH A SHARE, AND THE ONE THAT TAKES THE REST — the view layouts spec §11.1.
  *
- * Three regions keep their own height until a boundary beside them is dragged: a copy's text, as tall as what it
- * holds up to eight lines; the λ view's term map, 120 px; and the source view's outline, which
- * `panel-sizes-stored.test.ts` has, since only the app builds that view. From the first drag each has a share
- * (`data-sized`). And the λ term takes what its view has spare, past six tenths of the WINDOW.
+ * The λ view's term map keeps its own height, 120 px, until a boundary beside it is dragged, as the source view's
+ * outline does, which `panel-sizes-stored.test.ts` has, since only the app builds that view. From the first drag each
+ * has a share (`data-sized`). And the λ term takes what its view has spare, past six tenths of the WINDOW. A TM view's
+ * regions each start with a share.
  */
 
 const CONTROLS = controlState(false, '0')
@@ -32,8 +32,6 @@ const events = (over: Partial<PaneEvents> = {}): PaneEvents => ({
   speed: () => 8,
   setSpeed: vi.fn(),
   rebind: vi.fn(),
-  editSink: () => vi.fn(),
-  collapse: vi.fn(),
   ...over,
 })
 
@@ -61,21 +59,21 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('a copy’s text, in a TM view', () => {
+describe('the TM view’s rules and diagram', () => {
   const STATES = 200
-  /** A chain of states, each with one rule to the next: a table far taller than the view. */
+  /** A chain of states, one per instruction, each with one rule to the next: a table far taller than the view. */
   const PROGRAM: TmProgram = {
     states: Array.from({ length: STATES }, (_, i) => ({
       name: `q${i}`,
       accept: i === STATES - 1,
       rules: i === STATES - 1 ? [] : [{ read: [null], write: [null], moves: ['S' as const], next: i + 1 }],
-      instr: null,
+      instr: i,
     })),
     alphabet: ['_'],
     tapes: 1,
     width: 4,
     start: 0,
-    listing: [],
+    listing: Array.from({ length: STATES }, (_, i) => `li\tr0, #${i}`),
     labels: [],
   }
   const FRAME: TmState = {
@@ -87,8 +85,6 @@ describe('a copy’s text, in a TM view', () => {
     source_node: null,
     rule: 0,
   }
-  /** Three lines: shorter than the eight a text panel shows before it scrolls. */
-  const TEXT = 'tapes 1\nstart q0\naccept q1\n'
 
   const mount = () => {
     const sizes = vi.fn<(s: Shares) => void>()
@@ -96,106 +92,8 @@ describe('a copy’s text, in a TM view', () => {
     const pane = new TmPane(host, events({ panelSizes: sizes }))
     pane.setProgram(PROGRAM, ['t'])
     pane.render(FRAME, CONTROLS)
-    pane.setEditor(TEXT)
-    return { host, pane, sizes }
+    return { host, sizes }
   }
-
-  it('keeps its own height, with a boundary under it, above the tapes', async () => {
-    const { host } = mount()
-    await frame()
-    const text = region(host, 'text')
-    expect(text.hidden, 'precondition: the text panel is shown').toBe(false)
-    expect(text.dataset.sized, 'a text nobody dragged has a share').toBeUndefined()
-    const lines = host.querySelectorAll('.term-editor .cm-line').length
-    expect(lines, 'precondition: the editor holds the text’s lines').toBeGreaterThanOrEqual(3)
-    expect(heightOf(text), 'the text panel is not as tall as its three lines and its header').toBeLessThan(140)
-    const b = boundary(host, 'text', 'rules')
-    expect(b.getAttribute('aria-label')).toBe('resize text and rules')
-    // UNDER THE UPPER REGION: the status line and the tapes lie between it and the rules, and keep their own height.
-    expect(b.previousElementSibling).toBe(text)
-    expect(b.getBoundingClientRect().bottom).toBeLessThanOrEqual(
-      (host.querySelector('.tapes') as HTMLElement).getBoundingClientRect().top + 0.5,
-    )
-    // THE TEXT'S PART OF THE TWO AS THEY ARE DRAWN, though it has no share to say.
-    b.focus()
-    const rules = region(host, 'rules')
-    expect(b.getAttribute('aria-valuenow')).toBe(
-      String(Math.round((heightOf(text) / (heightOf(text) + heightOf(rules))) * 100)),
-    )
-  })
-
-  it('takes a share at the first drag, and the tapes move with the boundary at the height they had', async () => {
-    const { host, sizes } = mount()
-    await frame()
-    const tapes = host.querySelector('.tapes') as HTMLElement
-    const [text, rules, diagram] = [region(host, 'text'), region(host, 'rules'), region(host, 'diagram')]
-    const was = { text: heightOf(text), rules: heightOf(rules), diagram: heightOf(diagram), tapes: heightOf(tapes) }
-    const tapesTop = tapes.getBoundingClientRect().top
-    await drag(host, boundary(host, 'text', 'rules'), 80)
-    expect(text.dataset.sized).toBe('true')
-    expect(heightOf(text), 'the text did not take 80 px').toBeCloseTo(was.text + 80, 0)
-    expect(heightOf(rules), 'the rules did not give them').toBeCloseTo(was.rules - 80, 0)
-    expect(heightOf(diagram), 'the diagram, which the boundary does not part, moved').toBeCloseTo(was.diagram, 1)
-    expect(heightOf(tapes), 'the tapes did not keep their height').toBe(was.tapes)
-    expect(tapes.getBoundingClientRect().top, 'the tapes did not move down with the boundary').toBeCloseTo(
-      tapesTop + 80,
-      0,
-    )
-    expect(host.scrollHeight, 'the view grew').toBe(host.clientHeight)
-    // THE EDITOR FILLS THE SHARE ITS PANEL HAS, and scrolls inside it where its text is longer.
-    const editor = host.querySelector('.term-editor') as HTMLElement
-    expect(editor.getBoundingClientRect().bottom).toBeCloseTo(text.getBoundingClientRect().bottom, 0)
-    // THE TWO REGIONS THE BOUNDARY PARTS HAVE A SHARE FROM THE DRAG, in the diagram's measure: it is built with a
-    // share of 1 and has none stored, so a share is a height as a multiple of the diagram's.
-    const s = sizes.mock.calls.at(-1)?.[0] as Shares
-    expect(Object.keys(s).sort()).toEqual(['rules', 'text'])
-    expect(s.rules as number).toBeCloseTo(heightOf(rules) / heightOf(diagram), 2)
-    expect(s.text as number).toBeCloseTo(heightOf(text) / heightOf(diagram), 2)
-  })
-
-  it('goes back to its own height at Enter on its boundary', async () => {
-    const { host, sizes } = mount()
-    await frame()
-    const text = region(host, 'text')
-    const was = heightOf(text)
-    await drag(host, boundary(host, 'text', 'rules'), 80)
-    expect(heightOf(text), 'precondition: the drag moved the boundary').toBeGreaterThan(was + 70)
-    boundary(host, 'text', 'rules').focus()
-    await userEvent.keyboard('{Enter}')
-    await frame()
-    expect(text.dataset.sized).toBeUndefined()
-    expect(heightOf(text)).toBeCloseTo(was, 0)
-    expect(Object.keys(sizes.mock.calls.at(-1)?.[0] as Shares)).toEqual([])
-  })
-  /**
-   * **A MAXIMISE ENDS WHEN ITS PANEL LEAVES THE VIEW.** A copy's text panel is hidden when its editor is taken down,
-   * and a maximise of it that went on would draw every other panel closed for a panel nobody could see, with no
-   * pressed button left to press.
-   */
-  it('ends a maximise of its panel when the editor is taken down', async () => {
-    const { host, pane } = mount()
-    await frame()
-    const expanded = (name: string) =>
-      host.querySelector(`[data-panel="${name}"] .panel-toggle`)?.getAttribute('aria-expanded')
-    await userEvent.click(host.querySelector('[data-panel="text"] .panel-maximise') as HTMLElement)
-    await frame()
-    expect([expanded('rules'), expanded('diagram')], 'precondition: the maximise drew the others closed').toEqual([
-      'false',
-      'false',
-    ])
-    pane.setEditor(null)
-    await frame()
-    expect(region(host, 'text').hidden, 'precondition: the text panel is hidden').toBe(true)
-    expect([expanded('rules'), expanded('diagram')], 'the other panels are still drawn closed').toEqual([
-      'true',
-      'true',
-    ])
-    expect(
-      host.querySelectorAll('.panel-maximise[aria-pressed="true"]').length,
-      'a maximise button is still pressed',
-    ).toBe(0)
-    expect(boundary(host, 'rules', 'diagram'), 'no boundary is drawn between the two').not.toBeNull()
-  })
 
   it('drags the boundary between the rules and the diagram by the diagram’s title, and leaves it open', async () => {
     const { host, sizes } = mount()

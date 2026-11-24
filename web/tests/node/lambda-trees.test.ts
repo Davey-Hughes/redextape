@@ -103,14 +103,4 @@ describe('LambdaTrees', () => {
     trees.want('s', 0)
     expect(trees.buildOf('s')).toBe(2)
   })
-
-  it('answers none for a session with no client, and prunes sessions that are gone', () => {
-    const c = client()
-    const trees = new LambdaTrees((s) => (s === 's' ? c : undefined))
-    expect(trees.want('gone', 0)).toEqual({ kind: 'none' })
-    trees.want('s', 0)
-    trees.store('s', 1, wire(0))
-    trees.prune((s) => s !== 's')
-    expect(trees.want('s', 0)).toEqual({ kind: 'none' })
-  })
 })

@@ -44,7 +44,7 @@ type OpenDocument = {
  * **PER DOCUMENT RATHER THAN ONE ROUTER FOR THE APP, AND THAT IS WHAT MAKES MISROUTING
  * UNREPRESENTABLE.** A single sink taking a URI would put a lookup — and a way to get it wrong —
  * in whichever module owned the map. Opening a document and saying where its diagnostics go is one
- * act here, and `closeDocument` drops the sink with the document.
+ * act here.
  */
 export type DiagnosticsSink = (diagnostics: LspDiagnostic[]) => void
 
@@ -75,11 +75,10 @@ export class LspUnavailable extends Error {
 /**
  * The main-thread half of the language server, and where every decision lives.
  *
- * **IT OWNS THE WORKER'S LIFECYCLE, UNLIKE `SessionClient`, AND THE ASYMMETRY IS DELIBERATE.** That
- * class holds a port it may not kill, because lifecycle is `SessionPool`'s and one session's damage
- * is contained by terminating its thread. There is exactly one language server for the whole app, so
- * there is no pool for it to be in, and the thing that would own its lifecycle would have this class
- * as its only member.
+ * **IT OWNS THE WORKER'S LIFECYCLE, UNLIKE `SessionClient`, AND THE ASYMMETRY IS DELIBERATE.** That class holds a
+ * port it may not kill, because its worker is `SessionPool`'s, which gives each session a thread of its own so that
+ * one session's damage stays on it. There is exactly one language server for the whole app, so there is no pool for
+ * it to be in, and the thing that would own its lifecycle would have this class as its only member.
  *
  * **NO TIMEOUT ON A PENDING REQUEST, AND THAT IS A DECISION.** A request that is never answered is
  * either a dead worker, which the `error` listener below sees and which rejects every pending request
@@ -122,11 +121,6 @@ export class LspClient {
   /** Whether language features are available. `false` once the server has stopped for good. */
   get available(): boolean {
     return !this.#off
-  }
-
-  /** How many documents the client believes are open — the replay set's size. */
-  get openDocumentCount(): number {
-    return this.#documents.size
   }
 
   /**
@@ -299,9 +293,7 @@ export class LspClient {
   /**
    * Open one editor's document, and say where its diagnostics go.
    *
-   * **RE-OPENING A URI IS LEGITIMATE AND HAPPENS ROUTINELY.** A copy's editor is destroyed when
-   * its pane rebinds away and built again when a pane shows that buffer next, so the same
-   * document opens more than once in a page's life with a new sink each time. The version
+   * **A URI OPENED AGAIN REPLACES WHAT WAS OPEN AT IT**, its sink included, and the version
    * restarts at 1 because the server replaces its copy outright.
    */
   openDocument(uri: string, languageId: LanguageId, text: string, handlers: DocumentHandlers): void {
@@ -331,18 +323,6 @@ export class LspClient {
   }
 
   /**
-   * Close a document.
-   *
-   * **IT MUST BE REMOVED FROM THE REPLAY SET TOO**, not only told to the server: a restart replays
-   * `#documents`, so a document left here would be reopened into the new worker after the view that
-   * held it was gone.
-   */
-  closeDocument(uri: string): void {
-    if (!this.#documents.delete(uri)) return
-    this.#notifyServer('textDocument/didClose', { textDocument: { uri } })
-  }
-
-  /**
    * The formatted document as a list of edits — empty when there is nothing to do.
    *
    * **THE SERVER ANSWERS `null`, NOT `[]`, FOR TEXT THAT DOES NOT PARSE, AND THIS IS WHERE THAT IS
@@ -358,7 +338,7 @@ export class LspClient {
     return (result ?? []) as LspTextEdit[]
   }
 
-  /** The document's outline. `[]` for a language that has none — λ answers no symbols by design. */
+  /** The document's outline. `[]` for a document with nothing to list. */
   async documentSymbols(uri: string): Promise<LspDocumentSymbol[]> {
     const result = await this.#request('textDocument/documentSymbol', { textDocument: { uri } })
     return (result ?? []) as LspDocumentSymbol[]
@@ -367,8 +347,7 @@ export class LspClient {
   /**
    * What the construct under `position` means, or `null`.
    *
-   * `null` is the ordinary answer for a cursor on whitespace or a keyword, and for every position in
-   * a `.rxlambda` document — λ carries no source spans, so there is nothing to resolve against.
+   * `null` is the ordinary answer for a cursor on whitespace or a keyword.
    */
   async hover(uri: string, position: LspPosition): Promise<LspHover | null> {
     const result = await this.#request('textDocument/hover', { textDocument: { uri }, position })

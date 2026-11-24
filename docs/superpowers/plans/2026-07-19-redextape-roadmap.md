@@ -41177,3 +41177,696 @@ read the rebase's logs in `$R/rebase-1/`, and the last runs `git grep` at `4c26c
 | 1, 0, 1, 1 | failures of `view-keys-focus`'s Stage caret case in the gate's Firefox run after the rebase and in the three runs of its file alone | `for f in $R/rebase-1/firefox.log $R/rebase-1/ff-view-keys-focus-{1..3}.log; do sed 's/\x1b\[[0-9;]*m//g' $f \| grep -a '^ FAIL ' \| grep -c 'leaves the caret in the source editor, and the key chooses the tabs'; done` |
 | 2 | the files that conflict when `main` at `b32af3d` and the branch before the rebase are merged | `grep -c '^CONFLICT' $R/rebase-1/merge-tree.log` |
 | 0 | the files #194 changed under `web/` that name a removed symbol, at `4c26ce4` | `git grep -lP 'new-view\|addViewItems\|addViewButton\|addViewMenu\|fillAddViewMenu\|\baddView\b\|insertBeside\|pressedLayout\|newLambdaViewItem\|plusView' 4c26ce4 -- $(git diff --name-only 798fa38 b32af3d -- web) \| wc -l` |
+
+#### COPIES ARE GONE FROM THE WEB APP: NO COPY CAN BE MADE, EDITED, SEEN, STORED OR RESTORED, THE APP REMOVES `redextape.buffers` AT EVERY START-UP, AND IT LOADS ONLY THE `redextape` GRAMMAR AND OPENS LSP DOCUMENTS ONLY IN `redextape` (PR 1 of three; 2026-11-23 and 24, branch `remove-copies` on `b627fe3`: the design and the plan in `12e5e2b` and `c6c1758`, then `c6c1758..5ac7e9b`, 38 commits, `0fa0e0d` and its revert `8c6cc4b` among them; this entry, with the design's *As built*, in `515f655..31861cf`; the fixes of the review of the whole branch in `31861cf..752963a`, 13 commits; and this entry brought up to them in the commit after)
+
+Davey said on 2026-11-23: "I don't really want copies anymore as things stand. maybe they can be introduced later again,
+however the site is pretty cluttered as is, and I think the main usage of the site right now is just explore the
+different compilations of the source code. copies only really makes sense if the site is a better editor of these other
+things, and would need essentially an entirely second page/view to do this." The design is
+`docs/superpowers/specs/2026-11-23-remove-copies-design.md`, resting on two surveys of `f3b2bd3`,
+`~/temp/redextape-remove-plus-view-record/copies-extent-survey.md` and `copies-survey.md`, whose facts it checked again
+at `5b5ef1f`, whose tree is `b627fe3`'s. It takes the whole feature out in three pull requests: this one, the web app's;
+PR 2, the Rust and wasm code only copies used; and PR 3, which narrows the code that holds several sessions to the
+program's one. Davey chose that split, took every pick the design put to him (Q1 to Q3, *DECISIONS*) and approved the
+design on 2026-11-23.
+
+The plan is `docs/superpowers/plans/2026-11-23-remove-copies.md`. `12e5e2b` committed the design and the plan, and
+`c6c1758` the rulings on the plan's pre-flight scan. The build is the 54 commits after that, 50 of them under `web/`.
+The first 38 are Tasks 1 to 14 in order, a subagent each with a reviewer after it and a fix round where a review asked
+for one; from Task 9 each task ran as two dispatches, the removal with its commit, then the wide runs, the sabotages and
+what they found. Tasks 1 and 2 moved the tests that borrowed a copy for their content or for a second view onto the
+program or a component fixture while copies still existed; Task 3 took the stored copies and added the removal at
+start-up; Tasks 4, 5 and 9 each took a way in, rxm, TM and λ, with its view's copy parts; Task 6 took the state
+diagram's tiers that only a hand-written machine reached; Task 7 the TM and rxm views' editor panels; Task 8 `copies ▾`;
+Task 10 the copy editors and their custody; Task 11 what showed a copy; Task 12 the copies' sessions; Task 13 the
+languages; and Task 14 the pages, the docs and the last words. Task 15 ran the full gate and a pass by hand in Firefox,
+and changed nothing. Task 16 wrote this entry and *As built* in 3 commits; Task 17 reviewed the whole branch, four
+reviewers each over a slice of it; and Task 18 fixed what held of the review in 13 commits, every one under `web/`, ran
+the gate again and brought this entry up to the fixes (*WHAT THE WHOLE-BRANCH REVIEW FOUND*). The Rust changes are
+comments (*HOW IT IS BUILT*). The lane's record is `~/temp/redextape-remove-copies-record/`, `$R` below; this branch's
+logs, sabotage drivers, saved copies and figures are in `$R/pr1/impl/`, `$L` below. The task briefs and reports and the
+ledger of rulings, `progress.md`, are in `$R/pr1/sdd/`, `$S` below, a copy of the worktree's
+`.superpowers/sdd/2026-11-23-remove-copies/`, which git ignores.
+
+| Task | Its commits; its fix rounds' |
+|---|---|
+| 1 | `edfeba0` |
+| 2 | `7e77d2e`; `cf022d4` |
+| 3 | `41feb5d`; `7354696` |
+| 4 | `4b71485` |
+| 5 | `3e980c7`, and `0fa0e0d` with its revert `8c6cc4b` (*DECISIONS*); `9f06b9e` |
+| 6 | `d5466ef` |
+| 7 | `e669971`; `5529af5` and `82243dc` |
+| 8 | `9424778`; `1a8c357` |
+| 9 | `124bf1a` and `2483b57`; `adc9c24` and `e0ee915` |
+| 10 | `f472f1e` and `6844070`; `e016188` |
+| 11 | `26ddf2b`, `dcdeea1` and `cd14cb6`; `864bc29` |
+| 12 | `858e685`; `5720054` |
+| 13 | `8facca6` |
+| 14 | `2802780`, `10ec92c` and `538144b`; `e9730e6`, `20f52a3`, `a8c3a58`, `3a066d4` and `5ac7e9b` |
+| 16 | `515f655` and `314aee9`; `31861cf` |
+| 18 | `73c3622`, `0aad7de`, `80ce7dc`, `852a14a`, `653c43e`, `972392a`, `aff0e1d`, `db81aeb`, `3e2e22c`, `6d972c0`, `08c1542`, `0b7de71` and `752963a` |
+
+##### WHAT CHANGED FOR A PERSON
+
+- **No copy can be made, edited, seen, stored or restored.** The header has no `copies ▾`, so no *new TM copy*, *new rxm
+  copy*, delete, undo, pause or resume; the ⋯ menus of the λ, TM and rxm views have no *edit a copy*, *move the editor
+  here* or *format*, and the source view's keeps its *format*; the λ view has no *text* panel and the TM and rxm views
+  no *text* or *outline* panel; no view reads `copy · not linked`; and the title menu's copy pairs, such as `λ · copy
+  1`, the readout's copy rows, the link line's sentences on views of copies, the share popover's "copies are not
+  included", the storage line's words on copies and the copies' notices went with them. The program's views are as they
+  were: steps, links, the other panels, splits, the Stage, the toggles, the keys, the presets, and the source editor
+  with its ⋯ *format*. Titles keep `· program` until PR 3 (Q1).
+- **The app removes `redextape.buffers` at every start-up**, silently where the storage refuses. A page that finds the
+  key, copies and views bound to them in it, opens every view and every Stage tab on the program, titled `· program`,
+  and leaves the other keys as they were. `privacy.html`'s row for the key reads: "Nothing. The app deletes this key
+  each time it starts; earlier versions kept the text of copies under it."
+- **A share link, stored workspace, remembered arrangement or stored program from before the change loads**, one that
+  holds state for the panels that went among them: each panel that stays opens and sizes as stored, and no *text* or
+  *outline* panel shows.
+- **The notice line's focus falls to *settings*.** A resting storage sentence put away with *hide* from the keyboard
+  leaves the focus on `#settings`, drawn, at 390 and at 1280 px, where it went to `copies ▾`'s `#buffers`.
+- **The web app loads only the `redextape` grammar and opens LSP documents only in `redextape`.** Its build emits that
+  grammar's `.wasm` and the `web-tree-sitter` runtime alone, where it also emitted the λ, TM and rxm grammars'. The
+  grammars and the language servers keep all four languages.
+- **The pages.** `help.html` drops *edit a copy* and `copies ▾`, titles its keys table *Keys in the source editor* and
+  gives the source editor as where F12, Shift+F12 and F2 work; `privacy.html` speaks of one editor; `README.md` says the
+  site's editor uses the same server and the `.rxt` grammar; `docs/architecture.md` drops the copy editors and the
+  copied text; and the grammar READMEs say the site colours its source editor with the `redextape` grammar and that the
+  other three colour other editors.
+
+##### WHAT IT COST
+
+**What only copies did, which nothing replaces** (the design's non-goals: nothing replaces copies, and nothing is kept
+for bringing them back):
+
+- a λ term, a Turing machine or an rxm program edited by hand and run, forked from a view or begun blank;
+- a machine with no instruction map in the state diagram, whose `name` and `none` tiers only such a machine reached;
+- a session beside the program's, and so a view on anything but the program;
+- copies kept from one page load to the next.
+
+**The IR views' copies are withdrawn** (Q3): the CLIF copies and the LLVM copies, the second and fifth pieces of
+`docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md` §9 (`:441`, `:446`), which
+`docs/superpowers/specs/2026-11-18-clif-view-design.md:28` left out of the CLIF view. The next IR piece is §9's third,
+machine code, and then the LLVM IR view. Copies, if they return, come back as a page of their own with a design of their
+own.
+
+**The code that existed only for copies went**, each piece in the task that removed its last caller (G4):
+
+- whole, in `web/src`: `scratch.ts` (`ScratchBuffers` and the warm-copy cap, `MAX_WARM_BUFFERS`), `buffer-list.ts`
+  (`copies ▾`), `buffers-store.ts` (the stored copies), `scratch-editor.ts`, `copy-editor.ts`, `editor-custody.ts` and
+  `editor-debounce.ts` (the editors and their custody) and `focus-draw.ts` (ruling 10); `copy-build.ts` lost
+  `CopyCompiled`, `CopyBuild` and `buildCopy`, and what was left of it, the worker's one-occupant rule, is `claim.ts`;
+- in the worker and the protocol: the scratch handles, `BUILD`, `onScratch` and the value loop; the `scratch` request
+  and the `scratch-compiled`, `tm-scratch-compiled`, `rxm-scratch-compiled`, `tm-value` and `rxm-value` replies; the
+  fork cap, `MAX_FORK_RULES`, `ruleCount` and `forkable`; `VALUE_CHUNK`; and the compiled replies' machine text, rxm
+  text and `tmResultDecodable`;
+- in the sessions: `SessionEntry.detached` and `readings`, `SessionRegistry.remove` and `has`, `SessionPool.unbind`, and
+  `PoolPort` with its `terminate` and the port each pooled entry carried, which only `unbind` read; and
+  `LambdaTrees.prune`, its call in each frame's draw and `LambdaTrees.want`'s answer for a session with no client, since
+  no session leaves the registry now;
+- in the views: `view-header.ts`'s `CopyState`, `setCopy`, `editCopy`, its hint line and its claim item, and
+  `viewMenu`'s `setFormattable` with its flag, which only a copy's view turned off; the icons `edit` and
+  `move-editor-here`; `LambdaPane`'s editor and *text* panel and `pane-chrome.ts`'s `textPanel`; `MachineViewChrome`'s
+  copy editor and *outline*; the TM view's copy status and value line and the rxm view's copy value; `setDetached` and
+  `copy · not linked`; the state diagram's `name` and `none` tiers, with `tierOf`, `Groups.tier`, `StateDiagram.tier`
+  and `reorderByReach`;
+- around them: `transport.ts`'s `forkCopy`, `onBuffersChanged` and editor deps; `replies.ts`' copy replies;
+  `pane-host.ts`'s editor mounting, its custody hooks, `reseedingSlots`, `moveBack` and `rebind`'s editor handover;
+  `main.ts`'s copies' storage and restore, `copyHolds`, `refreshBuffers`, the copy half of a link open's undo and
+  `resetViews`, which rebuilt the copies' views, *reset preset* calling `focusView` in its stead; `readout.ts`'s copy
+  rows; `link-status.ts`'s `DetachedPanes` and `link-wiring.ts`'s `detachedPanes`; the share popover's copies line;
+  `unsaved.ts`'s words on copies and `UnsavedStore`, its record for each writer, the other writer having been the stored
+  copies; `editor-keymap.ts`'s `KeymapSetting.unfollow`, whose callers were the copy editors; `layout-view.ts`'s
+  `retitleStage`; `LspClient.closeDocument`; `cut-text.ts`'s watch on a copy's *no term yet*; `LANGUAGE_OF_PANE` and the
+  λ, TM and rxm entries of `LANGUAGE_IDS`, `LANGUAGE_LABEL`, `EXTENSION_OF_LANGUAGE` and `colour.ts`'s `SOURCES`; and
+  the CSS that styled what went;
+- the five copy probes with their workers, corpus and fixture, four `pnpm` scripts, what named them in
+  `web/vite.config.ts`, and `scripts/emit-probe-reduced-files.sh`.
+
+What copies shared with the program stays: `CopyLeg` and `COPY_LEGS`, the type of the legs a recording holds;
+`claimLive` and `liveHandle`; `MachineViewChrome`, shrunk; and the registry, the pool, `Binding.session` and the title
+menu's pairs, which run over the program's one session until PR 3. At `752963a` none of the 27 rows of the plan's
+deleted-symbol sweep matches a file under `web/` or `scripts/` but for a name the plan keeps or a word that means
+something else there: `data-describes`, which keeps its `program` value and reads `none` for the other (ruling 8), in 3
+files, `readout.ts`, `style.css` and `strip.test.ts`; `nameOf`, the name of a `draw.ts` dep that went, in 8 others, each
+a name of its own: in `state-diagram.ts`, a local helper that names a state of the local level, which it hands to
+`local-layout.ts`'s `layoutLocal` (`state-diagram.ts:846`), whose parameter of that name it fills; in `controls-gate`,
+the accessible name of a control, which its cases assert; a control or a box in a failure's message in
+`step-bar-narrow`, `tm-status-line`, `tm-view-narrow` and `view-strip-narrow`, and a register or value row of the
+program's views in `cut-text`; `editorHost`, the source editor's host, in `main.ts` and `panel-sizes-stored.test.ts`;
+"the term at this step" in `link-status.ts`'s doc of the program's λ view; `TmScratchStatus` in
+`bindings-contract.test.ts`, read from its generated binding until PR 2; and the λ, TM and rxm language ids in
+`colour-slices.test.ts`, `grammar-differential.test.ts` and the node `colour.test.ts`, which load the four grammars
+under ids of their own (ruling 13), and in `scripts/check-lua.sh`, the Neovim plugin's check. Its other matches are
+under `crates/` and `grammars/` and in `docs/architecture.md`'s Neovim lines, which keep the four languages, or are the
+Rust that PR 2 takes (*WHAT THIS DID NOT CLOSE*).
+
+To `752963a`, `web/src` gained 978 lines and lost 9252, in 74 files, 9 of them deleted and 1, `claim.ts`, added; it
+holds 32930 lines, where it held 41204 at `b627fe3`. The 32 files with 50 or more lines changed:
+
+| File | Added | Deleted |
+|---|---|---|
+| `web/src/buffer-list.ts` | 0 | 455 |
+| `web/src/buffers-store.ts` | 0 | 162 |
+| `web/src/colour.ts` | 60 | 67 |
+| `web/src/copy-build.ts` | 0 | 124 |
+| `web/src/copy-editor.ts` | 0 | 421 |
+| `web/src/draw.ts` | 29 | 116 |
+| `web/src/editor-custody.ts` | 0 | 508 |
+| `web/src/focus-draw.ts` | 0 | 74 |
+| `web/src/lambda-pane.ts` | 13 | 423 |
+| `web/src/link-status.ts` | 24 | 172 |
+| `web/src/link-wiring.ts` | 11 | 72 |
+| `web/src/lsp-protocol.ts` | 12 | 44 |
+| `web/src/machine-view-chrome.ts` | 6 | 125 |
+| `web/src/main.ts` | 130 | 967 |
+| `web/src/pane-chrome.ts` | 10 | 182 |
+| `web/src/pane-host.ts` | 131 | 760 |
+| `web/src/panes.ts` | 17 | 44 |
+| `web/src/protocol.ts` | 21 | 232 |
+| `web/src/readout.ts` | 19 | 149 |
+| `web/src/replies.ts` | 23 | 473 |
+| `web/src/rxm-pane.ts` | 4 | 49 |
+| `web/src/scratch-editor.ts` | 0 | 459 |
+| `web/src/scratch.ts` | 0 | 1045 |
+| `web/src/session-client.ts` | 20 | 89 |
+| `web/src/session-worker.ts` | 56 | 382 |
+| `web/src/sessions.ts` | 39 | 119 |
+| `web/src/state-groups.ts` | 22 | 92 |
+| `web/src/style.css` | 46 | 296 |
+| `web/src/tm-pane.ts` | 14 | 238 |
+| `web/src/transport.ts` | 23 | 376 |
+| `web/src/unsaved.ts` | 18 | 36 |
+| `web/src/view-header.ts` | 19 | 124 |
+| the other 42 files | 211 | 377 |
+
+The other files the branch changes, outside `web/tests` and `docs/superpowers`. The text above gives what changed in the
+pages, `README.md`, `docs/architecture.md`, `web/package.json`, `web/vite.config.ts`,
+`scripts/emit-probe-reduced-files.sh` and the grammar READMEs, *HOW IT IS BUILT* in `session.rs`, and *The comment
+budgets* under *DECISIONS* in `scripts/comment-budget.json`. Of the rest, `web/index.html` loses `copies ▾`'s button;
+`scripts/check-attributions.sh` re-says its examples and its self-test's fixture, which cited copy code, on code that
+stays; and `.gitignore`'s comment on the four committed grammar parsers says the web app loads the source's grammar and
+its browser tests load all four:
+
+| File | Added | Deleted |
+|---|---|---|
+| `.gitignore` | 6 | 6 |
+| `README.md` | 2 | 3 |
+| `docs/architecture.md` | 12 | 13 |
+| `scripts/check-attributions.sh` | 19 | 24 |
+| `scripts/comment-budget.json` | 3 | 3 |
+| `scripts/emit-probe-reduced-files.sh` | 0 | 88 |
+| `web/help.html` | 11 | 14 |
+| `web/index.html` | 0 | 1 |
+| `web/package.json` | 0 | 4 |
+| `web/privacy.html` | 4 | 4 |
+| `web/vite.config.ts` | 7 | 50 |
+| `grammars/README.md` | 5 | 5 |
+| `grammars/tree-sitter-redextape-lambda/README.md` | 5 | 10 |
+| `grammars/tree-sitter-redextape-rxm/README.md` | 3 | 5 |
+| `grammars/tree-sitter-redextape-tm/README.md` | 3 | 5 |
+| `crates/redextape-wasm/src/session.rs` | 13 | 16 |
+
+##### HOW IT IS BUILT
+
+- **The removal at start-up** is `forgetCopies(store?: Storage)` in `program-store.ts`, the module that owns the
+  program's key, called once at every start-up beside `readProgramStorage` (ruling 3). It reads `localStorage` inside
+  its `try`, so a storage that throws on access is silent, as a failed read of the program is. It runs at every
+  start-up, not once behind a flag, since a tab still running the previous build can write the key again (the design's
+  *Decided*).
+- **The machine views.** `MachineViewChrome` stays, shrunk to the header, the step strip, the menu and its choices,
+  built with `super(on)`, since `ClifPane` extends it too (ruling 5). The TM, rxm and clif views hold no editor; ↺ on
+  each restarts it at step 0 and throws nothing (R1), the custody's flush having been narrowed in Task 7 to the views
+  that hold an editor and removed with the custody in Task 10 (ruling 6).
+- **A focus move draws at once.** `focus-draw.ts` deferred the draw after a focus move because the move could redraw the
+  readout or the inspector at another height; Task 2 found no focus move on the program's views that changes the layout
+  (`$S/task-2-report.md`), so Task 5 deleted `focus-press.test.ts`, whose way in was a TM copy, and Task 9 the module
+  and its wiring (ruling 10).
+- **The state diagram groups a machine's states by instruction alone**: a state built for no instruction is a runtime
+  routine's, the level shown is the one chosen, the *program* choice is never disabled, and `isGuard` knows the overflow
+  guard by the name the core reserves for it (ruling 7).
+- **`readout.ts`'s `data-describes`** reads `program` or `none`, where it read `copy` for no program, which the
+  program's own first frames are, so the dim on a running compile still applies to a program alone (ruling 8).
+- **The notice line's default fallback is `#settings`**, a header control shown at every width; *hide* on the resting
+  sentence has no fallback of its own (ruling 4).
+- **The colour registry** takes its language key as a type parameter that defaults to `LanguageId`, which is
+  `'redextape'`; the tests that load all four grammars name their own ids and sources (ruling 13), which the compiler
+  requires whenever the keys are not the app's (`aff0e1d`).
+- **The worker's one-occupant rule** is `claim.ts`, with `tests/node/claim.test.ts`.
+- **Rust: comments only.** `crates/redextape-wasm/src/session.rs` is the one Rust file the branch changes, in 4 hunks
+  and 29 lines, each a `///` line: `forkable`'s two citations (`3e980c7`) and `rxm-copy-corpus.ts`'s `CASES`
+  (`4b71485`), which the attribution check fails once the file or the symbol is gone (ruling 15), and `MAX_FORK_RULES`
+  in `MAX_SCRATCH_TM_BYTES`' doc (`9f06b9e`, Task 5's fix round).
+
+##### DECISIONS
+
+**Davey's** (2026-11-23): the whole feature removed, with nothing kept for bringing it back; three pull requests in
+order, the design's approach 1, with PR 1 planned as about six tasks that each leave a working app and pass the
+pre-commit gate; the code for several sessions stripped in PR 3 rather than kept; Q1, `· program` dropped from the
+titles in PR 3; Q2, the README's and the portfolio's images retaken once after PR 1 merges, the NAS upload waiting for
+his word; Q3, the IR views' CLIF and LLVM copies withdrawn; the design approved; and the build begun once the plan
+needed no decision of his: "if it doesn't need any decisions, you can continue with subagent driven dev". During the
+build he made the one comment budget raise the classifier refused, `web/tests` from 0.2262 to 0.2263 in `7354696`, under
+the controller's rule below.
+
+**The plan's rulings** (its *Global Constraints*; *As built* in the design says where they part from it):
+
+- **The task split**: fourteen code tasks for the design's six steps, the two moving tasks first, since a removal cannot
+  move a case whose way in it has just taken (ruling 1).
+- **What is total over `CopyLeg` stayed until Task 12**, since `CopyLeg` and `COPY_LEGS` also type the program's
+  recording (ruling 2).
+- Rulings 3 to 8, 10 and 13 are under *HOW IT IS BUILT*.
+- **A test that put hand-written content in a view through a copy** moved onto a compiled program where one has the
+  shape, otherwise onto a component fixture, `tm-fixture.ts`, whose every state carries an instruction (ruling 9).
+- **Of the design's 70 whole files**, 4 stay and 3 more go (ruling 11; *THE TESTS*).
+- **`rebind`'s same-leg branch for a session other than the view's went in PR 1**, in Task 9, with the cases that made a
+  copy only to reach a second session: the pre-flight reversed ruling 12, which had left it for PR 3, since every taker
+  of the branch was a copy path. `split`'s `choice.session` stays for PR 3.
+- **`wasm-vocabulary.test.ts`** went in Task 12 (ruling 14); CSS went with the markup it styled (ruling 16);
+  `state-diagram-local-layout.test.ts`'s case of two two-tape rules and `lsp-hover.test.ts`'s TM-rule case were deleted,
+  not moved, since no compiled machine has two two-tape rules from one state to another, and only a copy's editor opened
+  a `redextape_tm` document (rulings 17 and 18).
+- **The pre-flight's general rules**: every commit fixes the importers, callers, citations and cases its removals break,
+  and lowers a comment budget the guard reports stale; each sabotage re-introduces the regression it guards, so that it
+  can fire; the old panels' checks read the stored sizes too; and `privacy.html`'s row may say what the key held.
+
+**The controller's rulings during the build** (the ledger, `$S/progress.md`):
+
+- **Task 1.** `state-diagram-local-fan-row` moved onto a fixture of `bmul17.s9.up31`'s neighbourhood built with
+  `tm-fixture.ts`, since no walk of a compiled program reaches it at a bearable cost; the fans' label case, which no
+  placement edit fails, on `b627fe3`'s setup too, was parked as older than the branch.
+- **Task 2.** `retitleStage` and its wiring only retitled a Stage tab for a copy, and went in Task 11.
+- **Task 3.** The comment budgets' rule: lower a share the guard reports stale; raise one only when deleted code, not
+  added comments, moved it, by exactly the value the guard prints, with the reason in the commit message; an edit the
+  classifier refuses goes to Davey.
+- **Task 4.** `record-cost.test.ts`'s case (h) fails at `b627fe3` too, its hand-built session having no clif leg, and
+  got one in Task 18 (`972392a`).
+- **Task 5.** `0fa0e0d`, a fix of an older Firefox bug, an editor's caret left stale when a view key, a divider's drag
+  or a Stage switch moves the focus, went out of PR 1: `8c6cc4b` reverts it, and its tree is `3e980c7`'s. It changes
+  format-on-blur's timing and wants its own review; the patch and its diagnosis are in `$R/firefox-caret/`. A fix round
+  goes to a fresh agent with the brief, the report and the findings, and the gate runs by one script, `$R/pr1/gate.zsh`.
+- **Task 8.** From Task 9 each task ran as two dispatches, since one agent's count of its own calls did not hold it near
+  the project's bound.
+- **Task 12.** `PoolPort`, its `terminate` and `Pooled.port` went in PR 1, reversing an earlier ruling that left them
+  for PR 3, since only `unbind` read them; and `copy-build.ts`, holding no copy build after the task, became `claim.ts`.
+- **Task 13.** `vite.config.ts`'s `assetsInlineLimit` entry, which Task 13 removed with its one reason, the λ grammar's
+  size, came back in Task 18 (`aff0e1d`) with a reason that names no grammar; and `COLOUR_CEILING_UNITS`' doc meets the
+  design's call d, since no derivation of 6,100,000 exists for the source editor.
+- **Task 14.** `lambda-tree.ts`'s rule for a hint's trailing digits stays, since the program's own λ view reaches it
+  through a source binder such as `t1`; and the six `tok-*` classes the λ, TM and rxm grammars produced stay, since
+  `TOKEN_CLASSES` mirrors the Rust `TokenClass`, which the native LSP keeps.
+- **Task 15.** A `vite preview` of the task's own build, under the browser lock and stopped after, for the pass by hand.
+- **Task 16.** The worktree's `.superpowers/sdd/` is copied whole into `$R/pr1/sdd/` before the worktree goes, and this
+  entry's `$S` names the copy.
+- **Task 17.** The review of the whole branch ran as four reviewers, each over a slice of the diff, since one reviewer
+  could not hold all of it: `web/src`'s UI; its sessions and protocol with the pages, docs, scripts, this entry and *As
+  built*; and the two halves of `web/tests`.
+- **Task 18.** What only a session leaving the registry reached went in PR 1 (B-I2): `LambdaTrees.prune`, its call in
+  each frame and its node case, and `main.ts`'s `sessions.has` guard; the implementer's widening to `LambdaTrees.want`'s
+  arm for a session with no client and to `SessionRegistry.has` stands, for the same reason. `viewMenu.setFormattable`
+  and its flag went with `unfollow` (A-I1), since only copies turned *format* off. The task ran as three dispatches: the
+  Important findings with the items the task reviews carried, the Minor findings, and the gate with this entry.
+
+**Calls the implementers made, which their reviews accepted**: Task 7 removed `EDITOR_ON_LEAVE` and `holdsOnLeave`
+whole; Task 9 deleted the view menu's repeat-guard case, which its sabotage left green (9-I1); Task 10 deleted
+`panel-stack.ts`'s branch for a hidden panel in a maximise, which no code in `web/src` reaches, since none hides a
+panel; Task 11 kept `strip.test.ts`'s case that keeps a copy out of the program error, renamed, removed `results.ts`'s
+`valueLine` and `endedLine`, which only the copy readout read, and made the readout's stopped table one constant; Task
+18 took `unsavedLine`'s boolean with `UnsavedStore`, since no caller passed `false` once `saved()` hands `null` itself,
+and gave the notice for a tree-sitter runtime that will not load the words of the grammar and ceiling notices, *source
+is showing uncoloured*.
+
+**The comment budgets** (`scripts/comment-budget.json`), each change the value `check-comments.mjs` printed: `web/src`
+from 0.4642 to 0.4582 in `41feb5d`, 0.4528 in `e669971`, 0.4469 in `9424778`, 0.4269 in `f472f1e` and 0.4096 in
+`858e685`; `web/tests` from 0.2318 to 0.2262 in `41feb5d`, up to 0.2263 in `7354696`, where deleting a duplicated
+fixture's code raised the share, down to 0.2203 in `3e980c7`, up to 0.2204 in `d5466ef`, whose deleted cases took more
+code lines than comment lines, and down to 0.2118 in `9424778` and 0.2036 in `124bf1a`; and `crates/redextape-wasm` from
+0.3749 to 0.3612 in `3e980c7`.
+
+##### THE TESTS
+
+At `b627fe3` the coverage run read 350 files and 3974 tests: 264 Chromium files with 2225 tests, the 2 scroll-bar files
+with 6, and 84 node files with 1743. At `5ac7e9b` it reads 298 and 3386: 215 with 1853, 2 with 6, and 81 with 1527. At
+`752963a`, after the review's fixes, it reads 298 and 3388: 215 with 1855, 2 with 6, and 81 with 1527. Each run counts 2
+tests that fail as expected.
+
+**Files.** The branch deletes 71 files of `web/tests`, 16045 lines: 58 browser test files; 9 browser helpers, which are
+the probes' workers and corpus and the fixtures only the copies' tests used; and 4 node test files. They are the 68 the
+plan's sweep names by file, and 3 more: `copy-header.test.ts` (`4b71485`), the third of ruling 11's additions, once Task
+2 had moved its lasting case into `view-title.test.ts`; `focus-press.test.ts` (`3e980c7`, ruling 10); and the node
+`copy-build.test.ts` (`5720054`), which ruling 11 kept for its `claimLive` case and which is `claim.test.ts` now. It
+adds 9: `copies-key-removed.test.ts`, `copies-key-removed-stage.test.ts` and their fixture; `stored-old-panels.test.ts`,
+`stored-old-panels-link.test.ts` and their fixture; `tm-fixture.ts`; and the node `claim.test.ts` and
+`storage-fixture.ts`. `web/tests` gained 2145 lines and lost 22110.
+
+**Cases.** The diff takes 575 case declarations out of `web/tests` and puts 65 in; `$L/18-case-lines.txt` holds the 640
+lines, each tagged by `$L/16-cases.mjs`. Of those out, 363 went with the deleted files and 212 left files that stay; of
+those in, 8 are in the new files and 57 in files that stay. 3 kept their names in another file: `copy-header.test.ts`'s
+ellipsis case, in `view-title.test.ts`; `copy-build.test.ts`'s `claimLive` case, in `claim.test.ts`; and
+`two-lambda-panes.test.ts`'s case that the source view *reset preset* brings back still holds the program, in
+`pane-picker.test.ts` (Task 18). A case moved under a new name, or rewritten in its place, counts once out and once in,
+and one moved by a change to its setup alone, as most of Tasks 1 and 2's were, changes no declaration line and is not
+counted. By task, out and in, in which a case one task put in and a later task took out counts in both:
+
+| Task | Commits | Out | In |
+|---|---|---|---|
+| 1 | `c6c1758..edfeba0` | 6 | 5 |
+| 2 | `edfeba0..cf022d4` | 7 | 9 |
+| 3 | `cf022d4..7354696` | 100 | 15 |
+| 4 | `7354696..4b71485` | 66 | 7 |
+| 5 | `4b71485..9f06b9e` | 86 | 7 |
+| 6 | `9f06b9e..d5466ef` | 10 | 1 |
+| 7 | `d5466ef..82243dc` | 20 | 3 |
+| 8 | `82243dc..1a8c357` | 46 | 8 |
+| 9 | `1a8c357..e0ee915` | 48 | 5 |
+| 10 | `e0ee915..e016188` | 42 | 2 |
+| 11 | `e016188..864bc29` | 52 | 3 |
+| 12 | `864bc29..5720054` | 108 | 12 |
+| 13 | `5720054..8facca6` | 5 | 6 |
+| 14 | `8facca6..5ac7e9b` | 2 | 3 |
+| 18 | `31861cf..752963a` | 3 | 5 |
+
+- **Moved onto the program or a fixture while copies still existed**: in Task 1, the state diagram's local-level cases
+  (`state-diagram-local`, its `-pan`, `-scrollbars`, `-layout`, `-fans` and `-fan-row`), four of `link-clear`'s cases,
+  `tm-grid`'s share case and `tm-status-line`'s phone-width case, the hand-written machines onto `tm-fixture.ts`; in
+  Task 2, the one-id and parked-view cases, and `pane-picker`'s, `stage-tab-titles`', `view-title`'s, `controls-gate`'s
+  undo case, the link opens' undo cases and `lsp-restored-panel`'s. A sabotage on the new setup shows that it still
+  reaches what the case holds (*THE SABOTAGES*, the rows of Tasks 1 and 2), but for the fans' label case.
+- **New**: K1 and K2 (Task 3), `copies-key-removed.test.ts`'s two cases, the key removed with the program's key kept,
+  and the views a stored copy was bound to opening on the program, and `copies-key-removed-stage.test.ts`'s two, the
+  same on a Stage workspace; F1 and F2, `program-store.test.ts`'s `forgetCopies` cases, every other key left, and quiet
+  where the storage refuses; O1 and O2 (Task 2), `stored-old-panels-fixture.ts`'s two cases, run on a stored workspace
+  by `stored-old-panels.test.ts` and on a share link by `stored-old-panels-link.test.ts`; M1 (Tasks 4, 5 and 9),
+  `rxm-app.test.ts`'s cases that the λ, TM and rxm views' ⋯ menus offer no *edit a copy* and draw every item, with no
+  group or part left empty, and M2 (Task 10), that only the source view's offers *format*; N1 (Task 8),
+  `program-quota.test.ts`'s focus on `#settings` after *hide*, at 1280 and at 390 px; R1 (Task 7),
+  `restart-rewind.test.ts`'s ↺ on the TM, rxm and clif views; OUT (Task 7), `lsp-outline.test.ts`'s case that a TM or
+  rxm view has no outline; `strip.test.ts`'s two (Task 11), `data-describes` on the first call and the dim only while
+  the readout describes a program; L1 (Task 13), `lsp-diagnostics.test.ts`'s case that the app's LSP documents are in
+  `redextape` alone; and `pages.test.ts`'s case that each row of the help page's keys table names the source editor
+  (Task 14); and in Task 18, for what the review of the whole branch found no case held: `view-menu.test.ts`'s case that
+  the source view's ⋯ offers *format* from the start, `pane-picker.test.ts`'s case moved from `b627fe3`'s
+  `two-lambda-panes.test.ts`, an assertion in `storage-blocked.test.ts`'s first case of the views a page whose storage
+  cannot be read opens on, and the node `colour.test.ts`'s case that the compiler refuses a registry over other keys
+  without their sources; and `unsaved.test.ts`'s cases, re-said for the program's one writer, one of them under a new
+  name.
+- **Deleted with what they held**: the 71 files above, and from files that stay the cases whose subject was a copy, each
+  read first (the plan's tables name them); and in Task 18, the node `lambda-trees.test.ts`'s case of `prune` and of a
+  session with no client.
+
+##### THE SABOTAGES
+
+Each saved the file it edits to `$L/sab/`, made the one edit, ran the named test files, restored the file from its copy
+and compared it with `cmp`. A driver in `$L` per task ran them, `01-sab-driver.mjs` to `13-sab-driver.mjs`, and each
+task's results file, `01-sab-results.txt` to `13-sab-results.txt`, records `cmp` equal for each of its runs, 79 lines in
+all, a run again counting again. Task 5's fix round and Task 14 ran theirs by hand, logs `t5f1-sab*.log` and
+`t14b-S1.log`, restored and `cmp` equal by their reports. A case stops at its first failed hard assertion, and a run is
+read for the assertion each case failed at. The runs are in Chromium, but 3-S2's and 3-S3's first runs, 6-S1, the `-0`
+runs of 12-S1a to 12-S2, 13-S2 and 14-S1, in the node tier, and 13-S3, a build. An id is the task's number and the
+task's own id. Task 15 ran none; its pass by hand against `b627fe3` stands in (*VERIFICATION*). Task 18 ran its own by
+hand, each file saved to `$L/sab18/` or `$L/sab18a2/`, restored and `cmp` equal by its report, in Chromium but for
+18-M6, a typecheck.
+
+| Id | The one edit | Cases failed, of the run's, and where | Log in `$L` |
+|---|---|---|---|
+| 1-pan-1 | `state-diagram.ts`'s drag pan writes no scroll position | 8 of 26: *pans with a mouse drag on its background…* at *scrollLeft moved by the drag* | `01-sab-pan-1.log` |
+| 1-pan-2 | the wheel's zoom removed | 14 of 26: *zooms with the wheel…* at *zoomed to 1.5* | `01-sab-pan-2.log` |
+| 1-pan-3 | `#sizeLocal` sizes its box to the whole drawing | 5 of 26: the reach case at *drawn in the panel, blank on the left, x at its start* | `01-sab-pan-3.log` |
+| 1-pan-1m to 1-pan-3m | the three again, on the final pan setup | 8, 14 and 5 of 26, at the same assertions | `01-sab-pan-1m.log` to `01-sab-pan-3m.log` |
+| 1-sb | the level's rules that hide its scroll bar removed | 1 of 3: *draws no scroll bar…* at *the room a vertical scroll bar takes* | `01-sab-sb.log` |
+| 1-hub | the content box's height halved | 3 of 11: HUB at its precondition, *taller than its panel*, not at `margins().below` | `01-sab-hub.log` |
+| 1-hub-2 | the drawing set 200 px higher | 3 of 11: HUB at `margins().above` | `01-sab-hub-2.log` |
+| 1-measure | the `loadingdone` and style observers removed | 2 of 11: both measure cases at their waits | `01-sab-measure.log` |
+| 1-fans, 1-fans-2, 1-fans-3 | a label placed by `points[0]`; a place's clearance blind to other lines; the costliest place | none: 2 of 2 passed each; 1-fans-3 passes on `b627fe3`'s copy setup too (*WHAT THIS DID NOT CLOSE*) | `01-sab-fans.log`, `01-sab-fans-2.log`, `01-sab-fans-3.log`, `01-sab-driver-4-copy-setup.log` |
+| 1-fans-reach | `REACH` 1 | 2 of 2 skipped: the file's `beforeAll` wait | `01-sab-fans-reach.log` |
+| 1-fanrow | the row's apart rule for a line along it removed | 1 of 2: the fan-row case at `expect(misread).toEqual([])` | `01-sab-fanrow.log` |
+| 1-link-a | the click's `on.unpin()` removed | 22 of 38: the click case at *cleared by the click*, the double-click case at *cleared at the first click* | `01-sab-link-a.log` |
+| 1-link-b | the empty-space, drag and gesture guard removed | 37 of 38, at `pin()`: replaced by 1-link-b1 and 1-link-b2 | `01-sab-link-b.log` |
+| 1-link-b1 | the guard's `onEmptySpace` test removed | 6 of 38: the click on *local* at *the pin* | `01-sab-link-b1.log` |
+| 1-link-b2 | the guard's drag threshold removed | 2 of 38: the pan at *the pin* | `01-sab-link-b2.log` |
+| 1-grid | `virtual-grid.ts`'s resize no longer draws | 1 of 7: `tm-grid`'s share case at the shrink's last row | `01-sab-grid.log` |
+| 1-status | `.tm-line > .tm-state` set to `flex: none` | 2 of 10: both widths at *one row* | `01-sab-status.log` |
+| 2-oit-reid | `arrangements.ts`'s `reidentified` gives no new id | 6 of 8: `one-id-two-kinds`' cases 1 and 2 at *…not built under an id of its own*, `-stored`'s at *the TM view was built under the rxm view’s id* and *the rxm view was built again* | `02-sab-oit-reid.log` |
+| 2-oit-enter | `enter` keeps the entry under the combination entered | 3 of 3, at the precondition *the stored workspace does not parse*: replaced by 2-oit-keep-any-kind | `02-sab-oit-enter.log` |
+| 2-oit-keep-any-kind | the keep rule keeps a parked view on its id, of any kind | 1 of 3: case 3; after the fix round at *the view under rxm-0 is not the rxm view the tree names* | `02-sab-oit-keep-any-kind-round0.log`, `02-sab-oit-keep-any-kind.log` |
+| 2-info-keep-id-alone | the keep rule on the id alone, the counterfactual case 3's doc names | none: 3 of 3 passed, as its doc says | `02-sab-info-keep-id-alone.log` |
+| 2-pvr-keep | the keep rule keeps a parked view no arrangement holds | 1 of 1: at *the closed view came back under its id* | `02-sab-pvr-keep.log` |
+| 2-pp-nolambda | `draw.ts`'s `?.` on the λ view dropped | 8 of 8 skipped: the file's `beforeAll`; replaced by 2-pp-nolambda2 | `02-sab-pp-nolambda.log` |
+| 2-pp-nolambda2 | `draw.ts` takes a λ view for granted once any view exists | 2 of 8: `pane-picker`'s moved case at *the TM view’s step to move* | `02-sab-pp-nolambda2.log` |
+| 2-stt-title | `viewTitle` takes the leg from the leaf's id | 2 of 2: both `stage-tab-titles` cases at *the tab after a pick of …* | `02-sab-stt-title.log` |
+| 2-vt-nowrap | `.view-title-text` wraps | 1 of 8: `view-title`'s moved case at *the title is one line* | `02-sab-vt-nowrap.log` |
+| 2-cg-inert | the notice's action `inert` | 1 of 25: `controls-gate`'s undo case at *cannot take the focus* | `02-sab-cg-inert.log` |
+| 2-soh-tree | `undoOpen` restores the workspace with the link's tree | 1 of 12: at *the undo put back no view the split added* | `02-sab-soh-tree.log` |
+| 2-lrp-open | the source outline built shut | 2 of 3: *restores the panel open* at `aria-expanded`, and the render case at its wait | `02-sab-lrp-open.log` |
+| 2-lrp-symbols | the source outline's `symbols` rejects | 1 of 3: *renders into the restored panel* at its wait | `02-sab-lrp-symbols.log` |
+| 2-O-S1 | `parsePanels` refuses `text` and `outline` | 4 of 4: O1 at *lambda-0's view*, O2 at *lambda-0's map* | `02-sab-O-S1.log` |
+| 2-O-S2 | `panel-stack.ts`'s `#own` reads `outline`'s share for `rules` | 2 of 4: O1 and O2 at *tm-0's diagram over rules* | `02-sab-O-S2.log` |
+| 3-S1 | `main.ts` does not call `forgetCopies` | 2 of 4: K1 and K2 at the key | `03-sab-S1.log` |
+| 3-S2 | `forgetCopies` throws what the storage throws | 1 of 17 in the node tier: F2 at *returns quietly*; `storage-blocked` fails to load, its 6 skipped | `03-sab-S2-node.log`, `03-sab-S2.log` |
+| 3-S3 | `forgetCopies` removes `redextape.program` too | 1 of 17 in the node tier: F1 at the other keys; 1 of 2: K1 at the program's key | `03-sab-S3-node.log`, `03-sab-S3.log` |
+| 4-S1 | `MachineViewChrome`'s constructor builds *edit a copy* and offers an rxm fork, one hunk | 1 of 9: M1-rxm at *an edit a copy item* | `04-sab-S1.log` |
+| 4-S2 | `machine-row.ts` reads the width as `clientWidth` less the padding, which a scroll bar changes | 3 of 3: the moved case at its precondition, *no bar*, not at *and stays wide*; the other two at *in each of six frames* | `04-sab-S2.log` |
+| 5-S1 | the same hunk for the TM view | 2 of 10: M1-tm and M1-rxm at *an edit a copy item* | `05-sab-S1.log` |
+| 5-S2 | `replies.ts` hands a view off the page each compile | 2 of 6: `hidden-views` at *the TM view is off the page* and *no grouping off the page* | `05-sab-S2.log` |
+| 5-f1 | `viewMenu` names the λ view's display items `•` once a split stops applying, which is on entering the Stage | 4 of 25, in Stage and custom: the split case at the Stage branch's walk; against the test before the fix, 25 of 25 passed | `t5f1-sab3-new.log`, `t5f1-sab2-old.log` |
+| 6-S1 | `groupStates` puts a state with no instruction in the group before it | 8 of 21 in the node tier: *gives every instruction a row…* at the groups, the overflow badge and edge cases, and four `program-level` cases | `06-sab-S1-node.log` |
+| 6-S2 | the *program* choice disabled again whenever a machine is set | 4 of 57: `state-diagram-local` at the choice | `06-sab-S2.log` |
+| 7-S1 | the custody's flush walks every view of the session again | 8 of 11: R1 at *what the presses threw*, `p.pane.flushEditor is not a function`, the other ↺ cases with it | `07-sab-S1.log` |
+| 7-S2 | `LEG_PANELS.tm` given `outline` back | 1 of 2: O1 at *tm-0's outline* | `07-sab-S2.log` |
+| 7-S3 | the TM view given an empty, shut *outline* region after the diagram | 2 of 9: OUT at *the TM view*, O2 at *tm-0's outline* | `07-sab-S3.log` |
+| 7-S4 | the region boundary's rule after a hidden call stack removed | 4 of 86: *begins each region…* at `medium`, in the rxm and clif views | `07-sab-S4.log` |
+| 8-S1 | `createNotices` given no fallback | 2 of 5: N1 at both widths, the focus on `<body>` | `08-sab-S1.log` |
+| 8-S2 | the fallback `#workspace` | 2 of 5: N1 at both widths, the focus on `#workspace` | `08-sab-S2.log` |
+| 9-S1 | `viewMenu` builds a disabled *edit a copy* with its hint when given none | 3 of 11: M1-rxm, M1-tm and M1-λ at *an edit a copy item* | `09-sab-S1.log` |
+| 9-S2 | `undoOpen` puts back nothing | 4 of 12: the undo case at the program, its first assertion | `09-sab-S2.log` |
+| 9-S2b | `undoOpen` puts back all but the view the split added | 1 of 12: at *the undo put back no view the split added* | `09-sab-S2b.log` |
+| 9-S3 | a display group keeps its label and loses its choices | 1 of 11: M1-λ at *a group with no item* | `09-sab-S3.log` |
+| 9-S4 | an empty rule at the end of the menu | 3 of 11: M1 at *a part with no item after it* | `09-sab-S4.log` |
+| 9-I1 | the edit the view menu's repeat-guard case was to catch | none: 10 of 10 passed, and the case went (*DECISIONS*) | `09-sab-I1.log` |
+| 10-S1 | the λ view's menu given *format* and shown it | 1 of 12: M2 at *lambda-0: a format item*, before and after M2 lost its editor assertion | `10-sab-S1.log` |
+| 10-S2, 10-S2b | the source's menu built without *format*, its key renamed, then renamed `split` | 1 of 12: M2 at a null ⋯ button; once `menuDrawn` names the button, at *source: a ⋯ button* | `10-sab-S2.log`, `10-sab-S2b.log` |
+| 10-S3 | the λ map's `ResizeObserver` removed | 1 of 12: at *the map was not drawn again at the height it has* | `10-sab-S3.log` |
+| 11-S1 | `readout.ts` describes `program` always | 3 of 7: *says what it describes on the very first call* at *the first call wrote no data-describes*, two at their `none` preconditions | `11-sab-S1.log` |
+| 11-S2 | the running dim without `[data-describes="program"]` | 1 of 7: at *a line with no program, dimmed for the compile* | `11-sab-S2.log` |
+| 12-S1a | `SessionPool.bind` binds a live session again | 1 of 6: *refuses to bind a session that already has a worker*; `pool-isolation` 1 of 1 passed, since no case rebinds now | `12-sab-S1a-0.log`, `12-sab-S1a-1.log` |
+| 12-S1b | `bind` hands every later session the first session's port | 4 of 6, one worker per session among them; `pool-isolation` 1 of 1 at the three threads | `12-sab-S1b-0.log`, `12-sab-S1b-1.log` |
+| 12-S1c | a worker per session, every later session posting to the first's port | 2 of 6; `pool-isolation` 1 of 1 at the first session's answer | `12-sab-S1c-0.log`, `12-sab-S1c-1.log` |
+| 12-S2 | `claimLive` skips `dropLive` | 1 of 2: the `claimLive` case at its order | `12-sab-S2-0.log` |
+| 13-S1 | the source opened as `redextape_tm` | 3 of 5: L1 at the language id, and two diagnostics cases | `13-sab-S1-0.log` |
+| 13-S2 | `LANGUAGE_IDS` given `redextape_x` | 2 of 5: at `arrayContaining` and *each have an extension* | `13-sab-S2-0.log` |
+| 13-S3 | `SOURCES` given the TM grammar back | the build emits `tree-sitter-redextape-tm-*.wasm`; after the restore it emits the `redextape` grammar and `web-tree-sitter` alone | `13-sab-S3-assets.txt`, `13-sab-S3-after-assets.txt` |
+| 14-S1 | the help page's F12 row names the copies again | 1 of 18: *names the source editor as where each key works* | `t14b-S1.log` |
+| 18-AI1 | `view-header.ts` mounts the menu at once only with display items | 1 of 9: the new `view-menu` case at *no ⋯ to reach format by* | `t18a1-ai1-sab.log` |
+| 18-CI1 | *reset preset* empties the source document first | the moved `pane-picker` case, run alone, at its last assertion, the program's text | `t18a1-ci1-sab.log` |
+| 18-C2I1 | `defaultLayout` builds the source, TM, λ and rxm views | 1 of 6: the first case at *did not open on the first-load views* | `t18a1-c2i1-sab.log` |
+| 18-M2 | `.view-title-text` given `text-overflow: clip` | `view-title`'s cut-title case, run alone, at *the cut ends in an ellipsis*, after *the title is cut* | `t18a2-vt-sab.log` |
+| 18-M6 | `record-cost.test.ts`'s replay built without its clif leg | the typecheck: `TS2741`, *Property 'clif' is missing* | `t18a2-satisfies-sab.log` |
+| 18-M4 | `-fan-row`'s states billed to instruction 1 of a one-line listing | the file's 2 cases skipped: `tm-fixture.ts` throws *states billed past the listing* | `t18a2-fr-sab.log` |
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+Task 17 read `b627fe3..31861cf` as four reviewers, each over a slice of the diff with the whole tree to read: A,
+`web/src`'s UI; B, its sessions and protocol with the pages, docs, scripts, this entry and *As built*; and C1 and C2,
+the two halves of `web/tests`. Their reports are merged into `$L/review.md`: no Critical finding, 5 Important and 27
+Minor. Task 18 checked each before acting on it. Every Important one held, and each was fixed test first, in a commit of
+its own:
+
+- **A-I1** (`73c3622`): `viewMenu.setFormattable` and its flag, which only a copy's view turned off, and
+  `KeymapSetting.unfollow`, whose callers were the copy editors, with docs that described them falsely. *format* is in
+  the source view's ⋯ from the start, which a new `view-menu.test.ts` case holds.
+- **B-I1** (`0aad7de`): `tm-seed.ts`, `rxm-seed.ts` and `SessionEntry.programs` named a cool or a retire among the ways
+  a view comes to show a session, and `hidden.test.ts` a λ view forked to a copy, the sibling the search for the class
+  found.
+- **B-I2** (`80ce7dc`): `LambdaTrees.prune`, called in each frame, pruned nothing, since no session leaves the registry
+  now, and `main.ts`'s `sessions.has` guard was never false. They went with `LambdaTrees.want`'s arm for a session with
+  no client and `SessionRegistry.has`, which only such a session reached.
+- **C1-I1** (`852a14a`): the case that the source view, closed and brought back by *reset preset*, still holds the
+  program went with `two-lambda-panes.test.ts`, and no other case held it. It is in `pane-picker.test.ts` now.
+- **C2-I1** (`653c43e`): `storage-blocked.test.ts` had lost its assertion of the views a page whose storage cannot be
+  read opens on, `source` and `tm-0`, and holds it again.
+
+With them went what the task reviews had carried to Task 18 (`972392a`, `aff0e1d`, `db81aeb`): `record-cost.test.ts`'s
+case (h) builds its session with a clif leg; `session-memory.test.ts`'s wasm case drops an array that held nothing its
+readings needed; `lsp-diagnostics.test.ts`'s case that shows every view runs last; `createGrammarRegistry` requires its
+sources for keys that are not the app's; `assetsInlineLimit` came back; `main.ts` filters the capture tables on
+`LANGUAGE_IDS`; and the comments and the notice that gave an editor per view as their reason give one that holds for the
+one source editor. Then the Minor findings (`3e2e22c`, `6d972c0`, `08c1542`, `0b7de71`, `752963a`): comments re-flowed
+to 120 columns or re-said, `privacy.html`'s row, `.gitignore`'s clause, the design's header, `unsaved.ts` for the
+program's writer alone, the tests' docs, and tests that hold what they name, among them `satisfies
+Required<SessionLegs>` on the hand-built sessions of `replies.test.ts` and `record-cost.test.ts`, `view-title.test.ts`'s
+ellipsis, and `tm-fixture.ts`, which admits a state billed to no instruction and throws on one billed past the listing.
+B M2 and B M3, on this entry and *As built*, are fixed in the commit that brings this entry up to date; C1 M9 waits for
+R1-4 (*WHAT THIS DID NOT CLOSE*); `review.md`'s *Answers (Task 18)* gives the reasons. The sabotages of what Task 18
+added are its rows of *THE SABOTAGES*.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **PR 2** takes the Rust and wasm code only copies used, which this branch stops calling and leaves tested in Rust: the
+  scratch exports and their code in `crates/redextape-wasm/src/lib.rs` and `session.rs` (`lambdaScratch`,
+  `lambdaScratchAt`, `tmScratch`, `rxmScratch` and their types, and `Session`'s `tmText`, `tmResultDecodable` and
+  `rxmText`); `probe.rs`; the features `probe-no-tm-scratch-ceiling` and `probe-rxm-copy` in
+  `crates/redextape-wasm/Cargo.toml`, with `scripts/check-all.sh:168-176`'s four legs and two comments that name them,
+  unchanged on this branch; the three wire types `TmScratchStatus`, `ReductionStatus` and `ValueRun` with their bindings
+  and their rows in `ts_bindings.rs` and `bindings-contract.test.ts`; and the Rust comments that cite what this branch
+  deleted. Those that cite a deleted web file, at `752963a`: `crates/redextape-wasm/src/probe.rs:12`
+  (`rxm-copy-memory.test.ts`); `crates/redextape-wasm/src/session.rs:1325` (`rxm-copy-cost.test.ts`), `:1346`
+  (`rxm-copy-memory.test.ts`) and `:1651` (`tm-buffer-cost.test.ts`); `crates/redextape-lsp-wasm/src/lib.rs:322`
+  (`rxm-copy.test.ts`); and `crates/redextape-wasm/Cargo.toml:30` (`tm-buffer-cost.test.ts`), `:41`
+  (`rxm-copy-cost.test.ts`) and `:42` (`rxm-copy-memory.test.ts`). Those that cite a deleted `pnpm` script:
+  `test:probe:rxm-copy` at `session.rs:1326` and `:1346` and `Cargo.toml:43`, and `test:probe:tm-buffer` at
+  `session.rs:1655` and `Cargo.toml:29`, which says its feature exists for that script. The three ruling 15 re-said are
+  not among them. Comments that name the UI that went, such as *edit a copy* in
+  `crates/redextape-core/src/tm/rxm.rs:325`, `crates/redextape-core/tests/rxm_roundtrip.rs:327` and `session.rs:1337`,
+  go to PR 2 with them.
+- **PR 3** narrows to one session what still runs over the program's one: `SessionRegistry` and `SessionPool`;
+  `Binding.session` and `PaneSlot`'s session; `SessionEntry.label` and `· program` (Q1); `pairs()` and the title menu's
+  and the split lists' pairs; the per-session `LambdaTrees`; and `split`'s `choice.session`. `rebind`'s same-leg branch
+  for a second session went in Task 9.
+- **The images** (Q2): the README's `demo.webp` and the portfolio's `full.webp` and `card.webp` still show `+ view` and
+  `copies ▾`. They are retaken after this branch merges, and the upload to the NAS waits for Davey's word.
+- **The Firefox caret fix** waits for its own pull request (*DECISIONS*, Task 5). Until it merges `view-keys-focus`'s
+  Stage caret case, *leaves the caret in the source editor, and the key chooses the tabs*, fails in Firefox at times.
+- **The Firefox failures this branch did not add**, under *VERIFICATION*. Firefox is not in CI.
+- **What the task reviews deferred**: the ledger lists each minor a task review deferred; the review of the whole branch
+  triaged them, and Task 18 fixed those that held. Two cases a sabotage cannot fail where it aims stay:
+  `machine-row-scrollbars`' moved case, which 4-S2 fails at its precondition, and the fans' label case (R1-4), which no
+  placement edit fails, on `b627fe3`'s copy setup too. Reaching that case costs `state-diagram-local-fans.test.ts` a
+  walk of 11,827 clicks of ▶, about 38 s in Chromium; a fixture of the neighbourhood, as `-fan-row` has, would save it
+  once what the case should hold is decided.
+- **The Rust warnings** that `check-slow.sh` and `check-all.sh` print, an unused import in
+  `crates/redextape-core/src/tm/encoding/binary.rs` and an unused dependency of `redextape-native`, are older than the
+  branch.
+- **Davey has not tried the branch.** He tries it in Firefox before he gives the word to push.
+
+##### VERIFICATION
+
+**The gate at `5ac7e9b`**, Task 15's, in two dispatches: Phase A by `$L/15a-run.zsh` and `$R/pr1/gate.zsh`, each leg's
+exit in `$L/15a-exits.txt` and `$L/15-exits.txt`, and Phase B by `gate.zsh` again, `$L/15b-exits.txt`. 44 runs of its
+legs exited 0, the five fast web legs twice, and Firefox exited 1, below. The web job as CI runs it, from `web/`: the
+wasm, lsp-wasm, clif-wasm and bindings builds; the licences and licence-editions checks, each `--self-test` and then
+alone; the node tier; `biome ci`, 460 files, no fixes applied; `pnpm run typecheck`; the attribution check, 574 sites
+and 0 violations; coverage under the browser lock in a capped unit; and `build:app`. The scans CI runs, each
+`--self-test` and then alone, `check-doc-figures.sh` finding 45 figures that match the tree, and `check-comments.mjs
+--base b627fe3`. The Rust legs, since the branch changes Rust comments: `cargo llvm-cov nextest --workspace
+--fail-under-lines 90`, 2046 tests passed and 35 skipped, lines 95.56%; `scripts/check-slow.sh`, green; and
+`scripts/check-all.sh` in its two halves, `--no-browser`, green but for the browser tier it skips, and `--browser-only`,
+whose wasm tests passed 36.
+
+| `All files` | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|
+| `b627fe3`, `$L/00-coverage.log` | 97.93 | 92.25 | 98.7 | 99.15 |
+| `5ac7e9b`, `$L/15-coverage.log` | 98.07 | 92.24 | 98.67 | 99.31 |
+| `752963a`, `$L/t18b-coverage.log` | 98.09 | 92.29 | 98.72 | 99.33 |
+| the floors, `web/vite.config.ts` | 95 | 89 | 97 | 97 |
+
+**Firefox at `5ac7e9b`**, on the 87 browser test files the branch adds or edits, of which 84 run in a Firefox project
+(`record-cost.test.ts` is a probe, and `machine-row-scrollbars` and `state-diagram-local-scrollbars` run in Chromium
+alone), into `$L/15b-firefox.log`: 7 files failed and 77 passed; 43 tests failed, 942 passed and 14 were skipped. 33 of
+the 43 fail by name in the baseline as it stood before Task 15, `$L/15b-00-firefox-fails.before.txt`, from a Firefox run
+of `b627fe3`'s tree in which 9 files of 78 and 39 tests of 1020 failed. 9 are `inspector-phone.test.ts`'s, which Task 15
+ran in Firefox at `b627fe3` too, where 10 of its 45 failed (`$L/15b-inspector-phone-base.log`), each for the reason it
+fails at `5ac7e9b`, and which it added to `$L/00-firefox-fails.txt`. The last is `view-keys-focus`'s Stage caret case
+(*WHAT THIS DID NOT CLOSE*). By file: `view-keys` 19, `tm-view-narrow` 11, `inspector-phone` 9, and `app`,
+`divider-drag-format-on-blur`, `view-keys-focus` and `view-keys-format-on-blur` 1 each.
+
+**By hand in Firefox, at `5ac7e9b`** (`$L/15-hand.zsh`, `$L/hand/drive.mjs`, its record `$L/15-hand.log` and
+`$L/hand/drive.json`, its 18 screenshots in `$L/hand/`): the app built by `vite build` and served by `vite preview`,
+driven by Playwright's Firefox at 1280 by 896 and at 390 by 844. No `#buffers` and no copy word on a button of the
+header or its menus, and at 390 the toggles are the workspace menu's `show` row; each view's ⋯ opened by a click: the λ
+view's holds the splits and its display items, the TM and rxm views' the splits, none of them *edit a copy*, *move the
+editor here* or *format*, and the source view's holds *format*; the TM view's panels are rules and diagram, the rxm
+view's listing, registers, stack and heap, and the λ view's map, and none of the three holds an editor; with
+`redextape.buffers` seeded, a λ copy bound to `lambda-0` and a TM copy to `tm-0`, and the page reloaded, the key is gone
+and every view reads `· program`; with the storage refused, *hide* from the keyboard leaves the focus on `#settings`. No
+page error, and no console error or warning: 64 checks, none failed. The same drive against a build of `b627fe3` failed
+28 of its 64 checks, each where a copy part was. The checks for *move the editor here*, for *format* in a machine view's
+menu and for an editor in a view cannot fail there, since at `b627fe3` those show only in a copy's view, which the drive
+does not make; the sabotages and the sweep hold their absence. The build's grammar files are
+`tree-sitter-redextape-*.wasm` and `web-tree-sitter-*.wasm` alone.
+
+**The gate at `752963a`**, Task 18's, after the review's fixes, by `$L/t18b-run.zsh`, Task 15's web legs under a tag of
+their own, each leg's exit in `$L/t18b-run-exits.txt` and `$L/t18b-exits.txt`: 33 runs of its legs exited 0, and Firefox
+exited 1, below. The four builds; the licences and licence-editions checks, each `--self-test` and then alone; the node
+tier, 81 files and 1527 tests; `biome ci`, 460 files, no fixes applied; `pnpm run typecheck`; the attribution check, 573
+sites and 0 violations; coverage, its row in the table above, over each floor; `build:app`, whose 54 assets are, but for
+their hashes, those of Task 15's build, the same five `.wasm` among them, so `assetsInlineLimit`'s return changes
+nothing the build emits; the scans CI runs, each `--self-test` and then alone, `check-doc-figures.sh` finding 45
+figures; and `check-comments.mjs --base b627fe3`. No Rust leg ran: `git diff --name-only 31861cf..752963a -- crates
+Cargo.toml Cargo.lock` is empty, so the Rust legs at `5ac7e9b` hold. Firefox ran on the 21 browser test files Task 18
+edits but `record-cost.test.ts`, a probe, and on the 5 that import a fixture it edits, `stored-old-panels`,
+`stored-old-panels-link`, `state-diagram-local-layout`, `state-diagram-local-pan` and `tm-status-line`
+(`state-diagram-local-scrollbars` runs in Chromium alone), into `$L/t18b-firefox.log`: 2 files failed and 23 passed; 2
+tests failed, 294 passed and 7 were skipped. Both fail by name in `$L/00-firefox-fails.txt`: `app`'s *a step that loops
+in its own state still releases a source-originated link's hold on the table* and `controls-gate`'s *walks every toggle,
+each named by its own word*.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`B=b627fe3`, `H=752963a`, `R=~/temp/redextape-remove-copies-record` and `L=$R/pr1/impl`, and `noansi`, a `sed` that
+strips colour codes, on a worktree whose files outside `docs/superpowers/`, untracked ones among them, are those of
+`752963a`, the last code commit, which the first row checks, by `$L/18-figures.zsh`, which reads each from
+`$L/18-figures.cmds` and prints it above its output into `$L/18-figures.log`. They are Task 16's `$L/16-figures.zsh` and
+`$L/16-figures.cmds`, which read `5ac7e9b`, with `H` given and rows added for Task 18. The rows that read a log, Task
+1's baselines, Task 15's or Task 18's legs or a task's sabotages, name it in their command.
+
+| Value | What | Produced by |
+|---|---|---|
+| `same-outside-docs`, `H=752963a` | the tree these rows read: the same as H's outside docs/superpowers/, untracked files included | `git diff --quiet $H -- . ':!docs/superpowers' && [[ -z $(git status --porcelain -- . ':!docs/superpowers') ]] && print same-outside-docs; print H=$H` |
+| 56; 2; 54; 38; 3; 13 | commits on b627fe3 to H; the design and the plan, b627fe3..c6c1758; the build, c6c1758..H; of it Tasks 1-14, c6c1758..5ac7e9b; Task 16, 5ac7e9b..31861cf; Task 18, 31861cf..H | `git rev-list --count $B..$H; git rev-list --count $B..c6c1758; git rev-list --count c6c1758..$H; git rev-list --count c6c1758..5ac7e9b; git rev-list --count 5ac7e9b..31861cf; git rev-list --count 31861cf..$H` |
+| 50; 13 | the build's commits that change web/: in all; Task 18's | `git rev-list --count c6c1758..$H -- web; git rev-list --count 31861cf..$H -- web` |
+| 13 on 2026-11-23, 43 on 2026-11-24 | every commit's date, in UTC, with how many | `TZ=UTC git log --date=format-local:%F --format=%ad $B..$H \| sort \| uniq -c` |
+| 0 | files outside docs/ that the design and the plan change | `git diff --name-only $B c6c1758 \| grep -vc '^docs/'` |
+| `tree-equal` | the revert: its subject, and whether its tree is 3e980c7's | `git log -1 --format=%s 8c6cc4b \| cut -c1-40; git diff --quiet 3e980c7 8c6cc4b && print tree-equal` |
+| the 54 SHAs of the table of tasks | the build's commits, oldest first | `git log --reverse --format='%h %s' c6c1758..$H \| cut -c1-90` |
+| `crates/redextape-wasm/src/session.rs` | files the branch changes under crates/, or Cargo.toml and Cargo.lock | `git diff --name-only $B $H -- crates Cargo.toml Cargo.lock` |
+| 13, 16 | its lines added and deleted | `git diff --numstat $B $H -- crates` |
+| 4; 29; 0 | their hunks; changed lines; changed lines that are not a /// line | `git diff -U0 $B $H -- crates \| grep -c '^@@'; git diff -U0 $B $H -- crates \| grep -cE '^[-+][^-+]'; git diff -U0 $B $H -- crates \| grep -E '^[-+][^-+]' \| grep -vcE '^[-+]\s*///'` |
+| the hunks at 913, 944, 1328 and 1649; `9f06b9e`, `3e980c7`, `4b71485` | the hunks, and the commits that make them | `git diff -U0 $B $H -- crates \| grep '^@@' \| cut -c1-40; git log --format=%h $B..$H -- crates` |
+| 5 5; 5 10; 3 5; 3 5 | grammars/: files changed, lines added and deleted | `git diff --numstat $B $H -- grammars` |
+| 74, 978, 9252 | web/src: files changed, lines added, lines deleted | `git diff --numstat $B $H -- web/src \| awk '{n++; a+=$1; d+=$2} END {print n, a, d}'` |
+| each row of the table of `web/src` | web/src, by file | `git diff --numstat $B $H -- web/src` |
+| the 32 rows; 42, 211, 377 | web/src: the files with 50 or more lines added and deleted; the other files, how many, lines added, lines deleted | `git diff --numstat $B $H -- web/src \| awk '$1+$2 >= 50'; git diff --numstat $B $H -- web/src \| awk '$1+$2 < 50 {n++; a+=$1; d+=$2} END {print n, a, d}'` |
+| 9 deleted, `claim.ts` added | web/src files deleted and added | `git diff --name-status $B $H -- web/src \| grep -v '^M'` |
+| 41204; 32930 | web/src lines at b627fe3; at H | `git grep -c '' $B -- web/src \| awk -F: '{s+=$NF} END {print s}'; git grep -c '' $H -- web/src \| awk -F: '{s+=$NF} END {print s}'` |
+| each row of the table of the other files | the pages, config, docs and scripts: lines added and deleted | `git diff --numstat $B $H -- web/index.html web/help.html web/privacy.html web/vite.config.ts web/package.json README.md docs/architecture.md scripts .gitignore` |
+| 9, 58, 4 (71) | web/tests files deleted, by tier and kind | `git diff --name-only --diff-filter=D $B $H -- web/tests \| awk -F/ '{print $3, ($NF ~ /\.test\.ts$/ ? "test" : "helper")}' \| sort \| uniq -c` |
+| the 9 files | web/tests files added | `git diff --name-only --diff-filter=A $B $H -- web/tests` |
+| 2145, 22110; 16045 | web/tests lines added, deleted; deleted with the deleted files | `git diff --numstat $B $H -- web/tests \| awk '{a+=$1; d+=$2} END {print a, d}'; git diff --numstat --diff-filter=D $B $H -- web/tests \| awk '{d+=$2} END {print d}'` |
+| 68; `copy-build.test.ts`, `copy-header.test.ts`, `focus-press.test.ts`; none | the plan's list of deleted files (the sweep's by-file row): entries; the deleted files it does not name (left), and it names but are not deleted (right) | `awk -F'\t' '$1=="by file" {print $3}' $R/pr1/sweep-patterns.txt \| tr '\|' '\n' \| wc -l; comm -3 <(git diff --name-only --diff-filter=D $B $H -- web/tests \| xargs -n1 basename \| sort) <(awk -F'\t' '$1=="by file" {print $3}' $R/pr1/sweep-patterns.txt \| tr -d '()' \| sed 's/\\//g' \| tr '\|' '\n' \| sort)` |
+| `4b71485`, `3e980c7`, `5720054` | the commits that delete copy-header.test.ts, focus-press.test.ts and the node copy-build.test.ts | `for f in web/tests/browser/copy-header.test.ts web/tests/browser/focus-press.test.ts web/tests/node/copy-build.test.ts; do print -r -- "$f $(git log --diff-filter=D --format=%h $B..$H -- $f)"; done` |
+| 575 (363 of deleted files, 212 of kept); 65 (8 in new files, 57 in kept); 3 out to another file | case declarations the diff takes out of web/tests and puts in, tagged by $L/16-cases.mjs into $L/18-case-lines.txt | `git diff -U0 $B $H -- web/tests \| node $L/16-cases.mjs $L/18-case-lines.txt` |
+| each row of the table by task | case declarations out and in, by task | `for r in c6c1758..edfeba0 edfeba0..cf022d4 cf022d4..7354696 7354696..4b71485 4b71485..9f06b9e 9f06b9e..d5466ef d5466ef..82243dc 82243dc..1a8c357 1a8c357..e0ee915 e0ee915..e016188 e016188..864bc29 864bc29..5720054 5720054..8facca6 8facca6..5ac7e9b 5ac7e9b..31861cf 31861cf..$H; do print -rn -- "$r: "; git diff -U0 $r -- web/tests \| node $L/16-cases.mjs \| sed -n '1,2p' \| cut -d' ' -f1,2 \| paste -sd' '; done` |
+| 264, 2225; 2, 6; 84, 1743; 215, 1853; 2, 6; 81, 1527; 215, 1855; 2, 6; 81, 1527 | coverage runs: per project, files and tests, at b627fe3 (00), at 5ac7e9b (15) and at H (t18b) | `for f in 00 15 t18b; do print $f; noansi $L/$f-coverage.log \| sed -nE 's/^ *[✓×↓] +(.*[^ ]) +tests\/[^ ]+ \(([0-9]+) tests?.*/\1\t\2/p' \| awk -F'\t' '{n[$1]++; s[$1]+=$2} END {for (k in s) print k, n[k], s[k]}' \| sort; done` |
+| 350, 3972 and 2, 97.93, 92.25, 98.7, 99.15; 298, 3384 and 2, 98.07, 92.24, 98.67, 99.31; 298, 3386 and 2, 98.09, 92.29, 98.72, 99.33 | coverage: files, tests and the All files row, at b627fe3, at 5ac7e9b, then at H | `noansi $L/00-coverage.log $L/15-coverage.log $L/t18b-coverage.log \| grep -aE 'Test Files\|Tests  \|All files' \| tr -s ' '` |
+| 81, 1527; 81, 1527 | the node tier at 5ac7e9b; at H | `grep -aE 'Test Files\|Tests ' $L/15-node.log; grep -aE 'Test Files\|Tests ' $L/t18b-node.log` |
+| every budget and commit of *The comment budgets* | the comment budgets' changes, by commit | `git log --format='%h' -p $B..$H -- scripts/comment-budget.json \| grep -E '^[0-9a-f]{7}$\|^[-+] '` |
+| each run's tests failed and run in *THE SABOTAGES* | sabotage runs, each with its exit and tests, in each task's results file | `for n in 01 02 03 04 05 06 07 08 09 10 11 12 13; do print "== $n"; grep -E 'exit [0-9]' $L/$n-sab-results.txt \| cut -c1-110; done` |
+| 22, 17, 3, 2, 2, 2, 4, 2, 6, 6, 2, 8, 3; 79 | the runs restored and cmp equal, by results file, and in all | `for n in 01 02 03 04 05 06 07 08 09 10 11 12 13; do print -rn -- "$n "; grep -c 'cmp equal' $L/$n-sab-results.txt; done; cat $L/{01,02,03,04,05,06,07,08,09,10,11,12,13}-sab-results.txt \| grep -c 'cmp equal'` |
+| 5-f1's 4 of 25 and 25 of 25; 14-S1's 1 of 18 | the fix rounds' sabotage runs: Task 2's, Task 5's and Task 14's | `grep -E 'exit' $L/02f-sab-driver.log; for f in $L/t5f1-sab*.log; do print -rn -- "${f:t} "; noansi $f \| grep -aE '^ +Tests ' \| tr -s ' '; done; ls $L \| grep -E '^t14' \| tr '\n' ' '; print; for f in $L/t14b-S1.log; do noansi $f \| grep -aE '^ +Tests \|FAIL ' \| tr -s ' ' \| cut -c1-140; done` |
+| each run's failure in *THE SABOTAGES*, the rows of Task 18 | Task 18's sabotage runs: each log, its tests and its first failure | `for f in $L/t18a1-*sab*.log $L/t18a2-*sab*.log; do print -rn -- "${f:t} "; noansi $f \| grep -aE '^ +Tests \|error TS\|^Error\|AssertionError' \| head -2 \| tr -s ' ' \| cut -c1-140 \| paste -sd' '; done` |
+| the grammar files 13-S3's row names | 13-S3: the grammars the build emits with the TM grammar given back, and after the restore | `cat $L/13-sab-S3-assets.txt; print --; cat $L/13-sab-S3-after-assets.txt` |
+| 11 files for the row of `data-describes` and `nameOf` (the next row); 2 for `editorHost`; the other matches *WHAT IT COST* names | the deleted-symbol sweep at H: each row, its task, the files it matches and how many | `zsh $L/16-sweep.zsh` |
+| `readout.ts`, `style.css`, `strip.test.ts` (3); the 8 others *WHAT IT COST* names | the sweep's row of `data-describes` and `nameOf`: the files that match through `data-describes` or `describes = `; those that match through `nameOf` | `rg -l --glob '!*.wasm' --glob '!*.json' -e 'describes = \|data-describes' web scripts crates README.md docs/architecture.md grammars \| sort; print --; rg -l --glob '!*.wasm' --glob '!*.json' -w -e nameOf web scripts crates README.md docs/architecture.md grammars \| sort` |
+| 27 | the sweep's rows | `grep -vc '^#' $R/pr1/sweep-patterns.txt` |
+| `link-status.ts:26`; `rxm.rs:325`, `rxm_roundtrip.rs:327`, `session.rs:1337` | the lines in web/src and crates/ that the sweep's row of forkCopy and *edit a copy* matches | `rg -n -e "$(awk -F'\t' '$2 ~ /forkCopy/ {print $3}' $R/pr1/sweep-patterns.txt)" web/src crates \| cut -c1-120` |
+| the 8 lines PR 2's bullet lists, in 4 files | the lines under crates/ that name a web file the branch deleted | `rg -n -e "(^\|[^A-Za-z0-9_-])($(git diff --name-only --diff-filter=D $B $H -- web \| xargs -n1 basename \| sed 's/\./\\./g' \| paste -sd'\|'))" crates \| cut -c1-150` |
+| the 5 lines PR 2's bullet lists, in 2 files | the lines under crates/ that name a pnpm script the branch deleted | `rg -n 'test:probe:(tm-buffer\|rxm-copy)' crates \| cut -c1-150` |
+| `unchanged`; 6 | check-all.sh unchanged on the branch; its lines 168-176 that name a probe feature | `git diff --quiet $B $H -- scripts/check-all.sh && print unchanged; sed -n '168,176p' scripts/check-all.sh \| grep -c 'probe-'` |
+| 44; `firefox exit 1` | the gate's legs at 5ac7e9b (Task 15): runs that exited 0, the gate script's own line left out; any other | `cat $L/15a-exits.txt $L/15-exits.txt $L/15b-exits.txt \| grep -v '^gate.zsh' \| grep -c 'exit 0'; cat $L/15a-exits.txt $L/15-exits.txt $L/15b-exits.txt \| grep 'exit' \| grep -v 'exit 0'` |
+| 33; `firefox exit 1` | the gate's legs at H (Task 18): runs that exited 0, the gate script's own line left out; any other | `cat $L/t18b-run-exits.txt $L/t18b-exits.txt \| grep -v '^gate.zsh' \| grep -c 'exit 0'; cat $L/t18b-run-exits.txt $L/t18b-exits.txt \| grep 'exit' \| grep -v 'exit 0'` |
+| 2046, 35; 95.56%; green; green but for the browser tier; 36 | cargo llvm-cov, check-slow, check-all's two halves | `noansi $L/15-llvm-cov.log \| grep -aE 'Summary\|^TOTAL' \| tr -s ' '; noansi $L/15-check-slow.log \| grep -aE 'Summary\|slow tier green' \| tr -s ' '; noansi $L/15-check-all.log \| grep -a 'green, but PARTIAL' \| cut -c1-60; noansi $L/15-check-all-browser.log \| grep -a 'test result: ok. 36'` |
+| 460; 1; 574 sites, 0 violations; 45 figures | biome's files; its No fixes applied; the attribution check; the doc-figures check | `grep -ao 'Checked [0-9]* files' $L/15-lint.log; grep -ac 'No fixes applied' $L/15-lint.log; noansi $L/15-attr.log \| grep -a 'sites' \| tail -1; grep -rah 'documented figures' $L/15*.log \| sort -u` |
+| 460; 1; 573 sites, 0 violations; 45 figures | at H: biome's files; its No fixes applied; the attribution check; the doc-figures check | `grep -ao 'Checked [0-9]* files' $L/t18b-lint.log; grep -ac 'No fixes applied' $L/t18b-lint.log; noansi $L/t18b-attr.log \| grep -a 'sites' \| tail -1; grep -ah 'documented figures' $L/t18b-scan-doc-figures.log` |
+| 87 | the browser test files the branch adds or edits | `git diff --name-only --diff-filter=AM $B $H -- web/tests/browser \| grep -c '\.test\.ts$'` |
+| 7, 77 (84); 43, 942, 14 | Firefox at 5ac7e9b: files and tests | `noansi $L/15b-firefox.log \| grep -aE 'Test Files\|Tests  ' \| tr -s ' '` |
+| 43; 33; 9 in `inspector-phone`, 1 in `view-keys-focus` | its failures by name; of them, in the baseline list before Task 15 added inspector-phone; the others | `noansi $L/15b-firefox.log \| grep -a ' FAIL ' \| sed -E 's/^ *FAIL +\\|[^\|]*\\| tests\/browser\///' \| sort -u >\| $L/16-ff.fails; wc -l < $L/16-ff.fails; awk '/^[^ ]/ {f=$0; next} /^  / {sub(/^ +/, ""); print f " > " $0}' $L/15b-00-firefox-fails.before.txt \| sort -u >\| $L/16-ff-base.fails; comm -12 $L/16-ff.fails $L/16-ff-base.fails \| wc -l; comm -23 $L/16-ff.fails $L/16-ff-base.fails \| cut -c1-120` |
+| 19, 11, 9, 1, 1, 1, 1 | the failures by file | `cut -d'>' -f1 $L/16-ff.fails \| sort \| uniq -c` |
+| 10 of 45 | inspector-phone in Firefox at b627fe3 | `noansi $L/15b-inspector-phone-base.log \| grep -aE 'Test Files\|Tests  ' \| tr -s ' '` |
+| 9 of 78 files; 39 of 1020 tests | the Firefox baseline at b627fe3 | `head -1 $L/00-firefox-fails.txt` |
+| 21; 2, 23 (25); 2, 294, 7 | the browser test files Task 18 adds or edits; Firefox on them, with the five that import a fixture it edits, at H: files and tests | `git diff --name-only --diff-filter=AM 31861cf $H -- web/tests/browser \| grep -c '\.test\.ts$'; noansi $L/t18b-firefox.log \| grep -aE 'Test Files\|Tests  ' \| tr -s ' '` |
+| 2; 2; none | its failures by name; of them, in the baseline list; the others | `noansi $L/t18b-firefox.log \| grep -a ' FAIL ' \| sed -E 's/^ *FAIL +\\|[^\|]*\\| tests\/browser\///' \| sort -u >\| $L/18-ff.fails; wc -l < $L/18-ff.fails; awk '/^[^ ]/ {f=$0; next} /^  / {sub(/^ +/, ""); print f " > " $0}' $L/00-firefox-fails.txt \| sort -u >\| $L/18-ff-base.fails; comm -12 $L/18-ff.fails $L/18-ff-base.fails \| wc -l; comm -23 $L/18-ff.fails $L/18-ff-base.fails \| cut -c1-140` |
+| 64, 0; 64, 28; 18 | the pass by hand at 5ac7e9b: checks, failed; the same drive at b627fe3: checks, failed; screenshots | `grep -c '"check"' $L/15-hand.log; grep -c '"ok":false' $L/15-hand.log; grep -c '"check"' $L/15-hand-base.log; grep -c '"ok":false' $L/15-hand-base.log; ls $L/hand/*.png \| wc -l` |
+| `tree-sitter-redextape-*.wasm`, `web-tree-sitter-*.wasm` | the grammar .wasm files in the pass by hand's build of 5ac7e9b | `ls $L/hand/dist/assets \| grep 'tree-sitter.*\.wasm$'` |
+| one digest, `16bf8e3eb9bd`, for both lists of 54 assets; the same 5 `.wasm` files | the .wasm files build:app emits at 5ac7e9b and at H, without their hashes | `for f in 15 t18b; do print -rn -- "$f: "; noansi $L/$f-build-app.log \| grep -aoE 'dist/assets/[^ ]+' \| sed -E 's/-[A-Za-z0-9_-]{8}\././' \| sort \| paste -sd' ' \| md5sum \| cut -c1-12; noansi $L/$f-build-app.log \| grep -aoE 'dist/assets/[^ ]+\.wasm' \| sed -E 's/-[A-Za-z0-9_-]{8}\././' \| paste -sd' '; done` |
+| `:441`, `:446`, `:28` | the IR specs' lines that name CLIF copies or LLVM copies | `grep -n 'CLIF copies\\|LLVM copies' docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md docs/superpowers/specs/2026-11-18-clif-view-design.md \| cut -c1-140` |

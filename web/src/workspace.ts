@@ -160,7 +160,10 @@ export type Workspace = {
   readonly tree: LayoutNode
   readonly switches: Switches
   readonly speed: Speed
-  /** The view the user is in — any leaf, the source view included. It drives the readout (spec §9). */
+  /**
+   * The view the user is in — any leaf, the source view included (spec §3). The Stage shows it, and a rebuild that
+   * takes the focus off the page gives it back there.
+   */
   readonly focused: LeafId
   readonly panels: Panels
   /** Beside `panels`, and kept and dropped with it: a parked view keeps its sizes, a closed view's are dropped. */

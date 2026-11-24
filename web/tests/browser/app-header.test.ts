@@ -17,7 +17,7 @@ describe('the app header', () => {
     const button = document.querySelector<HTMLButtonElement>('#workspace') as HTMLButtonElement
     expect(button.textContent?.trim()).toBe('Explorer ▾')
     // THE POSITIVE HALF: the glyph is in the label and out of the name (spec §6). A bare `▾` reaching
-    // the accessible name reads as "down-pointing triangle", which is what `copies ▾` already avoids.
+    // the accessible name reads as "down-pointing triangle", which is what `examples ▾` avoids too.
     expect(computeAccessibleName(button)).toBe('Explorer')
   })
 

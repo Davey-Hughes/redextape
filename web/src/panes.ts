@@ -15,35 +15,13 @@ export type LeafId = string
 export type PaneKind = 'source' | Leg
 
 /**
- * The leg a pane of `kind` renders, or `null` for the source pane, which renders an editor and no leg.
- *
- * **A `switch`, SO THAT A NEW KIND IS A TYPE ERROR HERE RATHER THAN A SILENT ANSWER.** Asking "is this kind a
- * leg" by listing them — `kind === 'lambda' || kind === 'rxm' || kind === 'tm'` — would answer `false` for a new
- * leg's kind with `tsc` green (`legs.ts` has the class of bug). Every arm returns, so a kind with no arm is TS2366.
- */
-export function legOfPane(kind: PaneKind): Leg | null {
-  switch (kind) {
-    case 'source':
-      return null
-    case 'lambda':
-      return 'lambda'
-    case 'rxm':
-      return 'rxm'
-    case 'tm':
-      return 'tm'
-    case 'clif':
-      return 'clif'
-  }
-}
-
-/**
  * The panels a view of each leg reads back from a stored workspace, by the name `data-panel` and `Panels` know them
- * by. The text panel is not one: its collapse reaches the view's owner through `on.collapse`, not `on.panel`.
+ * by.
  */
 export const LEG_PANELS = {
   lambda: ['map'],
-  rxm: ['listing', 'registers', 'stack', 'heap', 'outline'],
-  tm: ['rules', 'diagram', 'outline'],
+  rxm: ['listing', 'registers', 'stack', 'heap'],
+  tm: ['rules', 'diagram'],
   clif: ['listing', 'values', 'stack', 'heap'],
 } as const satisfies { readonly [K in Leg]: readonly string[] }
 
@@ -100,8 +78,9 @@ export class PaneCollection {
    * The panes the user has focused, most recent first, each once — `markActive`'s record.
    *
    * **AN ORDER, NOT THE LAST PANE PER LEG**, because a reader may refuse the last one: the running focuses take the
-   * most recently focused view that shows the program, and when the view focused last shows a copy the answer is the
-   * one focused before it. A last-per-leg map could only fall back to insertion order there.
+   * most recently focused view the tree on screen holds, and when the view focused last is kept only in a remembered
+   * arrangement the answer is the one focused before it. A last-per-leg map could only fall back to insertion order
+   * there.
    */
   #recent: LeafId[] = []
 
@@ -124,7 +103,7 @@ export class PaneCollection {
   }
 
   /**
-   * Forget `id`. Idempotent, mirroring `SessionRegistry.remove`: a second call asks for a state already true.
+   * Forget `id`. Idempotent: a second call asks for a state already true.
    *
    * Its place in the focus order goes with it, so the order holds only panes that exist: a pane rebuilt under the
    * same id — a leg change, a reset — is focused afresh before it is anyone's answer.
@@ -179,11 +158,10 @@ export class PaneCollection {
    * STYLE. `markActive` may have recorded `pane-3` while it was a λ pane, and `pane-3` may be a TM pane now;
    * it answers for the leg it is on.
    *
-   * **`accept` IS WHAT A READER REFUSES, AND THE RUNNING FOCUSES REFUSE A COPY.** A running focus is the
-   * program's: it resolves against the program's link index, and a copy's frames own no construct of it. So
-   * `draw.ts` asks for the most recently focused view that shows the program, and a copy's view focused last
-   * is passed over: taken, it would leave the program's own view unmarked while it is the view being stepped.
-   * With no `accept`, every pane on the leg is admitted.
+   * **`accept` IS WHAT A READER REFUSES, AND THE RUNNING FOCUSES REFUSE A VIEW THE TREE ON SCREEN DOES NOT HOLD.** A
+   * view kept alive in an arrangement the workspace remembers is no one's to watch (the view layouts spec §5), so
+   * `draw.ts` asks for the most recently focused view on screen or on a Stage tab, and passes over one focused last
+   * before its arrangement was put away. With no `accept`, every pane on the leg is admitted.
    *
    * A LEG WITH NO ADMITTED PANE ANSWERS `undefined` RATHER THAN A THROW: a leg with none is a state, not a
    * wiring bug.
@@ -203,15 +181,14 @@ export class PaneCollection {
   }
 
   /**
-   * `active(leg, accept)` among the panes `onPage` says are on the page: of those `accept` admits, the one
-   * focused most recently, else the first of them, else `undefined`.
+   * `active(leg)` among the panes `onPage` says are on the page: the one focused most recently, else the first of
+   * them, else `undefined`.
    *
    * **A READER OF A VIEW'S OWN STATE ASKS THIS, NOT `active`.** In Stage one host is on the page and the
    * rest are off it, and selecting a tab records the focused leaf without marking a pane active, so
    * `active(leg)` can name a hidden pane. `draw()` hands a pin and a tree only to views on the page, so a
-   * hidden λ view's `linkState` would answer for an earlier pin: the λ link clause asks this, of the views
-   * that show the program. `undefined` is the link clause's honest absence: no λ view of the program on
-   * screen, so no term of the program's to explain.
+   * hidden λ view's `linkState` would answer for an earlier pin: the λ link clause asks this. `undefined` is the
+   * link clause's honest absence: no λ view on screen, so no term to explain.
    *
    * **A READER OF A LEG'S LIVE HISTORY ASKS `active`.** The running focuses read the session a pane is
    * bound to, which is current whether or not the pane is drawn, and part 2's spec §8 keeps the step bar
@@ -220,12 +197,8 @@ export class PaneCollection {
    * `onPage` IS THE CALLER'S, which keeps the collection free of the DOM: the app passes the `onPage`
    * below, and a node test passes its own.
    */
-  shown<K extends Leg>(
-    leg: K,
-    onPage: (e: PaneEntry<K>) => boolean,
-    accept: (e: PaneEntry<K>) => boolean = () => true,
-  ): PaneEntry<K> | undefined {
-    return this.active(leg, (e) => onPage(e) && accept(e))
+  shown<K extends Leg>(leg: K, onPage: (e: PaneEntry<K>) => boolean): PaneEntry<K> | undefined {
+    return this.active(leg, onPage)
   }
 
   /** Every pane rendering `leg` AND bound to `session` — the question a reply handler is asking. */

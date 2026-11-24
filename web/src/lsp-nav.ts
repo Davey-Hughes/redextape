@@ -115,10 +115,10 @@ function keyOf(l: LspLocation): number {
  * and `historyKeymap` bind no F-key, so neither shadows anything CodeMirror already does. They also
  * take no modifier that vim's normal mode uses.
  *
- * **`F2` IS THE THIRD, AND IT LIVES HERE RATHER THAN BESIDE THE POINTER TOOLTIP IN `lsp-hover.ts`
- * SO ONE EDIT REACHES BOTH EDITORS.** Both editor construction sites already call this function to
- * build their keymap, so a binding added here is the only kind of edit that reaches both without a
- * second one somewhere else. See the binding itself for why `F2` is the key chosen.
+ * **`F2` IS THE THIRD, AND IT LIVES HERE RATHER THAN BESIDE THE POINTER TOOLTIP IN `lsp-hover.ts`,
+ * SO THE EDITOR'S NAVIGATION KEYS ARE BUILT IN ONE PLACE.** The source editor builds its keymap with this
+ * function, and `pages.test.ts` holds the help page's key table to what it returns. See the binding
+ * itself for why `F2` is the key chosen.
  */
 export function navKeymap(deps: {
   readonly uri: () => string | undefined

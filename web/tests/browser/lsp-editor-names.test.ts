@@ -9,8 +9,8 @@ const textboxes = () => [...document.querySelectorAll<HTMLElement>('.cm-content[
 
 /**
  * **DEFERRED-ACCESSIBILITY ITEM 16 — "neither editable text region carries an accessible name".**
- * CodeMirror gives its content a `textbox` role and no name, so on a workspace showing several editors
- * at once, unnamed, every one of them would announce identically.
+ * CodeMirror gives its content a `textbox` role and no name, so a screen reader would announce the source editor as
+ * an unnamed text box, with nothing to say what it holds.
  */
 describe('editable regions carry accessible names', () => {
   beforeAll(async () => {
@@ -25,26 +25,11 @@ describe('editable regions carry accessible names', () => {
     expect(source?.getAttribute('aria-label')).toBe('source program editor')
   })
 
-  it('names a copy after the view that holds it, and distinctly from the source', async () => {
-    const pane = document.querySelector<HTMLElement>('[data-leaf="tm-0"]')
-    pane?.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => pane?.querySelector('.term-editor') !== null, 'the copy to mount its editor')
-
-    const copy = pane?.querySelector<HTMLElement>('.term-editor .cm-content')
-    const name = copy?.getAttribute('aria-label') ?? ''
-    expect(name).toContain('TM')
-    expect(name).toContain('editor')
-    expect(name).not.toBe('source program editor')
-  })
-
   it('leaves no editable region unnamed', () => {
-    expect(textboxes().length).toBeGreaterThan(1)
+    expect(textboxes().length).toBe(1)
     for (const box of textboxes()) {
       const name = box.getAttribute('aria-label') ?? ''
       expect(name, `an editable region announced as "${name}"`).not.toBe('')
     }
-    // And no two announce the same way, which is the whole point on a tiled workspace.
-    const names = textboxes().map((b) => b.getAttribute('aria-label'))
-    expect(new Set(names).size).toBe(names.length)
   })
 })

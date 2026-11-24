@@ -1,11 +1,10 @@
-import { EditorView } from '@codemirror/view'
+import type { EditorView } from '@codemirror/view'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, setLeafKind } from '../../src/layout'
 import { bindingKey } from '../../src/view-header'
 import { parseWorkspace } from '../../src/workspace'
 import {
-  editorsInLeaf,
   lambdaLeaves,
   leafIds,
   leafKind,
@@ -30,13 +29,10 @@ import {
  * has no writer, so a leg change is the replacement of a whole `PaneEntry` under an unchanged `LeafId`,
  * performed by `applyLayout`'s two passes rather than by anything in the slot.
  *
- * THE HARNESS IS `two-lambda-panes.test.ts`'s shell and one-mount-per-file `beforeAll` (ES module
- * imports are cached, so `main()` runs once per page and Vitest gives each test FILE its own page), with
- * a `beforeEach` of this file's own that undoes the tree shape through `resetToFourViews` and puts the
- * source program back. That file's doc has the argument for each, including why the first compile has to
- * be waited for before any fork click can land. Selectors are that file's verbatim: `button.detach` for
- * the fork (the button carries real text, not an `aria-label`), `aria-label` for the glyph-only layout
- * controls, and `bindingKey(leg, session)` for the title menu's items.
+ * THE HARNESS IS `SHELL` and a one-mount-per-file `beforeAll` (ES module imports are cached, so `main()` runs once per
+ * page and Vitest gives each test FILE its own page), with a `beforeEach` of this file's own that undoes the tree shape
+ * through `resetToFourViews` and puts the source program back, and waits for the first compile. Selectors: `aria-label`
+ * for the glyph-only layout controls, and `bindingKey(leg, session)` for the title menu's items.
  *
  * **KINDS ARE READ FROM `data-kind`, AND THAT IS THE POINT OF THE ATTRIBUTE RATHER THAN A CONVENIENCE
  * HERE.** `hostFor` writes it once when it mints a host and a kind change REUSES that host, so
@@ -177,74 +173,6 @@ describe('a pane changes which leg it renders', () => {
   })
 
   /**
-   * **THE EDITOR SURVIVES A KIND CHANGE, WHICH IS THE CUSTODY PATH REACHED THROUGH A GESTURE OTHER THAN A
-   * CLOSE.** `applyLayout`'s pass 1 hands a departing λ pane's editor to `custody.hold` before
-   * `panes.remove` makes the pane unreachable. A kind change removes the same entry as a close does, for a
-   * different reason, and the handover has to cover both — which is why the predicate sits ABOVE the
-   * handover rather than beside it.
-   *
-   * IT ASSERTS IDENTITY, NOT A COUNT, for `two-lambda-panes.test.ts`'s reason: destroying the view and
-   * building a fresh one seeded with the same text produces identical `.cm-editor` counts at every step.
-   * `EditorView.findFromDOM` plus a cursor parked away from position 0 — where a freshly constructed
-   * `EditorState` always starts — is what a rebuild fails.
-   *
-   * THE SURVIVOR'S CLAIM CONTROL IS ASSERTED TO BE OFFERED **AND** TO WORK. Either half alone passes
-   * against the failure this guards: the button is offered whenever a detached pane holds no editor, so
-   * an editor destroyed by the switch rather than taken into custody would leave it offered and inert —
-   * the exact "control that provably cannot work, offered anyway" the custody machinery exists to
-   * prevent.
-   */
-  it('carries the editor into custody when the pane holding it changes leg', async () => {
-    const errors: string[] = []
-    const onError = (e: ErrorEvent) => errors.push(e.message)
-    window.addEventListener('error', onError)
-    try {
-      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-      await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to mount an editor')
-      splitSame('lambda-0', 'row')
-      await until(() => lambdaLeaves().length === 2, 'the split to produce a second λ pane')
-      const survivor = lambdaLeaves().find((id) => id !== 'lambda-0') ?? ''
-      expect(survivor).not.toBe('')
-      expect(editorsInLeaf('lambda-0')).toBe(1)
-      expect(editorsInLeaf(survivor)).toBe(0)
-
-      const hostBefore = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .cm-content')
-      if (hostBefore === null) throw new Error('the forked pane has no editor host')
-      const viewBefore = EditorView.findFromDOM(hostBefore)
-      if (viewBefore === null) throw new Error('no CodeMirror view mounted under the forked pane')
-      const cursorAt = viewBefore.state.doc.length
-      viewBefore.dispatch({ selection: { anchor: cursorAt } })
-
-      // THE SWITCH, ON THE PANE THAT IS HOLDING THE EDITOR.
-      pickBinding('lambda-0', bindingKey('tm', 'source'))
-      await until(() => leafKind('lambda-0') === 'tm', 'the editor-holding λ pane to become a TM pane')
-
-      // MOUNTED NOWHERE, DESTROYED NOWHERE — in custody, which no surface shows directly. The
-      // observable is that the page holds no mounted scratch editor at all while the source editor is
-      // untouched.
-      expect(document.querySelectorAll('.term-editor .cm-editor').length).toBe(0)
-      expect(document.querySelectorAll('.cm-editor').length).toBe(1)
-
-      const claim = document.querySelector<HTMLButtonElement>(`[data-leaf="${survivor}"] button.claim-editor`)
-      expect(claim).not.toBeNull()
-      claim?.click()
-      await until(() => editorsInLeaf(survivor) === 1, 'the survivor to claim the held editor')
-
-      const hostAfter = document.querySelector<HTMLElement>(`[data-leaf="${survivor}"] .cm-content`)
-      if (hostAfter === null) throw new Error('the claiming pane has no editor host')
-      const viewAfter = EditorView.findFromDOM(hostAfter)
-      expect(viewAfter).toBe(viewBefore)
-      expect(viewAfter?.state.selection.main.head).toBe(cursorAt)
-      // THE SAME ONE, IN ONE PLACE — a hand-back that duplicated rather than relocated satisfies every
-      // assertion above except this one.
-      expect(document.querySelectorAll('.term-editor .cm-editor').length).toBe(1)
-      expect(errors).toEqual([])
-    } finally {
-      window.removeEventListener('error', onError)
-    }
-  })
-
-  /**
    * **THE CONTROL THE PICK WAS MADE WITH IS DESTROYED BY THE PICK.** `applyLayout` reaches the incoming
    * pane's `host.replaceChildren(…)`, which takes the title-selector the user is operating with it; with
    * nothing putting focus anywhere afterwards, a keyboard user who arrowed to a TM pair and pressed Enter
@@ -278,86 +206,5 @@ describe('a pane changes which leg it renders', () => {
     // kept the same element alive would satisfy every assertion above and none of decision 1's.
     expect(document.activeElement).not.toBe(title)
     expect(title.isConnected).toBe(false)
-  })
-
-  /**
-   * **THREE CLICKS: COMPILE, FORK THE λ PANE, THEN PICK THE BUFFER'S OWN `λ · …` ENTRY ON THE TM PANE.**
-   * `PaneSlot.render` pushes `pairs()` to every pane, so a TM pane's selector genuinely lists a λ-only
-   * session. A handler that took the session half and kept the slot's leg would mint `{ leg: 'tm',
-   * session: <the buffer> }` — which `legOf` throws on, inside `draw.ts`'s per-pane loop, which has no
-   * `try`/`catch`: not one dropped frame but every frame after it. A guard there that refused the pick
-   * would make it a silent no-op. The pick is acted on one layer up, where the layout tree is: the leaf
-   * changes kind and the entry is rebuilt on the leg that was picked. The node tier cannot drive that —
-   * `pane-host.ts` needs a DOM and a tree.
-   *
-   * IT DRIVES A SECOND FRAME AFTER THE SWITCH RATHER THAN STOPPING AT THE DOM. A wedged loop throws on
-   * EVERY LATER frame, so a test that asserted only the state right after the pick would pass on a render
-   * loop that was already dead.
-   */
-  it('acts on a cross-leg pick from the TM side instead of wedging the render loop', async () => {
-    const errors: string[] = []
-    const onError = (e: ErrorEvent) => errors.push(e.message)
-    window.addEventListener('error', onError)
-    try {
-      document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-      await until(() => editorsInLeaf('lambda-0') > 0, 'the fork to register a scratch buffer')
-      expect(leafKind('tm-0')).toBe('tm')
-
-      // THE PAIR THE FORK PRODUCED, READ OFF THE PANE THAT PERFORMED IT. A fork mints `scratch-N`
-      // (5d-ii-c decision 1), and the number depends on how many forks this FILE ran before this test (one
-      // `main()` per page), so it cannot be written down; the pane that just forked is where the app itself
-      // records it. `pickBinding` throws if the value it is handed is not in the target selector, which is
-      // what keeps this from silently picking nothing.
-      const buffer = titleOf('lambda-0')?.dataset.binding ?? ''
-      expect(buffer).not.toBe(bindingKey('lambda', 'source'))
-
-      pickBinding('tm-0', buffer)
-      await until(() => leafKind('tm-0') === 'lambda', 'the TM pane to become a λ pane on the buffer')
-
-      expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
-      await until(() => termOf('tm-0') !== '', "the scratch's own term to paint in the switched pane")
-      // TWO λ PANES ON THE SCRATCH AND NO TM PANE AT ALL, which is a legal state — `draw.ts` and
-      // `link-wiring.ts` answer an empty leg with `undefined` rather than a throw.
-      expect(lambdaLeaves().sort()).toEqual(['lambda-0', 'tm-0'])
-      expect(document.querySelectorAll('[data-kind="tm"]').length).toBe(0)
-
-      // A SECOND FRAME, WHICH IS THE WHOLE POINT OF THE STAGE — a wedged loop throws on EVERY later frame.
-      // **NOT `◀` ON THE SWITCHED PANE**: the buffer's run opens on its step 0 (`History`), so `canBack` is
-      // false and the click is a silent no-op.
-      //
-      // **AND NOT A SOURCE KEYSTROKE EITHER.** A keystroke ends no buffer (5d-ii-c design §4.3's table), so
-      // it moves nothing and there would be nothing to observe. AN EDIT OF THE BUFFER drives the same
-      // per-pane loop `draw.ts` would throw in, and shows the switched pane following the buffer's OWN later
-      // frames, on a binding it acquired through a cross-leg pick.
-      const scratchTerm = termOf('tm-0')
-      expect(stepTextOf('tm-0')).not.toBe('')
-      const editorHost = document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .cm-content')
-      if (editorHost === null) throw new Error('the forked pane has no editor host')
-      const bufferView = EditorView.findFromDOM(editorHost)
-      if (bufferView === null) throw new Error('no CodeMirror view mounted under the forked pane')
-      bufferView.dispatch({ changes: { from: 0, to: bufferView.state.doc.length, insert: '(λu. u) (λw. w)' } })
-      await until(
-        () => termOf('tm-0') !== scratchTerm && termOf('tm-0') !== '',
-        "the switched pane to repaint on the buffer's own new frames",
-      )
-      // Both λ panes resolve the one buffer's λ leg, so the two showing the same term is that repaint
-      // having reached this pane rather than only the one holding the editor.
-      expect(termOf('tm-0')).toBe(termOf('lambda-0'))
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
-
-      // AND THE KEYSTROKE PATH, which reaches `link-wiring.ts` from the source editor's own update
-      // listener without going through `draw.ts` first — the other entry point the throw could be
-      // reached from. The switched pane is still on the buffer afterwards, which is 5d-ii-c decision 2 (a
-      // keystroke ends no buffer) read on a pane bound through a cross-leg pick.
-      view.dispatch({ changes: { from: view.state.doc.length, insert: ' + 0' } })
-      await until(stateIdle, 'the source recompile to settle')
-      expect(titleOf('tm-0')?.dataset.binding).toBe(buffer)
-      expect(document.querySelector('[data-leaf="tm-0"] h2')?.textContent).toContain('copy · not linked')
-      expect(termOf('tm-0')).toBe(termOf('lambda-0'))
-      expect(errors).toEqual([])
-    } finally {
-      window.removeEventListener('error', onError)
-    }
   })
 })

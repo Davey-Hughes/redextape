@@ -1,6 +1,8 @@
 import { EditorView } from '@codemirror/view'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Parser } from 'web-tree-sitter'
+import tmHighlights from '../../../grammars/tree-sitter-redextape-tm/queries/highlights.scm?raw'
+import tmWasmUrl from '../../../grammars/tree-sitter-redextape-tm/tree-sitter-redextape-tm.wasm?url'
 import { classMapFrom, createGrammarRegistry, FIRST_SCREEN_UNITS, treeSitterColour } from '../../src/colour'
 import { machine } from '../node/tm-text-fixture'
 import { until } from './harness'
@@ -13,10 +15,8 @@ import { until } from './harness'
  * slice is timed by `performance.now`, its continuation waits on a browser timer, and the recompute the plugin asks
  * for when the tree lands goes through a mounted `EditorView` to the DOM a user reads.
  *
- * **ONE EDITOR AND NO APP, SO THAT NOTHING ELSE IS ON THE PAGE'S MAIN THREAD.** A copy of a machine mounts while two
- * workers record, and their replies take turns with the slices: at `CPUQuota=25%` the tree had not landed when both
- * recordings ended, 13 s on. `colour-slices-fork.test.ts` is that page, and it waits for nothing that comes after the
- * mount. Here the parse is the only work there is.
+ * **ONE EDITOR AND NO APP, SO THAT NOTHING ELSE IS ON THE PAGE'S MAIN THREAD.** In the app, the workers that record
+ * post replies that take turns with the slices. Here the parse is the only work there is.
  *
  * **566,779 UNITS, 57 TO 67 ms OF PARSING ON THIS MACHINE AGAINST A SLICE OF 8.** Each case asserts that the parse
  * was still pending when its first slice returned, and the rest of the case rests on that: a runner that parsed this
@@ -86,9 +86,11 @@ describe('a parse that outlasts one slice, in a mounted editor', () => {
   const mounted = async (where: 'start' | 'end'): Promise<{ view: EditorView; first: AtFirstSlice }> => {
     calls.length = 0
     const failures: string[] = []
+    // THE TM GRAMMAR, WHICH THE APP DOES NOT LOAD, for the TM text `machine` writes.
     const registry = createGrammarRegistry({
       onFailure: (id, reason) => failures.push(`${id}: ${reason}`),
       onRuntimeFailure: (reason) => failures.push(reason),
+      sources: { redextape_tm: { wasmUrl: tmWasmUrl, highlights: tmHighlights } },
     })
     let open: () => void = () => {}
     const gate = new Promise<void>((resolve) => {

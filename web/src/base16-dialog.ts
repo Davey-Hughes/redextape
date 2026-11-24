@@ -30,7 +30,7 @@ import { DEFAULT_PALETTE, PALETTE_CHOICE_LABELS } from './skin'
  * the two coincide there; in WebKit, and in Firefox on macOS, a mouse click does not focus a button, and both would
  * leave the focus wherever it was before the menu opened. The item itself would strand it in a closed popover.
  *
- * **A CONTROL THAT CANNOT ACT SAYS WHY** (umbrella §4 rule 4), as *edit a copy* does: the reason as its
+ * **A CONTROL THAT CANNOT ACT SAYS WHY** (umbrella §4 rule 4): the reason as its
  * `aria-description` and in a visible line under the actions.
  */
 

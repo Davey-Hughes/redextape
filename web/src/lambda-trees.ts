@@ -48,15 +48,14 @@ type Entry = {
  */
 export class LambdaTrees {
   #entries = new Map<SessionId, Entry>()
-  #client: (session: SessionId) => TreeRequester | undefined
+  #client: (session: SessionId) => TreeRequester
 
-  constructor(client: (session: SessionId) => TreeRequester | undefined) {
+  constructor(client: (session: SessionId) => TreeRequester) {
     this.#client = client
   }
 
   want(session: SessionId, step: number): TreeFor {
     const client = this.#client(session)
-    if (client === undefined) return { kind: 'none' }
     if (client.awaitingRun) return this.#held(this.#entries.get(session), step)
     let e = this.#entries.get(session)
     if (e === undefined || e.gen !== client.gen) {
@@ -105,10 +104,5 @@ export class LambdaTrees {
    */
   buildOf(session: SessionId): number | null {
     return this.#entries.get(session)?.gen ?? null
-  }
-
-  /** Drop every session `alive` says is gone — a deleted copy's last tree is not worth keeping. */
-  prune(alive: (session: SessionId) => boolean): void {
-    for (const id of [...this.#entries.keys()]) if (!alive(id)) this.#entries.delete(id)
   }
 }

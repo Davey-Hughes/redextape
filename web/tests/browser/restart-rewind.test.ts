@@ -1,13 +1,11 @@
 import type { EditorView } from '@codemirror/view'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { editorOf } from './editor-view-fixture'
+import { EXAMPLES } from '../../src/examples'
 import {
   alphaOf,
   frames,
   historyFills,
-  paneByLeaf,
-  pick,
   recorded,
   SHELL,
   segments,
@@ -17,17 +15,12 @@ import {
   until,
 } from './harness'
 
-/**
- * **A COPY'S EDITOR WAITS 3 S HERE BEFORE IT SENDS AN EDIT, WHERE THE APP WAITS 300 MS**, for
- * `copy-edit-leaving.test.ts`'s reason: the case of ↺ on a copy presses ↺ inside that wait, and a machine short of CPU
- * stretches the gap from the key to the click past the app's. That case asserts its own window, so a wait that ran out
- * first fails it rather than passing.
- */
-vi.mock('../../src/editor-debounce', () => ({ EDITOR_DEBOUNCE_MS: 3000 }))
-
 /** `step-focus-recording.test.ts`'s program: its TM leg stops `budget` again after a "keep recording". */
 const LONG_SRC =
   'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4, 3, 1, 2, 4, 3, 1, 2, 4, 3, 1, 2, 4].map(add1)'
+
+/** The `fact` example, which the CLIF leg builds. */
+const FACT = EXAMPLES.find((e) => e.id === 'fact')?.text ?? ''
 
 /** The hidden-recording spec's example, whose rxm run is longer than one history. */
 const EXAMPLE = 'let mut n = 100000; while n > 0 { n = n - 1; } n'
@@ -401,68 +394,37 @@ describe('↺ back to step 0, in the app', () => {
   }, 90_000)
 
   /**
-   * **AN EDIT STILL IN A COPY'S EDITOR'S DEBOUNCE IS SENT BEFORE ↺ CHOOSES**, so that ↺ sees the generation it claims
-   * and seeks, as during any recompile: a rewind would be replaced by the edit's build, and an edit that does not parse
-   * builds nothing to answer it. The replies are held from before the key, so the copy cannot have answered the edit
-   * by the click, and the line as the click lands, read before ↺'s handler, shows whether the edit was still unsent.
-   * Once the copy has answered it, ↺ seeks again: the worker holds nothing, and the frames stay a generation behind.
-   * **LAST OF THE APP'S CASES**: it leaves the λ view on a copy, where a later `compiled` would not find the program's.
+   * **↺ ON A MACHINE VIEW OF THE PROGRAM RESTARTS IT AND THROWS NOTHING.** Each view is stepped off step 0 before
+   * its ↺, so a ↺ that did nothing would leave it there; what the presses threw is read before where they left the
+   * views, since a ↺ that throws before it seeks leaves its view where it was.
    */
-  it('↺ on a copy’s view whose step 0 was dropped, inside the debounce of an edit that does not parse, sends it and seeks, and seeks once the copy answered', async () => {
-    await compiled(`${LONG_SRC}     `)
-    const pane = paneByLeaf('lambda-0')
-    await pick(pane, 'detach')
-    await until(() => editorOf(pane) !== null && line('lambda-0').startsWith('step '), 'the copy’s editor and frames')
-    await stoppedPast('lambda-0', 0)
-    while (line('lambda-0').includes('history is full')) {
-      const was = at('lambda-0').of
-      await userEvent.click(extendOf('lambda-0'))
-      await until(() => at('lambda-0').of > was && !line('lambda-0').includes('…'), 'the copy’s recording to stop')
+  it('↺ on the program’s TM, rxm and clif views restarts each at step 0 and throws nothing', async () => {
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: FACT } })
+    const toggle = document.querySelector('#views-shown button[data-shows="clif"]') as HTMLButtonElement
+    await userEvent.click(toggle)
+    const leaves = ['tm-0', 'rxm-0', 'clif-0']
+    const ready = (l: string) => /^step 0 of [\d,]+/.test(line(l)) && !/…|recompiling/.test(line(l))
+    await until(() => leaves.every(ready), 'each machine view at step 0, its first fill over')
+    const thrown: string[] = []
+    const onError = (e: ErrorEvent) => thrown.push(String(e.error ?? e.message))
+    const onRejection = (e: PromiseRejectionEvent) => thrown.push(String(e.reason))
+    addEventListener('error', onError)
+    addEventListener('unhandledrejection', onRejection)
+    const after: Record<string, number> = {}
+    try {
+      for (const leaf of leaves) {
+        await userEvent.click(button(leaf, FORWARD))
+        expect(at(leaf).step, `precondition: ▶ stepped ${leaf}`).toBe(1)
+        await userEvent.click(button(leaf, RESTART))
+        after[leaf] = at(leaf).step
+      }
+    } finally {
+      removeEventListener('error', onError)
+      removeEventListener('unhandledrejection', onRejection)
     }
-    const kept = oldestKept('lambda-0')
-    expect(kept, 'precondition: the copy’s view dropped its step 0').toBeGreaterThan(0)
-    await userEvent.click(button('lambda-0', NEWEST))
-    expect(at('lambda-0').step, 'precondition: the view stands past the oldest kept step').toBeGreaterThan(kept)
-
-    const editor = editorOf(pane) as EditorView
-    editor.dispatch({ selection: { anchor: editor.state.doc.length } })
-    editor.focus()
-    await until(() => editor.hasFocus, 'the copy’s editor to take the focus')
-    held = []
-    await userEvent.keyboard(')')
-    let atClick: string | null = null
-    document.addEventListener('click', () => (atClick = line('lambda-0')), { capture: true, once: true })
-    await userEvent.click(button('lambda-0', RESTART))
-    expect(atClick, 'precondition: the view as the click lands, its copy not yet sent the edit').not.toContain(
-      '— recompiling',
-    )
-    expect(
-      { step: at('lambda-0').step, recompiling: line('lambda-0').includes('— recompiling') },
-      'the view at once after ↺, the replies held',
-    ).toEqual({ step: kept, recompiling: true })
-
-    release('let through')
-    await until(
-      () => pane.querySelectorAll('.cm-lintRange, .cm-lint-marker').length > 0,
-      'the copy’s editor to mark the parse error',
-    )
-    await until(() => !line('lambda-0').includes('— recompiling'), 'the copy’s answer to the edit')
-    expect(at('lambda-0').step, 'the view once the copy answered the edit').toBe(kept)
-    expect(line('lambda-0'), 'the view once the copy answered the edit').not.toContain('…')
-    const restart = button('lambda-0', RESTART)
-    expect({ disabled: restart.disabled, ariaDisabled: restart.ariaDisabled }, '↺ is live').toEqual({
-      disabled: false,
-      ariaDisabled: null,
-    })
-
-    await userEvent.click(button('lambda-0', NEWEST))
-    expect(at('lambda-0').step, 'precondition: the view stands past the oldest kept step again').toBeGreaterThan(kept)
-    held = []
-    await userEvent.click(restart)
-    expect(
-      { step: at('lambda-0').step, recording: line('lambda-0').includes('…') },
-      'the view at once after ↺ on the copy whose edit did not parse, the replies held',
-    ).toEqual({ step: kept, recording: false })
+    expect(thrown, 'what the presses threw').toEqual([])
+    expect(after, 'each view after its ↺').toEqual({ 'tm-0': 0, 'rxm-0': 0, 'clif-0': 0 })
+    await userEvent.click(toggle)
   }, 90_000)
 
   it('lets the app take back a listener it gave a session worker, while replies are held and after', async () => {

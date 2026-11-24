@@ -5,14 +5,7 @@ import { createPanel, type Panel } from './panel'
  * The outline's rows, rendered into a panel body — Plan 7 part 3 spec §5.3, and a consumer of the panel
  * primitive in `panel.ts` rather than a mechanism of its own.
  *
- * **WHAT EACH LANGUAGE ANSWERS:**
- *
- * | language | symbols |
- * |---|---|
- * | `redextape` | its `fn` definitions (kind 12) AND its `let` bindings (kind 13) |
- * | `redextape_tm` | its `state` blocks, kind 5 |
- * | `redextape_rxm` | its labels, kind 12 |
- * | `redextape_lambda` | **none, by design** — a λ term carries no source positions |
+ * **WHAT IT LISTS:** a `redextape` program's `fn` definitions (kind 12) AND its `let` bindings (kind 13).
  *
  * The server answers the hierarchical `DocumentSymbol` shape — that is what `initialize` negotiates,
  * and an entry carries `selectionRange` rather than `location` — and this renders its `children`.

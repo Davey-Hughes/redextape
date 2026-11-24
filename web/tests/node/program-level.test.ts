@@ -2,30 +2,28 @@ import { describe, expect, it } from 'vitest'
 import { arcsOf, chipName, chipsOf, programRows } from '../../src/program-level'
 import { groupStates } from '../../src/state-groups'
 import type { TmProgram } from '../../src/types'
-import { COMPILED, COPY, state } from './tm-machines'
+import { COMPILED, state } from './tm-machines'
 
 const compiled = groupStates(COMPILED)
 const LABELS = COMPILED.labels
 
 /** A row as a word, so a whole layout reads as one line: `L:skip`, `pc3`, `steps:pc1`, `H:runtime`. */
-const shown =
-  (g = compiled) =>
-  (r: ReturnType<typeof programRows>[number]) =>
-    r.kind === 'label'
-      ? `L:${r.name}`
-      : r.kind === 'heading'
-        ? `H:${r.name}`
-        : r.kind === 'steps'
-          ? `steps:${g.groups[r.group]?.name}`
-          : (g.groups[r.group]?.name ?? '?')
+const shown = (r: ReturnType<typeof programRows>[number]) =>
+  r.kind === 'label'
+    ? `L:${r.name}`
+    : r.kind === 'heading'
+      ? `H:${r.name}`
+      : r.kind === 'steps'
+        ? `steps:${compiled.groups[r.group]?.name}`
+        : (compiled.groups[r.group]?.name ?? '?')
 
 describe('the rows', () => {
   it("puts a label above the instruction it names, and leaves the runtime routines to *arcs*' side column", () => {
-    expect(programRows(compiled, LABELS, 'arcs', null).map(shown())).toEqual(['pc0', 'pc1', 'pc2', 'L:f', 'pc3'])
+    expect(programRows(compiled, LABELS, 'arcs', null).map(shown)).toEqual(['pc0', 'pc1', 'pc2', 'L:f', 'pc3'])
   })
 
   it('draws the runtime routines as rows under a heading in *chips*', () => {
-    expect(programRows(compiled, LABELS, 'chips', null).map(shown())).toEqual([
+    expect(programRows(compiled, LABELS, 'chips', null).map(shown)).toEqual([
       'pc0',
       'pc1',
       'pc2',
@@ -39,7 +37,7 @@ describe('the rows', () => {
   })
 
   it('opens the current group onto a row of its sub-steps, under it', () => {
-    expect(programRows(compiled, LABELS, 'arcs', 1).map(shown())).toEqual([
+    expect(programRows(compiled, LABELS, 'arcs', 1).map(shown)).toEqual([
       'pc0',
       'pc1',
       'steps:pc1',
@@ -51,12 +49,7 @@ describe('the rows', () => {
 
   it('prints a label one past the last instruction after it, as `print_rxm` does', () => {
     const trailing = [['end', 4]] as const
-    expect(programRows(compiled, trailing, 'arcs', null).map(shown()).at(-1)).toBe('L:end')
-  })
-
-  it('draws every name group as a row, in order, and no labels, without instructions to hang them on', () => {
-    const copy = groupStates(COPY)
-    expect(programRows(copy, [], 'arcs', null).map(shown(copy))).toEqual(copy.groups.map((g) => g.name))
+    expect(programRows(compiled, trailing, 'arcs', null).map(shown).at(-1)).toBe('L:end')
   })
 })
 

@@ -1,52 +1,11 @@
 import type { FieldWidth } from './field-width'
-import { createPanel, type Panel } from './panel'
 import type { Shares } from './panel-stack'
 import type { ClifLoad, Leg, Listing } from './protocol'
-import type { ScratchEditorConfig } from './scratch-editor'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
 import type { ClifDisplay, LambdaDisplay, Speed, TmDisplay } from './workspace'
 
 export type PaneEvents = {
-  /**
-   * The LSP document this pane's editor is, resolved when the editor is built.
-   *
-   * **A THUNK, BECAUSE A SLOT'S BINDING MOVES AND THE DOCUMENT FOLLOWS THE SESSION.** A pane is
-   * constructed once and rebound many times; resolving the URI at construction would pin an
-   * editor built later to whichever buffer the pane happened to show first. `transport.ts` reads
-   * `slot.binding` inside this, the same way `editSink` does.
-   *
-   * Optional for the same reason the two members below it are: a test builds a pane with only the
-   * handlers it drives, and an editor with no document simply has no language features.
-   */
-  lspDocument?(): ScratchEditorConfig['document']
-
-  /**
-   * The colourer this pane's editor takes — `colour.ts`'s `treeSitterColour`, for this pane's language.
-   *
-   * A THUNK FOR `lspDocument`'s REASON, ONE STEP WEAKER. A pane's LEG is fixed by its renderer type, so
-   * the language could in principle be resolved at construction; the thunk is here so both editor
-   * facts are resolved at the same moment, by the same file (`transport.ts` reads `slot.binding.leg`
-   * for each), rather than one of them being pinned a rebind earlier than the other.
-   *
-   * Optional for `lspDocument`'s reason too: a test builds a pane with only the handlers it drives, and
-   * an editor with no colourer is simply uncoloured.
-   */
-  colour?(): ScratchEditorConfig['colour']
-
-  /**
-   * The page's keymap setting, which this pane's editor joins when it is built.
-   *
-   * **A VALUE RATHER THAN A THUNK, WHICH THE TWO ABOVE ARE.** Those resolve facts about a BINDING, and
-   * a slot's binding moves under a pane that was constructed once. There is one keymap for the whole
-   * page: it does not depend on which buffer this pane is showing, and `main.ts` builds it before it
-   * builds the transport, so there is no ordering to defer either.
-   *
-   * Optional for `lspDocument`'s reason: a test builds a pane with only what it drives, and an editor
-   * with no setting keeps CodeMirror's own bindings.
-   */
-  keymap?: ScratchEditorConfig['keymap']
-
   back(): void
   forward(): void
   /** `⏭`: to the newest recorded step, the end of what the worker has recorded — never asking it for more. */
@@ -64,7 +23,7 @@ export type PaneEvents = {
   /**
    * The pane selector picked a `(leg, session)` pair for this pane's slot.
    *
-   * REQUIRED, UNLIKE `detach` AND `linkState` BELOW, and the difference is not stylistic. Those two
+   * REQUIRED, UNLIKE `linkState` AND `linkLambda` BELOW, and the difference is not stylistic. Those two
    * are absent on a pane that genuinely lacks the affordance — the λ pane has no δ-table to click, the
    * TM pane has no λ term — whereas every pane occupies a slot and every slot has a binding
    * (design §3.2b, decision 1). A pane whose rebind did nothing would be a pane whose selector lies.
@@ -73,14 +32,12 @@ export type PaneEvents = {
    * (`view-header.ts`) lists several legs, and reports which pair was picked, not the session half of it.
    *
    * **ONE CONTROL FOR BOTH AXES BECAUSE THE AXES ARE NOT INDEPENDENT (design §3.2).** A session holds
-   * at most one leg per `Leg` — the source session has all three, a λ scratch has only λ — and
-   * `SessionRegistry.legOf` THROWS on a binding naming a leg its session lacks. Two independent
-   * controls (a kind picker beside a session picker) would therefore have to answer "what happens when
-   * you pick TM while bound to a λ-only scratch" with an invented fallback: silently rebind to some
-   * other session, or make the option vanish and reappear as the other control moves. Both are rules a
-   * user has to learn and a reader has to keep in step. One list of pairs — `SessionRegistry.pairs()`,
-   * which enumerates exactly the pairs that provably resolve — makes the invalid combination
-   * unrepresentable instead of merely handled.
+   * at most one leg per `Leg`, and `SessionRegistry.legOf` THROWS on a binding naming a leg its session lacks.
+   * Two independent controls (a kind picker beside a session picker) would therefore have to answer a pick of a leg
+   * the chosen session lacks with an invented fallback: silently rebind to some other session, or make the option
+   * vanish and reappear as the other control moves. One list of pairs — `SessionRegistry.pairs()`, which
+   * enumerates exactly the pairs that provably resolve — makes the invalid combination unrepresentable instead of
+   * merely handled.
    *
    * WHAT A HANDLER MAY DO WITH THE LEG IS NOT THIS TYPE'S BUSINESS, AND THE TWO HANDLERS IN THE APP DO
    * DIFFERENT THINGS WITH IT. `transport.ts`'s takes the session on a same-leg pick and THROWS on any
@@ -92,80 +49,9 @@ export type PaneEvents = {
    */
   rebind(binding: Binding<Leg>): void
   /**
-   * Fork this pane's term into the λ scratchpad — 5d-i design §4.3, at the step the pane is showing.
-   *
-   * OPTIONAL, LIKE `linkState` AND UNLIKE `rebind`: a pane has this handler when it has the affordance
-   * the handler reports. A TM or rxm pane has no term to fork.
-   *
-   * **IT CARRIES A STEP, NOT TEXT.** 5d-iii design §4.1's inputs are the SOURCE session's step-0 term —
-   * the link index's `lambdaText`, which the `compiled` reply carries, not any pane — and the step,
-   * which `History` owns. So the pane reports the one fact it owns, `transport.ts` resolves the rest,
-   * and the pane does not go looking for a term. The view shows only its own step, as a tree or as text,
-   * so there is no second body a fork could be taken from.
-   */
-  detach?: (step: number) => void
-  /**
-   * Where the editor being built sends its edits — 5d-iii design §4.3's second edit gesture, and `detach`'s
-   * counterpart: that one forks a new copy from a view of the program, the sink this returns rebuilds a copy that
-   * already exists. The view calls this once per editor it BUILDS, and hands the sink to the `ScratchEditor` as its
-   * `onEdit`, which its debounce, its `flush` and its `format` call — so it fires on a keystroke that survived the
-   * debounce or was flushed before it, and on the text a format leaves, never on the seed that mounted the editor
-   * (`ScratchEditor#setText`'s `#seeding` guard keeps a seed from reaching it at all).
-   *
-   * **A THUNK THAT RETURNS A SINK, BOUND WHEN IT IS CALLED TO THE COPY THE VIEW SHOWS THEN, AND NOT A HANDLER THAT
-   * READS THE VIEW'S COPY WHEN IT FIRES.** With the second, a view that moved to another copy inside the debounce
-   * would send what was typed into the one it left to the one it moved to. An editor is one copy's for its life,
-   * wherever it is mounted (`ScratchEditorConfig.onEdit`), which is why a view that is handed an editor it did not
-   * build leaves the editor's sink alone. `lspDocument` above is resolved at the same moment, so an editor's
-   * document and its sink are the same copy's.
-   *
-   * OPTIONAL, FOR THE SAME REASON `detach` IS: an editor exists only on a pane whose slot owns a
-   * scratch (5d-iii §4.2), and this file declares the shape without deciding when a pane gets it — that is
-   * `transport.ts`'s wiring, same as `detach` above.
-   */
-  editSink?(): (src: string) => void
-  /**
-   * This pane asks to hold its scratch session's editor — the editor-moves rule (5d-ii-a design §4.3).
-   *
-   * OPTIONAL, FOR `detach`'s REASON: it exists only on a pane whose slot may be bound to a scratch —
-   * every λ, TM and rxm view, since a TM or rxm view showing a copy whose editor another view holds
-   * offers it too (`CopyEditor.#refreshClaim`). IT CARRIES NOTHING, same as `close` below — the pane
-   * knows it was asked; it does not know its own `LeafId` or which session it is bound to.
-   * `pane-host.ts`'s `paneEvents` holds both and is what makes the request into
-   * `custody.claim(session, id)` followed by `applyLayout()`, which is where the actual DOM move happens
-   * (`editor-custody.ts`'s `reconcileEditors`) — this handler only reports the click.
-   *
-   * (`splitRow`/`splitColumn` carry a `PaneChoice`, and the distinction is the one their own doc draws:
-   * what the pane's own menu produced is a fact about the PICK, not about the tree — which the pane
-   * knows nothing of.)
-   */
-  showEditor?: () => void
-  /**
-   * This pane's editor was collapsed or expanded.
-   *
-   * OPTIONAL, BUT NOT THE WAY `detach` AND `showEditor` ARE: `textPanel` is the editor host's own
-   * container and both constructors build it unconditionally, so a pane built with no `collapse`
-   * handler still shows the panel and toggles it — only the report of the gesture goes missing, an
-   * `on.collapse?.(collapsed)` call with nothing on the other end.
-   *
-   * **NOT WITHHELD ON A TM PANE.** `TmPane` also `implements EditablePane` and builds a `textPanel` (in its
-   * `CopyEditor`, as the rxm view's does) that wraps the editor's host in the pane body exactly like
-   * `LambdaPane`'s, and calls `on.collapse?.(collapsed)` from it. `transport.ts`'s `events` provides this
-   * handler on every leg: left λ-only, every `TmPane` would be built with `on.collapse === undefined`, so a
-   * TM collapse would hide the host but never reach `scratchpad.setCollapsed`, and the buffer would come
-   * back expanded on reload.
-   *
-   * IT REPORTS THE GESTURE AND DOES NOT PERFORM IT. The host is already hidden or shown by the time this
-   * runs — `createPanel`'s own click handler (`panel.ts`) applies the new `hidden`/`aria-expanded` state
-   * before calling `onToggle`. This is the app being told, so it can record the state against the
-   * BUFFER (5d-ii-d §4.7) rather than against the pane the editor happens to be mounted in today.
-   */
-  collapse?: (collapsed: boolean) => void
-  /**
    * One of this view's own panels was opened or closed — Plan 7 part 2 spec §3. `pane-host.ts` records it
-   * per view in the workspace. OPTIONAL for `lspDocument`'s reason: a test builds a pane with only the
-   * handlers it drives, and `pane-host.ts` gives every view this one. The text panel reports through
-   * `collapse` instead, because its state belongs to the copy.
+   * per view in the workspace. OPTIONAL: a test builds a pane with only the handlers it drives, and `pane-host.ts`
+   * gives every view this one.
    */
   panel?: (name: string, open: boolean) => void
   /** A boundary between this view's regions was moved, or put back: every share the view now holds (spec §11.4). */
@@ -197,20 +83,6 @@ export type PaneEvents = {
    * reason: a CLIF view built without it has no switch.
    */
   clifListing?: { current(): Listing; choose(l: Listing): void }
-  /**
-   * Copy this view's PROGRAM, a TM view's machine or an rxm view's listing, into a copy on the view's leg — 5d-iv
-   * design §4.3, Plan 7 part 5 spec §7.
-   *
-   * **NO STEP, WHERE `detach` CARRIES ONE, AND THAT IS WHY IT IS A SECOND MEMBER RATHER THAN A REUSE.**
-   * A λ fork replays the source term to the frame the pane was showing, so that handler reports the
-   * one fact it owns. A program has no step-k text: the seed is its whole text, which the session keeps
-   * (`SessionEntry.programs`), not the pane. This handler needs nothing from the pane, and a `step`
-   * parameter its handler ignored would be a parameter with no reader.
-   *
-   * OPTIONAL, LIKE `detach`, AND BY THE SAME TEST: a pane has this handler when it has the affordance
-   * the handler reports.
-   */
-  detachProgram?(): void
   /** A state row was clicked. Absent on panes that have no table. */
   linkState?: (stateId: number) => void
   /**
@@ -223,7 +95,7 @@ export type PaneEvents = {
   /**
    * This pane's split and close gestures.
    *
-   * OPTIONAL, LIKE `detach` AND UNLIKE `rebind`, and the same test applies: a pane has these handlers
+   * OPTIONAL, LIKE `linkState` AND UNLIKE `rebind`, and the same test applies: a pane has these handlers
    * when it has the affordance. A pane rendered outside a layout tree — which is every pane in
    * `view-title.test.ts` and in `tests/node/sessions.test.ts` — has no tree to split.
    *
@@ -244,50 +116,6 @@ export type PaneEvents = {
   splitRow?: (choice: PaneChoice) => void
   splitColumn?: (choice: PaneChoice) => void
   close?: () => void
-}
-
-/**
- * The **text** panel: a copy's editable text — a λ term or a machine — as a collapsible region (Plan 7
- * part 1, spec §8).
- *
- * THE STATE IS `aria-expanded`, NOT A RELABEL — accessibility items 2 and 15 — and hiding is the panel
- * setting `hidden` on the body, which is the view's own editor host. The views keep no collapse class.
- *
- * SHOWN ONLY WHILE AN EDITOR IS MOUNTED, the "a control that provably cannot work should not be offered"
- * standard `viewMenu` and the title-selector apply: `update(false)` hides the whole panel.
- *
- * **THE STATE IS PERSISTED PER BUFFER, NOT PER PANE**, because the editor MOVES: a collapse remembered
- * against a pane would describe whichever buffer landed there next. `scratch.ts`'s `setCollapsed` records
- * the gesture `onToggle` reports, and `update`'s `initial` is how the record reaches this closure: it is
- * read only on the unavailable → available transition, and every mount the app makes passes the
- * buffer's own recorded flag.
- *
- * **AN UNMOUNT RESETS TO OPEN.** A hidden control has no state left to survive with, so the next mount
- * starts from its own record. The reset lives in `update`, behind its no-op guard: a repeated same-state
- * call is a no-op.
- */
-export function textPanel(
-  body: HTMLElement,
-  onToggle: (collapsed: boolean) => void,
-): { readonly el: HTMLElement; readonly panel: Panel; update(available: boolean, initial?: boolean): void } {
-  const panel = createPanel({ name: 'text', label: 'text', body, onToggle: (open) => onToggle(!open) })
-  panel.el.hidden = true
-  let on = false
-  return {
-    el: panel.el,
-    panel,
-    update(available: boolean, initial = false) {
-      if (available === on) return
-      on = available
-      if (available) {
-        panel.setOpen(!initial)
-        panel.el.hidden = false
-        return
-      }
-      panel.el.hidden = true
-      panel.setOpen(true)
-    },
-  }
 }
 
 /**

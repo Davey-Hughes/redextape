@@ -13,10 +13,11 @@ import {
   colourSpans,
   createGrammarRegistry,
   FIRST_SCREEN_UNITS,
+  type GrammarRegistry,
   overCeiling,
   PARSE_SLICE_MS,
 } from '../../src/colour'
-import { LANGUAGE_IDS, type LanguageId } from '../../src/lsp-protocol'
+import type { LanguageId } from '../../src/lsp-protocol'
 import type { TokenClass } from '../../src/types'
 import { machine } from './tm-text-fixture'
 
@@ -45,7 +46,7 @@ describe('overCeiling', () => {
     expect(overCeiling(COLOUR_CEILING_UNITS + 1)).toBe(true)
   })
 
-  it('has the larger copy ceiling, a TM copy’s, not a number of its own', () => {
+  it('is 6,100,000 code units', () => {
     expect(COLOUR_CEILING_UNITS).toBe(6_100_000)
   })
 })
@@ -451,14 +452,14 @@ describe('the colourer on a document whose parse outlasts one slice', () => {
       ranges: readonly Visible[],
     ): void
     text(): string
-    ceilings: LanguageId[]
+    ceilings: string[]
   }
 
   /** A TM editor over `src` showing `ranges`, with its grammar already arrived and its first update run. */
   const mount = async (src: string, ranges: readonly Visible[]): Promise<Mounted> => {
     let reads = 0
     let dispatches = 0
-    const ceilings: LanguageId[] = []
+    const ceilings: string[] = []
     const view = {
       state: EditorState.create({ doc: src }),
       visibleRanges: ranges,
@@ -889,10 +890,20 @@ describe('the grammar registry when something does not load', () => {
   const initRuntime = (): Promise<void> =>
     Parser.init({ locateFile: () => repoFile('../../node_modules/web-tree-sitter/web-tree-sitter.wasm') })
 
+  /** The four grammars the repository ships, each under its language id. */
+  const GRAMMARS = {
+    redextape: 'tree-sitter-redextape',
+    redextape_lambda: 'tree-sitter-redextape-lambda',
+    redextape_tm: 'tree-sitter-redextape-tm',
+    redextape_rxm: 'tree-sitter-redextape-rxm',
+  } as const
+  type GrammarId = keyof typeof GRAMMARS
+  const sourceOf = (id: GrammarId) => ({ wasmUrl: wasmOf(GRAMMARS[id]), highlights: highlightsOf(GRAMMARS[id]) })
+
   /** Whether an editor of `languageId` over `src` paints anything, driven through the real plugin. */
-  const painted = async (
-    registry: { load: (id: LanguageId) => Promise<{ language: Language; query: Query } | null> },
-    languageId: LanguageId,
+  const painted = async <K extends string>(
+    registry: GrammarRegistry<K>,
+    languageId: K,
     src: string,
     classes: Map<string, Map<string, string>>,
   ): Promise<number> => {
@@ -914,10 +925,17 @@ describe('the grammar registry when something does not load', () => {
     return plugin.decorations.size
   }
 
+  it('takes no registry over keys that are not the app’s without their sources, by its type', () => {
+    const callbacks = { onFailure: () => undefined, onRuntimeFailure: () => undefined }
+    // @ts-expect-error — the app's table has none of these keys, so a registry over them is given each one's grammar.
+    const unsourced = () => createGrammarRegistry<'other'>(callbacks)
+    expect(unsourced).toBeTypeOf('function')
+  })
+
   it('leaves one broken grammar uncoloured, reports it once, and colours the others anyway', async () => {
-    const failures: [LanguageId, string][] = []
+    const failures: [GrammarId, string][] = []
     const runtimeFailures: string[] = []
-    const registry = createGrammarRegistry({
+    const registry = createGrammarRegistry<'redextape' | 'redextape_lambda'>({
       onFailure: (id, reason) => failures.push([id, reason]),
       onRuntimeFailure: (reason) => runtimeFailures.push(reason),
       initRuntime,
@@ -928,10 +946,7 @@ describe('the grammar registry when something does not load', () => {
           wasmUrl: repoFile('../../../grammars/tree-sitter-redextape-lambda/no-such-grammar.wasm'),
           highlights: highlightsOf('tree-sitter-redextape-lambda'),
         },
-        redextape: {
-          wasmUrl: wasmOf('tree-sitter-redextape'),
-          highlights: highlightsOf('tree-sitter-redextape'),
-        },
+        redextape: sourceOf('redextape'),
       },
     })
     const classes = classMapFrom([
@@ -958,9 +973,9 @@ describe('the grammar registry when something does not load', () => {
   })
 
   it('reports a failed shared runtime once for the page, not once per language', async () => {
-    const failures: [LanguageId, string][] = []
+    const failures: [GrammarId, string][] = []
     const runtimeFailures: string[] = []
-    const registry = createGrammarRegistry({
+    const registry = createGrammarRegistry<GrammarId>({
       onFailure: (id, reason) => failures.push([id, reason]),
       onRuntimeFailure: (reason) => runtimeFailures.push(reason),
       // **THE SEAM IS OVER THE WHOLE STEP RATHER THAN OVER `locateFile`, AND IT HAS TO BE.**
@@ -968,9 +983,16 @@ describe('the grammar registry when something does not load', () => {
       // have initialised the runtime in this process, no `locateFile` can make it fail again. See
       // `createGrammarRegistry`'s `initRuntime`.
       initRuntime: () => Promise.reject(new Error('the runtime .wasm did not fetch')),
+      sources: {
+        redextape: sourceOf('redextape'),
+        redextape_lambda: sourceOf('redextape_lambda'),
+        redextape_tm: sourceOf('redextape_tm'),
+        redextape_rxm: sourceOf('redextape_rxm'),
+      },
     })
 
-    const loaded = await Promise.all(LANGUAGE_IDS.map((id) => registry.load(id)))
+    const ids = Object.keys(GRAMMARS) as GrammarId[]
+    const loaded = await Promise.all(ids.map((id) => registry.load(id)))
 
     expect(loaded, 'every language goes uncoloured, which is the honest outcome').toEqual([null, null, null, null])
     // **THE DEFECT FIRST, BECAUSE A SEQUENCE PROVES ONLY ITS PREFIX.** Four `onFailure` calls would report

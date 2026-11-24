@@ -62,13 +62,6 @@ export function createCompile(deps: {
   const schedule = (src: string) => {
     clearTimeout(timer)
     results.dataset.state = 'running'
-    // **A SOURCE KEYSTROKE ENDS NO BUFFER — 5d-ii-c design §4.3.** A scratch buffer is an independent λ
-    // session the user edits, which nothing but an explicit retire ends.
-    //
-    // **THE HEADER LIST, NOT A RECOMPILE, IS THE APP'S POISON RECOVERY — 5d-ii-c design §3.4 and §4.4.** Its
-    // delete is the escape, reachable whether or not a pane still shows the buffer, which is why §4.4
-    // put it in the header rather than in pane chrome.
-    //
     // A compile repaints the panes: `client.supersede()` below notifies the pool's `onSupersede`
     // callback, which is `() => draw()`, so a claimed generation reaches the panes synchronously on
     // every dispatch. The source's own frames arrive through `replies.ts` and drive their own.
@@ -92,7 +85,7 @@ export function createCompile(deps: {
       clifSync.ran(clif)
       // **THE PROGRAM IS STORED WHERE IT IS POSTED — Plan 7 part 6a spec §4.3.** A keystroke, an encoding or width change, a
       // picked example and the start-up program all arrive here, so this is the one write site and there is one write
-      // per pause. A keystroke in the last `DEBOUNCE_MS` before the tab closes is not stored, as a copy's is not.
+      // per pause. A keystroke in the last `DEBOUNCE_MS` before the tab closes is not stored.
       persist(src, encoding, width)
     }, DEBOUNCE_MS)
   }

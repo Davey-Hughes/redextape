@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
 import { HEADER_ORDER, KIND_WORD } from '../../src/layout'
 import { DAY, EMBER, legacyLayout } from '../node/base16-fixtures'
-import { base16Dialog, SHELL, stateIdle, until } from './harness'
+import { base16Dialog, SHELL, selectedTab, stageTab, stateIdle, tabLeaves, until } from './harness'
 
 /**
  * **EVERY CONTROL, AS A CLASS** — umbrella §8.1, Plan 7 part 2 spec §14. Rather than one test per control,
@@ -22,7 +22,7 @@ import { base16Dialog, SHELL, stateIdle, until } from './harness'
  * **NOT AN APPROXIMATION OF MY OWN.** One that read `aria-label`, then a wrapping `<label>`, then
  * `textContent`, then `title` would pass two things a reader would actually hear as wrong, because it
  * compares text content with itself: an appearance toggle named `◐system` (the glyph a text node beside
- * the word), and a menu item whose name runs two spans together as `edit a copythe whole machine`. A
+ * the word), and a menu item whose label and second line, two spans, run together into one word. A
  * name computed independently of the visible-label check below is what makes the comparison a check
  * rather than a tautology.
  */
@@ -71,7 +71,7 @@ function visibleLabel(el: HTMLElement): string {
   for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove()
   // **CHILD BY CHILD, JOINED WITH A SPACE, BECAUSE THAT IS WHAT THE NAME RULES DO — CONDITIONALLY.** A
   // control whose label and its second line are two spans has no whitespace between them in the markup,
-  // so `textContent` runs them together (`edit a copythe whole machine`). The name computation inserts a
+  // so `textContent` runs them together into one word. The name computation inserts a
   // space between element children that are not `display: inline` — which is a rule about LAYOUT, so a
   // label side that depended on it would be as fragile as the name side. This side always joins; the
   // controls that would otherwise rely on the display rule write their name down with `aria-label`.
@@ -95,10 +95,9 @@ const isGlyph = (s: string) => !/[\p{L}\p{N}]/u.test(s)
  * **THE CHECK IS BOUNDED TO `\p{So}` AND `\p{Sm}`, AND NAMING WHAT THAT EXCLUDES IS THE POINT OF THIS
  * PARAGRAPH.** Those two are Unicode's symbol-other and symbol-math categories; `·` (U+00B7, `Po`) and
  * `—` (U+2014, `Pd`) are PUNCTUATION and pass straight through. Deliberately, because this app produces
- * both on purpose and in quantity — `λ · copy 1` from `view-header.ts`'s `pairLabel`, `resume λ copy 1
- * — restarts at step 0` from `buffer-list.ts`, `reset preset — restores the default views` from the
- * markup — where they separate clauses a reader runs together rather than standing in for a word. So a
- * green run here says no SYMBOL reached a name. It says nothing about punctuation, and widening the
+ * both on purpose and in quantity — `λ · program` from `view-header.ts`'s `pairLabel`, `reset preset — restores
+ * the default views` from the markup — where they separate clauses a reader runs together rather than standing in
+ * for a word. So a green run here says no SYMBOL reached a name. It says nothing about punctuation, and widening the
  * class to catch `·` would fail on names the design asked for rather than on a defect.
  *
  * **`=` IS THE SECOND EXCEPTION, AND IT IS PROGRAM TEXT (Plan 7 part 6a spec §6).** An example in `examples ▾`
@@ -115,11 +114,10 @@ const straySymbol = (s: string) => /[\p{So}\p{Sm}]/u.test(s.replaceAll('+', '').
  * outside a modal inert, so every control there would fail the focus check below for that reason alone; and a
  * control inside a CLOSED dialog is as unreachable as one inside a closed popover.
  *
- * **`closest('[hidden]')`, NOT `el.hidden` — the difference is a whole panel.** A collapsed or unmounted
- * panel hides its own element (`pane-chrome.ts`'s `textPanel` hides the panel until an editor is
- * mounted), and its toggle inside it reads `hidden === false` while being unreachable and unseen. A
- * filter that asked the button would pass it; asking whether anything above it is hidden is what makes
- * the reachability check below mean what it says.
+ * **`closest('[hidden]')`, NOT `el.hidden` — the difference is a whole region.** A collapsed panel hides its body, and
+ * a control in that body reads `hidden === false` while being unreachable and unseen; so does one under any other
+ * hidden ancestor, such as a `machine-row.ts` region whose panel is in the row. A filter that asked the button would
+ * pass it; asking whether anything above it is hidden is what makes the reachability check below mean what it says.
  */
 function controls(): HTMLElement[] {
   const scope: ParentNode = document.querySelector('dialog:modal') ?? document
@@ -152,10 +150,8 @@ function check(where: string): HTMLElement[] {
     if (el.matches(':disabled')) {
       // **A DISABLED CONTROL IS UNREACHABLE ON PURPOSE, SO IT IS NOT HELD TO REACHABILITY.** The
       // transport buttons are disabled whenever their leg has no history to walk, which is the project's
-      // own rule; *edit a copy* over `MAX_FORK_RULES` is the one the umbrella's rule 4 is about, and
-      // `view-menu.test.ts` pins that it states its reason. What this gate still holds a disabled
-      // control to is its NAME, asserted above — a control a reader cannot act on is still a control
-      // they will hear.
+      // own rule. What this gate still holds a disabled control to is its NAME, asserted above — a control a
+      // reader cannot act on is still a control they will hear.
     } else if (el.tabIndex === -1 && el.closest('[role="row"]') !== null) {
       // **A CONTROL OUT OF THE TAB ORDER IN A GRID'S ROW IS NEVER FOCUSED BY A USER, SO IT IS HELD TO ITS NAME
       // ALONE.** The grid is its level's one tab stop, a mousedown on its rows is cancelled (`VirtualGrid`), and
@@ -175,21 +171,15 @@ beforeAll(async () => {
   const view: EditorView = await (await import('../../src/main')).ready
   view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
   await until(stateIdle, 'the first compile')
-  // A copy, so the copies menu has rows and a view shows a copy's controls.
-  document.querySelector<HTMLButtonElement>('[data-leaf="lambda-0"] button.detach')?.click()
-  await until(
-    () => (document.querySelector('[data-leaf="lambda-0"] .view-title')?.textContent ?? '').includes('copy'),
-    'the copy',
-  )
 })
 
 /**
  * The four workspace states spec §14 item 5 names: the three presets, and one *custom* combination.
  *
  * **`views` IS WHAT CHANGES THE SELECTORS**, not `steps` or `readout`: in Stage one view is on the page,
- * so the per-view cases are driven from whichever view the stage is showing rather than from every view on
- * the page. The `custom` row is Explorer with one switch moved, and it is deliberately the switch that
- * changes the page most — a `custom` that looked like Explorer would walk the same controls twice.
+ * so the per-view cases select each tab in turn and drive the view it shows (`eachView`). The `custom` row is
+ * Explorer with one switch moved, and it is deliberately the switch that changes the page most — a `custom` that
+ * looked like Explorer would walk the same controls twice.
  */
 const STATES = [
   { name: 'Explorer', picks: ['[data-preset="explorer"]'], tiled: true },
@@ -208,21 +198,40 @@ function enter(picks: readonly string[]): void {
 }
 
 /**
- * The leaves a per-view case can be driven from in this state: tiled, every view on the page but the source's; in the
- * stage, the one it shows.
+ * The leaves a per-view case is driven from in this state: every view but the source's, read off the page when tiled
+ * and off the tabs in the stage, which puts one view on the page at a time.
  *
  * **READ OFF THE PAGE, NOT LISTED**: a list of the views there were is a list that misses the next one, and the gate
  * would stay green while walking none of its controls. Every view host is a `.pane` with its leaf id; the source's is
  * the one leaf with no title menu to open.
  */
 function viewLeaves(tiled: boolean): string[] {
+  const leaves = tiled
+    ? [...document.querySelectorAll<HTMLElement>('.pane[data-leaf]')].map((host) => host.dataset.leaf ?? '')
+    : tabLeaves()
+  return leaves.filter((leaf) => leaf !== '' && leaf !== 'source')
+}
+
+/**
+ * Hand each of `viewLeaves` to `walk` with its view on the page, in the stage by selecting its tab, then the one that
+ * was. **EVERY TAB, NOT THE SHOWN ONE**: a stage view whose menu holds nothing has no `⋯`, so a walk of the shown tab
+ * alone could walk nothing.
+ */
+function eachView(tiled: boolean, walk: (leaf: string) => void): void {
+  const leaves = viewLeaves(tiled)
   if (tiled) {
-    return [...document.querySelectorAll<HTMLElement>('.pane[data-leaf]')]
-      .map((host) => host.dataset.leaf ?? '')
-      .filter((leaf) => leaf !== '' && leaf !== 'source')
+    for (const leaf of leaves) walk(leaf)
+    return
   }
-  const shown = document.querySelector<HTMLElement>('#views [role="tab"][aria-selected="true"]')
-  return shown?.dataset.leaf === undefined ? [] : [shown.dataset.leaf]
+  const shown = selectedTab()
+  try {
+    for (const leaf of leaves) {
+      stageTab(leaf).click()
+      walk(leaf)
+    }
+  } finally {
+    if (shown !== undefined) stageTab(shown).click()
+  }
 }
 
 describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
@@ -239,9 +248,7 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
    */
   it('with each header menu open', () => {
     const openers = [...document.querySelectorAll<HTMLButtonElement>('header.bar button[aria-controls]')]
-    expect(openers.map((b) => b.id)).toEqual(
-      expect.arrayContaining(['workspace', 'buffers', 'examples', 'share', 'settings']),
-    )
+    expect(openers.map((b) => b.id)).toEqual(expect.arrayContaining(['workspace', 'examples', 'share', 'settings']))
     const walked: string[] = []
     let inWorkspaceMenu: HTMLElement[] = []
     for (const button of openers) {
@@ -270,9 +277,10 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
   it("with every view's title and ⋯ menu open", () => {
     const leaves = viewLeaves(tiled)
     expect(leaves.length, `${name}: no view to walk`).toBeGreaterThan(0)
-    // THE WALK REACHES EVERY KIND OF VIEW THE FOUR-VIEW PAGE HAS: a tiled state shows all of them, the rxm view too.
-    if (tiled) expect(leaves, `${name}: the views walked`).toEqual(['lambda-0', 'rxm-0', 'tm-0'])
-    for (const leaf of leaves) {
+    // THE WALK REACHES EVERY KIND OF VIEW THE FOUR-VIEW PAGE HAS, the rxm view too, in tiles or by the stage's tabs.
+    expect(leaves, `${name}: the views walked`).toEqual(['lambda-0', 'rxm-0', 'tm-0'])
+    let opened = 0
+    eachView(tiled, (leaf) => {
       for (const sel of [`[data-leaf="${leaf}"] button.view-title`, `[data-leaf="${leaf}"] button.view-more`]) {
         const button = document.querySelector<HTMLButtonElement>(sel)
         // A VIEW WITH ONE PAIR HAS A PLAIN-TEXT TITLE AND NO BUTTON (spec §7), and a view whose menu
@@ -280,11 +288,13 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
         // missing control is skipped rather than failed.
         if (button === null) continue
         button.click()
+        opened += 1
         check(`${name}: ${sel}`)
         const menu = document.getElementById(button.getAttribute('aria-controls') ?? '')
         if (menu?.matches(':popover-open')) menu.hidePopover()
       }
-    }
+    })
+    expect(opened, `${name}: no view had a title menu or a ⋯ to open`).toBeGreaterThan(0)
   })
 
   /**
@@ -298,12 +308,18 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
    * the vacuous-negative failure spec §12 names for renames, arriving here instead.
    */
   it('with a split submenu open, where splits apply', () => {
-    for (const leaf of viewLeaves(tiled)) {
+    const bare: string[] = []
+    eachView(tiled, (leaf) => {
       const more = document.querySelector<HTMLButtonElement>(`[data-leaf="${leaf}"] button.view-more`)
       // **THE MENU'S OWN EXISTENCE IS ASSERTED, NOT OPTIONAL-CHAINED.** `viewMenu` removes `⋯` entirely
       // when nothing applies, so `more?.click()` on a null would open nothing and the `toBeNull()` below
       // would pass having proved only that a menu nobody opened contains no split items — the vacuous
-      // negative this case's own doc claims to prevent.
+      // negative this case's own doc claims to prevent. **BUT ON THE STAGE A VIEW WHOSE MENU HOLDS NOTHING HAS NONE**,
+      // as no split or close applies there: the TM and rxm views', which are named after the walk, not skipped.
+      if (!tiled && more === null) {
+        bare.push(leaf)
+        return
+      }
       expect(more, `${name}: ${leaf} has no ⋯ menu to open`).not.toBeNull()
       more?.click()
       expect(
@@ -324,52 +340,37 @@ describe.each(STATES)('every control in $name', ({ name, picks, tiled }) => {
       }
       const menu = document.getElementById(more?.getAttribute('aria-controls') ?? '')
       if (menu?.matches(':popover-open')) menu.hidePopover()
-    }
+    })
+    // ONLY THESE HAD NO `⋯` ON THE STAGE, so every other view walked went through the stage branch above.
+    if (!tiled) expect(bare, `${name}: the views with no ⋯ on the stage`).toEqual(['rxm-0', 'tm-0'])
   })
 })
 
 /**
- * **THE COPIES MENU'S OWN STATES STAY IN EXPLORER ALONE, AND THAT IS A DECISION.** What these two cases
- * exercise — a notice's *undo*, a paused copy's *resume* — is identical in all four workspace states:
- * the copies menu is an app-header popover that no switch touches. They also MUTATE the shared page
- * (delete then undo, pause then resume), so running them four times would be four rounds of state churn
- * for one signal. `check()` itself is state-agnostic; it enumerates whatever the page holds.
+ * **A NOTICE'S UNDO STAYS IN EXPLORER ALONE, AND THAT IS A DECISION.** The notice line is the app header's, which no
+ * switch touches, so the case is identical in all four workspace states; it also MUTATES the shared page (an example
+ * opened, then put back), so running it four times would be four rounds of state churn for one signal. `check()`
+ * itself is state-agnostic; it enumerates whatever the page holds.
  */
-describe('every control in Explorer, with the copies menu in each of its states', () => {
+describe('every control in Explorer, with a notice offering undo', () => {
   /**
    * **A NOTICE'S ACTION BUTTON IS A CONTROL, AND ONLY THIS CASE REACHES IT.** Every other case here runs against
-   * a page whose notices carry no action, so `notice.ts`'s `button.notice-action` — here the *undo* a delete
-   * offers, a control on the page only while its notice lasts — is name-checked and focus-checked here alone. A
-   * delete puts one on screen; the copies menu is left open afterwards by `handleDelete`, which is its own rule
-   * (Plan 7 part 2 spec §11) and means this pass also sees a copies menu with one row fewer.
+   * a page whose notices carry no action, so `notice.ts`'s `button.notice-action` — here the *undo* an example's
+   * pick offers, a control on the page only while its notice lasts — is name-checked and focus-checked here alone.
    */
   it('on the page as it stands, with a notice offering undo', () => {
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="delete "]')?.click()
+    document.querySelector<HTMLButtonElement>('#examples')?.click()
+    document.querySelector<HTMLButtonElement>('#examples-menu button[data-example="arithmetic"]')?.click()
     const action = document.querySelector<HTMLButtonElement>('#notice button.notice-action')
-    expect(action, 'the delete offered no undo to check').not.toBeNull()
+    expect(action, 'the pick offered no undo to check').not.toBeNull()
     expect(nameOf(action as HTMLElement), 'the undo control is unnamed').toBe('undo')
     check('page with an undo notice')
     action?.click()
   })
-
-  /**
-   * **A PAUSED COPY'S ROW OFFERS A DIFFERENT CONTROL**, and the pass above only ever sees a running one:
-   * `resume λ copy 1 — restarts at step 0` is never name-checked otherwise.
-   */
-  it('with a paused copy in the copies menu', () => {
-    document.querySelector<HTMLButtonElement>('#buffers')?.click()
-    document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="pause "]')?.click()
-    expect(document.querySelector('.buffer-list button[aria-label^="resume "]')).not.toBeNull()
-    check('#buffers with a paused copy')
-    document.querySelector<HTMLButtonElement>('.buffer-list button[aria-label^="resume "]')?.click()
-    const menu = document.querySelector<HTMLElement>('.buffer-list')
-    if (menu?.matches(':popover-open')) menu.hidePopover()
-  })
 })
 
 /**
- * **THE IMPORT DIALOG, IN EXPLORER ALONE**, for the copies menu's reason above: it is a modal no workspace switch
+ * **THE IMPORT DIALOG, IN EXPLORER ALONE**, for the notice's reason above: it is a modal no workspace switch
  * touches (Plan 7 part 6b spec §10). It is walked open and empty, where both applies are disabled with a reason;
  * after a failing scheme's check with its details open, where `apply adjusted` can act; and with both halves stored,
  * where each `remove` in the now line is named by its half. While it is open the walk is the dialog's alone, and this

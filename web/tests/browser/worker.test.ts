@@ -4,22 +4,10 @@ import type { CopyLeg, FramesReply, Leg, LegFrame, RecordEnd, RunReply, RunReque
 import type { LambdaState } from '../../src/types'
 import { until } from './until'
 
-/** The copy build reply of each leg a copy can hold. */
-const COPY_BUILT: { readonly [K in CopyLeg]: RunReply['kind'] } = {
-  lambda: 'scratch-compiled',
-  rxm: 'rxm-scratch-compiled',
-  tm: 'tm-scratch-compiled',
-}
-
-/**
- * The step-0 frame of `leg` that the build reply among `replies` carried, as a list of none or one: a session's
- * `compiled`, or `leg`'s copy's `*-scratch-compiled`.
- */
+/** The step-0 frame of `leg` that the `compiled` reply among `replies` carried, as a list of none or one. */
 function builtFirst<K extends CopyLeg>(replies: readonly RunReply[], leg: K): LegFrame[K][] {
-  const built = replies.find((r) => r.kind === 'compiled' || r.kind === COPY_BUILT[leg])
-  if (built === undefined) return []
-  const first =
-    built.kind === 'compiled' ? built.first[leg] : 'first' in built ? (built.first as LegFrame[K] | null) : null
+  const built = replies.find((r) => r.kind === 'compiled')
+  const first = built?.kind === 'compiled' ? built.first[leg] : null
   return first === null ? [] : [first]
 }
 
@@ -59,8 +47,7 @@ function askUntil(
 /**
  * Collect EVERY reply for one request. The worker answers many times per request, and a helper that resolved on the
  * first message would silently test only the `compiled` reply. A program's answer ends at its `result`, or at
- * `no-session` for one that did not build; a copy never gets a `result`, so its tests ask `askUntil` for its frames'
- * end instead.
+ * `no-session` for one that did not build.
  */
 function askAll(req: RunRequest, timeoutMs = 30_000): Promise<{ replies: RunReply[]; worker: Worker }> {
   return askUntil(req, (r) => r.kind === 'result' || r.kind === 'no-session', timeoutMs)
@@ -74,6 +61,21 @@ const genOf = (r: RunReply): number | null => ('gen' in r ? r.gen : null)
 const run = (src: string, gen = 1, encoding = 'unary'): RunRequest => ({ kind: 'run', gen, src, encoding, clif: null })
 
 describe('session-worker', () => {
+  it('sends the program’s rxm listing on compiled, and null with no rxm leg', async () => {
+    const { replies, worker } = await askAll(run('let x = 40; x + 2'))
+    worker.terminate()
+    const compiled = replies.find((r) => r.kind === 'compiled')
+    expect(compiled?.kind === 'compiled' && compiled.programs.rxm).toEqual({
+      program: { listing: ['li\tr0, #40', 'mov\tr1, r0', 'li\tr2, #2', 'add\trr, r1, r2', 'halt'], labels: [] },
+    })
+
+    const list = `[${Array.from({ length: 2048 }, (_, i) => i).join(', ')}]`
+    const declined = await askAll(run(list))
+    declined.worker.terminate()
+    const second = declined.replies.find((r) => r.kind === 'compiled')
+    expect(second?.kind === 'compiled' && [second.statuses.rxm.available, second.programs.rxm]).toEqual([false, null])
+  })
+
   it('drives the λ leg to a normal form and decodes the λ and TM legs', async () => {
     const { replies, worker } = await askAll(run('let x = 40; x + 2'))
     worker.terminate()
@@ -333,81 +335,6 @@ describe('session-worker recording', () => {
   })
 })
 
-const recorded = (r: RunReply): boolean =>
-  (r.kind === 'frames' && r.leg === 'rxm' && r.done !== null) || r.kind === 'no-session'
-
-describe('session-worker rxm copies', () => {
-  const FORTY_TWO = 'result Nat\n\n    li\trr, #42\n    halt\n'
-
-  it('sends the program’s rxm as text on compiled, headed by its type, and null with no rxm leg', async () => {
-    const { replies, worker } = await askAll(run('let x = 40; x + 2'))
-    worker.terminate()
-    const compiled = replies.find((r) => r.kind === 'compiled')
-    expect(compiled?.kind === 'compiled' && compiled.programs.rxm?.text).toBe(
-      'result Nat\n\n    li\tr0, #40\n    mov\tr1, r0\n    li\tr2, #2\n    add\trr, r1, r2\n    halt\n',
-    )
-
-    const list = `[${Array.from({ length: 2048 }, (_, i) => i).join(', ')}]`
-    const declined = await askAll(run(list))
-    declined.worker.terminate()
-    const second = declined.replies.find((r) => r.kind === 'compiled')
-    expect(second?.kind === 'compiled' && [second.statuses.rxm.available, second.programs.rxm]).toEqual([false, null])
-  })
-
-  it('builds an rxm copy, answers with its status, listing and value, then records its frames', async () => {
-    const { replies, worker } = await askUntil(
-      { kind: 'scratch', gen: 1, leg: 'rxm', src: FORTY_TWO, step: 0 },
-      recorded,
-    )
-    worker.terminate()
-    const [built, ...rest] = replies
-    expect(built?.kind).toBe('rxm-scratch-compiled')
-    if (built?.kind !== 'rxm-scratch-compiled') return
-    expect(built.rxm).toEqual({ available: true, reason: '', run: 'Running', cap: null, total_steps: 2 })
-    expect(built.rxmProgram).toEqual({ listing: ['li\trr, #42', 'halt'], labels: [] })
-    expect(built.value).toEqual({ Value: { text: '42' } })
-    // STEP 0 ON THE BUILD REPLY, THE CHUNKS FROM STEP 1 (`buildCopy`'s doc).
-    const frames = builtFrames(replies, 'rxm')
-    expect(frames.map((f) => [f.step, f.source_node])).toEqual([
-      [0, null],
-      [1, null],
-      [2, null],
-    ])
-    expect(rest.at(-1)).toMatchObject({ kind: 'frames', leg: 'rxm', done: 'ended' })
-  })
-
-  it('refuses text with a label mistake, and names it', async () => {
-    const { replies, worker } = await askUntil(
-      { kind: 'scratch', gen: 1, leg: 'rxm', src: '\tjmp\tnowhere\n', step: 0 },
-      recorded,
-    )
-    worker.terminate()
-    expect(replies.map((r) => r.kind)).toEqual(['no-session'])
-    expect(replies[0]?.kind === 'no-session' && replies[0].diagnostics.map((d) => d.message)).toEqual([
-      'undefined label `nowhere`',
-    ])
-  })
-
-  it('answers extend on an rxm copy with its frames and its value, where a session gets a result', async () => {
-    const { worker } = await askUntil({ kind: 'scratch', gen: 1, leg: 'rxm', src: FORTY_TWO, step: 0 }, recorded)
-    const replies: RunReply[] = []
-    const done = new Promise<void>((resolve) => {
-      worker.addEventListener('message', (e: MessageEvent<RunReply>) => {
-        replies.push(e.data)
-        if (e.data.kind === 'rxm-value') resolve()
-      })
-    })
-    worker.postMessage({ kind: 'extend', gen: 1, leg: 'rxm', epoch: 0 })
-    await done
-    worker.terminate()
-    expect(replies.map((r) => [r.kind, 'leg' in r ? r.leg : null])).toEqual([
-      ['frames', 'rxm'],
-      ['rxm-value', null],
-    ])
-    expect(replies.at(-1)).toEqual({ kind: 'rxm-value', gen: 1, value: { Value: { text: '42' } } })
-  })
-})
-
 /** `step-focus-recording.test.ts`'s program of that name: its TM leg stops `budget` twice before it ends. */
 const LONG_SRC =
   'fn map(xs, f) { if is_empty(xs) { nil } else { cons(f(head(xs)), map(tail(xs), f)) } } fn add1(x) { x + 1 } [3, 1, 2, 4, 3, 1, 2, 4, 3, 1, 2, 4, 3, 1, 2, 4].map(add1)'
@@ -471,8 +398,8 @@ const stopped = (replies: readonly RunReply[], leg: Leg, epoch: number): boolean
 
 /**
  * `leg`'s frames under `epoch` up to its first stop, and how that stop ended: a fill. **A BUILD'S FILL STARTS WITH THE
- * STEP-0 FRAME ITS BUILD REPLY CARRIED**, a session's `compiled` or a copy's `*-scratch-compiled`, its chunks recording
- * on from step 1; a rewind's chunks carry their step 0 themselves.
+ * STEP-0 FRAME ITS `compiled` REPLY CARRIED**, its chunks recording on from step 1; a rewind's chunks carry their step
+ * 0 themselves.
  */
 const fill = (
   replies: readonly RunReply[],
@@ -509,41 +436,6 @@ describe('session-worker rewind', () => {
       }
     } finally {
       w.worker.terminate()
-    }
-  })
-
-  it('rewinds a λ, a TM and an rxm copy, and each records what its first fill did', async () => {
-    const source = watch()
-    try {
-      source.post(run('let x = 40; x + 2'))
-      await source.settle(() => source.results().length === 1, 'the run’s result')
-    } finally {
-      source.worker.terminate()
-    }
-    const compiled = source.replies.find((r) => r.kind === 'compiled')
-    if (compiled?.kind !== 'compiled') throw new Error('the run sent no `compiled`')
-    const step0 = fill(source.replies, 'lambda', 0).frames[0] as LambdaState
-    // THE WHOLE TERM, NOT A CUT ONE: a frame's text is cut at `FRAME_BYTES`, and a cut text is no λ text to fork.
-    const [tmSrc, rxmSrc] = [compiled.programs.tm?.text ?? null, compiled.programs.rxm?.text ?? null]
-    expect([step0.cut, tmSrc === null, rxmSrc === null]).toEqual([null, false, false])
-    const builds: [CopyLeg, RunRequest][] = [
-      ['lambda', { kind: 'scratch', gen: 1, leg: 'lambda', src: step0.text, step: 0 }],
-      ['tm', { kind: 'scratch', gen: 1, leg: 'tm', src: tmSrc ?? '', step: 0 }],
-      ['rxm', { kind: 'scratch', gen: 1, leg: 'rxm', src: rxmSrc ?? '', step: 0 }],
-    ]
-    for (const [leg, build] of builds) {
-      const w = watch()
-      try {
-        w.post(build)
-        await w.settle(() => stopped(w.replies, leg, 0), `the ${leg} copy’s first fill to stop`)
-        w.post({ kind: 'rewind', gen: 1, leg, epoch: 1 })
-        await w.settle(() => stopped(w.replies, leg, 1), `the ${leg} copy’s rewound fill to stop`)
-        const first = fill(w.replies, leg, 0)
-        expect(first.frames.length, `the ${leg} copy’s first fill`).toBeGreaterThan(1)
-        expect(fill(w.replies, leg, 1), `the ${leg} copy’s rewound fill`).toEqual(first)
-      } finally {
-        w.worker.terminate()
-      }
     }
   })
 

@@ -52,10 +52,6 @@
           menu holds them there, in its <strong>show</strong> row.
         </li>
         <li>
-          A view's <strong>⋯</strong> menu has <strong>edit a copy</strong>: the term, the machine or the rxm program as
-          text you can change and run on its own. <strong>copies ▾</strong> lists them.
-        </li>
-        <li>
           <strong>share</strong> makes a link to the program, the views and where each one stands; the workspace
           menu (<strong>Explorer ▾</strong> at first) switches between the Explorer, Debugger and Stage presets; and
           <strong>settings</strong> holds the style, palette, appearance and keymap choices, and whether to format when
@@ -63,28 +59,29 @@
         </li>
       </ol>
 
-      <h2>Keys in the editors</h2>
+      <h2>Keys in the source editor</h2>
       <table id="editor-keys">
         <thead>
           <tr><th scope="col">Key</th><th scope="col">Does</th><th scope="col">Where</th></tr>
         </thead>
         <tbody>
-          <tr data-key="F12"><td><kbd>F12</kbd></td><td>go to the definition of the name at the caret</td><td>the source, and machine and rxm copies</td></tr>
-          <tr data-key="Shift-F12"><td><kbd>Shift</kbd>+<kbd>F12</kbd></td><td>go to the next reference to it</td><td>the source, and machine and rxm copies</td></tr>
-          <tr data-key="F2"><td><kbd>F2</kbd></td><td>show what the editor knows about the name at the caret</td><td>the source, and machine and rxm copies</td></tr>
+          <tr data-key="F12"><td><kbd>F12</kbd></td><td>go to the definition of the name at the caret</td><td>the source editor</td></tr>
+          <tr data-key="Shift-F12"><td><kbd>Shift</kbd>+<kbd>F12</kbd></td><td>go to the next reference to it</td><td>the source editor</td></tr>
+          <tr data-key="F2"><td><kbd>F2</kbd></td><td>show what the editor knows about the name at the caret</td><td>the source editor</td></tr>
           <tr data-key="Mod-'"><td><kbd>Ctrl</kbd>+<kbd>'</kbd> (<kbd>⌘</kbd>+<kbd>'</kbd> on a Mac)</td><td>link the caret's position to the other views</td><td>the source editor</td></tr>
         </tbody>
       </table>
       <p>
-        A λ copy's editor has no definitions or references to go to, so these three do nothing there. Everything else
-        is the editor's default keymap, or vim's when <strong>settings</strong> sets the keymap to vim.
+        Every other key does what the editor's default keymap does, or vim's when <strong>settings</strong> sets the
+        keymap to vim.
       </p>
 
       <h2>View keys</h2>
       <p id="view-keys-prefix">
-        Press <kbd>Ctrl</kbd>+<kbd>.</kbd> and then one of these keys, from anywhere on the page, an editor included.
-        <kbd>Ctrl</kbd> may stay held for the second key or not. The key after the prefix acts once; any other key is
-        typed as usual, and <kbd>Esc</kbd>, or <kbd>Ctrl</kbd>+<kbd>.</kbd> again, leaves without doing anything.
+        Press <kbd>Ctrl</kbd>+<kbd>.</kbd> and then one of these keys, from anywhere on the page, the source editor
+        included. <kbd>Ctrl</kbd> may stay held for the second key or not. The key after the prefix acts once; any
+        other key is typed as usual, and <kbd>Esc</kbd>, or <kbd>Ctrl</kbd>+<kbd>.</kbd> again, leaves without doing
+        anything.
       </p>
       <table id="view-keys">
         <thead>
@@ -142,7 +139,7 @@
             </td>
           </tr>
           <tr>
-            <td>any view, outside its editors</td>
+            <td>any view, outside the source editor</td>
             <td>
               <kbd>Esc</kbd> clears the link, as a click on empty space in a view does; with a menu or dialog open it
               closes that instead, and in a TM view's <strong>width</strong> box it first puts back a width typed there

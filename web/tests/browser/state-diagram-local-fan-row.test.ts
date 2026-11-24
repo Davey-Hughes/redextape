@@ -1,28 +1,58 @@
-import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import FACT_12 from '../../src/examples/fact-12.rxt?raw'
-import { diagram, diagramChoice, frames, SHELL, stateIdle, tmPane, tmStatus, until } from './harness'
+import type { TmProgram } from '../../src/types'
+import { controlState, diagram, diagramChoice, frames, until } from './harness'
+import { mountTmFixture } from './tm-fixture'
 
 /**
  * A fan whose middle line runs along its row (`docs/superpowers/specs/2026-11-16-state-diagram-tidy-design.md`, the
  * fans): `fact(12)`'s level under binary in `bmul17.s9.up31`, laid out over 829 px, the 844 px panel less a classic
  * scroll bar's room. Its names are as long as the cap shows whole, so in either engine's font the level is wider than
  * that and its gaps no wider than their labels need, where a row is set furthest apart for the label along it to sit
- * by its own line, the line a reader takes it to belong to. The TM copy starts in that state rather than walking there.
+ * by its own line, the line a reader takes it to belong to. The view is given the states around that state, `LEVEL`,
+ * rather than a run walked there, a walk too long for a test.
  */
 
 const STATE = 'bmul17.s9.up31'
 const level = () => diagram().querySelector('.local-level') as HTMLElement
 const nodes = () => [...diagram().querySelectorAll<HTMLElement>('.local-node')]
 
-/** The TM view's own copy's editor, detached from the program first. */
-async function copyEditor(): Promise<EditorView> {
-  const content = () => tmPane().querySelector<HTMLElement>('.term-editor .cm-content')
-  if (content() === null) tmPane().querySelector<HTMLButtonElement>('button.detach')?.click()
-  await until(() => content() !== null, 'the copy to mount its editor')
-  const { EditorView } = await import('@codemirror/view')
-  return EditorView.findFromDOM(content() as HTMLElement) as EditorView
+/** A rule on the `WORK` tape alone, the second of five: what it reads, how its head moves, the state it goes to. */
+const work = (read: string, move: 'L' | 'R' | 'S', next: number) => ({
+  read: [null, read, null, null, null],
+  write: [null, null, null, null, null],
+  moves: ['S', move, 'S', 'S', 'S'] as ('L' | 'R' | 'S')[],
+  next,
+})
+
+/**
+ * The states within two rules of `STATE` in `fact(12)`'s machine under binary, and their rules among them, as it
+ * compiles: the level is drawn from these alone. In the machine's order, which orders the states of a column. All but
+ * `overflow` are billed to one instruction, which the local level does not draw; `overflow` to none, as the core
+ * builds it.
+ */
+const LEVEL: TmProgram = {
+  states: [
+    ['overflow', []],
+    ['bmul17.s9.up29', [work('0', 'R', 2), work('1', 'R', 2)]],
+    ['bmul17.s9.up30', [work('0', 'R', 3), work('1', 'R', 3)]],
+    [STATE, [work('1', 'S', 0), work('0', 'L', 4)]],
+    ['bmul17.s9.need', [work('0', 'R', 5), work('1', 'R', 6), work('#', 'R', 7)]],
+    ['bmul17.s9.wr0', []],
+    ['bmul17.s9.wr1', []],
+    ['bmul17.s9.zlo', []],
+  ].map(([name, rules]) => ({
+    name: name as string,
+    accept: false,
+    rules: rules as ReturnType<typeof work>[],
+    instr: name === 'overflow' ? null : 0,
+  })),
+  alphabet: ['#', '0', '1', '_'],
+  tapes: 5,
+  width: 32,
+  start: 3,
+  listing: ['bmul17.s9'],
+  labels: [],
 }
 
 type Box = { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number }
@@ -32,27 +62,27 @@ const toBox = (x: number, y: number, b: Box) =>
 
 beforeAll(async () => {
   await page.viewport(1280, 2400)
-  document.body.innerHTML = SHELL
-  const view = await (await import('../../src/main')).ready
-  // THE TM VIEW ALONE IN ITS ROW, as the other local-level files have it.
-  document.querySelector<HTMLButtonElement>('[data-leaf="rxm-0"] button.view-close')?.click()
-  await until(() => document.querySelector('[data-leaf="rxm-0"]') === null, 'the rxm view to close')
-  // PICKED FROM THE MENU, which also sets the binary encoding, whose state names these are.
-  await userEvent.click(document.querySelector('#examples') as HTMLElement)
-  await userEvent.click(document.querySelector('#examples-menu [data-example="fact-12"]') as HTMLElement)
-  await until(() => view.state.doc.toString() === FACT_12 && stateIdle() && tmStatus() !== '', 'fact(12) to compile')
-  tmPane().querySelector<HTMLButtonElement>('[data-panel="rules"] .panel-toggle')?.click()
-  const copy = await copyEditor()
-  const start = /^start .*$/m.exec(copy.state.doc.toString())
-  expect(start).not.toBeNull()
-  const from = start?.index ?? 0
-  copy.dispatch({ changes: { from, to: from + (start?.[0].length ?? 0), insert: `start ${STATE}` } })
-  await until(() => tmStatus().startsWith(`${STATE} `), `the copy to start in ${STATE}`)
+  const { host, pane } = mountTmFixture(LEVEL, ['REG', 'WORK', 'STACK', 'HEAP', 'BOX'], { width: 1280, height: 1000 })
+  // NAMED AS THE APP'S FIRST TM VIEW IS, so the harness's readers of that view's diagram read this one.
+  host.dataset.leaf = 'tm-0'
+  // IN `STATE`, ITS `WORK` HEAD ON A BLANK, WHICH NO RULE OF IT READS.
+  pane.render(
+    {
+      state: 3,
+      step: 0,
+      heads: [0, 0, 0, 0, 0],
+      window_start: [0, 0, 0, 0, 0],
+      window: ['_', '_', '_', '_', '_'],
+      source_node: null,
+      rule: null,
+    },
+    controlState(false, 'step 0 of 0', false, false, false),
+  )
   await userEvent.click(diagramChoice('local') as HTMLButtonElement)
   await until(() => nodes().length === 8, `the local level around ${STATE}`)
   // THE PANEL LESS A CLASSIC SCROLL BAR'S ROOM: overlay scroll bars here take none, so the panel is that wide itself.
-  const chrome = window.innerWidth - level().offsetWidth
-  await page.viewport(829 + chrome, 2400)
+  const chrome = host.offsetWidth - level().offsetWidth
+  host.style.width = `${829 + chrome}px`
   await until(() => level().offsetWidth === 829, 'the level to be 829 px wide')
   await frames()
 })

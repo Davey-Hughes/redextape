@@ -229,6 +229,10 @@ describe('a maximise in a view with a region that has no header', () => {
   /**
    * THE λ TERM HAS NOTHING TO BE DRAWN CLOSED AS, so it keeps its floor under a maximised term map and is not hidden:
    * a view of a term that showed none of it would be a view of its map alone.
+   *
+   * **AND THE MAP IS DRAWN FOR THE HEIGHT IT HAS UNDER ITS MAXIMISE IN A VIEW TOO SHORT FOR ITS FLOORS**, where the
+   * term is at its floor before, under and after it: the term reports no change of size there, so only the canvas's own
+   * observer can draw the map again.
    */
   it('leaves the term its floor and gives the map the rest', async () => {
     const host = document.createElement('section')
@@ -265,6 +269,20 @@ describe('a maximise in a view with a region that has no header', () => {
     await frame()
     expect(map.clientHeight, 'the map is not back at the height it is built at').toBe(120)
     expect(map.height).toBe(Math.round(120 * devicePixelRatio))
+
+    host.style.height = `${host.clientHeight - (heightOf(term) - floor) - 60}px`
+    await frame()
+    await frame()
+    expect(heightOf(term), 'precondition: the term is at its floor').toBeCloseTo(floor, 0)
+    const built = map.clientHeight
+    await userEvent.click(host.querySelector('[data-panel="map"] .panel-maximise') as HTMLElement)
+    await frame()
+    await frame()
+    expect(heightOf(term), 'precondition: the term stays at its floor').toBeCloseTo(floor, 0)
+    expect(map.clientHeight, `precondition: the maximise changes the map's height from ${built}`).not.toBe(built)
+    expect(map.height, 'the map was not drawn again at the height it has').toBe(
+      Math.round(map.clientHeight * devicePixelRatio),
+    )
   })
 
   /**
@@ -295,54 +313,5 @@ describe('a maximise in a view with a region that has no header', () => {
       'the map’s panel does not reach the view’s bottom',
     ).toBeCloseTo(host.getBoundingClientRect().bottom, 0)
     expect(host.scrollHeight).toBe(host.clientHeight)
-  })
-
-  /**
-   * **A MAP A MAXIMISE HID IS DRAWN AGAIN WHEN IT IS SHOWN, WHATEVER ELSE MOVED**: the λ view watches the canvas's
-   * own box. The map draws nothing while its panel is drawn closed, and what usually draws it again is the term's
-   * change of size. In a view too short for its floors the term is at its floor before the maximise, under it and
-   * after it, and says nothing: held here on a view of a copy 260 px tall, whose text is what is maximised.
-   */
-  it('draws the map at the step the view is on when a maximise that hid it ends, with the term’s size unchanged', async () => {
-    const host = document.createElement('section')
-    host.className = 'pane'
-    host.dataset.kind = 'lambda'
-    host.style.height = '260px'
-    host.style.width = '640px'
-    document.body.append(host)
-    const pane = new LambdaPane(host, inertEvents({ editSink: () => vi.fn(), collapse: vi.fn() }), { map: true })
-    pane.render(frameState, CONTROLS)
-    const first = wireOf(WIDE)
-    pane.renderTree({ kind: 'tree', tree: first })
-    pane.setEditor('g a b')
-    await frame()
-    await frame()
-    const term = host.querySelector('.term') as HTMLElement
-    const map = host.querySelector('.term-map') as HTMLCanvasElement
-    const label = (n: number): string => `term map: ${n} nodes by depth`
-    expect(map.getAttribute('aria-label')).toBe(label(first.kind.length))
-    const floor = Number.parseFloat(getComputedStyle(term).minHeight)
-    expect(heightOf(term), 'precondition: the term is at its floor').toBeCloseTo(floor, 0)
-
-    const text = host.querySelector('[data-panel="text"] .panel-maximise') as HTMLElement
-    await userEvent.click(text)
-    await frame()
-    await frame()
-    expect(
-      host.querySelector('[data-panel="map"] .panel-toggle')?.getAttribute('aria-expanded'),
-      'precondition: the maximise drew the map closed',
-    ).toBe('false')
-    expect(heightOf(term), 'precondition: the term is at its floor under the maximise').toBeCloseTo(floor, 0)
-    const second = wireOf('g (a b) (c d)')
-    pane.renderTree({ kind: 'tree', tree: second })
-    expect(map.getAttribute('aria-label'), 'precondition: a hidden map is not drawn').toBe(label(first.kind.length))
-
-    await userEvent.click(text)
-    await frame()
-    await frame()
-    expect(heightOf(term), 'precondition: the term is at its floor after it').toBeCloseTo(floor, 0)
-    expect(map.getAttribute('aria-label'), 'the map shows the tree of a step the view has left').toBe(
-      label(second.kind.length),
-    )
   })
 })

@@ -73,10 +73,10 @@ describe('a workspace that stores every panel', () => {
     }
   })
 
-  it('draws exactly the panels the table names, and the text panel', () => {
+  it('draws exactly the panels the table names', () => {
     for (const leg of PANEL_LEGS) {
       const drawn = [...(host(leafOf(leg)) as HTMLElement).querySelectorAll<HTMLElement>('[data-panel]')]
-      expect(drawn.map((el) => el.dataset.panel).sort(), leg).toEqual([...LEG_PANELS[leg], 'text'].sort())
+      expect(drawn.map((el) => el.dataset.panel).sort(), leg).toEqual([...LEG_PANELS[leg]].sort())
     }
   })
 })

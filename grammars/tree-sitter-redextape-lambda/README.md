@@ -67,15 +67,10 @@ they answer to different ones — copying either class into the other would brea
 
 ## What this is for
 
-**The web app's λ copy editor, and external editors** — the same two lanes the mini-language grammar
-occupies. `web/src/colour.ts` loads this grammar's committed `tree-sitter-redextape-lambda.wasm` and
-`queries/highlights.scm` through `web-tree-sitter`, and the editor in the λ pane, where a λ copy is
-edited, is coloured from them. The Plan 7 part 3 design
-(`docs/superpowers/specs/2026-09-20-plan7-part3-editor-intelligence-design.md` §6.1) gives the
-reasons. The term the λ pane displays is not coloured by this grammar: `web/src/lambda-body.ts`
-colours the tree the worker serves by token kind, as `lambda-layout.ts` lays it out, and a frame's
-flat text through `spans.ts`'s `decorationRanges`, over spans the worker's printer computed from the
-term it holds.
+**External editors.** The web app does not load this grammar, and the term the λ pane displays is
+not coloured by it: `web/src/lambda-body.ts` colours the tree the worker serves by token kind, as
+`lambda-layout.ts` lays it out, and a frame's flat text through `spans.ts`'s `decorationRanges`,
+over spans the worker's printer computed from the term it holds.
 
 Neovim, Helix, Zed and Emacs cannot call a Rust function, and `redextape-lsp` — which serves
 Neovim — advertises no semantic tokens, deliberately, for the reason the mini-language grammar's
@@ -150,7 +145,7 @@ are in the roadmap entry for this branch (`docs/superpowers/plans/2026-07-19-red
 The `12` and the `1270` matter together: the smallest entry contributes **7** spans, so no comparison
 here can pass by being handed an empty expectation.
 
-A fifth runs in a browser, against the artefact `web/` loads. The crate above compiles `parser.c`
+A fifth runs in a browser, against the committed `.wasm`. The crate above compiles `parser.c`
 through `cc` and has no wasm build, so the two sides meet in a file: `tests/golden.rs` prints one λ
 fixture through `lambda::printed_term`, holds it to `print_lambda_mapped`'s classification, and
 holds `grammars/capture-golden.json` equal to the captures this crate computes for it (it rewrites

@@ -1,11 +1,9 @@
 import type { EditorView } from '@codemirror/view'
 import { setLink } from './highlight'
-import { perLeg } from './legs'
 import { type InstrLeg, type Link, type LinkIndex, type Pin, pinAtInstr } from './link'
-import { type DetachedPanes, type LambdaLinkState, linkStatus } from './link-status'
+import { type LambdaLinkState, linkStatus } from './link-status'
 import { LINKED, LINKED_LEGS, type LinkedLeg, perLinkedLeg } from './linked-legs'
-import type { LeafId, PaneCollection } from './panes'
-import type { SessionRegistry } from './sessions'
+import type { PaneCollection } from './panes'
 
 /**
  * The source editor's key for linking at the caret, the keyboard route to a click. `main.ts` binds it and the help
@@ -68,7 +66,7 @@ export type LinkWiring = {
   /**
    * How many link gestures `setLinkTo` and `linkInstr` have taken: read before and after a click's own handlers, it
    * tells the clear's listener whether the click linked. Only the view's handler knows whether a row links (a label
-   * row, an instruction `defunc` minted, a row of a copy), and a clear after one that did would undo it.
+   * row, an instruction `defunc` minted), and a clear after one that did would undo it.
    */
   get gestures(): number
   drawLink(l: Link | null, here: Readonly<Record<LinkedLeg, boolean>>, lambda: LambdaLinkState): void
@@ -79,17 +77,11 @@ export type LinkWiring = {
    */
   linkInstr(pc: number | null, origin: InstrLeg): void
   linkAtSourceOffset(byteOffset: number): void
-  /**
-   * Per leg, how many views it has and the title of each one showing a copy — what the status line's detachment clause
-   * reads, and what the share popover's copies line names (Plan 7 part 6a spec §5.2).
-   */
-  detachedPanes(): DetachedPanes
 }
 
 export function createLinkWiring(deps: {
   view: () => EditorView
   statusHost: HTMLElement
-  sessions: SessionRegistry
   panes: PaneCollection
   draw: () => void
   /**
@@ -97,46 +89,9 @@ export function createLinkWiring(deps: {
    * link sentence (Plan 7 part 2 spec §11); a keystroke never does.
    */
   announce: (text: string) => void
-  /** A view's title as its header reads it — how the detachment clause names a view showing a copy. */
-  viewTitle: (id: LeafId) => string
-  /** Whether the tree on screen holds this view — `draw.ts`'s dep of the same name has what it excludes. */
-  arranged: (id: LeafId) => boolean
 }): LinkWiring {
-  const { view, sessions, panes, draw, announce, viewTitle, arranged } = deps
+  const { view, panes, draw, announce } = deps
   const linkStatusHost = deps.statusHost
-
-  /**
-   * Which views are outside the source correspondence right now — 5d-i §4.5's first surface, read off the
-   * bindings: per leg, how many views it has and the title of each one showing a copy.
-   *
-   * TWO LOOKUPS RATHER THAN A FLAG, and that is what makes 5d-i §4.5's pairing cheap: detachment is a
-   * property of the SESSION (`SessionEntry.detached`), so a view is detached exactly when the session
-   * it is bound to is, and both surfaces — this sentence and the view's own `copy · not linked` status, which
-   * `PaneSlot.render` sets from the same field — cannot disagree.
-   *
-   * **EVERY VIEW OF EVERY LEG.** Reading only each leg's active view — the one focused last — would leave an
-   * rxm copy on screen unnamed while a view of the program beside it had been focused more recently, and a
-   * leg's views could not be told apart in the sentence. `linkStatus` names each view showing a copy, by its
-   * title where its leg has more than one view, and suppresses a leg's own clauses only when every view of it
-   * shows a copy. A view OFF the page, in Stage, is counted too: it is still a view, and its tab names it.
-   * **A VIEW THE TREE ON SCREEN DOES NOT HOLD IS NOT COUNTED** (the view layouts spec §5): it is kept alive in an
-   * arrangement the workspace remembers, nothing on the page names it, and a share link, whose popover reads this
-   * too, does not carry it.
-   *
-   * A LEG WITH NO VIEW HAS NOTHING TO SAY, WHICH IS THE HONEST ANSWER RATHER THAN A CONVENIENT ONE.
-   * Detachment is a property of the SESSION a view is BOUND to, so with no view there is no binding to
-   * read and nothing is outside the correspondence — and the clause this drives ("λ view shows a copy —
-   * not linked to the program") would otherwise narrate a view that does not exist. `draw()` gives the λ link
-   * state the same kind of answer, `'absent'`.
-   */
-  const detachedPanes = (): DetachedPanes =>
-    perLeg((leg) => {
-      const views = panes.of(leg).filter((p) => arranged(p.id))
-      return {
-        views: views.length,
-        copies: views.filter((p) => sessions.entryOf(p.slot.binding.session).detached).map((p) => viewTitle(p.id)),
-      }
-    })
 
   /**
    * The current compile's link index, and the construct the user has linked.
@@ -147,10 +102,10 @@ export function createLinkWiring(deps: {
    *
    * NOT IN THE REGISTRY. §3.2b asks for an entry owning "its own `LegState`s and its own
    * `SessionClient`", which is what `SessionEntry` holds — and no more. An index is a property of a
-   * COMPILE, and §3.3 puts `linkIndex` and `sourceSpan` on no scratch type, so a per-entry
-   * `index` would be `null` for every entry that is not the source one. Moving it is therefore not a
-   * mechanical change: it changes what the field means, and it belongs to whichever change first gives
-   * a session other than the source one a link index.
+   * COMPILE, which only the source session runs, so a per-entry `index` would be `null` for every
+   * entry that is not the source one. Moving it is therefore not a mechanical change: it changes what
+   * the field means, and it belongs to whichever change first gives a session other than the source
+   * one a link index.
    */
   let index: LinkIndex | null = null
   let linkable = false
@@ -176,27 +131,20 @@ export function createLinkWiring(deps: {
    * running focus against `link` (`isCoincident`) once, and re-deriving it here would need `running`
    * threaded in anyway — passing the booleans it produces is the smaller surface. Meaningless when
    * `l === null` (nothing is pinned to coincide with) or `!linkable` (both return before reading it).
-   *
-   * `detached` IS ON EVERY ARM, NOT ONLY `'linked'`, and that is §4.5's obligation rather than
-   * symmetry: `{state:'none'}` with a detached λ pane is precisely the case where this line goes from
-   * blank to speaking. `linkStatus` is the one function that reads the field and it suppresses a
-   * detached pane's own clauses itself, so nothing here has to know which clauses those are.
    */
   const drawLink = (l: Link | null, here: Readonly<Record<LinkedLeg, boolean>>, lambda: LambdaLinkState) => {
-    const detached = detachedPanes()
     if (!linkable) {
-      linkStatusHost.textContent = linkStatus({ state: 'stale', detached })
+      linkStatusHost.textContent = linkStatus({ state: 'stale' })
       return
     }
     if (l === null) {
-      linkStatusHost.textContent = linkStatus({ state: ownerless ? 'ownerless' : 'none', detached })
+      linkStatusHost.textContent = linkStatus({ state: ownerless ? 'ownerless' : 'none' })
       return
     }
     linkStatusHost.textContent = linkStatus({
       state: 'linked',
       legs: perLinkedLeg((leg) => ({ emits: LINKED[leg].rows(l, link).length > 0, here: here[leg] })),
       lambda,
-      detached,
     })
   }
 
@@ -242,18 +190,10 @@ export function createLinkWiring(deps: {
     // name the wrong rows there, or none — but that pane is about to be reseeded before it is next
     // shown, and `draw.ts`'s seed block re-applies the CURRENT pin once it is, so a wrong answer
     // written here never reaches the screen.
-    //
-    // **A COPY IS NOT LINKED (5d-i design §4.5), so it marks nothing whatever is pinned** — `draw.ts`'s λ guard, for
-    // the machine views. `l` holds the PROGRAM's state and instruction indices, and a view showing a copy numbers its
-    // rows by the copy, so an index read there names whatever the copy has at it (Plan 7 part 5 spec amendment 32, in
-    // the inbound direction). `detached` is the session's own fact, read here because the view's binding moves.
     for (const leg of LINKED_LEGS) {
       const { rows, pane } = LINKED[leg]
       const scrollTo = from !== null && from !== leg
-      for (const p of panes.of(leg)) {
-        const marked = l === null || sessions.entryOf(p.slot.binding.session).detached ? [] : rows(l, link)
-        pane(p).setLink(marked, scrollTo)
-      }
+      for (const p of panes.of(leg)) pane(p).setLink(l === null ? [] : rows(l, link), scrollTo)
     }
   }
 
@@ -364,6 +304,5 @@ export function createLinkWiring(deps: {
     setLinkTo,
     linkInstr,
     linkAtSourceOffset,
-    detachedPanes,
   }
 }

@@ -3,8 +3,6 @@ import { page, userEvent } from 'vitest/browser'
 import { LAYOUT_STORAGE_KEY, type LayoutNode, leaves, MAX_TREE_LEAVES } from '../../src/layout'
 import { parseWorkspace, serializeWorkspace } from '../../src/workspace'
 import {
-  copyNames,
-  editorsOf,
   focusInPage,
   fourViewWorkspace,
   host,
@@ -97,7 +95,7 @@ beforeAll(async () => {
 })
 
 describe('a stored workspace with rxm-0 and tm-0 each under two kinds', () => {
-  let rxmView: { inner: Element; editor: Element }
+  let rxmView: Element
 
   it('opens as it was stored', () => {
     // A WORKSPACE THE LOADER REFUSED WOULD HAVE OPENED ON THE DEFAULT, the source beside the TM view.
@@ -109,20 +107,14 @@ describe('a stored workspace with rxm-0 and tm-0 each under two kinds', () => {
   })
 
   it('enters the tree that names the rxm view’s id as a TM view under a new id, and parks the rxm view', async () => {
-    host('rxm-0')?.querySelector<HTMLButtonElement>('button.detach')?.click()
-    await until(() => titleText('rxm-0') === 'rxm · copy 1' && editorsOf('rxm-0') === 1, 'the copy and its editor')
+    // THE RXM VIEW IS RECOGNISED BY ITS ELEMENT, which its constructor builds: a view built again has another.
     const inner = host('rxm-0')?.firstElementChild
-    const editor = host('rxm-0')?.querySelector('.term-editor .cm-editor')
-    if (inner === null || inner === undefined || editor === null || editor === undefined)
-      throw new Error('the copy’s view has nothing to recognise it by')
-    rxmView = { inner, editor }
-    expect(copyNames(), 'precondition: one view shows the copy').toEqual(['rxm copy 1 · 1 view'])
+    if (inner === null || inner === undefined) throw new Error('the rxm view has nothing to recognise it by')
+    rxmView = inner
+    expect(titleText('rxm-0'), 'precondition: the rxm view shows the program').toBe('rxm · program')
 
     await userEvent.click(toggle('rxm'))
     await focusInPage('a press on the rxm toggle, which parks the rxm view')
-    expect
-      .soft(copyNames(), 'the switch built a TM view over the rxm view of the copy')
-      .toEqual(['rxm copy 1 · 1 view'])
     const built = mounted().filter((id) => id !== 'source')
     expect.soft(built, 'the TM view was built under the rxm view’s id').not.toEqual(['rxm-0'])
     expect(built).toHaveLength(1)
@@ -142,12 +134,8 @@ describe('a stored workspace with rxm-0 and tm-0 each under two kinds', () => {
     await userEvent.click(toggle('rxm'))
     await focusInPage('a press on the rxm toggle, which shows the rxm view again')
     expect(mounted()).toEqual(['source', 'rxm-0', 'tm-0'])
-    expect(titleText('rxm-0')).toBe('rxm · copy 1')
-    expect(host('rxm-0')?.firstElementChild, 'the rxm view was built again').toBe(rxmView.inner)
-    expect(host('rxm-0')?.querySelector('.term-editor .cm-editor'), 'the copy’s editor is another one').toBe(
-      rxmView.editor,
-    )
-    expect(copyNames()).toEqual(['rxm copy 1 · 1 view'])
+    expect(titleText('rxm-0')).toBe('rxm · program')
+    expect(host('rxm-0')?.firstElementChild, 'the rxm view was built again').toBe(rxmView)
   })
 
   /**

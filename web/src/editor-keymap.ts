@@ -22,13 +22,13 @@ import { type KeymapMode, readKeymap, writeKeymap } from './editor-prefs'
  * reconfigurer, and would invite a later reader to conclude that "loads asynchronously" is what
  * compartments are for. It is not: "is replaced from outside" is.
  *
- * **ONE `Compartment` INSTANCE FOR EVERY EDITOR ON THE PAGE, WHICH IS SAFE AND IS NOT A SHARED
+ * **ONE `Compartment` INSTANCE FOR THE MODULE, WHICH IS SAFE AND IS NOT A SHARED
  * SETTING.** A `Compartment` is an identity token, not a container: each `EditorState` keeps its own
  * contents under it, and `reconfigure` is an effect dispatched into ONE view. What the shared token
  * buys is that any view built through `keymapSlot` can be reconfigured by `setKeymap` without the
  * caller having to have kept hold of the compartment that built it. The one rule it imposes is
- * CodeMirror's own — a single state may not mention the same compartment twice — and no editor here
- * has two keymap slots.
+ * CodeMirror's own — a single state may not mention the same compartment twice — and the source
+ * editor has one keymap slot.
  */
 const keymapCompartment = new Compartment()
 
@@ -36,8 +36,8 @@ const keymapCompartment = new Compartment()
  * The extension `mode` installs: vim, or nothing at all.
  *
  * **THE EMPTY ARRAY IS THE POINT OF THE DEFAULT ARM.** `default` is not a second keymap this app
- * supplies; it is CodeMirror's own bindings, which every editor already lists (`defaultKeymap`,
- * `historyKeymap`, and each editor's own). So the default keymap is what is left when vim contributes
+ * supplies; it is CodeMirror's own bindings, which the source editor already lists (`defaultKeymap`,
+ * `historyKeymap` and its own). So the default keymap is what is left when vim contributes
  * nothing, and `[]` is a valid `Extension` that contributes exactly that.
  */
 export const keymapExtension = (mode: KeymapMode): Extension => (mode === 'vim' ? vim() : [])
@@ -52,7 +52,7 @@ export const keymapExtension = (mode: KeymapMode): Extension => (mode === 'vim' 
  * than of key bindings. CodeMirror runs those handlers in extension order and stops at the first that
  * returns true — and the facet's handler is a single shared `ViewPlugin` that `@codemirror/state`
  * places where the FIRST `keymap.of(...)` in the list appears, at default precedence, no matter how
- * many more follow it. Both of this app's editors open their keymaps with `navKeymap`, so a slot
+ * many more follow it. The source editor opens its keymap with `navKeymap`, so a slot
  * placed just above `keymap.of([...defaultKeymap, ...historyKeymap])` would sit BELOW the handler that
  * runs the whole facet.
  *
@@ -87,20 +87,12 @@ export const setKeymap = (view: EditorView, mode: KeymapMode): void => {
 }
 
 /**
- * The page's chosen keymap, and the editors that follow it.
+ * The page's chosen keymap, and the editor that follows it.
  *
- * **A SUBSCRIPTION RATHER THAN A THUNK, WHICH IS THE OPPOSITE OF HOW `formatOnBlur` IS CARRIED, AND
- * THE DIFFERENCE IS FORCED.** That preference is read at the moment it matters — an editor losing
- * focus asks `formatOnBlur()` and acts on the answer — so passing a getter is enough and nothing has
- * to be told when it changes. A compartment cannot be read lazily: the new extension only takes effect
- * when a transaction carrying `reconfigure` is dispatched INTO each view, so the setting has to be
- * able to reach every editor that exists. Hence `follow`.
- *
- * **THE EDITORS REGISTER THEMSELVES, RATHER THAN THE APP ENUMERATING THEM.** There is no list of live
- * editors to walk: `editor-custody.ts` holds the ones waiting between panes, each pane holds at most
- * one of its own, and `main.ts` holds the source view — three owners with three lifetimes. Asking each
- * editor to join on construction and leave in `destroy()` keeps the one list that matters here in step
- * with the only events that can change it.
+ * **THE SETTING REACHES INTO THE EDITOR RATHER THAN WAITING TO BE READ.** A compartment cannot be read lazily: the
+ * new extension only takes effect when a transaction carrying `reconfigure` is dispatched INTO the view, so a change
+ * of keymap has to be pushed to the editor. Hence `follow`, which the source editor joins once and never leaves, since
+ * it lives as long as the page.
  */
 export class KeymapSetting {
   #mode: KeymapMode
@@ -119,26 +111,20 @@ export class KeymapSetting {
   /**
    * Take `view` under this setting: put it in the mode in force now, and keep it in step from here on.
    *
-   * **IT RECONFIGURES ON JOINING RATHER THAN TRUSTING THE CALLER.** An editor's slot was filled from
-   * `this.mode` a few statements earlier, so the dispatch is almost always a no-op — but "almost
-   * always" is the gap a `setText` seed or an awaited construction could open, and a view that joined
-   * in the wrong mode would stay in it until the next time the user touched the control.
+   * **IT RECONFIGURES ON JOINING RATHER THAN TRUSTING THE CALLER.** An editor's slot is filled from `this.mode`
+   * when it is built, so the dispatch is usually a no-op; but a mode chosen between the build and the join would
+   * otherwise leave the editor in the old one until the next time the user touched the control.
    */
   follow(view: EditorView): void {
     this.#followers.add(view)
     setKeymap(view, this.#mode)
   }
 
-  /** Stop keeping `view` in step — called from `destroy()`, so a dead view is never dispatched into. */
-  unfollow(view: EditorView): void {
-    this.#followers.delete(view)
-  }
-
   /**
-   * Choose `mode`: remember it, and switch every editor now on screen.
+   * Choose `mode`: remember it, and switch the editor now on screen.
    *
    * A no-op when nothing changes, so re-selecting the current entry does not dispatch a transaction
-   * into every editor on the page.
+   * into the editor.
    */
   set(mode: KeymapMode): void {
     if (mode === this.#mode) return

@@ -1,8 +1,20 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { retype, SHELL, until } from './harness'
+import { beforeAll, describe, expect, it, type MockInstance, vi } from 'vitest'
+import { page } from 'vitest/browser'
+import { LspClient } from '../../src/lsp-client'
+import { host, idle, pressToggle, retype, SHELL, toggle, until } from './harness'
 
 let view: EditorView
+
+/** Every `openDocument` call the app makes, from before `main` builds its client. */
+let opened: MockInstance<LspClient['openDocument']>
+
+beforeAll(async () => {
+  // SET BEFORE `main` IS IMPORTED: the source editor opens its document as the app mounts.
+  opened = vi.spyOn(LspClient.prototype, 'openDocument')
+  document.body.innerHTML = SHELL
+  view = await (await import('../../src/main')).ready
+})
 
 const errorMarkers = () => document.querySelectorAll('.cm-editor .cm-lintRange-error').length
 const gutterMarkers = () => document.querySelectorAll('.cm-editor .cm-lint-marker-error').length
@@ -16,15 +28,8 @@ const gutterMarkers = () => document.querySelectorAll('.cm-editor .cm-lint-marke
  * document, arrive at the wrong offsets because the UTF-16 conversion is wrong, or never clear
  * because `didChange` is not posted. Every one of those is a way the app could ship broken while
  * the node tier stays green.
- *
- * A copy's diagnostics, a TM copy's included, are `lsp-copy-diagnostics.test.ts`'s.
  */
 describe('source diagnostics, served by the LSP worker', () => {
-  beforeAll(async () => {
-    document.body.innerHTML = SHELL
-    view = await (await import('../../src/main')).ready
-  })
-
   it('marks a broken program, in the text and in the gutter', async () => {
     retype(view, 'let x = ;')
 
@@ -76,5 +81,28 @@ describe('source diagnostics, served by the LSP worker', () => {
     // conversion that ignored `line` would mark line 1.
     const line = view.state.doc.lineAt(view.posAtDOM(document.querySelector('.cm-editor .cm-lintRange-error') as Node))
     expect(line.number).toBe(3)
+  })
+})
+
+/**
+ * **EVERY DOCUMENT THE APP OPENS IS IN `redextape`**, the one language whose grammar the page loads. The other views
+ * show what the program records and hold no editor, so showing each of them opens nothing in another language.
+ */
+describe('the LSP documents the app opens', () => {
+  it('are in redextape alone, with the λ, TM, rxm and clif views each shown on the compiled program', async () => {
+    const [width, height] = [window.innerWidth, window.innerHeight]
+    // WIDE ENOUGH FOR EVERY TOGGLE TO BE IN THE HEADER: a narrow window puts them in the workspace menu.
+    await page.viewport(1280, 900)
+    try {
+      await until(idle, 'the first compile to finish recording')
+      for (const kind of ['lambda', 'tm', 'rxm', 'clif']) {
+        if (toggle(kind).getAttribute('aria-pressed') !== 'true') await pressToggle(kind)
+        await until(() => host(`${kind}-0`) !== null, `the ${kind} view to be shown`)
+      }
+    } finally {
+      await page.viewport(width, height)
+    }
+    expect(opened.mock.calls.length, 'the source editor opened its document').toBeGreaterThan(0)
+    for (const [uri, languageId] of opened.mock.calls) expect(languageId, uri).toBe('redextape')
   })
 })

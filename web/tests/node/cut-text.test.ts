@@ -5,8 +5,8 @@ import { CUT_TEXT_SELECTORS } from '../../src/cut-text'
 
 /**
  * EVERY TEXT THE STYLESHEET CUTS HAS A WAY TO READ WHOLE (the cut-text tooltips design): each selector of a rule that
- * declares `text-overflow: ellipsis` is watched by `cut-text.ts`, or titled by its own code, or both in part, and the
- * watcher watches nothing else. So a new cut text fails here until it is given one of the two, and a text given both
+ * declares `text-overflow: ellipsis` is watched by `cut-text.ts` or titled by its own code, and the watcher watches
+ * nothing else. So a new cut text fails here until it is given one of the two, and a text given both
  * would show its own title and then lose it to the watcher's.
  */
 
@@ -37,24 +37,12 @@ const TITLED: Record<string, string> = {
   '.machine-panel .panel-note': "the count's, `machine-panels.ts`",
 }
 
-/**
- * The texts whose own code titles them in part: each to the watched selector for the part it leaves untitled. A copy's
- * term has its own title (`buffer-list.ts`); a copy with no term reads `no term yet` and has none.
- */
-const PART_WATCHED: Record<string, string> = {
-  '.buffer-row-term': '.buffer-row-term.is-absent',
-}
-
 const cut = ellipsisSelectors(css)
 
 describe('the watched texts', () => {
-  it('names every text the stylesheet cuts with an ellipsis, as watched, as titled by its own code, or as both in part', () => {
-    for (const s of [...Object.keys(TITLED), ...Object.keys(PART_WATCHED)])
-      expect(cut.has(s), `precondition: the stylesheet cuts ${s}`).toBe(true)
-    const named = (s: string) =>
-      CUT_TEXT_SELECTORS.includes(s) ||
-      Object.hasOwn(TITLED, s) ||
-      (Object.hasOwn(PART_WATCHED, s) && CUT_TEXT_SELECTORS.includes(PART_WATCHED[s] ?? ''))
+  it('names every text the stylesheet cuts with an ellipsis, as watched or as titled by its own code', () => {
+    for (const s of Object.keys(TITLED)) expect(cut.has(s), `precondition: the stylesheet cuts ${s}`).toBe(true)
+    const named = (s: string) => CUT_TEXT_SELECTORS.includes(s) || Object.hasOwn(TITLED, s)
     expect(
       [...cut].filter((s) => !named(s)),
       'cut with an ellipsis, and neither watched nor titled',
@@ -62,10 +50,7 @@ describe('the watched texts', () => {
   })
 
   it('watches no text the stylesheet does not cut, and none its own code titles', () => {
-    const parts = Object.values(PART_WATCHED)
-    const stray = CUT_TEXT_SELECTORS.filter(
-      (s) => !(cut.has(s) || parts.includes(s)) || Object.hasOwn(TITLED, s) || Object.hasOwn(PART_WATCHED, s),
-    )
+    const stray = CUT_TEXT_SELECTORS.filter((s) => !cut.has(s) || Object.hasOwn(TITLED, s))
     expect(stray, 'watched, and not cut or titled by its own code').toEqual([])
   })
 })
