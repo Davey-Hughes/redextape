@@ -1,6 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
+import { NOTICE_MS } from '../../src/notice'
 import {
   frame,
   frames,
@@ -105,6 +106,39 @@ const sampling = (): (() => Sample[]) => {
     probe.remove()
     return samples
   }
+}
+
+/**
+ * Run `act` with the notices it draws held, and answer how many it held. **HELD, NOT RACED**: a notice's action goes
+ * with it `NOTICE_MS` after it is drawn, and a case that reaches the action only after a settle and its steps would
+ * race that clock on a machine short of CPU. A held notice's timer is never set, so it lasts until another notice
+ * replaces it, its action runs or a gesture withdraws it. A timer is held by its delay, all a timer says of itself, so
+ * any other of that delay set meanwhile is held with it, and **A HOLD THAT HELD NONE HELD NOTHING**: the caller asserts
+ * the count.
+ */
+async function holdingNotices(act: () => Promise<void>): Promise<number> {
+  const set = window.setTimeout
+  let count = 0
+  window.setTimeout = ((handler: TimerHandler, ms?: number, ...args: unknown[]) => {
+    if (ms !== NOTICE_MS) return set(handler, ms, ...args)
+    count += 1
+    return 0
+  }) as typeof window.setTimeout
+  try {
+    await act()
+  } finally {
+    window.setTimeout = set
+  }
+  return count
+}
+
+/** The `fact(4)` example picked from `examples ▾`, which draws a notice with its undo. */
+async function pickFact(): Promise<void> {
+  await userEvent.click(document.querySelector('#examples') as HTMLElement)
+  const fact = [...document.querySelectorAll<HTMLElement>('button.example')].find((b) =>
+    /^fact\(4\)/.test(b.textContent ?? ''),
+  )
+  await userEvent.click(fact as HTMLElement)
 }
 
 /** The program session idle and no view recording. */
@@ -234,17 +268,18 @@ describe('a recompile, in the app with the λ, rxm and TM views and their panels
   }, 60_000)
 
   it('swaps in one frame on an example', async () => {
-    const { before, samples } = await recompile(async () => {
-      await userEvent.click(document.querySelector('#examples') as HTMLElement)
-      const fact = [...document.querySelectorAll<HTMLElement>('button.example')].find((b) =>
-        /^fact\(4\)/.test(b.textContent ?? ''),
-      )
-      await userEvent.click(fact as HTMLElement)
-    })
+    const { before, samples } = await recompile(pickFact)
     expect(flashes(before, samples)).toEqual([])
   }, 60_000)
 
+  /**
+   * **ITS OWN PICK, WITH THE PICK'S NOTICE HELD**: the undo is that notice's action, and between the pick and the
+   * press the case settles the pick's compile and steps every view (`holdingNotices`). The pick is made over `SRC`, so
+   * the undo puts back a program that is not the example's, whatever the case before left.
+   */
   it('swaps in one frame on the example’s undo', async () => {
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SRC } })
+    expect(await holdingNotices(pickFact), 'precondition: the pick’s notice held').toBe(1)
     const { before, samples } = await recompile(() => userEvent.click(undoButton() as HTMLButtonElement))
     expect(flashes(before, samples)).toEqual([])
   }, 60_000)
@@ -254,6 +289,8 @@ describe('a recompile, in the app with the λ, rxm and TM views and their panels
    * view waits on its leg's first chunk to go there: the TM view behind the λ and rxm recordings.
    */
   it('swaps in one frame on a shared link’s open', async () => {
+    // FROM `SRC`'S STEP 0, WHATEVER THE CASE BEFORE LEFT: three steps from any other step would carry the link past 3.
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SRC } })
     await settled()
     for (const leaf of LEAVES) for (let i = 0; i < 3; i += 1) await userEvent.click(forward(leaf))
     await frames()

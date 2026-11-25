@@ -44059,3 +44059,146 @@ the rebase onto `da6edae` are in that part's table, each beside its log, and not
 | 2, 1, 2; 1, 1, 1 | the tests failed under `56819c8`'s sabotages, `sab-drop-gone`, `sab-worker-drop-gone` and `sab-worker-drop-gone-pair`; under their controls, the drop kept, the case made to throw among them | `for f in $M/rebase3/logs/sab-{drop-gone,worker-drop-gone,worker-drop-gone-pair,drop-kept,worker-drop-kept,worker-drop-kept-pair}.log; do sed 's/\x1b\[[0-9;]*m//g' $f \| rg -a -o '^ +Tests +[0-9]+ failed'; done` |
 | 11; 0 | the legs at `56819c8` that exited 0; that did not | `rg -c ' exit=0$' $M/rebase3/logs/prove-summary.log; rg ' exit=[1-9]' $M/rebase3/logs/prove-summary.log \| wc -l` |
 | 84, 1595; 479; 41, 404; 13, 72; 47; 71 | at `56819c8`: the node tier's files and tests passed; the files `biome ci` checked; the Chromium leg's files and tests passed; the Firefox leg's; the files changed since `f6a1d7d` the comment check read; since `2a96b84` | `for f in node chromium firefox; do sed 's/\x1b\[[0-9;]*m//g' $M/rebase3/logs/$f.log \| rg -a '^ +(Test Files\|Tests) '; done; rg -o 'Checked [0-9]+ files' $M/rebase3/logs/biome.log; rg -o 'in [0-9]+ changed files since [0-9a-f]+' $M/rebase3/logs/comments-base-{f6a1d7d,2a96b84}.log` |
+
+#### RECOMPILE-SWAP'S UNDO CASE NO LONGER RACES THE NOTICE'S 8 S: IT MAKES ITS OWN PICK AND HOLDS THAT PICK'S NOTICE, AND ITS SHARED-LINK CASE STARTS FROM ITS OWN PROGRAM (2026-11-25, branch `recompile-swap-notice-race` on `100f119`, rebased onto it from `f59ef8e` by way of `65392ce` and `da6edae`: `100f119..195d79a`, 3 code commits and 2 of this entry, plus this entry's updates after the full-branch review and after its re-review)
+
+PR #202's CI run 3523 failed `recompile-swap.test.ts`, a file #202 does not touch. The firefox-caret lane found why,
+`~/temp/redextape-remove-copies-record/notice-race/diagnosis.md`, and the fault is on `main`. This branch changes that
+one test file and no production code. The lane's record is `~/temp/redextape-remove-copies-record/notice-race/`, `$R`
+below: one line per browser run in `$R/runs-exits.txt`, each run's log beside it as `TAG.log`, the runners
+(`runs.zsh`, `runs-port.zsh`, `prove.zsh`, `prove2.zsh`, `probe2700.zsh`, `probecut.zsh`) and the saved copies in
+`$R/sab/`.
+
+| Commit | What |
+|---|---|
+| `35e7cfe` | the undo case's own pick under a hold, `holdingNotices`, put in `harness.ts` and used at twelve sibling sites too; the link case starts from `SRC`. `767fea0` on `f59ef8e`, then `5efeacd` on `65392ce`, then `49e85b5` on `da6edae`, before the rebases |
+| `de74876` | the hold back in `recompile-swap.test.ts` alone, `harness.ts` and the twelve sibling files as on `main`, after the class probe below. `73a34dd` on `f59ef8e`, then `b4cede8` on `65392ce`, then `9736bd3` on `da6edae`, before the rebases |
+| `195d79a` | the hold's comment says again that a gesture withdraws a held notice, as `main.ts` ends a pick's notice on an edit or on an encoding, width or listing chosen. `b215342` on `65392ce`, then `07314d7` on `da6edae`, before the rebases |
+
+The browser runs below were all made before the rebases onto `da6edae` and `100f119`, and each keeps the SHA it ran at.
+`recompile-swap.test.ts` is one blob, `e12e5d3`, at `73a34dd`, `b4cede8` and `9736bd3`, and another at `b215342` and
+`07314d7`. The rebases onto `da6edae` and `100f119` left the branch's `web/` diff as it was: outside the roadmap, the
+diff from `bacde87` to `f5284ba` is the diff from `65392ce` to `da6edae` (`$R/rebase-assert.txt`), and the one from
+`be3d0d7` to `079c60a` the one from `da6edae` to `100f119` (`$R/rebase2-assert.txt`).
+
+##### WHAT SHOWED
+
+In run 3523 the case *swaps in one frame on the example's undo* failed, and *swaps in one frame on a shared link's open*
+after it failed its precondition with every view at step 6.
+
+##### THE CAUSE
+
+The undo case pressed the undo of the notice the example case's pick drew. `notice.ts` ends a notice and its action
+`NOTICE_MS`, 8,000 ms, after `notify`, on a real `setTimeout`. Between the pick and the press lay the rest of the example
+case, the undo case's settle, nine forward clicks and the frames they paint: the diagnosis's probe put the press 5,249
+ms after the pick unloaded, and under `CPUQuota=50%` and load the notice went at +7,980 ms and the press came at
++11,822 ms. `recompile()` had stepped every view to step 3 before the undo threw, and the link case stepped them three
+more.
+
+##### THE FIX
+
+`holdingNotices(act)` runs `act` with every `setTimeout` of `NOTICE_MS`'s delay left unset, and answers how many it held;
+a notice it held lasts until another replaces it, its action runs or a gesture withdraws it. It holds by delay as
+`share-open-clif.test.ts`'s `holdDebounce` does; a mock of `notice.ts`'s export, the way the deleted
+`copy-edit-leaving.test.ts` widened its debounce, could not reach `createNotices`, which reads its own binding. The undo
+case writes `SRC` into the editor, picks `fact(4)` under the hold and asserts it held 1, then presses the undo inside
+`recompile()` as before, so the clock is out of the case rather than further off. It holds what it held: a recompile on
+the example's undo, from `fact(4)` back to a `sum_to` program, swaps every view in one frame. The pick is `pickFact`,
+which the example case uses too, so the undo case no longer needs that case to have passed. The link case writes `SRC`
+first, and a recompile puts every view on step 0, whatever the case before left.
+
+##### THE SIBLINGS
+
+A read-only sweep listed every other browser file that reaches a notice's action or checks it is still there, 24 files,
+and named the sites where a compile, a settle or a run of gestures lies between the notice and that; the full-branch
+review found a 25th, `share-open-unreadable`, which reads the start-up notice's text after the first compile. `49e85b5`
+held the notice at twelve of the 24. The class probe then ran `main`'s code at `f59ef8e` with `NOTICE_MS` cut: at 4,000
+the 24 files passed, 208 tests; at 2,700 the 24 passed and `recompile-swap.test.ts` alone failed, its two cases; at
+1,000 the twelve held files passed, 85 tests, two of them only vacuously (below). So `9736bd3` took the holds out: they
+guarded nothing a run showed, and a held notice never ends by itself, which a later case that waits for a notice to end
+would hang on. `share-open-unreadable` ran after the review in this branch's worktree at `b215342`, whose only change
+from `65392ce` under `web/` and `crates/` is `recompile-swap.test.ts`, so it ran as on `main`'s code: with `NOTICE_MS`
+cut to 2,700 and to 1,000 it passed both times, 2 tests each. Every sibling passed at 2,700, and the twelve and
+`share-open-unreadable` at 1,000 too; the other twelve ran at 2,700 at the lowest.
+
+- **A compile between, passing at 1,000:** `examples-menu` (the pick, then its undo in the next case),
+  `share-open-hashchange` (the paste, then the undo two cases on), the five start-up link files `share-open`,
+  `-alone`, `-nothing-stored`, `-width` and `-deep` (the open at mount, then the undo or its check cases on),
+  `share-open-clamps` and `share-open-clamps-unseen` (an open, then its run), `examples-undo-format` (a pick, a Tab
+  walk and a format pass), and `share-open-unreadable` (the start-up notice, then its text after the first compile).
+- **Passing at 1,000 only vacuously:** `field-width` and `clif-switch`'s *withdraws a picked example's undo*, which
+  assert the undo gone after a compile and a choice; a notice that ran out first would pass them. Their span is a pick
+  and one compile, the shape `examples-menu` held at 1,000.
+- **Safe on their own terms:** `notice-float` waits for every notice to end between its gestures, so it cannot take a
+  hold, and passed at 2,700; the other eleven reach the action within a few round trips and passed at 2,700;
+  `notice.test.ts` runs on fake timers; `examples-menu`'s run-out case and `notice-float`'s waits wait for the clock
+  by design.
+
+##### THE RUNS
+
+The placed race is the diagnosis's: `notice.ts` saved, `NOTICE_MS` cut to 4,000, restored from the saved copy and
+compared with `cmp`. `main`'s code ran in a second worktree at `f59ef8e`, `redextape-notice-race-base`. At `f59ef8e` the
+file failed 2 of 2, each with the undo case at line 248, the button gone before the click (`Cannot read properties of
+null (reading 'click')`), and the link case at its precondition, `step 6`. At `73a34dd`, before the rebase onto
+`65392ce`, it passed 3 of 3. **THAT RACE DOES NOT TELL THE HOLD APART FROM THE CASE'S OWN PICK**: with the fix the whole
+undo case, its pick first, took 3,384 to 4,317 ms in 13 Chromium runs without a quota, so its own pick reaches the undo
+near or inside 4,000 ms held or not. What shows the hold holds is the case's `toBe(1)` on the count `holdingNotices`
+answers: a hold that held no timer fails it.
+
+With `NOTICE_MS` as it is, at `73a34dd` before the rebase onto `65392ce`: Chromium 5 of 5, under `systemd-run --user
+--scope -p CPUQuota=50%` 3 of 3, and Firefox, `REDEXTAPE_FIREFOX=1` with the `firefox` and `firefox-capture` projects, 2
+of 2. One more run under the quota hung before its first test, its log holding only vitest's `RUN` line, and was stopped
+at 1,024 s; its rerun, the third pass, ran on the browser API port 63415 (`runs-port.zsh`). After the rebase onto
+`65392ce` Chromium passed once at `52dcfc8` in the full-branch review and once at `b215342`, 6 of 6 tests each. The runs
+at `767fea0`, on `f59ef8e`, are in the record too, and `9736bd3` changes the test file only by moving the hold back into
+it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`field-width` and `clif-switch`'s withdrawal cases** still pass, rather than fail, if the pick's notice runs out
+  before the choice; nothing measured their span apart from the run they share with `examples-menu`'s shape.
+- **Not run here:** the whole browser tier, coverage, CI's LLVM job and `check-slow.sh`. The branch changes one browser
+  test file.
+
+##### VERIFICATION
+
+**At `110df3b`**, before the rebase onto `65392ce`, `73a34dd` and this entry: each leg into `$R/gate-<leg>.log` and its
+exit into `$R/gate-exits.txt`, every one 0: the node tier, 82 files and 1549 tests; `node scripts/check-comments.mjs
+--base f59ef8e`; `scripts/check-attributions.sh`, 577 sites; `pnpm run typecheck`; `biome ci --error-on-warnings`, 468
+files.
+
+**At `b215342`**, before the rebase onto `da6edae`, and **at `07314d7`**, after it and before the rebase onto `100f119`,
+each leg into `$R/gate-C-<leg>.log` and then `$R/gate-R-<leg>.log` and its exit into `$R/gate-exits.txt`, every one 0
+and with the same counts: the node tier, 84 files and 1598 tests; `node scripts/check-comments.mjs`, `--base 65392ce`
+and then `--base da6edae`; `scripts/check-attributions.sh`, 579 sites; `pnpm run typecheck`;
+`biome ci --error-on-warnings`, 472 files. The browser runs after the rebase onto `65392ce` used the wasm packages the
+review built at `52dcfc8`, and `git diff --stat 52dcfc8 b215342` names no file under `crates/`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh with
+`R=~/temp/redextape-remove-copies-record/notice-race`, `X=$R/runs-exits.txt` and `noansi`, `sed 's/\x1b\[[0-9;]*m//g'`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 1 file, 44 insertions, 7 deletions | the branch's code diff | `git diff --shortstat da6edae 07314d7 -- web crates` |
+| 0 | lines of production code changed | `git diff da6edae 07314d7 -- web/src crates \| wc -l` |
+| `e12e5d3` three times, `b339d6c` twice | `recompile-swap.test.ts` at `73a34dd`, `b4cede8`, `9736bd3`, `b215342` and `07314d7` | `git rev-parse {73a34dd,b4cede8,9736bd3,b215342,07314d7}:web/tests/browser/recompile-swap.test.ts \| cut -c1-7` |
+| equal | outside the roadmap, the diff from `bacde87` to `f5284ba` and the one from `65392ce` to `da6edae` | `diff <(git diff bacde87 f5284ba -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md') <(git diff 65392ce da6edae -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md') && echo equal` |
+| equal | outside the roadmap, the diff from `be3d0d7` to `079c60a` and the one from `da6edae` to `100f119` | `diff <(git diff be3d0d7 079c60a -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md') <(git diff da6edae 100f119 -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md') && echo equal` |
+| 8000 | `NOTICE_MS` | `grep -n 'NOTICE_MS = ' web/src/notice.ts` |
+| 5,249, 7,980, 11,822 | the diagnosis's probe, in ms | `grep -oE '5,249\|7,980\|11,822' $R/diagnosis.md` |
+| 2 of 2 | the placed race at `f59ef8e` | `grep -c '^placed-base-[12] chromium noquota exit 1 .* HEAD f59ef8e .* NOTICE_MS 4000' $X` |
+| lines 248 and 272, `step 6` | where those runs failed | `noansi $R/placed-base-*.log \| grep -aoE 'recompile-swap.test.ts:(248:64\|272:6)\|step 6' \| sort \| uniq -c` |
+| 3 of 3 | the placed race at `73a34dd` | `grep -c '^final-placed-fix-[123] chromium noquota exit 0 .* HEAD 73a34dd .* NOTICE_MS 4000' $X` |
+| 13, 3,384, 4,317 | the undo case with the fix in Chromium without a quota: runs, fastest and slowest in ms | `noansi $R/{placed-fix-?,final-placed-fix-?,final-chromium-?,review-chromium-1,fix-chromium-1}.log \| grep -aoE 'undo [0-9]+ms' \| grep -oE '[0-9]+' \| sort -n \| awk 'NR==1{a=$1} {b=$1} END{print NR, a, b}'` |
+| 5 of 5 | Chromium at `73a34dd` | `grep -c '^final-chromium-[1-5] chromium noquota exit 0 .* HEAD 73a34dd dirty 0 NOTICE_MS 8000' $X` |
+| 3 of 3, and 1 stopped at 1,024 s with no test run | `CPUQuota=50%` | `grep -E '^final-quota-' $X \| cut -d' ' -f1-7; noansi $R/final-quota-3.log \| grep -c '✓\|×'` |
+| 2 of 2 | Firefox | `grep -c '^final-firefox-[12] firefox noquota exit 0 .* HEAD 73a34dd dirty 0 NOTICE_MS 8000' $X` |
+| 2; 6 of 6 each | Chromium after the rebase onto `65392ce`, at `52dcfc8` and at `b215342`: runs at exit 0; tests | `grep -cE '^(review\|fix)-chromium-1 chromium noquota .*exit 0 .* HEAD (52dcfc8\|b215342) dirty 0 NOTICE_MS 8000' $X; noansi $R/{review,fix}-chromium-1.log \| grep -a 'Tests  '` |
+| 24, 208 | the class at 4,000 on `main`'s code: files, tests | `noansi $R/probe-base.log \| grep -aE 'Test Files\|Tests  '` |
+| 24 passed, 1 failed; 2 of 214 | the class and `recompile-swap` at 2,700: files; tests failed | `noansi $R/probe2700-base.log \| grep -aE '^ +×\|Test Files\|Tests  '` |
+| 12, 85 | the twelve at 1,000: files, tests | `noansi $R/probe1000-base.log \| grep -aE 'Test Files\|Tests  '` |
+| 2; 2 of 2 each | `share-open-unreadable` at `b215342`, at 2,700 and at 1,000: runs at exit 0; tests | `grep -cE '^probecut(2700\|1000)-unreadable chromium noquota exit 0 .* HEAD b215342 .* NOTICE_MS (2700\|1000)' $X; noansi $R/probecut{2700,1000}-unreadable.log \| grep -a 'Tests  '` |
+| 7, 0 | the cuts restored and `cmp` equal; restores that failed | `grep -c 'restored, cmp ok' $X; grep -c 'RESTORE FAILED' $X` |
+| 5, 82, 1549, 577, 468 | the gate at `110df3b`: legs at exit 0; node files and tests; attribution sites; biome's files | `grep -c 'exit 0 HEAD 110df3b' $R/gate-exits.txt; noansi $R/gate-node.log \| grep -aE 'Test Files\|Tests  '; grep -ao 'checked [0-9]* attribution' $R/gate-attributions.log; grep -aoE 'Checked [0-9]+ files' $R/gate-biome.log` |
+| 5, 84, 1598, 579, 472 | the gate at `b215342`: the same | `grep -c 'exit 0 HEAD b215342' $R/gate-exits.txt; noansi $R/gate-C-node.log \| grep -aE 'Test Files\|Tests  '; grep -ao 'checked [0-9]* attribution' $R/gate-C-attributions.log; noansi $R/gate-C-biome.log \| grep -aoE 'Checked [0-9]+ files'` |
+| 5, 84, 1598, 579, 472 | the gate at `07314d7`: the same | `grep -c 'exit 0 HEAD 07314d7' $R/gate-exits.txt; noansi $R/gate-R-node.log \| grep -aE 'Test Files\|Tests  '; grep -ao 'checked [0-9]* attribution' $R/gate-R-attributions.log; noansi $R/gate-R-biome.log \| grep -aoE 'Checked [0-9]+ files'` |
