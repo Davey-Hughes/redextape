@@ -42982,3 +42982,96 @@ rows were added at `2cc3ec0` by `$R/fix3/figures.zsh`, which ran every row again
 | 1 of 4; `:76`; `v24`, `v15` | SM's Chromium run: the same | `strip $R/fix3/sab-SM-browser.log \| grep -aE "Tests \|AssertionError\|clif-fault-tags.test.ts:[0-9]+"` |
 | 6 legs, each `exit=0` | `$R/fix3/prove.sh`'s legs at `2cc3ec0` | `cat $R/fix3/prove-exits.txt` |
 | 4; 4; 4; 463; 5 | at `2cc3ec0`: the node test file's tests passed; in Chromium; in Firefox; the files `biome ci` checked; the changed files the comment check read | `for f in node chromium firefox; do strip $R/fix3/$f-fault-tags.log \| grep -aE "^ +Tests "; done; strip $R/fix3/biome.log \| grep -o "Checked [0-9]* files"; tail -1 $R/fix3/comments.log` |
+
+#### IN FIREFOX, A VIEW KEY, A DIVIDER'S DRAG OR A STAGE SWITCH MADE WHILE THE SOURCE EDITOR HAS THE FOCUS LEAVES ITS CARET WHERE IT WAS (2026-11-24 and 25, branch `firefox-caret` on `f818cca`, rebased onto it from `e65a533` by way of `2a96b84` and
+`f59ef8e`: the fix in `e9415ee`, `6bcae2f` after the rebases, this entry in the two commits after it, and this entry
+brought up to the rebases in the commits after those)
+
+In Firefox, a person typing in the source editor who pressed a view key, dragged a divider with the pointer or switched
+views in the Stage could find the caret at the start of the text, and the next key they typed went there. Chromium left
+the caret where it was. The defect is older than #196: Task 5 of that branch, `remove-copies`, met it in
+`view-keys-focus.test.ts`'s Stage case, diagnosed it and wrote the fix as `0fa0e0d`, which `8c6cc4b` took back out of
+that branch for a pull request of its own. This branch is `0fa0e0d` applied onto `e65a533` by `git am`, with no conflict
+and no change to its code or its message. The diagnosis is
+`~/temp/redextape-remove-copies-record/firefox-caret/diagnosis-report.md`; this lane's record is that directory, `$F`
+below, and its logs are in `$F/impl/`, `$L` below.
+
+##### THE CAUSE
+
+**Firefox sends no `blur` to an element that leaves the page with the focus.** `layout-view.ts`'s `renderLayout` takes
+every host off the page with `root.replaceChildren()`, and `renderStage` moves the shown view's host out of `#views` and
+back. `pane-host.ts`'s `keepingFocus` then gives the focus back to the editor by `moveFocus`, which calls CodeMirror's
+`focus()`. That writes the state's selection to the page only where it differs from CodeMirror's last reading of the DOM
+selection, and only CodeMirror's `blur` handler clears that reading. In Chromium the detach sends the blur. In Firefox
+nothing does, so the reading still names the caret while the browser has put the DOM selection at the start of the text,
+`focus()` writes nothing, and the next `selectionchange` makes CodeMirror take the start of the text for the user's
+caret. Whether a run fails is a race: other work in the rebuild can refresh the reading first, so a case could pass one
+run and fail the next.
+
+##### THE FIX
+
+`layout-view.ts`'s `blurEditorIn(root)` blurs the focused editor under `root` before the render takes the views off the
+page: in `renderLayout` before `root.replaceChildren()`, and in `renderStage` before the host moves. Every browser then
+sends the blur Chromium sends at the detach, and `focus()` writes the state's selection back. It blurs an editor alone:
+a divider still on the page takes a `blur` for the end of its keyboard gesture (`separator.ts`'s `commitKeys`), and
+would commit it in the middle of the render. The blur falls inside `keepingFocus`'s rebuild, which runs under
+`rebuilding`, so a view key and a divider's drag still format nothing with *format on blur* on.
+
+**What changes beyond the case.** In Firefox the editor is now sent a `blur` by every layout render that runs while it
+has the focus, as Chromium sends one. So a render outside `keepingFocus` with *format on blur* on now formats the text
+in Firefox, as it already did in Chromium.
+
+**The renders checked.** Every render that takes views off the page is `pane-host.ts`'s `applyLayout`, which calls
+`renderStage` or `renderLayout`, so the two calls cover them. The app has one editor, the source view's, which `main.ts`
+builds, and the pass of `applyLayout` in which a pane's constructor empties its host with `host.replaceChildren(…)`
+skips the source leaf. `banner.ts`'s `showBanner` replaces what `#views` holds when the app did not start, and nothing
+gives the editor the focus after that, so it needs no blur. `applySwitches` moves the readout's hosts between the strip
+and the inspector, and they hold no editor.
+
+##### VERIFICATION
+
+Firefox ran under the browser lock, after the wait for port 63315, by `$L/runs.zsh`, at `e65a533`, the base, and at
+`e9415ee`, the head. Each run's exit is in `$L/runs-exits.txt`, its log in `$L/<run>.log` and its failures by name in
+`$L/<run>.fails`.
+
+| Firefox on | At `e65a533` | At `e9415ee` |
+|---|---|---|
+| `view-keys`, `view-keys-focus`, `view-keys-format-on-blur`, `divider-drag-format-on-blur` and `divider-drag` | 3 files of 5 failed; 20 tests failed, 45 passed, 2 skipped (`b5`) | in each of 3 runs, 1 file failed; 1 test failed, 64 passed, 2 skipped (`h5-1` to `h5-3`) |
+| every file the `firefox` and `firefox-capture` projects include | 22 files of 217 failed; 78 tests failed, 1754 passed, 2 failed as expected, 25 skipped (`ball`) | 18 files of 217 failed; 53 tests failed, 1779 passed, 2 failed as expected, 25 skipped (`hall`) |
+
+The one failure in each run on the five files is `view-keys`'s *ends when the window loses the focus*, which fails at
+the base too. Of the head's 53 failures in the whole list, 52 fail by name at the base. The other, `clif-worker`'s
+*drops the stepper for a request with no listing*, failed at its count of chunks after the drop, 6 where it allows 1,
+and passed 3 runs of 3 alone at the head (`hcw-1` to `hcw-3`). In both whole runs `share-open-deep.test.ts` ran no test:
+its `beforeAll` threw Firefox's `InternalError: too much recursion`, and it is counted among the failed files. 26 of the
+base's failures pass at the head (`$L/base-now-pass.txt`): 15 in `view-keys`, 5 in `divider-drag-focus`, 2 in
+`focus-scroll`, 1 each in `view-keys-format-on-blur` and `divider-drag-format-on-blur`, and `clif-app-failed`'s *says
+the load failed, and loads on Retry* and `controls-gate`'s *walks every toggle, each named by its own word*. Chromium on
+the five files at the head: 67 tests passed (`hch5`).
+
+**The sabotage**, the diagnosis's SC1: `blurEditorIn`'s condition led by `false && `, the file saved to
+`$L/sab/SC1.orig` first. `view-keys.test.ts` in Firefox: 19 tests failed, 17 passed and 2 skipped (`sab-SC1`), 16 of
+them at "the caret is not where it was"; at the head the file fails 1. The file was restored from its copy, and `cmp`
+found the two equal.
+
+**The gate at `e9415ee`**, by `$F/gate.zsh`, each leg's exit in `$L/gate-exits.txt` and `$L/gate2-exits.txt`: the node
+tier, 81 files and 1527 tests; `check-comments.mjs --base e65a533`; the attribution check, 575 sites and 0 violations;
+`pnpm run typecheck`; and `biome ci`, 460 files, each exited 0 in both runs. Coverage, the node and Chromium projects
+under the lock in a capped unit, exited 1 in the first on one case: `clif-app-failed`'s timed
+out waiting for the CLIF view to say the load failed. Alone it passed (`cov-clif-app-failed`), and in the second run
+coverage exited 0: 298 files, 3386 tests passed and 2 failed as expected; `All files` statements 98.09%, branches
+92.29%, functions 98.72%, lines 99.33%, as at `752963a`; `layout-view.ts` lines 99.14%.
+
+**After the rebase onto `f59ef8e`**, at `8c7a7b3`, by `$F/gate-r2.zsh`, each leg's exit in `$L/r2-exits.txt`:
+`check-comments.mjs --base f59ef8e`, the attribution check, `pnpm run typecheck` and `biome ci` exited 0. The node tier
+failed 1 of 1549 tests, `clif-view`'s *are the frames the real builds give*, because the worktree's `pkg-clif` was built
+before #201 added `returned`; rebuilt, the node tier passed 82 files and 1549 tests (`$L/r2-node-b.log`). Chromium on the
+five files: 67 tests passed. Firefox on the five files, `divider-drag-focus`, `clif-app-failed` and `clif-worker`: 2
+tests failed, 94 passed and 2 skipped, and both failures, `view-keys`'s *ends when the window loses the focus* and
+`divider-drag-focus`'s *does not scroll the view to a caret that is out of sight*, fail at `e65a533` too (`ball`).
+Coverage was not rerun.
+
+**After the rebase onto `f818cca`** (#197), at `69c68ae`, where only the roadmap conflicted, by `$F/gate-r3.zsh`, each
+leg's exit in `$L/r3-exits.txt`: the node tier, 83 files and 1553 tests with `pkg-clif` rebuilt for #197's change,
+`check-comments.mjs --base f818cca`, the attribution check, `pnpm run typecheck` and `biome ci` exited 0. The browser legs
+were not run at this head; CI runs them.

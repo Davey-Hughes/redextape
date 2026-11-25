@@ -90,6 +90,7 @@ export function renderLayout(
       ? { path: focused.dataset.path, index: focused.dataset.index }
       : null
 
+  blurEditorIn(root)
   // Detach children without destroying them — `replaceChildren()` with no arguments removes every
   // child, and the hosts we are about to re-append are held by the caller's map, so nothing is lost.
   root.replaceChildren()
@@ -101,6 +102,21 @@ export function renderLayout(
     )
     restored?.focus()
   }
+}
+
+/**
+ * Take the focus from an editor under `root` before a render takes `root`'s views off the page, as Chromium does as
+ * they go. **FIREFOX SENDS NO `blur` TO AN ELEMENT THAT LEAVES THE PAGE WITH THE FOCUS**, so CodeMirror would go on
+ * taking the DOM selection it last read for the one on the page: given the focus back (`pane-host.ts`'s `moveFocus`),
+ * its `focus()` would write nothing, the browser would put the caret at the start of the text, and CodeMirror would
+ * take that for the user's caret. Told of the blur, it writes its own selection back as it is focused.
+ *
+ * **AN EDITOR ALONE**: a divider still on the page takes a `blur` for the end of its keyboard gesture
+ * (`separator.ts`'s `commitKeys`), and would commit it in the middle of the render.
+ */
+function blurEditorIn(root: HTMLElement): void {
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.isContentEditable && root.contains(active)) active.blur()
 }
 
 function build(
@@ -278,6 +294,7 @@ export function renderStage(
 ): void {
   const held = root.contains(document.activeElement) ? document.activeElement : null
   const heldLeaf = held instanceof HTMLElement && held.getAttribute('role') === 'tab' ? held.dataset.leaf : undefined
+  blurEditorIn(root)
 
   const all = leaves(tree)
   const shown = all.some((l) => l.id === opts.focused) ? opts.focused : (all[0]?.id ?? opts.focused)
