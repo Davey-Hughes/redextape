@@ -1,6 +1,7 @@
 import { type Arrangements, liveLeaves, parseKey, treeKey } from './arrangements'
 import { defaultLayout, type LayoutNode, leaves, MAX_TREE_LEAVES, parseTree, type Shape, SOURCE_LEAF } from './layout'
 import type { LeafId } from './panes'
+import { knownTarget, type McTarget } from './protocol'
 
 /**
  * THE WORKSPACE — everything persisted about how the page is arranged: the layout tree, the three
@@ -84,9 +85,23 @@ export const DEFAULT_TM_DISPLAY: TmDisplay = { level: 'program', edges: 'arcs' }
 /** Each TM view's display settings, by leaf — a view with none stored draws with `DEFAULT_TM_DISPLAY`. */
 export type TmDisplays = Readonly<Record<LeafId, TmDisplay>>
 
-/** How a CLIF view lays out its listing (`clif-view.ts`'s `clifLeads`): compact, or as Cranelift prints it. */
+/**
+ * How a CLIF view lays out its listing (`clif-view.ts`'s `clifLeads`): compact, or as Cranelift prints it; and its
+ * machine code panel's target, x86-64 syntax and whether it shows the bytes (machine code panel design §4).
+ *
+ * **THE PANEL'S THREE ARE OPTIONAL, AND STORED ONLY ONCE CHOSEN**: a workspace stored before they existed has none,
+ * and a view with none shows x86-64 in AT&T syntax, without bytes (`mcDisplay`).
+ */
 export type ClifDisplay = {
   readonly layout: 'compact' | 'exact'
+  readonly target?: McTarget
+  readonly syntax?: 'att' | 'intel'
+  readonly bytes?: boolean
+}
+
+/** A CLIF view's machine code settings, each read from `d` or its default. */
+export function mcDisplay(d: ClifDisplay): Required<Omit<ClifDisplay, 'layout'>> {
+  return { target: d.target ?? 'x86-64', syntax: d.syntax ?? 'att', bytes: d.bytes ?? false }
 }
 
 export const DEFAULT_CLIF_DISPLAY: ClifDisplay = { layout: 'compact' }
@@ -143,9 +158,18 @@ export const LEG_DISPLAY: {
     fallback: DEFAULT_CLIF_DISPLAY,
     parse(entry) {
       if (typeof entry !== 'object' || entry === null) return null
-      const { layout } = entry as Record<string, unknown>
+      const { layout, target, syntax, bytes } = entry as Record<string, unknown>
       if (layout !== 'compact' && layout !== 'exact') return null
-      return { layout }
+      const known = knownTarget(target)
+      if (target !== undefined && known === null) return null
+      if (syntax !== undefined && syntax !== 'att' && syntax !== 'intel') return null
+      if (bytes !== undefined && typeof bytes !== 'boolean') return null
+      return {
+        layout,
+        ...(known === null ? {} : { target: known }),
+        ...(syntax === undefined ? {} : { syntax }),
+        ...(bytes === undefined ? {} : { bytes }),
+      }
     },
   },
 }

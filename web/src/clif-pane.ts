@@ -1,3 +1,4 @@
+import { watchIntent } from './clif-intent'
 import {
   CLIF_COPY,
   type ClifLayout,
@@ -13,6 +14,7 @@ import {
 } from './clif-view'
 import type { ControlState } from './controls'
 import { ListingPanel } from './listing-panel'
+import type { McAnswer } from './machine-code'
 import {
   callStackPanel,
   type HeapView,
@@ -24,19 +26,29 @@ import {
 } from './machine-panels'
 import { MachineRow } from './machine-row'
 import { MachineViewChrome } from './machine-view-chrome'
+import { MC_COPY, type McNotice, type McRows, mcFunctionLine, mcLine, mcNotice, mcRows, mcTitle } from './mc-view'
 import type { PaneEvents } from './pane-chrome'
 import { PanelStack, type Shares } from './panel-stack'
-import type { ClifCompiled } from './protocol'
+import { type ClifCompiled, knownTarget, type Listing, MC_TARGETS, type McTarget } from './protocol'
 import type { PaneView } from './sessions'
-import type { ClifListing, ClifRow, ClifRowKind, ClifState } from './types'
+import type { ClifListing, ClifRow, ClifRowKind, ClifState, McListing } from './types'
 import { radioGroup } from './view-header'
-import { type ClifDisplay, DEFAULT_CLIF_DISPLAY } from './workspace'
+import { type ClifDisplay, DEFAULT_CLIF_DISPLAY, mcDisplay } from './workspace'
+
+/**
+ * What the panel says of each target: its choice's hint, naming the ABI shown, and whether it has the syntax choice.
+ * **A `Record`**, so a target the bindings gain is a type error here until the panel can say what it is.
+ */
+const TARGET_WORDS: Record<McTarget, { readonly hint: string; readonly syntaxes: boolean }> = {
+  'x86-64': { hint: 'x86-64 as Linux calls it, System V', syntaxes: true },
+  arm64: { hint: 'arm64 as Linux calls it; Apple’s arm64 differs in a few calls', syntaxes: false },
+}
 
 /** Mints each view's listing a prefix for its cells' ids, which `aria-activedescendant` names. */
 let listingsMinted = 0
 
 /** Which panels a CLIF view has, by the name each is stored under in the workspace (`panes.ts`'s `LEG_PANELS`). */
-export type ClifPanels = Partial<Record<'listing' | 'values' | 'stack' | 'heap', boolean>>
+export type ClifPanels = Partial<Record<'listing' | 'code' | 'values' | 'stack' | 'heap', boolean>>
 
 /** The class a row that shows no instruction carries for its kind. */
 const LABEL_CLASS: { readonly [K in Exclude<ClifRowKind, 'Inst'>]: string } = {
@@ -56,14 +68,41 @@ const LABEL_CLASS: { readonly [K in Exclude<ClifRowKind, 'Inst'>]: string } = {
 export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   #on: PaneEvents
   #program: ClifCompiled | null = null
-  /** The listing `#program` carries, its rows and the spaces before each row's text in each layout; `null` for none. */
+  /**
+   * The listing `#program` carries, which listing it is, its rows and the spaces before each row's text in each layout;
+   * `null` for none. **THE MACHINE CODE SHOWN IS `level`'S**, so that a view seeded while a switch holds the old listing
+   * shows the old listing's code beside it.
+   */
   #shown: {
     readonly listing: ClifListing
+    readonly level: Listing
     readonly rows: ClifRows
     readonly leads: { readonly [L in ClifLayout]: readonly number[] }
   } | null = null
   /** How the listing is laid out: the view's own choice, as a λ view's *expand all* is. */
   #layout: ClifLayout
+  /** The view's display settings as stored, which a change reports whole, with only what has been chosen in it. */
+  #display: ClifDisplay
+  /** The machine code panel (machine code panel design §4): the program's code on the view's target. */
+  #machine: ListingPanel
+  /**
+   * Whether the pin `#linked` holds was made in another view, which scrolls this one to it (`setLink`): given again to
+   * the machine code panel when its rows come, as a view seeded after the pin is given it (`draw.ts`).
+   */
+  #linkScroll = false
+  /** The answer the machine code panel was last drawn from, `null` for none. */
+  #mcAnswer: McAnswer | null = null
+  /** The code the machine code panel shows and its rows; `null` for none. */
+  #mcShown: { readonly code: McListing; readonly rows: McRows } | null = null
+  /** The machine code ordinals of the clif instruction about to run, which the panel marks as current. */
+  #mcCurrent: ReadonlySet<number> = new Set()
+  /** What the machine code panel says instead of its rows, as `#notice` is the listing's. */
+  #mcNotice: HTMLElement
+  #mcSaid: string | null = null
+  /** What the machine code panel's header says beside its name: its target and level. */
+  #mcTitle: HTMLElement
+  #mcTarget: ReturnType<typeof radioGroup>
+  #mcSyntax: ReturnType<typeof radioGroup>
   #frame: ClifState | null = null
   /** Whether `#frame` is the run's result, which the values mark: `setResult`. */
   #result = false
@@ -79,6 +118,9 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   #notice: HTMLElement
   /** What `#notice` says, or `null` while it is off the page. */
   #said: string | null = null
+  /** The rxm pcs the last link pinned and the running focus names, kept for the machine code's rows to come. */
+  #linked: readonly number[] = []
+  #focused: readonly number[] = []
   /** The listing switch on the view's bar, or `null` for a view built without `clifListing`. */
   #switch: ReturnType<typeof listingSwitch> | null
 
@@ -96,6 +138,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     super(on)
     this.#on = on
     this.#layout = display.layout
+    this.#display = display
     this.#notice = document.createElement('p')
     this.#notice.className = 'clif-notice'
     this.#notice.setAttribute('role', 'status')
@@ -107,6 +150,11 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     this.menu.addCheck('clif-compact', 'compact', {
       on: () => this.#layout === 'compact',
       set: (on) => this.#setLayout(on ? 'compact' : 'exact'),
+    })
+    // THE MACHINE CODE'S BYTES, IN THE SAME MENU, for *compact*'s reason: how the panel shows its rows.
+    this.menu.addCheck('clif-bytes', 'machine code bytes', {
+      on: () => mcDisplay(this.#display).bytes,
+      set: (on) => this.#setDisplay({ bytes: on }),
     })
 
     // A ROW WITH A SRCLOC LINKS THE RXM INSTRUCTION IT WAS LOWERED FROM (CLIF view design §4, *Links*); one with none
@@ -125,6 +173,76 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
       onToggle: (open) => on.panel?.('listing', open),
     })
     const listingPanel = this.#listing.panel
+
+    // A MACHINE ROW WITH A PC LINKS THAT RXM INSTRUCTION, as a clif row with that pc does (machine code panel design §4,
+    // *Links*). CLOSED BY DEFAULT: nothing of a target's package is fetched until the panel is opened or its intent
+    // shown. **NAMED `code`, NOT `machine`**: `machine` is the values, call stack and heap row's region, whose share a
+    // workspace already stores under that name.
+    this.#machine = new ListingPanel({
+      name: 'code',
+      label: 'machine code',
+      open: panels.code ?? false,
+      reattachText: 'follow current instruction',
+      classes: { box: 'clif-listing mc-listing', spacer: 'clif-spacer', rows: 'clif-rows', row: 'clif-row' },
+      cellClass: 'clif-cell',
+      idPrefix: `mc-grid-${listingsMinted++}`,
+      fillInstr: (ordinal, cell, row) => this.#fillMachine(ordinal, cell, row),
+      fillLabel: (name, cell) => this.#fillMachineLabel(name, cell),
+      activate: (ordinal) => on.linkInstr?.(this.#mcRow(ordinal)?.pc ?? null),
+      onToggle: (open) => {
+        on.panel?.('code', open)
+        this.#draw()
+      },
+    })
+    const machinePanel = this.#machine.panel
+    // A CLASS OF ITS OWN, NOT THE LISTING'S `clif-notice`: what finds the listing's notice in the view must not find
+    // the panel's.
+    this.#mcNotice = document.createElement('p')
+    this.#mcNotice.className = 'mc-notice'
+    this.#mcNotice.setAttribute('role', 'status')
+    this.#mcTitle = document.createElement('span')
+    this.#mcTitle.className = 'mc-title'
+    this.#mcTarget = radioGroup(
+      {
+        label: 'target',
+        choices: MC_TARGETS.map((target) => ({
+          value: target,
+          label: target,
+          hint: () => TARGET_WORDS[target].hint,
+        })),
+        current: () => this.#target(),
+        pick: (v) => this.#setDisplay({ target: knownTarget(v) ?? mcDisplay(DEFAULT_CLIF_DISPLAY).target }),
+      },
+      'clif-listing-choice',
+    )
+    this.#mcTarget.el.className = 'clif-switch mc-target'
+    this.#mcSyntax = radioGroup(
+      {
+        label: 'syntax',
+        choices: [
+          { value: 'att', label: 'AT&T', hint: () => 'as Cranelift prints its own code' },
+          { value: 'intel', label: 'Intel', hint: () => 'destination first, no sigils' },
+        ],
+        current: () => mcDisplay(this.#display).syntax,
+        pick: (v) => this.#setDisplay({ syntax: v === 'intel' ? 'intel' : 'att' }),
+      },
+      'clif-listing-choice',
+    )
+    this.#mcSyntax.el.className = 'clif-switch mc-syntax'
+    // THE TITLE AND THE TWO CHOICES ARE ONE GROUP, FIRST IN THE ACTIONS, the re-attach and the maximise after it: the
+    // syntax choice comes and goes with the target, and the re-attach with a scroll, so only what follows the target
+    // choice may come and go, or it would move under the pointer (`style.css`'s `.mc-head`).
+    const head = document.createElement('span')
+    head.className = 'mc-head'
+    head.append(this.#mcTitle, this.#mcTarget.el, this.#mcSyntax.el)
+    machinePanel.actions.prepend(head)
+    // A TARGET'S PACKAGE IS FETCHED ON INTENT: the pointer resting on its choice, or the choice taking focus, and the
+    // panel's own toggle for the target it would show.
+    for (const target of MC_TARGETS) {
+      const b = this.#mcTarget.el.querySelector<HTMLElement>(`[role="radio"][data-value="${target}"]`)
+      if (b !== null) watchIntent(b, () => on.machineCode?.intent(target))
+    }
+    watchIntent(machinePanel.toggle, () => on.machineCode?.intent(this.#target()))
 
     this.#values = valuesPanel({
       name: 'values',
@@ -157,7 +275,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
 
     const body = document.createElement('div')
     body.className = 'clif-pane'
-    body.append(listingPanel.el, row.el, row.stackRegion, row.heapRegion)
+    body.append(listingPanel.el, machinePanel.el, row.el, row.stackRegion, row.heapRegion)
     this.mount(host, body)
     // IT KEEPS ITSELF, as `RxmPane`'s does: its listeners are on the regions and their headers, and only the row reads
     // it again.
@@ -171,11 +289,25 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
           panels: [listingPanel],
           bodies: () => [listingPanel.body],
         },
+        {
+          name: 'code',
+          label: 'machine code',
+          el: machinePanel.el,
+          share: 2,
+          panels: [machinePanel],
+          bodies: () => [machinePanel.body],
+        },
         ...row.regions,
       ],
       sizes,
       (next) => on.panelSizes?.(next),
     )
+    // THE RE-ATTACH AND THE MAXIMISE ARE ONE GROUP, LAST IN THE ACTIONS, so they take a second line together where the
+    // header has no room for them beside the name, the title and the choices (`style.css`'s `.mc-tail`).
+    const tail = document.createElement('span')
+    tail.className = 'mc-tail'
+    tail.append(...machinePanel.actions.querySelectorAll(':scope > .table-reattach, :scope > .panel-maximise'))
+    machinePanel.actions.append(tail)
     row.follow(host, stack)
     this.#draw()
   }
@@ -190,6 +322,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
       p !== null && 'listing' in p
         ? {
             listing: p.listing,
+            level: p.level,
             rows: clifRows(p.listing),
             leads: { compact: clifLeads(p.listing, 'compact'), exact: clifLeads(p.listing, 'exact') },
           }
@@ -199,14 +332,22 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     this.#draw()
   }
 
-  /** Mark every Inst row whose srcloc is one of the rxm `pcs` a link pinned: `ListingPanel.setLink`. */
+  /**
+   * Mark every Inst row whose srcloc is one of the rxm `pcs` a link pinned, and every machine instruction of those pcs:
+   * `ListingPanel.setLink`.
+   */
   setLink(pcs: readonly number[], scrollTo: boolean): void {
+    this.#linked = pcs
+    this.#linkScroll = scrollTo
     this.#listing.setLink(this.#ordinalsOf(pcs), scrollTo)
+    this.#machine.setLink(this.#mcOrdinalsOf(pcs), scrollTo)
   }
 
-  /** Mark every Inst row whose srcloc is one of the rxm `pcs` the running focus names: `ListingPanel.setFocus`. */
+  /** Mark every Inst row, and machine instruction, of the rxm `pcs` the running focus names: `ListingPanel.setFocus`. */
   setFocus(pcs: readonly number[]): void {
+    this.#focused = pcs
     this.#listing.setFocus(this.#ordinalsOf(pcs))
+    this.#machine.setFocus(this.#mcOrdinalsOf(pcs))
   }
 
   /**
@@ -232,8 +373,24 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
    */
   #setLayout(layout: ClifLayout): void {
     this.#layout = layout
-    this.#on.clifDisplay?.({ layout })
+    this.#setDisplay({ layout })
+  }
+
+  /** Change the view's display settings by `change`, report them whole for the workspace, and draw. */
+  #setDisplay(change: Partial<ClifDisplay>): void {
+    this.#display = { ...this.#display, ...change }
+    this.#on.clifDisplay?.(this.#display)
     this.#draw()
+  }
+
+  /** The target this view's machine code panel shows while it is open; `null` while it is closed. */
+  machineShown(): McTarget | null {
+    return this.#machine.panel.isOpen() ? this.#target() : null
+  }
+
+  /** The machine code panel's target. */
+  #target(): McTarget {
+    return mcDisplay(this.#display).target
   }
 
   #draw(): void {
@@ -245,6 +402,129 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     this.#values.show(frame === null ? null : clifValues(frame, this.#result))
     this.#stack.show(frame === null || shown === null ? null : clifStack(frame, shown.listing))
     this.#heap.show(frame === null ? null : clifHeap(frame))
+    this.#drawMachine(
+      next === null || shown === null ? null : (this.#instRow(shown.rows.ordinalOf(next) ?? -1)?.pc ?? null),
+    )
+  }
+
+  /**
+   * The machine code panel: its header for the target shown, its answer asked for while it is open, its rows when the
+   * view has a listing and the answer is in, and the machine instructions of the clif instruction about to run, at `pc`,
+   * marked and followed (machine code panel design §4, *Following*).
+   */
+  #drawMachine(pc: number | null): void {
+    const target = this.#target()
+    const hasListing = this.#shown !== null
+    const listing = this.#shown?.level ?? this.#on.clifListing?.current() ?? 'as-built'
+    const mc = this.#on.machineCode
+    const declined = this.#program !== null && 'error' in this.#program
+    // A NEW TITLE IS A NEW ELEMENT: a cut title's tooltip is `cut-text.ts`'s, which relies on no text rewritten in place.
+    const title = mcTitle(target, listing)
+    if (this.#mcTitle.textContent !== title) {
+      const next = document.createElement('span')
+      next.className = 'mc-title'
+      next.textContent = title
+      this.#mcTitle.replaceWith(next)
+      this.#mcTitle = next
+    }
+    this.#mcTarget.sync()
+    this.#mcSyntax.sync()
+    // ON ARM64 THE SYNTAX CHOICE KEEPS ITS ROOM, unseen and out of the tab order: in a narrow header the name and the
+    // title would take the room back, and the target choice would move under the pointer that chose arm64.
+    this.#mcSyntax.el.style.visibility = TARGET_WORDS[target].syntaxes ? '' : 'hidden'
+    // ASKED BEFORE THE LISTING COMES, while the view waits for it after a compile, so that the code is on its way
+    // beside the listing; never for a program the lowering declined, which has none.
+    const open = this.#machine.panel.isOpen()
+    if (open && !declined) mc?.want(target, listing)
+    const answer = hasListing ? (mc?.code(target, listing) ?? null) : null
+    if (answer !== this.#mcAnswer) {
+      this.#mcAnswer = answer
+      this.#mcShown = answer !== null && 'code' in answer ? { code: answer.code, rows: mcRows(answer.code) } : null
+      // THE BYTES COLUMN IS AS WIDE AS THE LISTING'S WIDEST ROW'S BYTES, two digits and a space each: no row's
+      // instruction steps right of the others', and no room is kept for bytes no row has, as x86-64's fifteen would
+      // be on arm64's four.
+      const widest = Math.max(0, ...(this.#mcShown?.code.rows.map((r) => r.bytes.length / 2) ?? []))
+      this.#machine.panel.body.style.setProperty('--mc-bytes', `${Math.max(0, 3 * widest - 1)}ch`)
+      this.#machine.setSource(this.#mcShown?.rows.source ?? null)
+      // NEW ROWS SCROLL TO THE PIN AS THE LISTING'S DO when they come after it, held until the run moves: a pin made
+      // before the code came would otherwise leave the panel on the run's rows with the pinned ones out of view.
+      this.#machine.setLink(this.#mcOrdinalsOf(this.#linked), this.#linkScroll)
+      this.#machine.setFocus(this.#mcOrdinalsOf(this.#focused))
+    }
+    this.#mcCurrent = new Set(pc === null ? [] : this.#mcOrdinalsOf([pc]))
+    // A CLOSED PANEL SAYS NOTHING: a notice in its hidden body would still be in the view's DOM, a status a screen
+    // reader can be pointed at and one more `role="status"` beside the listing's.
+    const reason = this.#on.legReason?.() ?? ''
+    this.#drawMachineNotice(open && mc !== undefined ? mcNotice(mc.load(target), answer, this.#program, reason) : null)
+    // FOLLOWING KEEPS THE CURRENT ROWS IN VIEW AS ONE BLOCK, as the listing centres its instruction about to run: a clif
+    // instruction's machine instructions are one function's, so the rows from its first to its last are centred
+    // together, another instruction's among them, or start at the box's top when they are more than it shows.
+    const current = [...this.#mcCurrent].sort((a, b) => a - b)
+    this.#machine.show(current[0] ?? null, this.#frame?.step ?? null, current.at(-1) ?? null)
+  }
+
+  /** `#drawNotice` for the machine code panel: `notice`'s words at the top of its body, or none. */
+  #drawMachineNotice(notice: McNotice | null): void {
+    const said = notice === null ? null : notice.kind === 'declined' ? `declined ${notice.text}` : notice.kind
+    if (said === this.#mcSaid) return
+    this.#mcSaid = said
+    const focused = this.#mcNotice.contains(document.activeElement)
+    if (notice === null) this.#mcNotice.remove()
+    else {
+      this.#mcNotice.replaceChildren(...mcNoticeContent(notice, () => this.#retryMachine()))
+      if (!this.#mcNotice.isConnected) this.#machine.panel.body.prepend(this.#mcNotice)
+    }
+    if (focused && !this.#mcNotice.contains(document.activeElement)) this.#machine.panel.toggle.focus()
+  }
+
+  #retryMachine(): void {
+    this.#on.machineCode?.retry(this.#target())
+    this.#draw()
+  }
+
+  /** The machine code row of the panel's instruction `ordinal`. */
+  #mcRow(ordinal: number): McListing['rows'][number] | undefined {
+    const shown = this.#mcShown
+    const row = shown?.rows.rowOf[ordinal]
+    return row === undefined ? undefined : shown?.code.rows[row]
+  }
+
+  #mcOrdinalsOf(pcs: readonly number[]): number[] {
+    const rows = this.#mcShown?.rows
+    return rows === undefined ? [] : pcs.flatMap((pc) => rows.ordinalsOfPc(pc))
+  }
+
+  /**
+   * A machine instruction's row: its offset, its pc, its bytes while they are shown, its instruction in the view's
+   * syntax, and the function a relocation in it is filled in with. **THE CURRENT CLIF INSTRUCTION'S EVERY MACHINE
+   * INSTRUCTION IS MARKED**, beside the one the panel follows, **ON ITS ROW**, where the link's, the focus's and the
+   * followed row's marks are: on the cell, its wash would paint over theirs.
+   */
+  #fillMachine(ordinal: number, cell: HTMLElement, row: HTMLElement): void {
+    const r = this.#mcRow(ordinal)
+    if (r === undefined) return
+    const { syntax, bytes } = mcDisplay(this.#display)
+    const line = mcLine(r, syntax, bytes)
+    const part = (className: string, text: string): HTMLElement => {
+      const span = document.createElement('span')
+      span.className = className
+      span.textContent = text
+      return span
+    }
+    cell.append(part('mc-offset', line.offset), part('rxm-pc', line.pc))
+    if (bytes) cell.append(part('mc-bytes', line.bytes))
+    cell.append(line.text)
+    if (line.callee !== '') cell.append(part('mc-callee', line.callee))
+    if (this.#mcCurrent.has(ordinal)) row.classList.add('is-current')
+  }
+
+  /** A machine code row that shows no instruction: a function's header, or the blank before it. */
+  #fillMachineLabel(name: string, cell: HTMLElement): void {
+    const code = this.#mcShown?.code
+    const r = code?.rows[Number(name)]
+    if (code === undefined || r === undefined || r.kind !== 'Function') return
+    cell.classList.add('is-function')
+    cell.textContent = mcFunctionLine(code, r.function)
   }
 
   /**
@@ -348,6 +628,29 @@ function noticeContent(n: ClifNotice, retry: () => void): (string | HTMLElement)
       button.textContent = CLIF_COPY.retry
       button.addEventListener('click', retry)
       return [CLIF_COPY.failed, ' ', button]
+    }
+  }
+}
+
+/** A machine code notice's words, and after a failure's, the Retry that loads the package again. */
+function mcNoticeContent(n: McNotice, retry: () => void): (string | HTMLElement)[] {
+  switch (n.kind) {
+    case 'loading':
+      return [MC_COPY.loading]
+    case 'building':
+      return [MC_COPY.building]
+    case 'declined':
+      return [MC_COPY.declined(n.text)]
+    // NO RETRY: the package would stop on the same program again; a new program asks again.
+    case 'trapped':
+      return [MC_COPY.trapped]
+    case 'failed': {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'mc-retry'
+      button.textContent = MC_COPY.retry
+      button.addEventListener('click', retry)
+      return [MC_COPY.failed, ' ', button]
     }
   }
 }

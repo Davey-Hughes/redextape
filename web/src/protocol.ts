@@ -9,6 +9,8 @@ import type {
   Diagnostic,
   LambdaState,
   LambdaStatus,
+  McListing,
+  McTarget,
   RunStatus,
   RxmProgram,
   RxmState,
@@ -258,6 +260,23 @@ export const knownListing = (v: unknown): Listing | null => (v === 'as-built' ||
  * run.
  */
 export type ClifLoad = 'idle' | 'loading' | 'ready' | 'failed'
+
+export type { McTarget } from './types'
+
+/**
+ * Every `McTarget`, as keys. **A `Record`**, so a target the bindings' union gains is a type error here until it is
+ * listed, and so in every list and lookup taken from it.
+ */
+const MC_TARGET_KEYS: Record<McTarget, null> = { 'x86-64': null, arm64: null }
+
+/** Every `McTarget`, in the order the panel's picker lists them. */
+export const MC_TARGETS = Object.keys(MC_TARGET_KEYS) as readonly McTarget[]
+
+/**
+ * `v` as a target, or `null` for anything else: how a stored or chosen target is read, as `knownListing` reads a
+ * listing, so that no other value becomes a target by default.
+ */
+export const knownTarget = (v: unknown): McTarget | null => MC_TARGETS.find((t) => t === v) ?? null
 
 /**
  * The frame type each leg records, keyed by the same `Leg` the protocol already speaks.
@@ -511,6 +530,17 @@ export type RunRequest =
    * stepper's frames of an older request are told apart, and a request of an epoch no newer than the leg's is ignored.
    */
   | { kind: 'clif'; gen: number; epoch: number; listing: Listing | null }
+  /**
+   * Load `target`'s machine code package and build nothing: the page's intent to show that target. Answered by an
+   * `mc-load`, as `clif-load` is, whatever generation is live.
+   */
+  | { kind: 'mc-load'; gen: number; target: McTarget }
+  /**
+   * Generation `gen`'s machine code on `target` as `listing`. **NOT RECORDED AND NOT KEPT**: the package holds no
+   * state, so the worker answers once from the live session's `clifInput()`, after the run's `result` and before any
+   * `clif` request posted after it builds, and a request for a generation no longer live is not answered.
+   */
+  | { kind: 'mc'; gen: number; target: McTarget; listing: Listing }
 
 /**
  * `declinedSpan` IS RESOLVED IN THE WORKER, not on the main thread, because `sourceSpan` is a
@@ -628,7 +658,16 @@ export type LegStatus = {
 export type LegProgram = { rxm: RxmCompiled; tm: TmCompiled; clif: ClifCompiled }
 
 /** What a CLIF view is handed: the listing, or why there is none. `null` while it is being built. */
-export type ClifCompiled = { readonly listing: ClifListing } | { readonly error: string }
+export type ClifCompiled =
+  | {
+      readonly listing: ClifListing
+      /**
+       * The listing `listing` is, as the worker built it. **CARRIED WITH THE ROWS, NOT READ FROM THE SWITCH**: while a
+       * switch holds the old listing the switch already says the new one, and a view seeded then shows these rows.
+       */
+      readonly level: Listing
+    }
+  | { readonly error: string }
 
 /**
  * A session's machine in the form a TM view is handed one: `compiled`'s `programs.tm`, which the session keeps as
@@ -728,7 +767,24 @@ export type RunReply =
    * can follow its listing and its frames and leaves the leg with no stepper. Not a `worker-error`, for `clif-load`'s
    * reason.
    */
-  | { kind: 'clif-listing'; gen: number; epoch: number; listing: ClifListing | null; error: string | null }
+  | { kind: 'clif-listing'; gen: number; epoch: number; listing: ClifListing; level: Listing; error: null }
+  | { kind: 'clif-listing'; gen: number; epoch: number; listing: null; error: string }
+  /** Where `target`'s machine code package's load stands, as `clif-load` says `pkg-clif`'s: no generation. */
+  | { kind: 'mc-load'; target: McTarget; state: 'loading' | 'ready' | 'failed'; error?: string }
+  /**
+   * The answer to an `mc` request: the rows, or with `code` `null`, why there are none: the rxm leg's refusal or the
+   * build's sentence, or with `trapped`, the message of the trap the package stopped on, which says nothing of the
+   * program. Not a `worker-error`, for `clif-load`'s reason.
+   */
+  | {
+      kind: 'mc'
+      gen: number
+      target: McTarget
+      listing: Listing
+      code: McListing | null
+      error: string | null
+      trapped: boolean
+    }
   /** The answer to `lambda-tree`; `tree.step` is the step it answers, clamped to the run. */
   | { kind: 'lambda-tree'; gen: number; tree: LambdaTreeWire }
   /**

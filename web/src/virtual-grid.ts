@@ -21,6 +21,11 @@ export type GridRows = {
   /** The row following keeps centred, or `null` for none this draw. */
   readonly follow: number | null
   /**
+   * The last row of a block that begins at `follow`, which following keeps in view as a whole (`centredScrollTop`);
+   * absent, the block is `follow` alone.
+   */
+  readonly followLast?: number | null
+  /**
    * The frame this draw shows — a view's step number — or `null` when it has none. **REQUIRED, NOT
    * OPTIONAL**, so a view cannot silently fall back to keying the hold on `follow` alone by omitting it:
    * a link's scroll hold (`VirtualGrid.scrollToRow`) is keyed on this field, because a view whose follow
@@ -395,7 +400,8 @@ export class VirtualGrid {
     } else if (this.#hold === null || this.#hold.frame !== rows.frame) {
       this.#hold = null
       if (rows.follow !== null) {
-        const top = this.#follow.targetScrollTop(rows.follow, ROW_HEIGHT, viewportHeight, count * ROW_HEIGHT)
+        const last = Math.max(rows.follow, rows.followLast ?? rows.follow)
+        const top = this.#follow.targetScrollTop(rows.follow, ROW_HEIGHT, viewportHeight, count * ROW_HEIGHT, last)
         if (top !== null && top !== this.el.scrollTop) {
           this.#follow.onProgrammaticScroll(top)
           this.el.scrollTop = top

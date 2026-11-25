@@ -4,7 +4,8 @@
 // from each type's Rust declaration; the directory is gitignored, so there is no committed copy to go
 // stale. `crates/redextape-wasm/tests/browser.rs` is what measures each of `pkg/`'s generated shapes
 // against a real browser and pins it — not this file, which declares none of them. The CLIF shapes,
-// which cross `pkg-clif/`'s boundary instead, are not among them.
+// which cross `pkg-clif/`'s boundary instead, are not among them, nor the machine code shapes, which cross
+// the two machine code packages' (`tests/node/mc-package.test.ts`).
 //
 // TWO FACTS ABOUT HOW THE BOUNDARY ENCODES THINGS LIVE HERE, because they are facts about the
 // boundary as a whole rather than about any one type, and moving them into one generated type's Rust
@@ -43,6 +44,9 @@ export type { Cut } from '../bindings/Cut'
 export type { Diagnostic } from '../bindings/Diagnostic'
 export type { LambdaState } from '../bindings/LambdaState'
 export type { LambdaStatus } from '../bindings/LambdaStatus'
+export type { McListing } from '../bindings/McListing'
+export type { McRow } from '../bindings/McRow'
+export type { McTarget } from '../bindings/McTarget'
 export type { Move } from '../bindings/Move'
 export type { RuleView } from '../bindings/RuleView'
 export type { RunStatus } from '../bindings/RunStatus'

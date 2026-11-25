@@ -2793,6 +2793,7 @@ main {
    outrank the browser's `[hidden]` and show them (`hidden.test.ts`), so each is guarded. */
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
 .clif-pane > .panel[data-panel="listing"][data-open="true"],
+.clif-pane > .panel[data-panel="code"][data-open="true"],
 .machine-stack:not([hidden]):has(> .panel[data-open="true"]),
 .machine-stack > .panel[data-open="true"],
 .machine-heap:not([hidden]):has(> .panel[data-open="true"]),
@@ -2801,13 +2802,14 @@ main {
   display: flex;
   flex-direction: column;
 }
-/* THE SHARES ARE `panel-stack.ts`'s TO WRITE, as the TM view's are: the listing's two and the others' one each, or
-   what a dragged boundary left. */
+/* THE SHARES ARE `panel-stack.ts`'s TO WRITE, as the TM view's are: the listing's two, the machine code's two and the
+   others' one each, or what a dragged boundary left. */
 .rxm-pane > .panel[data-panel="listing"][data-open="true"],
 .rxm-pane > .rxm-machine:has(> .panel[data-open="true"]),
 .rxm-pane > .machine-stack:has(> .panel[data-open="true"]),
 .rxm-pane > .machine-heap:has(> .panel[data-open="true"]),
 .clif-pane > .panel[data-panel="listing"][data-open="true"],
+.clif-pane > .panel[data-panel="code"][data-open="true"],
 .clif-pane > .rxm-machine:has(> .panel[data-open="true"]),
 .clif-pane > .machine-stack:has(> .panel[data-open="true"]),
 .clif-pane > .machine-heap:has(> .panel[data-open="true"]) {
@@ -2942,8 +2944,109 @@ main {
 .clif-cell.is-block {
   font-weight: 600;
 }
-/* WHAT A CLIF VIEW'S LISTING SAYS WHILE IT HAS NONE, at the top of the listing's body: words, so in the page's face. */
-.clif-notice {
+/* THE MACHINE CODE PANEL'S ROWS: an offset and the bytes, dimmed as the pc column is, before the instruction, and the
+   function a relocation fills in after it. */
+.mc-offset {
+  display: inline-block;
+  min-width: 6ch;
+  color: var(--fg-dim);
+}
+/* `--mc-bytes` IS THE WIDEST ROW'S BYTES IN THE LISTING SHOWN, which `clif-pane.ts` sets on the panel's box. */
+.mc-bytes {
+  display: inline-block;
+  min-width: var(--mc-bytes, 0);
+  margin-inline-end: 1ch;
+  color: var(--fg-dim);
+}
+.mc-callee {
+  margin-inline-start: 2ch;
+  color: var(--fg-dim);
+}
+/* THE MACHINE CODE PANEL'S HEADER IS ONE LINE WHEREVER ITS CONTROLS FIT, as a machine panel's is (the machine panels
+   row design §6.4): a header that wrapped would move the listing under it when the syntax choice came or went. The
+   name, the title and the two choices sit together from the left, the title one width whatever its words, so the target
+   choice is where it was whichever target, level or syntax is shown. Short of room, the title gives way first and then
+   the name, down to its disclosure mark, each cut short with its tooltip whole (`cut-text.ts`); the buttons never do.
+   Only a view too narrow for the mark, the choices and the maximise wraps them, rather than draw past its edge. */
+.clif-pane > .panel[data-panel="code"] > .panel-header {
+  flex-wrap: nowrap;
+}
+.clif-pane > .panel[data-panel="code"] > .panel-header > .panel-toggle {
+  flex: 0 1 auto;
+  min-width: calc(1em + var(--space-1));
+  white-space: nowrap;
+}
+/* THE ACTIONS NEVER SHRINK WHILE THE NAME HAS ROOM TO GIVE, and never past the disclosure mark: shrinking beside the
+   name, they would wrap a choice for a fraction of a pixel. */
+.clif-pane > .panel[data-panel="code"] > .panel-header > .panel-actions {
+  flex: 1 0 auto;
+  max-width: calc(100% - 1em - var(--space-1) - var(--space-2));
+}
+/* THE RE-ATTACH TAKES A SECOND LINE, WITH THE MAXIMISE, WHERE IT DOES NOT FIT BESIDE THE REST WHOLE, as the listing's
+   header wraps its own, and the first line stays as it was: the title and the name do not give way to it, which would
+   move the target choice. So while it is shown the actions claim no room from the name, and the title and choices
+   count at their whole width (`.mc-head`'s and `.mc-title`'s rules below). */
+.clif-pane
+  > .panel[data-panel="code"]
+  > .panel-header
+  > .panel-actions:has(> .mc-tail > .table-reattach:not([hidden])) {
+  flex-basis: 0;
+}
+.panel[data-panel="code"] .panel-name,
+.mc-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* THE TITLE AND THE CHOICES COUNT AS THE CHOICES ALONE (a basis of 0, and a title of no width of its own) while the
+   re-attach is hidden, so the maximise keeps its place beside them and the title gives way before anything wraps. */
+.mc-head {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+.mc-tail {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-inline-start: auto;
+}
+/* AS WIDE AS THE LONGEST TITLE, `x86-64 · optimised`, so where the header has room no title is cut. */
+.mc-title {
+  flex: 1 1 0;
+  max-width: 18ch;
+  contain: inline-size;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+}
+/* WITH THE RE-ATTACH SHOWN, THEY COUNT WHOLE, the title by its width and not its words, so the re-attach wraps where
+   they and it do not fit at those widths. */
+.panel-actions:has(> .mc-tail > .table-reattach:not([hidden])) > .mc-head {
+  flex-basis: auto;
+}
+.panel-actions:has(> .mc-tail > .table-reattach:not([hidden])) .mc-title {
+  flex: 0 1 auto;
+  width: 18ch;
+  contain: none;
+}
+/* EVERY MACHINE INSTRUCTION OF THE CLIF INSTRUCTION ABOUT TO RUN, beside the one the panel follows: a lighter wash of
+   the accent `.is-next` uses, so the run's place reads as one block. AFTER `.is-linked` AND `.is-focus`, BEFORE
+   `.is-next`, as `.state-row.is-current` is: the run's marks win the background by source order, and a link's dashed
+   edge and the focus's bottom edge still show on a current row. THE STATE TABLE'S CURRENT-ROW BAR TOO, so the block is
+   marked by a shape as well as a colour. */
+.clif-row.is-current {
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg));
+  --row-bar: 3px 0 0 var(--accent);
+}
+/* WHAT A CLIF VIEW'S LISTING, OR ITS MACHINE CODE PANEL, SAYS WHILE IT HAS NONE, at the top of its body: words, so in
+   the page's face. */
+.clif-notice,
+.mc-notice {
   margin: 0;
   padding: var(--space-2) 0.5rem;
   font-family: var(--font-ui);

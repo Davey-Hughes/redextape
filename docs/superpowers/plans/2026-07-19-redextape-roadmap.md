@@ -43578,3 +43578,484 @@ equal to 0`.
 | 0 | lines `clif-fetch.test.ts` differs from `cc9cff7`'s | `git diff cc9cff7 730cb68 -- web/tests/browser/clif-fetch.test.ts \| wc -l` |
 | `clif-worker.test.ts` | the files that call `holdRequests` | `git grep -l 'commands.holdRequests' 730cb68 -- web/tests/browser` |
 | 0 | browser test files that tap | `git grep -c '\.tap(' 730cb68 -- web/tests/browser \| wc -l` |
+
+#### MACHINE CODE PANEL PR 2: THE PANEL. A CLIF VIEW SHOWS THE RUN'S MACHINE CODE ON X86-64 OR ARM64, IN AT&T OR INTEL SYNTAX, FETCHES A TARGET'S PACKAGE ONLY ON INTENT, LINKS ITS ROWS TO THE RXM AND CLIF ROWS AND FOLLOWS THE RUN (2026-11-24, branch `machine-code-panel` on `mc-packages` `c4dc416`, `c4dc416..c11594d`, 17 commits, this entry in `2378798`, the fixes of a review of the whole branch made after the PR was opened in `2378798..67dbb2f`, 2 commits, and this entry brought up to them in the commit after; then rebased onto `mc-packages` `f6a1d7d`, on `main` `2a96b84`, #199, the abort drop in `56819c8` and this entry brought up to them in the commit after; then, #198 and #203 merged, rebased onto `main` `da6edae`, two test frames given #201's `returned` in `4eb0c77` and this entry brought up to them in the two commits after)
+
+2026-11-24, later: a review of the whole branch at `2378798`, made after the PR was opened, found 5 minor points, and
+`786f91c` and `67dbb2f`, which follow this entry's first writing, fix the two in the tests; of the other three, words,
+two are this entry's and the PR's and one #198's, and this entry is corrected in place (*WHAT THE REVIEWS CHANGED*).
+
+2026-11-24, later still: #199 merged as `2a96b84`, and `mc-packages` gained seven commits and was rebased onto it, to
+`f6a1d7d`. This branch is rebased onto `f6a1d7d` (`$M/rebase3.md`, which maps each commit's SHA before it to the one
+after), and every SHA this entry names on the branch is one from before it but `feb652d`, `2c40215` and `56819c8`, and
+those the 2026-11-25 paragraph says it names.
+`web/src/clif-intent.ts` and `web/tests/browser/clif-intent.test.ts` are now `main`'s, #199's: the branch's
+`clif-intent.ts` was #199's already, and its test differed from #199's in words and an element's label alone. Of
+`a7dac04`, now `feb652d`, only its `machine-row.test.ts` hunk stays, and of `ce104fe`, now `2c40215`, its `mc-fetch`
+and `mc-fetch-rest` hunks; each message was reworded at the rebase to say so. `c11594d` dropped out, its design line
+byte-equal to #198's. 20 of the 21 commits remain, and `56819c8` drops an x86-64 abort no request spent, after
+`mc-app-failed`'s case and after each `mc-worker` case, which #199's `failRequests` makes possible (*WHAT THIS DID NOT
+CLOSE*). What ran on the rebased tree is *VERIFICATION*'s part after the rebase onto #199.
+
+2026-11-25: #198 merged as `65392ce`, and after #201, #197, #202 and #203 `main` is `da6edae`. This branch is rebased
+onto it, `git rebase --onto origin/main f6a1d7d`, so #198's commits drop out (`$M/rebase-da6edae/`). Git stopped on
+the roadmap alone, rebuilt each time as `main`'s file plus this entry; every other file merged by itself, and the lines
+the branch adds and removes are the same as before. At the stop on `73d8860` git's message cleanup dropped its
+message's line that starts with `#199`, taking it for a comment; that commit was made again with its message whole,
+and every rebased commit's message is now its old one, byte for byte. The 23 commits remain, 18 the same and 5 changed
+in context only. This entry keeps naming the SHAs from before this rebase, `feb652d`, `2c40215` and `56819c8` among
+them, but for this paragraph's and *VERIFICATION*'s part after this rebase; the PR's body maps the 23 commits of
+`f6a1d7d..98c3d84` to theirs, and `$M/rebase3.md` maps the older ones to those 23. #201 made `returned` a field of
+every clif state, and `4eb0c77` gives it to the frames `mc-pane` and `mc-panel-layout` build by hand, whose lack of it
+failed the typecheck. What ran is *VERIFICATION*'s part after the rebase onto `da6edae`.
+
+**Spec §7, PR 2** (`docs/superpowers/specs/2026-11-24-machine-code-panel-design.md`): §4's panel and §6's page and
+worker, with §8's browser tests and a Firefox run, on PR 1's packages (#198, merged as `65392ce`). The range changes `web/`
+and the design alone, nothing under `crates/`, `scripts/`, `Cargo.*` or `.forgejo/`. Its first commit, `a45af64`, is
+the panel as it was drafted outside the repo's usual flow, in the cloud sandbox that drafted PR 1, with no browser and
+Node 22, and it was taken here as an outside contributor's draft: none of its browser side had run. A review of it found
+1 critical, 4 important and 11 minor findings, and building and using it found 10 more, the first of them 22 of CI's
+browser tests failing. Three fix passes, `d8b8235..9fc2d17`, 9 commits, close them and add the browser tests §8 owes.
+A review of the whole branch then found 9 minor findings, and `f82e42f..4a03c7f`, 3 commits, fix all but one, which is
+left to the user (*DECISIONS*). The branch was rebased across #196, which removed copies, and `77013e2..c11594d`, 4
+commits, bring the design up to it and give the longest browser cases bounds of their own. The lane's record is
+`~/temp/redextape-duet-patches-record/mc/`, `$M` below: `$M/panel-progress.md` is the branch's account, pass by pass,
+with its behaviour, test and sabotage table; `$M/review-commit-2.md` and `$M/gates-report.md` are the draft's review and
+its use in a browser; `$M/panel-branch-review.md` is the whole-branch review; `$M/rebase2.md` is the rebase.
+
+##### WHAT CHANGED FOR A PERSON USING THE CLIF VIEW
+
+**The panel.** Under the clif listing is a region titled *machine code*, closed by default. Open, it takes two shares,
+as the listing does, beside the values, call stack and heap row's one, and scrolls its rows in its own box; closed, it
+is its header alone, under the listing's boundary, and says nothing. Its header holds the title in the view's own words,
+*x86-64 · as built* or *arm64 · optimised*; the target choice *x86-64 | arm64*, whose hints name the ABI shown, Linux's
+System V and arm64 as Linux calls it, which Apple's differs from in a few calls; on x86-64 the syntax choice *AT&T |
+Intel*, AT&T by default, as Cranelift prints its own code, whose room stays on arm64 unseen so that the target choice
+does not move under the pointer; *follow current instruction* once the user has scrolled the panel; and the maximise.
+The header is one line wherever its controls fit. The title and then the name give way first, and where the re-attach
+does not fit beside the rest, it and the maximise take a second line, as the listing's header wraps its re-attach.
+
+**Its rows.** Every function in the order the clif listing has them, each under a row that names it as the call stack
+does, `u0:12 fact`, with its size in bytes. An instruction row has its offset in four hex digits, the rxm pc of the
+source range it lies in, blank for none, and the instruction; a call's or an address's target is named after `; `,
+`; u0:0 rt_cons`. *machine code bytes*, a checkbox in the view's `⋯` menu, adds the bytes in a column as wide as the
+widest bytes shown.
+
+**What it says.** *Loading machine code…* while a package loads and *Building machine code…* while the code is built.
+*machine code could not be loaded.* and Retry after a failed fetch; Retry loads again, and the focus goes to the panel's
+toggle as the Retry goes. *machine code could not be built: the package stopped with an error.*, with no Retry, when a
+package traps. *No machine code for this program:* and the listing's own reason when the clif pass declines the program;
+nothing for a program that does not compile, whose reason the step bar gives. A keystroke leaves the old code beside the
+old listing until the new program compiles; a listing switch is held until the new code is built too, and the panel then
+changes in the frame the listing changes in.
+
+**What it fetches.** Loading the page, opening a clif view, stepping it, ↺ and a listing switch with the panel closed
+fetch nothing. A target's package is fetched when a pointer that moved onto that target's choice rests on it 150 ms,
+at once when the choice is pressed or takes the focus, and when a pointer rests on the closed panel's toggle, for the
+target the panel would show. A pointer passing over a choice fetches nothing, and neither does a view drawn under a
+pointer that has not moved. A workspace stored with the panel open fetches its target at start. The code is built once
+per program, listing and target, after the program's compile.
+
+**Links and following.** A press on a machine row with a pc links that rxm instruction with origin `clif`, as a press
+on a clif row of that pc does: the rxm view, the source and TM views and the clif listing mark it, and the panel marks
+every machine row of that pc. A row with no pc links nothing. A pin from any view marks the panel's rows of the pcs it
+covers, and a pin made before the panel's rows came is scrolled to when they come. The rows of the clif instruction
+about to run are the current ones, each with a wash and a 3 px bar, under the next row's own mark; the panel keeps them
+in its box as one block, centred, or the first at the box's top when the block is taller than the box. A wheel over the
+panel stops its following until *follow current instruction*.
+
+**What is stored.** Per clif view, the target, the syntax and the bytes column in `clifDisplay` beside `layout`, the
+panel's open state in `panels` and its share in `panelSizes`, both under `code`. A workspace stored before the panel
+loads with it closed on x86-64, and share links carry the same fields.
+
+**Help.** help.html's clif paragraph and the clif view's line in the app header's gloss each gain a sentence on the
+panel.
+
+**A test-order fault on `main`, which #199 cures.** On `main`, `clif-app-failed.test.ts` fails when it runs in a tab
+after `clif-app-failed-intent.test.ts`: the second file's header draws the clif toggle under the pointer the first file
+left resting there, the browser sends the toggle `pointerenter` and no `pointermove`, and `pkg-clif/` is fetched 150 ms
+later (`~/temp/redextape-duet-patches-record/mc-packages/rebase/ci-flake.md`). `a7dac04`'s intent, which begins a rest
+at the first `pointermove`, cures it on this branch: the pair in one tab passed 3 of 3 runs here (`$M/rebase2.md`).
+#199, branch `intent-pointermove`, makes the same change on `main`, and curing the fault is its claim, not this PR's.
+By `git merge-tree` against #199 as the review of the whole branch ran it, the two conflict in `clif-intent.test.ts`
+and not in `clif-intent.ts`, whose change is the same on both. #199 has since gained `ea0d32b`, *a clif toggle moved
+from under a resting pointer starts a new rest at its next entry*, which changes `clif-intent.ts` again, and against
+`intent-pointermove` at `1f1c6ab` they conflict in both. So after #199 merges this branch takes `main`'s
+`clif-intent.ts` and `clif-intent.test.ts` and keeps only its own extra hunks in them: at `67dbb2f` its
+`clif-intent.ts` is the one #199 began with, `21dc3fb`'s, and its test differs from #199's only in words and in two
+preconditions #199's `4a92b08` has since rewritten. `a7dac04` then mostly drops out; what stays of it is its
+`machine-row.test.ts` hunk, which takes out the wait `d8b8235` put there. 2026-11-24, later still: #199 merged as
+`2a96b84` with `21dc3fb`'s `clif-intent.ts`, without `ea0d32b`, and the rebase onto it took `main`'s two files:
+`clif-intent.ts` merged with no conflict, the same on both sides, and `clif-intent.test.ts`, which `a7dac04` added and
+`main` has too, stopped the rebase once and is `main`'s file whole. `ea0d32b`'s change is `0e6e00e` on #203,
+`intent-followup`, the follow-up to #199, merged as `da6edae`, which changed `clif-intent.ts` once more; on `da6edae`
+this branch has `main`'s file.
+
+##### WHAT THE REVIEWS CHANGED
+
+**The draft, `a45af64`.** Its review read the code (`$M/review-commit-2.md`); its gates and use built it and drove it in
+a browser (`$M/gates-report.md`):
+
+- **C1, the region was named `machine`**, the name the clif view's values, call stack and heap row already has, so the
+  row's boundaries, maximise and stored share resolved to the panel. CI's `web` job would have failed: 22 browser tests
+  in 4 files, 17 in `machine-row.test.ts`, 3 in `panel-boundaries.test.ts` and 1 each in `clif-app-failed.test.ts` and
+  `clif-app-failed-intent.test.ts`, the last two because a closed panel drew a hidden *Loading machine code…* in the
+  listing's notice class. `d8b8235` names the panel and its region `code`, makes `PanelStack` refuse two regions or two
+  panels of one name, and gives a closed panel no notice and the notice and Retry classes of their own. 20 of the 22
+  pass with that. The other 2, both machine-row's, were a gap the closed panel's header now fills, which
+  `underBoundaries` measures to (*THE TESTS*), and a replaced view kept alive by the intent fault below, which
+  `a7dac04` cures.
+- **No share.** Open, the panel grew to its content, 2,193 px in a view 785 px tall: its box never scrolled, the row
+  under it moved to y 2,493, and following could not keep a current row in sight. `d8b8235` gives it two shares and a
+  scroll of its own.
+- **I1, a keystroke blanked the panel**, its answers keyed on the generation a keystroke claims at once; **I2, a listing
+  switch changed the listing first and the code after**, against §4. `6881501` keys answers on the last compiled
+  generation and drops them at each compile, and asks for a switched listing's code before its clif request, which the
+  worker answers before that request's listing.
+- **I3, the current wash was on the cell** and hid the next, link and focus marks; it is on the row since `d8b8235`.
+- **I4, no browser tests.** `90b0815..9fc2d17` add 13 files (*THE TESTS*).
+- **The minor findings**, fixed by `d8b8235..c817f60`: an ask said *loading* on the page's guess and Retry asked twice
+  (M1, M2), so a want now posts the load and asks once the load is ready, and Retry posts the load alone; a trap read as
+  a decline (M4), so the worker tells a trap's `Error` from a decline's string; old answers were never dropped (M5); the
+  header wrapped to three lines, and the target choice moved 98 px under the pointer on choosing arm64; a declined
+  program left the panel blank; the bytes column was 33ch for arm64's 4 bytes; the gloss lacked the panel, a callee
+  followed an arrow, and the title said `O0` beside a choice that says *as built*. M10, current rows marked by colour
+  alone, and M11, a pin made before the rows, waited for the whole-branch review's fix pass.
+- **Intent.** The first pass found that a clif view drawn under a resting pointer fetched the target under it 150 ms
+  later, the browser's `pointerenter` on a replaced element read as intent, against G3. `a7dac04` begins a rest at the
+  first `pointermove` and fetches at once on a press.
+
+**The whole-branch review** (`$M/panel-branch-review.md`), which found no critical or important defect and 9 minor
+findings, fixed in seven groups by `f82e42f`, `ce104fe` and `4a03c7f`:
+
+1. **The target type** was written by hand where `web/bindings/McTarget.ts` exists. It is the bindings' type, every list
+   of targets and every per-target table is checked against it, and one function validates a stored or chosen target.
+2. **A view built during a switch's hold showed the new listing's code and title beside the old listing**, reading the
+   listing from the switch. The worker's listing reply now says which listing it is, and the view keeps that with the
+   rows.
+3. **A trapped package's instance is kept**, as `pkg-clif/`'s is: not changed, a decision (*DECISIONS*, 6). **Current
+   rows marked by colour alone** carry the current-row bar, as the state table's current row does. **A pin made before
+   the rows came** is scrolled to when they come.
+4. **A clif request waited behind every machine code request taken before it**, a package's download included; it now
+   waits only behind those whose package was in.
+5. **A listing switch built the code of every target asked this generation**; it builds only what an open panel shows.
+6. **Stale words**: a CSS comment's width, the design's §4, §6 and §11, and help.html, which said each instruction links
+   its rxm instruction where a row with no pc links nothing.
+7. **A precondition logged, not asserted**: the case of a view drawn under a still pointer asserts that the browser told
+   the choice it is under the pointer.
+
+The review's *tests at risk on CI* went with them: a pass and a rest run under fake timers, so the rest's time passes
+only after the pointer has left; a press is counted around its own `pointerdown`; and a precondition that raced
+`INTENT_MS` against three round trips, and guarded nothing the case asserts, is gone.
+
+**The rebase across #196** (`$M/rebase2.md`). All 13 commits then on the branch survived with their messages; 4 stopped
+on conflicts, each resolved by keeping `main`'s removal and the panel's addition, and one fix git could not see:
+`onMc` tested `live.kind`, a field `main`'s `Live` no longer has, which typecheck caught. With copies went the scratch
+reply handler's `mc-load` and `mc` cases and the `live.kind` guards; the panel never asked a copy's session, so no
+machine code of a copy existed to remove. `77013e2` names `claim.ts` as the one-occupant rule's home in the design, and
+`c11594d` says the design leaves copies out because the app has none, since #196's design withdrew §9's CLIF and LLVM
+copies. Under `CPUQuota=50%` with 4 tabs, five cases took 8.00 to 11.40 s of vitest's default 15 s, so `f4a4abf` and
+`e9454be` give each a bound of 60 s: mc-panel-layout's narrowest-width walk, mc-frames' keystroke and held-switch cases,
+mc-fetch's first case and mc-fetch-stored's case; mc-link's setup has 60 s where it had 30 s. Capped again at
+`f4a4abf`, mc-link's setup took 16.0 s of its 60 s and its slowest case 24.58 s of its 90 s.
+
+**The review of the whole branch after the PR was opened** (`$M/final-review.md`), at `2378798`, the first to read the
+last fix pass, the rebase and the five commits after it, this entry's first writing among them. It found no critical or
+important defect, the rebase's nine conflict resolutions, the fix pass, the data flow, accessibility and CSS sound, the
+six *DECISIONS* still true of the code, and 5 minor points:
+
+1. **The worker's wait was held by no test.** A clif request waits for the `mc` requests of its generation taken before
+   it whose package was in, and no test took the two where that wait decides their order. `786f91c` adds an
+   `mc-worker` case that takes them between the run's `compiled` and its `result` (*WHAT THIS DID NOT CLOSE*).
+2. **`mc-app-failed` armed its failure without saying whether a load came first**, and left a hold it armed when its
+   case failed early. `67dbb2f` asserts first that no `mc-load` was asked for or started, with `mcLoads` beside the
+   machine code fixtures, and releases the hold and restores its ear after the case; dropping an abort nothing spent
+   waited for #199, and `56819c8` does it after the rebase onto it (*WHAT THIS DID NOT CLOSE*).
+3. **This entry and the PR said the two PRs conflict in `clif-intent.ts` and its test**, where by `git merge-tree` they
+   conflicted in the test alone; #199's later `ea0d32b` makes it both (*A test-order fault on `main`, which #199
+   cures*).
+4. **This entry and the PR said the test-order fault's test side was not made**: #199's `cc9cff7` makes it for the clif
+   files, and point 2 is `mc-app-failed`'s twin.
+5. **The design's §7 says each PR has its own plan**, where neither has one: #198's sentence, corrected there.
+
+##### THE TESTS
+
+**New**: `web/tests/node/machine-code.test.ts`, 9 tests, the store's asks and states; `web/tests/node/mc-view.test.ts`,
+11, the rows, notices and title; and 13 browser files with 72 tests, beside a fixture, `mc-fixture.ts`:
+`mc-panel-layout` 18, `mc-pane` 12, `mc-link` 11, `mc-worker` 8, `mc-layout-stored` 6, `clif-intent` 4, `mc-fetch` 3,
+`mc-fetch-rest` 3, `mc-frames` 3, and `mc-app-failed`, `mc-fetch-focus`, `mc-fetch-stored` and `mc-fetch-toggle` 1
+each. The app-level ones run the real worker and packages; `mc-pane` draws each notice from a given store state.
+2026-11-24, later still: `clif-intent.test.ts` is `main`'s since the rebase onto #199, so the branch adds 12 browser
+files with 68 tests, the counts of each the same.
+
+**Changed**: `machine-views.ts`'s `underBoundaries` measures to what is drawn next under a boundary, the lower region or
+a closed region's header, so in a clif view the closed panel's header sits right under the listing's boundary and the
+row begins 41 px, the header and its 8 px gap, below it, where it began right under the boundary before; `codeUnder`
+pins those 8 px and 0. `panel-stack-place.test.ts` gains the two refusals, `state-table.test.ts` a case for centring a
+block, `app-header.test.ts` reads the new gloss and help sentences, and the clif tests that hand a view a program hand
+it the program's listing `level` too.
+
+**How each was seen to fail.** Each behaviour in `$M/panel-progress.md`'s behaviour, test and sabotage tables names the
+sabotages that showed its test fail: the code it holds broken in the worktree, the test run, the file restored from a
+saved copy and compared with `cmp`. 106 sabotages over five passes, 22 in the layout pass, 26 in the data-flow pass,
+34 in the browser tests' pass, 21 in the whole-branch review's fix pass and 3 in the fix pass after the PR was opened,
+each with its log in `$M/logs/`, the last pass's in `$M/fix3/`; 100 failed a test, at a named assertion. 6 did not, and
+each is accounted for:
+
+- `taskA2-sab-switch-rule`: a CSS rule whose removal changed nothing at any width from 160 px, since the header wraps
+  before it would act; the rule was dead and is gone.
+- `taskC-sab-intent-no-press`: with the press ignored, the app still fetches, since a press focuses the choice and focus
+  fetches; `clif-intent.test.ts` holds the press alone, and `taskC-sab-intent-no-press-no-focus` fires in the app.
+- `taskC-sab-ask-every-draw`: an ask on every frame froze the page, so its case failed by its time, at no assertion; the
+  gentler `taskC-sab-ask-while-pending` fires at the count.
+- `fix2-sab-no-next-bar`: the followed row is also a current row, so it keeps a bar from either rule, by design;
+  `fix2-sab-no-bars` takes both away and fires.
+- `fix2-sab-no-chain` and `fix3-sab-no-chain`: with no chain at all in the worker every test passes, and in the second
+  the `mc-worker` case added for the chain after the PR was opened passes too, since from the run's `result` the `mc`'s
+  path and the clif request's are as deep and the `mc`'s was queued first. `fix3-sab-no-chain-await` adds one await to
+  the `mc`'s path, and the case fails at *the mc answered before the listing*; with the chain kept and that await added
+  it passes (`$M/fix3/fix3-ctl-chain-await.log`) (*WHAT THIS DID NOT CLOSE*).
+
+Others fired only past the assertion meant, or did not fire at first, and their tests were changed until they did:
+`taskA2-sab-notice-closed` (the stub answered with code, so no notice either way), `taskC-sab-current-under-link`,
+`taskC-sab-reattach-noop` and `taskC-sab-ask-before-compiled`. The draft's code, run under the data-flow pass's new
+tests, fails 8 of 13 of them (`$M/logs/taskB-oldcode.log`).
+
+2026-11-24, later still: `56819c8`'s drop was broken 3 times, each beside its control, logs in `$M/rebase3/logs/`, and
+the test files restored from saved copies and compared with `cmp`. Each makes a case throw after it arms its abort and
+before its load. `mc-app-failed` then `mc-fetch-focus` in one tab: with the drop taken away `mc-fetch-focus` fails at
+*timed out after 10000ms waiting for x86-64's wasm* (`sab-drop-gone`), and with it kept passes (`sab-drop-kept`).
+`mc-worker` whole, the throw in its Retry case: with the drop taken away no other case fails (`sab-worker-drop-gone`),
+since the case after it posts a load of its own, which the abort fails, and its `mc` loads the package again. Run
+with the held-package case alone after it, that case fails at *the mc answer once the package is in* without the drop
+(`sab-worker-drop-gone-pair`) and passes with it (`sab-worker-drop-kept-pair`).
+
+##### DECISIONS
+
+**Left to the user.** Each row is what the branch does today, awaiting the user's word:
+
+| | Decision | Options | Today |
+|---|---|---|---|
+| 1 | In a 600×900 window the open panel puts the values row below the visible part of the 352 px view | (a) accept: the view scrolls, as its heap does on `main`; (b) a default share of 1 for the panel, not 2; (c) a floor that keeps the row's header in view | (a) |
+| 2 | The header's second line where the re-attach does not fit | (a) keep; (b) a shorter re-attach in this header; (c) cut the name and title for it, which moves the target choice | (a), the controller's call |
+| 3 | Rows with no pc inside a current block, 141 across the 7 web examples, both listings and both targets: 139 register moves at a block's top and 2 the code of a clif instruction with no pc | (a) leave them unmarked; (b) mark a row with no pc between two rows of the current pc, right for the 139 and wrong for the 2; (c) a Rust change in a follow-up, `machine_code` giving a block-top move the pc of the instruction it precedes | (a) |
+| 4 | A closed panel costs every clif view 41 px, its header and gap | (a) accept; (b) the panel's toggle in the view's `⋯` menu and no header while closed | (a) |
+| 5 | A touch `pointerdown` is intent, so a pan that starts on a target choice fetches that package, 839,144 B gzip -9 for x86-64 or 621,796 B for arm64 | (a) accept; (b) for touch, fetch on `click` | (a); Tab through a choice fetches too, as Tab through the clif toggle fetches `pkg-clif/` on `main` |
+| 6 | A package that traps keeps its instance, and the next program's build runs on it, as `pkg-clif/`'s does | (a) keep both packages' instances; (b) forget the module on a trap and instantiate it again at the next ask, for both, in a follow-up | (a) |
+
+##### SIZE AND SPEED
+
+**What the app downloads.** Nothing at start: the default workspace, source and TM, makes 17 requests on both sides,
+`c4dc416` and this branch, and neither fetches a machine code asset; its response bodies, as `vite preview` serves them,
+are 2,937,433 B on `c4dc416` and 2,940,178 B here (`$M/logs/last-net.log`). On first use, a target's package is a
+loader of 8,499 B, 3,181 or 3,182 B gzip -9, and its wasm: x86-64's 3,967,076 B, 839,144 B gzip -9, and arm64's
+1,911,406 B, 621,796 B gzip -9, as `dist` holds them.
+
+**The built app.** `pnpm run build:app`'s `dist` is 5,586,082 B in 57 files at `c4dc416` and 11,493,874 B in 61 files
+here, 5,907,792 B more, of which the two wasm assets and their two loaders are 5,895,480 B. The rest: `index.js` 831,554
+to 840,494 B, 254,831 to 257,337 B gzip -9; `session-worker.js` 25,021 to 26,483 B, 7,290 to 7,661 B gzip -9; the CSS
+45,628 to 47,188 B; help.html 10,075 to 10,400 B; and `pkg-clif/`'s wasm 25 B, from the same Rust built in each side's
+own target dir, whose path the wasm holds 3 times.
+
+**Building the code** runs on the session worker after the program's compile, and holds the worker while it runs: at
+most 1.71 ms a call over the corpus, 0.28 ms at the median, on PR 1's measure (#198's entry).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Rows with no pc inside a current block stay unmarked**, so the block reads as two: *DECISIONS*, 3. A row does not
+  say whether it is a register move or the code of a clif instruction with no pc; telling them apart needs the Rust
+  side.
+- **The chain in the worker taken away alone breaks no test.** A clif request taken after an `mc` whose package is in
+  waits for that `mc`, so a switched listing's code lands before the listing. `mc-worker`'s case for it takes the two
+  before the run's `result`, where once the `result` comes nothing else orders them, and fails without the chain once
+  the `mc`'s path is one await deeper than the clif request's (`$M/fix3/fix3-sab-no-chain-await.log`); with the chain
+  taken away alone it passes, since the two paths are as deep and the order the worker took them in keeps the `mc`
+  first (`$M/fix3/fix3-sab-no-chain.log`).
+- **A trapped package instance is reused**, for `pkg-mc-*` as for `pkg-clif/`: *DECISIONS*, 6.
+- **The clif listing's own trap reads as a decline**, *No clif for this program:* and the trap's message, since
+  `clifThrew` posts a thrown `Error`'s message as a listing's reason. It is `main`'s, outside this PR; the panel tells
+  its own trap apart.
+- **`mc-app-failed`'s unspent abort.** #199's `cc9cff7` makes the test-order fault's test-side fix for the clif files.
+  Its twin here, `mc-app-failed`, asserts since `67dbb2f` that no machine code load came before it arms its failure,
+  and releases its hold after its case, but an abort it armed and nothing spent stays on the tab and fails the next
+  x86-64 request a later file makes: on this base `failRequests` adds to the armed count, so `failRequests(X86, 0)`
+  drops nothing. #199 makes it set the count; the drop is added at the rebase onto #199, as a comment in the file says.
+  2026-11-24, later still: closed. On `f6a1d7d` `failRequests` sets the count, and `56819c8` drops the abort after
+  `mc-app-failed`'s case and after each `mc-worker` case, whose two failure cases arm theirs before their worker
+  exists, so no load can come first (*How each was seen to fail*).
+- **The gap after a compile**, where the new listing can show beside *Building machine code…*, is held by `mc-pane`'s
+  words for the state and by no app test; it lasts a frame or two.
+- **An ask on every frame** froze the page rather than failing an assertion (`taskC-sab-ask-every-draw`); a bound on
+  asks would catch it sooner.
+- **Two buttons named Retry** can share a clif view when `pkg-clif/` and a machine code package have both failed to
+  load; an `aria-label` would tell them apart.
+- **`mc-panel-layout`'s notice-while-closed assertions repeat `mc-pane`'s**; the whole-branch review would delete them.
+- **Firefox's `view-keys.test.ts`**, which the branch does not touch and CI does not run, failed 16 to 20 of its 38 cases
+  in every run on both sides at `c11594d`, before #202 changed the code it tests (`layout-view.ts`); it was not run
+  after the rebase onto `da6edae`. Its case *stays armed through Control pressed alone* failed in 3 of 3 runs of the file
+  here and passed in 3 of 3 at `c4dc416`, but run alone it fails in 3 of 3 runs on each side: whether it passes depends
+  on the cases before it, on the base as here.
+
+##### VERIFICATION
+
+**The gate at `c11594d`**, the last commit before this entry, run by `$M/last/gates.sh` (its `head`, `base-setup`,
+`firefox-head` and `firefox-base` sections), `$M/last/net.sh`, `$M/last/ff-rerun.sh` and `$M/last/ff-control.sh`, each
+leg into a log in `$M/logs/` and a line with its exit in `$M/logs/last-summary.log`. The worktree's packages and
+bindings were built from this tree at `e9454be`, after the rebase (`$M/logs/rebase2-summary.log`), and the one commit
+since changes the design alone. `pre-commit run --all-files` passed every hook at `e9454be`
+(`$M/logs/rebase2-precommit.log`), and the hook passed on `c11594d` (`$M/logs/last-design-commit.log`).
+
+| Leg | Result | Log in `$M/logs/` |
+|---|---|---|
+| `cargo fmt --all --check`; `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, each | `last-fmt.log`, `last-clippy.log` |
+| the eight scans CI runs, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and lua, each `--self-test` then alone | exit 0, each of 16 | `last-scan-*.log` |
+| `node scripts/check-comments.mjs --self-test`, then `--base c4dc416`, this PR's base, and `--base e65a533`, `main` then | exit 0, each; 224 self-test cases; no history and no grown block in 49 and in 73 changed files | `last-comments-*.log` |
+| `scripts/check-all.sh --no-llvm`, with `TREE_SITTER` pinned, under the heavy and browser locks | exit 0, "green, but PARTIAL — these tiers were SKIPPED: LLVM"; the workspace's nextest 2054 passed and 35 skipped; the browser leg 36 passed | `last-check-all-no-llvm.log` |
+| CI's `web` job after its builds, in its order: `../scripts/check-licences.sh` and `../scripts/check-licence-editions.sh`, each `--self-test` then the check | exit 0, each | `last-web-licence*.log` |
+| `pnpm exec biome ci --error-on-warnings` | exit 0, 479 files | `last-web-biome.log` |
+| `pnpm run typecheck` | exit 0 | `last-web-typecheck.log` |
+| `pnpm run test:coverage`, CI's command with a json reporter beside its own | exit 0; 314 files; 3527 tests passed and 2 failed as expected; statements 98.13%, branches 92.41%, functions 98.77%, lines 99.34%, against thresholds of 95, 89, 97 and 97 | `last-web-test-coverage.log`, `.json` |
+| `pnpm run build:app`, here and at `c4dc416` | exit 0, each | `last-web-build-app.log`, `last-base-build-app.log` |
+| `pnpm run test:firefox`, the whole tier, here and at `c4dc416` in a scratch worktree with its own target dir, packages and `pnpm install` | exit 1 on both sides; *Firefox* below | `last-firefox-{head,base}.log`, `.json` |
+
+Skipped, as the range changes no Rust: the LLVM leg, `cargo llvm-cov` and `scripts/check-slow.sh`. `git diff --stat
+c4dc416..c11594d -- crates scripts Cargo.toml Cargo.lock .forgejo` prints nothing, and #198 ran them on its Rust.
+
+**The panel's files under coverage.** `machine-code.ts` 100% of statements, 91.3% of branches and 100% of functions and
+lines; `mc-view.ts` 100, 97.72, 100 and 100; `clif-pane.ts` 98.87, 93.22, 98.48 and 99.58. Every executable line the
+range adds to them runs, 27 of 27, 27 of 27 and 137 of 137 (`$M/last/cov-lines.py`), and a branch not taken stands on 1
+added line of `machine-code.ts`, 1 of `mc-view.ts` and 6 of `clif-pane.ts`. The worker's half, in `session-worker.ts`,
+is outside the measure: `vite.config.ts`'s coverage `exclude` lists that file.
+
+**Firefox** (`$M/final-ab.py`, `$M/logs/last-firefox-ab.log`). Here 78 of 1,932 tests failed, in 21 of 230 files; at
+`c4dc416`, 77 of 1,859, in 21 of 217. 75 failures are shared, in 20 files. The 13 new files ran 71 tests and passed 71.
+3 tests failed here and passed on the base, all in `view-keys.test.ts`, and 2 the other way round in the same file,
+which failed 17, 20 and 19 of its 38 cases in three runs here and 16, 18 and 18 on the base (`$M/last/ff-tally.py`).
+Of the 3, *ends on a key it does not know* passed in both reruns here and *a key held down acts once with Ctrl held
+through a held ]* failed in a rerun on the base too; *stays armed through Control pressed alone* failed in all three
+runs here and passed in all three on the base, and run alone it failed 3 of 3 on each side
+(`$M/logs/last-ff-control-*.log`). **No Firefox failure is the branch's own.**
+
+**Sizes and start-up requests**, with *SIZE AND SPEED*'s figures: `build:app`'s `dist` on each side
+(`$M/logs/last-dist-{base,head}.txt`, `last-dist-gz.txt`), and `vite preview` of each on port 5192, loaded once in
+headless `google-chrome-stable` by `$M/last-netprobe.mjs`, the server stopped after, and nothing listening on 5192 at
+the end (`$M/logs/last-net.log`). The scratch worktree was removed with `git worktree remove`, and its target dir
+deleted.
+
+**After the review of the whole branch, at `67dbb2f`**, run by `$M/fix3/prove.sh`, each leg into a log in `$M/fix3/`
+and a line with its exit in `$M/fix3/prove-summary.log`; every browser leg is one file in one tab, under the browser
+lock. `786f91c` and `67dbb2f` change `mc-worker.test.ts`, `mc-app-failed.test.ts` and `mc-fixture.ts` alone, and the
+fixture gains `mcLoads` and a type import, nothing its other files use, so the legs run the two changed test files, the
+files that load and fetch a package from the app (mc-frames and the five mc-fetch files) and the worker's clif request
+tests, and the gate at `c11594d` was not run again. The pre-commit hook passed on both commits
+(`$M/fix3/commit1.log`, `commit2.log`).
+
+| Leg | Result | Log in `$M/fix3/` |
+|---|---|---|
+| Chromium: mc-worker, mc-app-failed, mc-frames, mc-fetch, mc-fetch-focus, mc-fetch-rest, mc-fetch-stored, mc-fetch-toggle and clif-worker | exit 0, each; 8, 1, 3, 3, 1, 3, 1, 1 and 21 tests passed | `chromium-*.log` |
+| Firefox (`REDEXTAPE_FIREFOX=1`, project `firefox`): mc-worker and mc-app-failed | exit 0, each; 8 and 1 passed | `firefox-*.log` |
+| mc-worker in Chromium under `systemd-run --user --scope -p CPUQuota=50%`, a json reporter beside the default | exit 0; 8 passed; the new case 6,200 ms of its 60,000 ms bound | `cpucap-mc-worker.log`, `.json` |
+| `pnpm run test:node` | exit 0; 84 files, 1595 tests passed | `node.log` |
+| `pnpm exec biome ci --error-on-warnings`; `pnpm run typecheck` | exit 0, each; 479 files | `biome.log`, `typecheck.log` |
+| `node scripts/check-comments.mjs --base c4dc416` | exit 0; no history and no grown block in 49 changed files | `comments-base-c4dc416.log` |
+
+**After the rebase onto #199, at `56819c8`**, run by `$M/rebase3/prove.sh` and the comment and doc checks after it,
+each leg into a log in `$M/rebase3/logs/` and a line with its exit in `prove-summary.log`, once
+`$M/rebase3/build-all.sh` had built the five wasm packages and the bindings from this tree on a
+`pnpm install --frozen-lockfile` (`build-summary.log`). Against `f6a1d7d` the branch changes nothing under `crates/`,
+`scripts/`, `Cargo.*` or `.forgejo/`, so the Rust legs, the coverage tier, `check-all.sh` and the whole Firefox tier
+are left to CI's run on the push. Every browser leg ran under the browser lock with 63315 free; the rebase itself is
+`$M/rebase3.md`.
+
+| Leg | Result | Log in `$M/rebase3/logs/` |
+|---|---|---|
+| `pnpm exec biome ci --error-on-warnings`; `pnpm run typecheck` | exit 0, each; 479 files | `biome.log`, `typecheck.log` |
+| `pnpm run test:node` | exit 0; 84 files, 1595 tests passed | `node.log` |
+| Chromium, projects `browser` and `browser-scrollbars`, 4 tabs: the 41 files `mc-*`, `clif-*`, `machine-row*`, `panel-boundaries`, `cut-text*`, `machine-panel-headers`, `virtual-grid` and `panel-stack-place` | exit 0; 404 tests passed | `chromium.log`, `.json` |
+| Firefox (`REDEXTAPE_FIREFOX=1`, project `firefox`), 2 tabs: the 12 `mc-*` files and `clif-intent` | exit 0; 72 tests passed | `firefox.log`, `.json` |
+| `node scripts/check-comments.mjs --base f6a1d7d`, this PR's base, and `--base 2a96b84`, `main` | exit 0, each; no history and no grown block in 47 and 71 changed files | `comments-base-*.log` |
+| `scripts/check-citations.sh`, `check-doc-figures.sh`, `check-shared-docs.sh` and `check-text-bytes.sh`, on the tree with this entry | exit 0, each | `doc-*.log` |
+
+**After the rebase onto `da6edae`**, at `aed3b9e` unless the row says `4eb0c77`, run by the scripts in
+`$M/rebase-da6edae/gates/`, each leg into a log in its `logs/`, once `build-all.sh` had built the five wasm packages and
+the bindings from this tree (`build-summary.log`; of the packages only `pkg-clif` differed from the old tree's, by #201
+and #197). `aed3b9e` is the rebased `98c3d84` before `73d8860`'s message was made whole again, which made it `050e41b`
+with the same tree. `4eb0c77` changes two test frames and nothing else. The rest of the gate, coverage and `check-all.sh` among it,
+is left to CI's run on the push.
+
+| Leg | Result | Log in `$M/rebase-da6edae/` |
+|---|---|---|
+| `pnpm run typecheck` | exit 1 at `aed3b9e`, TS2741 in `mc-pane.test.ts` and `mc-panel-layout.test.ts`: `returned` missing; at `4eb0c77`, `tsc --noEmit` on the built bindings and the pre-commit hook's typecheck exit 0 | `gates/logs/typecheck.log`; `typecheck-fix.log`, empty, as `tsc` is when it passes; `commit-fix.log` |
+| `pnpm run test:node`; `biome ci --error-on-warnings`; `cargo clippy --workspace --all-targets -- -D warnings`; `check-comments.mjs --base da6edae` and its self-test | exit 0, each; 86 files, 1621 tests; 489 files; no history and no grown block in 47 changed files; 224 cases | `gates/logs/static-summary.log` |
+| Chromium, projects `browser` and `browser-scrollbars`, 4 tabs: the 45 files `clif-*`, `mc-*`, `machine-row*`, `panel-boundaries`, `result-*`, `cut-text*` and `machine-panel-headers` | first run exit 1, 390 of 391 passed; second run exit 0, 391 passed | `gates/logs/chromium.log`, `chromium-2.log` |
+| `clif-app.test.ts` alone, three times; the 33 of those files `main` has, at `da6edae` | exit 0, each; 323 tests passed | `gates/logs/clif-app-head-*.log`, `chromium-main.log` |
+| Firefox (`REDEXTAPE_FIREFOX=1`, projects `firefox` and `firefox-capture`), 2 tabs: the 12 `mc-*` files, `machine-row` and `machine-row-app`, at `aed3b9e` and at the old head `98c3d84` | exit 0, each; 161 tests passed on each side | `gates/logs/firefox-head.log`, `firefox-old.log` |
+| `mc-pane` and `mc-panel-layout` at `4eb0c77`, in Chromium and in Firefox | exit 0, each; 30 tests passed in each | `fix-browser.log`, `fix-firefox.log` |
+
+The one case that failed, `clif-app`'s *lists the program as built, its pcs in the rxm view's form*, timed out waiting
+for the listing to draw rows 0 to 3, the message of `main`'s scroll write race (#205): its screenshot shows the listing
+back on the run's row after the case's one write to its top. The case never opens this panel, which starts closed
+(`clif-pane.ts`'s `panels.code ?? false`) and asks for machine code only while open, so no draw of this branch's falls
+in that window. #205's helper writes again until the scroll holds.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at `c11594d`,
+and those of the rows whose *What* names `67dbb2f` at `67dbb2f`, with `M=~/temp/redextape-duet-patches-record/mc`;
+the last seven rows, on the rebase onto #199, ran at `56819c8` with this entry in the tree. The counts of the part after
+the rebase onto `da6edae` are in that part's table, each beside its log, and not here.
+
+| Value | What | Produced by |
+|---|---|---|
+| `c11594d` | the last commit before this entry, at which every command here ran but those of the rows naming `67dbb2f` | `git rev-parse --short HEAD` |
+| `67dbb2f`; 2; 3, 0 | the last code commit, at which the runs after the review of the whole branch ran; the commits after this entry's first writing, `2378798..67dbb2f`; the files they change under `web/tests/browser/`, and elsewhere | `git rev-parse --short 67dbb2f; git rev-list --count 2378798..67dbb2f; git diff --name-only 2378798 67dbb2f \| rg -c '^web/tests/browser/'; git diff --name-only 2378798 67dbb2f \| rg -v '^web/tests/browser/' \| wc -l` |
+| 5; 9; 5 | the review of the whole branch after the PR was opened: its minor points; the conflict resolutions it checked; the commits after the rebase it was the first to read, `4a03c7f..2378798` | `rg -c '^[0-9]\. \*\*' $M/final-review.md; sed -n '/^## Conflict resolutions/,/^The branch/p' $M/final-review.md \| rg -c '^[0-9]\. '; git rev-list --count 4a03c7f..2378798` |
+| `1f1c6ab`; 2 | at `67dbb2f`: `intent-pointermove`'s tip, against which `clif-intent.ts` conflicts, and `21dc3fb`'s `clif-intent.ts` the same as this branch's; the preconditions this branch's `clif-intent.test.ts` has in the form #199's `4a92b08` rewrote; the review's merge, in the test alone | `git rev-parse --short intent-pointermove; git merge-tree --write-tree intent-pointermove 67dbb2f \| rg -o 'Merge conflict in web/src/clif-intent\.ts'; git diff --quiet 21dc3fb 67dbb2f -- web/src/clif-intent.ts && print same; git diff intent-pointermove 67dbb2f -- web/tests/browser/clif-intent.test.ts \| rg -c '^\+.*precondition'; rg -o 'conflicts only in .web/tests/browser/clif-intent.test.ts.' $M/final-review.md` |
+| 17; 9; 3; 4 | commits in the range; the three fix passes', `d8b8235..9fc2d17`; the whole-branch review's fix pass's, `f82e42f..4a03c7f`; after the rebase, `77013e2..c11594d` | `git rev-list --count c4dc416..c11594d; git rev-list --count a45af64..9fc2d17; git rev-list --count 9fc2d17..4a03c7f; git rev-list --count 4a03c7f..c11594d` |
+| 1 docs, 49 web; 0 | the files the range changes, by top directory; those under `crates`, `scripts`, `Cargo.*` and `.forgejo` | `git diff --name-only c4dc416 c11594d \| cut -d/ -f1 \| sort \| uniq -c; git diff --name-only c4dc416 c11594d -- crates scripts Cargo.toml Cargo.lock .forgejo \| wc -l` |
+| 1; 4; 11 | the draft review's critical, important and minor findings | `rg -c '^\*\*C[0-9]\.' $M/review-commit-2.md; rg -c '^\*\*I[0-9]\.' $M/review-commit-2.md; rg -c '^- \*\*M[0-9]+\.' $M/review-commit-2.md` |
+| 10 | the findings of the draft's gates and use | `rg -c '^[0-9]+\. \*\*(Critical\|Important\|Minor)' $M/gates-report.md` |
+| 22, 4; 17, 3, 1, 1; 20 | the draft's failing browser tests and files; by file, machine-row, panel-boundaries, clif-app-failed-intent and clif-app-failed; those the code fixed | `sed 's/\x1b\[[0-9;]*m//g' $M/logs/taskA-before-4files.log \| rg -a '^ +(Test Files\|Tests) '; sed 's/\x1b\[[0-9;]*m//g' $M/logs/taskA-before-4files.log \| rg -a '^ *(FAIL\|×) ' \| rg -o 'tests/browser/[a-z-]+\.test\.ts' \| sort \| uniq -c; rg -o '20 fixed by code' $M/panel-progress.md` |
+| 785; 2193; 2493 | on the draft, at 1280 × 900: the view's height; the open panel's; the row's y | `rg '^open ' $M/logs/taskA-probe-before.log \| rg -o '"leaf":\{"y":46,"h":[0-9]+\|"panel":\{"y":[0-9]+,"h":[0-9]+\|"row":\{"y":[0-9]+'` |
+| 98 px; 33ch, 4 bytes | on the draft, the target choice's move on choosing arm64; the bytes column on arm64 | `rg -o '98 px right\|the bytes column is 33ch for 4 bytes' $M/gates-report.md` |
+| 9; 7 | the whole-branch review's minor findings; the groups its fix pass took them in | `sed -n '/^## Findings/,/^### Checked/p' $M/panel-branch-review.md \| rg -c '^[0-9]\. \*\*'; sed -n '/^### Each finding/,/^### Timing/p' $M/panel-progress.md \| rg -o '^[0-9]' \| sort -u \| wc -l` |
+| 13; 4 | the commits the rebase moved; those that stopped on a conflict | `rg -c '^[\|] [0-9a-f]{7} [\|] [0-9a-f]{7} [\|]' $M/rebase2.md; rg '^[\|] [0-9a-f]{7} [\|] [0-9a-f]{7} [\|]' $M/rebase2.md \| rg -vc '[\|] none'` |
+| 11.40, 8.00; 10.96, 10.32, 10.1; 15 s | under `CPUQuota=50%` with 4 tabs: mc-fetch-stored's case and mc-frames' held-switch case at `f4a4abf`; the narrowest walk, mc-frames' keystroke case and mc-fetch's first case at `f6b5761`, before the rebase; vitest's default | `rg -o "mc-fetch-stored's case 11.40 s / 15 s and mc-frames case 3 8.00 s / 15 s" $M/rebase2.md; rg -o '10.96 s, mc-frames case 1 \(keystroke\) 10.32 s, mc-fetch case 1 10.1 s\|default 15 s browser timeout' $M/panel-progress.md` |
+| 5; 60_000; 60_000, 30_000 | the cases bounded by `CASE_MS`; its value; mc-link's setup, now and at `4a03c7f` | `rg '^ +CASE_MS,$' web/tests/browser/mc-{panel-layout,frames,fetch,fetch-stored}.test.ts \| wc -l; rg -o 'CASE_MS = [0-9_]+' web/tests/browser/mc-fetch.test.ts; rg -o 'SETUP_MS = [0-9_]+' web/tests/browser/mc-link.test.ts; git show 4a03c7f:web/tests/browser/mc-link.test.ts \| rg -o '^\}, [0-9_]+\)'` |
+| 16.0, 60; 24.58, 90 | capped at `f4a4abf`: mc-link's setup and its bound; its slowest case and its bound | `rg -o 'mc-link setup 16.0 s / 60\|mc-link slowest 24.58 / 90' $M/rebase2.md` |
+| 3 | the runs of clif-app-failed-intent then clif-app-failed in one tab, each 2 passed | `for i in 1 2 3; do sed 's/\x1b\[[0-9;]*m//g' $M/logs/rebase2-pair-$i.log \| rg -a '^ +Tests '; done` |
+| 150 | `INTENT_MS`, the rest in ms | `rg -o 'INTENT_MS = [0-9]+' web/src/clif-intent.ts` |
+| 3 px | a current row's bar | `rg -A2 '^\.clif-row\.is-current \{' web/src/style.css \| rg -o -- '--row-bar: 3px'` |
+| 33, 8; 8, 0 | the closed panel's header and its gap at 1280 and 600 px; `codeUnder`'s pinned gaps | `rg -o 'every difference is the closed header \(33\) \+ its gap \(8\)' $M/panel-progress.md; rg -o 'codeUnder\(host\)\)\.toEqual\(\[8, 0\]\)' web/tests/browser/mc-panel-layout.test.ts` |
+| 18, 12, 11, 11, 9, 8, 6, 4, 3, 3, 3, 1, 1, 1, 1; 13, 72 | at `67dbb2f`, the tests of each new file, `mc-panel-layout` first, as `vitest list` collects them; the browser files and their tests | `zsh $M/fix3/list.sh; python3 $M/fix3/test-counts.py` |
+| 22 and 21, 26 and 26, 34 and 32, 21 and 19, 3 and 2 | the sabotages of each pass, and those that failed a test | `for p in taskA2 taskB taskC fix2 fix3; do t=0; n=0; for f in $M/{logs,fix3}/$p-sab-*.log(N); do [[ $f == *summary* ]] && continue; t=$((t+1)); sed 's/\x1b\[[0-9;]*m//g' $f \| rg -a -q '^ +Tests .* failed' && n=$((n+1)); done; print -r -- "$p $t $n"; done` |
+| 106; 100; 6 | their sums: sabotages; failed a test; did not | the line above, summed |
+| 8, 5, 13 | the draft's code under the data-flow pass's new tests: failed, passed, run | `sed 's/\x1b\[[0-9;]*m//g' $M/logs/taskB-oldcode.log \| rg -a '^ +Tests '` |
+| 141; 2; 139; 7 | rows with no pc between two rows of one pc; those that are a clif instruction's code; the register moves; the web examples | `wc -l < $M/taskB/same.txt; rg -c 'xorq %rdx, %rdx\|mov x2, #0x0' $M/taskB/same.txt; rg -vc 'xorq %rdx, %rdx\|mov x2, #0x0' $M/taskB/same.txt; ls web/src/examples/*.rxt \| wc -l` |
+| 352 px | the clif view's height in a 600 × 900 window | `rg -o 'In a 600x900 window the clif view is 352 px' $M/panel-progress.md` |
+| 1.71 ms; 0.28 ms | #198's slowest build call; its median | `rg -o 'on arm64 as built, 1.71 ms\|is 0.28 ms' docs/superpowers/plans/2026-07-19-redextape-roadmap.md` |
+| 3967076 839144; 1911406 621796; 8499 3181, 8499 3182 | the x86-64 and arm64 wasm assets in `dist`, raw and gzip -9; their loaders | `cat $M/logs/last-dist-gz.txt \| rg redextape_mc` |
+| 831554 254831, 840494 257337; 25021 7290, 26483 7661; 45628, 47188 | `index.js`, `session-worker.js` and the CSS at `c4dc416` and here, raw and gzip -9 | `cat $M/logs/last-dist-gz.txt \| rg -v redextape_mc` |
+| 57, 5586082; 61, 11493874; 5907792; 5895480 | `dist`'s files and bytes at `c4dc416`; here; the difference; the four new assets | `rg '^dist-' $M/logs/last-summary.log; print $(( 11493874 - 5586082 )); rg 'redextape_mc_wasm' $M/logs/last-dist-head.txt \| awk '{s+=$2} END {print s}'` |
+| 10075, 10400; 1257170, 1257195; 3 | help.html at `c4dc416` and here; `pkg-clif/`'s wasm in `dist`; the times this worktree's target dir's path is in it | `rg '^(help\.html\|assets/redextape_clif_wasm_bg)' $M/logs/last-dist-base.txt $M/logs/last-dist-head.txt; strings -n 8 pkg-clif/redextape_clif_wasm_bg.wasm \| rg -c 'redextape-machine-code-panel-target'` |
+| 17, 2940178, 0; 17, 2937433, 0; 0 | at start, the default workspace's requests, response bytes and machine code fetches, here; at `c4dc416`; ports listening on 5192 after | `rg '^(head\|base): \|^listening' $M/logs/last-net.log` |
+| 30; 0 | the gate's legs at `c11594d` that exited 0; that did not | `rg -c '^(fmt\|clippy\|scan-\|comments-\|web-\|check-all)[^ ]* exit=0 ' $M/logs/last-summary.log; rg '^(fmt\|clippy\|scan-\|comments-\|web-\|check-all)[^ ]* exit=[1-9]' $M/logs/last-summary.log \| wc -l` |
+| 224; 49; 73 | the comment check's self-test cases; the files changed since `c4dc416`; since `e65a533` | `rg -o 'self-test, [0-9]+ cases pass\|in [0-9]+ changed files since [0-9a-f]+' $M/logs/last-comments-*.log` |
+| 2054, 35; 36 | `check-all.sh --no-llvm`: the workspace's nextest, passed and skipped; the browser leg, passed | `sed 's/\x1b\[[0-9;]*m//g' $M/logs/last-check-all-no-llvm.log \| rg -a -m1 'Summary \['; rg -a 'test result: ok. 36 passed\|^green' $M/logs/last-check-all-no-llvm.log` |
+| 479 | the files `biome ci` checked | `rg -o 'Checked [0-9]+ files' $M/logs/last-web-biome.log` |
+| 314; 3527, 2; 98.13, 92.41, 98.77, 99.34; 98.87 93.22 98.48 99.58, 100 91.3 100 100, 100 97.72 100 100 | `test:coverage`: files; tests passed and failing as expected; statements, branches, functions and lines; `clif-pane.ts`, `machine-code.ts` and `mc-view.ts` | `sed 's/\x1b\[[0-9;]*m//g' $M/logs/last-web-test-coverage.log \| rg -a '^ +(Test Files\|Tests) \|^All files\|^ +(machine-code\|mc-view\|clif-pane)\.ts '` |
+| 97, 97, 89, 95 | the thresholds: lines, functions, branches, statements | `rg -o 'thresholds: \{[^}]+\}' web/vite.config.ts` |
+| 27 of 27, 27 of 27, 137 of 137; 1, 1, 6 | the added executable lines of `machine-code.ts`, `mc-view.ts` and `clif-pane.ts` that ran; the added lines with a branch not taken | `python3 $M/last/cov-lines.py machine-code.ts mc-view.ts clif-pane.ts \| rg 'added=\|branches'` |
+| 78, 1932, 21, 230; 77, 1859, 21, 217; 3; 0; 75, 20; 2 | Firefox: failed, tests, failed files and files here; at `c4dc416`; failing here and passing there; failing in files the base lacks; shared, in files; failing there and passing here | `python3 $M/final-ab.py $M/logs/last-firefox-head.json $M/logs/last-firefox-base.json \| rg -v '^  '` |
+| 13, 71, 71; 38; 17, 20, 19; 16, 18, 18; fff, fpp, ffp; ppp, ppp, pfp | Firefox: the new files, their tests, passed; `view-keys.test.ts`'s cases; its failures per run here; on the base; the three cases' results run by run here; on the base | `python3 $M/last/ff-tally.py` |
+| 3 of 3, 3 of 3 | the Control case alone, failed here; at `c4dc416` | `rg '^ff-control' $M/logs/last-summary.log` |
+| 15; 0; 0 | hooks passed in `pre-commit run --all-files` at `e9454be`; hooks failed there; on `c11594d` | `rg -c 'Passed' $M/logs/rebase2-precommit.log; rg 'Failed' $M/logs/rebase2-precommit.log \| wc -l; rg 'Failed' $M/logs/last-design-commit.log \| wc -l` |
+| 16; 0 | the legs at `67dbb2f` that exited 0; that did not | `rg -c ' exit=0$' $M/fix3/prove-summary.log; rg ' exit=[1-9]' $M/fix3/prove-summary.log \| wc -l` |
+| 8, 1, 3, 3, 1, 3, 1, 1, 21; 8, 1 | at `67dbb2f`, the tests passed in Chromium: mc-worker, mc-app-failed, mc-frames, mc-fetch, mc-fetch-focus, mc-fetch-rest, mc-fetch-stored, mc-fetch-toggle, clif-worker; in Firefox: mc-worker, mc-app-failed | `for f in chromium-{mc-worker,mc-app-failed,mc-frames,mc-fetch,mc-fetch-focus,mc-fetch-rest,mc-fetch-stored,mc-fetch-toggle,clif-worker} firefox-{mc-worker,mc-app-failed}; do sed 's/\x1b\[[0-9;]*m//g' $M/fix3/$f.log \| rg -a '^ +Tests '; done` |
+| 8; 6,200; 60,000 | at `67dbb2f`, mc-worker under `CPUQuota=50%`: tests passed; the new case's ms; its bound | `sed 's/\x1b\[[0-9;]*m//g' $M/fix3/cpucap-mc-worker.log \| rg -a '^ +Tests '; jq -r '.testResults[].assertionResults[] \| select(.title \| startswith("answers an mc whose package is in")) \| .duration \| floor' $M/fix3/cpucap-mc-worker.json; rg -o 'CASE_MS = [0-9_]+' web/tests/browser/mc-worker.test.ts` |
+| 84, 1595; 479; 49 | at `67dbb2f`: the node tier's files and tests passed; the files `biome ci` checked; the files changed since `c4dc416` the comment check read | `sed 's/\x1b\[[0-9;]*m//g' $M/fix3/node.log \| rg -a '^ +(Test Files\|Tests) '; rg -o 'Checked [0-9]+ files' $M/fix3/biome.log; rg -o 'in [0-9]+ changed files since [0-9a-f]+' $M/fix3/comments-base-c4dc416.log` |
+| `56819c8`; `f6a1d7d`; `2a96b84`; 21; 2 docs, 47 web; 0 | the last code commit, at which the runs after the rebase onto #199 ran; the base under its commits; `main` under that; the commits on the base; the files they change, by top directory; those under `crates`, `scripts`, `Cargo.*` and `.forgejo` | `git rev-parse --short 56819c8; git rev-parse --short 56819c8~21; git rev-parse --short $(git merge-base 56819c8 origin/main); git rev-list --count f6a1d7d..56819c8; git diff --name-only f6a1d7d 56819c8 \| cut -d/ -f1 \| sort \| uniq -c; git diff --name-only f6a1d7d 56819c8 -- crates scripts Cargo.toml Cargo.lock .forgejo \| wc -l` |
+| 20; 1; 2; 1; 7 | the rebase onto #199: the branch's 21 commits it kept; dropped; the messages reworded; its stops on a conflict; the blocks git reported in that stop | `rg -c '^[\|] [0-9]+ [\|] [0-9a-f]{7} [\|] [0-9a-f]{7} [\|]' $M/rebase3.md; rg -c '^[\|] [0-9]+ [\|] [0-9a-f]{7} [\|] dropped [\|]' $M/rebase3.md; rg -c 'REWORDED' $M/rebase3.md; rg -c '^CONFLICT' $M/rebase3/rebase.log; rg -c '^<<<<<<< ' $M/rebase3/stop-a7dac04-clif-intent.test.conflicted.ts` |
+| True; True, 45026 | at the rebase's head: `f6a1d7d`'s roadmap an exact prefix of the branch's; the rest byte-equal to this entry as it stood before the rebase, and its bytes | `rg -o 'prefix of the head roadmap: True\|entry.md: True \( [0-9]+' $M/rebase3/roadmap-check.txt` |
+| 18, 12, 11, 11, 9, 8, 6, 3, 3, 3, 1, 1, 1, 1; 12, 68 | at `56819c8`, the tests of each file the branch adds, `mc-panel-layout` first, as `vitest list` collects them; the browser files and their tests | `zsh $M/rebase3/list.sh; python3 $M/rebase3/test-counts.py` |
+| 2, 1, 2; 1, 1, 1 | the tests failed under `56819c8`'s sabotages, `sab-drop-gone`, `sab-worker-drop-gone` and `sab-worker-drop-gone-pair`; under their controls, the drop kept, the case made to throw among them | `for f in $M/rebase3/logs/sab-{drop-gone,worker-drop-gone,worker-drop-gone-pair,drop-kept,worker-drop-kept,worker-drop-kept-pair}.log; do sed 's/\x1b\[[0-9;]*m//g' $f \| rg -a -o '^ +Tests +[0-9]+ failed'; done` |
+| 11; 0 | the legs at `56819c8` that exited 0; that did not | `rg -c ' exit=0$' $M/rebase3/logs/prove-summary.log; rg ' exit=[1-9]' $M/rebase3/logs/prove-summary.log \| wc -l` |
+| 84, 1595; 479; 41, 404; 13, 72; 47; 71 | at `56819c8`: the node tier's files and tests passed; the files `biome ci` checked; the Chromium leg's files and tests passed; the Firefox leg's; the files changed since `f6a1d7d` the comment check read; since `2a96b84` | `for f in node chromium firefox; do sed 's/\x1b\[[0-9;]*m//g' $M/rebase3/logs/$f.log \| rg -a '^ +(Test Files\|Tests) '; done; rg -o 'Checked [0-9]+ files' $M/rebase3/logs/biome.log; rg -o 'in [0-9]+ changed files since [0-9a-f]+' $M/rebase3/logs/comments-base-{f6a1d7d,2a96b84}.log` |

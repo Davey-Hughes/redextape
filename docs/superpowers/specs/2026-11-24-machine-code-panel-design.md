@@ -127,7 +127,7 @@ clif  [as built | optimised]                            ⋯  ✕
  listing
  pc0       v4 = iconst.i64 100
 ▶pc2       v8, v9 = umul_overflow.i64 v4, v5
- machine code · x86-64 · O0     [x86-64 | arm64]         ▾
+ machine code · x86-64 · as built  [x86-64 | arm64]      ▾
        u0:12 fact  192 bytes
  0000             pushq %rbp
  0004             movq %rsp, %rbp
@@ -137,10 +137,16 @@ clif  [as built | optimised]                            ⋯  ✕
  values             call stack      heap
 ```
 
-- **The panel.** A region under the listing, closed by default, titled *machine code*, with the target and level it
-  shows: *x86-64 · O0* as built, *x86-64 · O1 up* optimised. Its header holds the target picker. Open, closed,
+- **The panel.** A region under the listing, named `code`, closed by default, titled *machine code*, with the target
+  and the listing it shows in the words of the view's own choice: *x86-64 · as built*, *x86-64 · optimised*. Its
+  header holds the target picker. Open, it
+  takes two shares, as the listing does, beside the row's one, with a boundary above and below and its rows scrolled
+  in its own box; closed, it is its header alone, under the listing's boundary, and says nothing. Open, closed,
   maximised and its share are stored per view as the other panels' are; stored workspaces and share links without it
-  read as closed. The header also holds the syntax toggle (Q5) while x86-64 is chosen.
+  read as closed. The header also holds the syntax choice (Q5), shown while x86-64 is chosen; on arm64 it keeps its
+  room unseen, so the target choice does not move. The header is one line wherever its controls fit: the title and
+  then the name give way first; the re-attach and the maximise take a second line where the re-attach does not fit
+  beside the rest whole, as the listing's header wraps its own; and no width down to the narrowest view draws past it.
 - **The picker.** `x86-64 | arm64` on the panel's header, each choice with a hint naming the ABI shown (Linux's System
   V; Apple's arm64 differs in a few calls). The choice is the view's, stored in `clifDisplay` beside `layout`, x86-64
   when none is stored. It does not touch the recording.
@@ -151,19 +157,27 @@ clif  [as built | optimised]                            ⋯  ✕
   register from the load that filled it, the instruction's own text left as the disassembler prints the bytes. A
   branch's target reads as an offset in the same function. Data the code
   carries reads as data: x86-64's constants after the code as `.quad`, alignment as `.zero N`, and arm64's far-call
-  addresses as `.8byte`. The bytes themselves show in a column of their own while *bytes*,
-  a checkbox in the view's `⋯` menu, is checked; it is not by default.
+  addresses as `.8byte`. The bytes themselves show in a column of their own, as wide as the shown listing's widest
+  bytes, while *machine code bytes*, a checkbox in the view's `⋯` menu, is checked; it is not by default.
 - **Links.** A row with a pc links that rxm instruction with origin `clif`, exactly as a clif row with that pc does: the
   rxm view marks it, the source and TM views mark its construct, the clif listing marks its rows, and the panel marks
   every machine instruction of that pc. A pin from anywhere marks the panel's rows whose pc it covers, by the same rule
   as the listing's. Rows with no pc link nothing.
 - **Following (Q4).** The machine instructions whose pc is the clif run's current instruction's are marked as the
-  current ones and kept in view while following. A clif instruction with no source location marks nothing.
+  current ones, on their rows, and kept in view while following as one block: from the first to the last centred in
+  the panel's box, or the first at its top when they are more than it shows. A scroll the user makes in the panel
+  stops following until *follow current instruction*, as in the listing. A clif instruction with no source location
+  marks nothing.
 - **Loading and failure.** Opening the panel or choosing a target not yet loaded fetches it; the panel says it is
-  loading, and on failure says so with Retry, as the listing does. The other panels and views are unaffected.
-- **When there is none.** Where the clif view has no listing (declined, not compiled) the panel says what the listing
-  says. A listing switched is held, as the listing is, until the new code is built, and the panel then changes in the
-  same frame as the listing.
+  loading, then that the code is being built, and on failure says so with Retry, as the listing does. A package that
+  traps on a program says the code could not be built because the package stopped with an error, with no Retry and
+  not in a decline's words, which would blame the program. The other panels and views are unaffected.
+- **When there is none.** Where the clif view has no listing the panel says what the listing says: a declined program
+  in the decline's words (*No machine code for this program:* and the listing's reason), and nothing for a program
+  that does not compile, whose reason the step bar gives; while the listing is still to come, its own loading or
+  building. A keystroke leaves the old code beside the old listing until the new program's compile, where the
+  listing goes too. A listing switched is held, as the listing is, until the new code is built, and the panel then
+  changes in the same frame as the listing.
 - **Help.** The clif line of `KIND_GLOSS` and help.html's clif paragraph gain one sentence each on the panel and the
   picker.
 
@@ -200,16 +214,25 @@ stops and comes back to the user before the view is built.
 
 ## §6 Web
 
-- **Loading.** The session worker imports a target's package with `import()` on that target's intent (§4's picker: the
-  pointer resting on the choice 150 ms or focus on it, through `watchIntent`; the panel's open toggle counts as intent
-  for the target it would show), on opening the panel, or at start when a stored workspace or share link has an open
-  panel. One loader per target, as `clifLoader` is. The one-occupant rule gains: a session may also have the machine
-  code packages loaded, which hold no state.
-- **Building.** A machine code request carries the target and the listing; the worker answers from the session's
-  `clifInput()` after the clif leg's first result, so it never delays a compile or the other legs. One answer per
-  program, listing and target is kept on the page and shared by every clif view of the buffer that shows that target.
+- **Loading.** The session worker imports a target's package with `import()` on that target's intent (§4's picker: a
+  pointer that moved onto the choice resting there 150 ms, a press, or focus on it, through `watchIntent`; the
+  panel's open toggle counts as intent for the target it would show), on opening the panel, or at start when a stored
+  workspace or share link has an open panel. A view drawn under a pointer that has not moved is no intent. One loader
+  per target, as `clifLoader` is. The one-occupant rule (`claim.ts`) is unchanged: it counts the wasm handles
+  alive on the worker, and a machine code package leaves none, since `machineCode` returns plain data.
+- **Building.** A machine code request carries the target and the listing, and the page makes it only once that
+  target's package is in, so the worker answers every request of a live generation. The worker answers from the
+  session's `clifInput()` after the run's `result`, as a clif pass is built, so it never runs before the compile's
+  result; while it builds (milliseconds on the corpus) the worker does nothing else, so an `extend` or a clif chunk
+  that comes then waits for it. A clif request taken after it waits for it only if its package was in when it was
+  taken, so a listing never waits on a download. On a listing switch the page asks for the new listing's code first,
+  on each target an open panel shows and no other, so it lands before the new listing, which the hold keeps back until
+  its frames come. One answer per
+  generation, listing and target is kept on the page, for the last compiled generation, and shared by every clif view
+  that shows that target.
 - **The pane.** The panel is a `ListingPanel` (no second listing-row builder) in a new `PanelStack` region between the
-  listing and the row; `LEG_PANELS.clif` gains `machine`; `ClifDisplay` gains `target`, `syntax` and `bytes`.
+  listing and the row; the region and the panel are `code` and `LEG_PANELS.clif` gains `code`; `ClifDisplay` gains
+  `target`, `syntax` and `bytes`.
 - **Links.** `LINKED.clif`'s `rows` already gives the pcs to mark; the pane marks the panel's rows with them too. A
   panel row click goes through the same `linkInstr(pc, 'clif')` as a listing row.
 - **Build wiring**, at each place `pkg-clif` has one (CLIF view PR 1's list): workspace members, `web/package.json`'s
@@ -238,14 +261,26 @@ Two PRs, each with its own roadmap entry:
 - **Source locations.** Every pc a machine row carries is the pc of some clif row in the same listing; every row inside
   a source-location range carries that range's pc; prologue rows carry none.
 - **Relocations.** Every relocation is named on the row it falls in, and every call row of the corpus names its target.
-- **No fetch without intent.** A browser test: the default workspace, then a clif view opened and stepped, makes no
-  request for either package; resting on *arm64* fetches arm64's alone; focusing *x86-64* fetches x86-64's; a stored
-  workspace with the panel open fetches its target at start. Each assertion is checked to fail when its behaviour is
-  sabotaged.
+- **No fetch without intent.** Browser tests, one file per case that fetches (`mc-fetch*.test.ts`): the default
+  workspace, then a clif view opened and stepped, a stored clif view whose panel is closed, a pointer passing over a
+  choice and a clif view drawn under a pointer that has not moved make no request for either package; resting on
+  *arm64* fetches arm64's alone; a press of *x86-64* fetches x86-64's; focusing *x86-64* fetches x86-64's alone; a rest
+  on the closed panel's toggle fetches the target it would show; a stored workspace with the panel open fetches its
+  target at start and asks once per compiled generation, after its compile; nothing is requested twice.
 - **Unchanged.** `pkg/` byte-identical; `pkg-clif/`'s behaviour unchanged, not its bytes, since `redextape-native` and
   `redextape-clif`, which it links, change; no snapshot changes; `cargo tree` for both shows no ISA.
-- **Links and following.** Each direction of §4's links, in both listings and on both targets, and the current marks
-  across steps, ↺ and a listing switch.
+- **Links and following** (`mc-link.test.ts`, `mc-panel-layout.test.ts`). Each direction of §4's links, in both
+  listings and on both targets, and the current marks across steps, ↺, a listing switch, a target switch and a
+  keystroke's recompile; a current row that is linked keeps the link's edge; the current block kept in the panel's box,
+  a wheel detaching it and the re-attach bringing it back, neither scrolling the page.
+- **What the panel draws** (`mc-pane.test.ts`, `mc-app-failed.test.ts`, `mc-frames.test.ts`). Each notice of §4 in its
+  words, seen in the open panel and absent from a closed one; Retry in the app; AT&T and Intel rows; the bytes column;
+  no syntax choice on arm64; the old code through a keystroke and the switch in the listing's frame.
+- **Stored** (`mc-layout-stored.test.ts`). A workspace without the panel's fields reads with the defaults; the target,
+  syntax, bytes, open panel and share come back through the view taken off the screen and back, a reload and a share
+  link.
+- Each behaviour above was seen to fail its test under a sabotage of the code that holds it, and the files run in
+  Firefox as in Chromium.
 
 ## §9 Left to the builder
 
@@ -266,3 +301,71 @@ Settled by the designer, not the user; open to the user's correction:
 - The target and *bytes* are the view's, like *compact*; the listing stays the program's.
 - Branch targets as offsets, not invented labels.
 - A size stop at 1 MB gzipped per package.
+
+## §11 Changed in review
+
+The draft's calls above are as the draft made them, except these, changed in review (the panel fix, tasks A and B):
+
+- **The name `code`, not `machine`.** `machine` is already the values, call stack and heap row's region, whose share a
+  workspace stores under that name, so the row's boundaries, maximise and stored share resolved to the panel.
+  `PanelStack` now refuses two regions or two panels of one name.
+- **A share and a scroll of its own.** The draft's panel grew to its content and pushed the row out of the view; it now
+  takes two shares, the listing's, and scrolls its rows in its box.
+- **A closed panel says nothing.** Its notice drew in its hidden body, one more status in the view's DOM beside the
+  listing's; the notice and Retry also have classes of their own. Closed, its header still sits under the listing's
+  boundary, as every closed panel's does since the panels row (#192), so the regions below begin 41 px lower than
+  without the panel and a maximised region is 41 px shorter; nothing else in the view moves.
+- **The current marks on the row**, where the next, link and focus marks are, so each still shows on a current row.
+- **Following keeps the block in view**, not its first row alone (§4, *Following*): a clif instruction's machine
+  instructions are one function's, and centring one row lost the block's end out of a box just tall enough for it.
+- **The bytes column as wide as the widest bytes shown**, not a fixed 33ch: x86-64's fifteen would push the text out
+  of a narrow view, and arm64's rows have at most eight.
+- **The syntax choice keeps its room on arm64**, and the header's rule (§4, *The panel*): the draft's header wrapped
+  and moved the target choice under the pointer as the syntax choice came and went. Where the re-attach does not fit
+  beside the rest, the controller chose a second line (option a) over cutting the name and title for it, which moved
+  the target choice, or a shorter re-attach.
+- **The old code stays through a keystroke** (§4, *When there is none*). The draft keyed an answer on the generation a
+  keystroke claims at once, so the panel dropped its rows for "Building machine code…" while the listing still showed
+  the old program, then went blank with no words. An answer is now the last compiled generation's.
+- **A declined program says why, a trap says it is one.** The draft's open panel was blank on a program the lowering
+  declines; it now says so in the decline's words. A wasm trap read "No machine code for this program: unreachable",
+  a decline the program did not earn; the worker now tells a trap (an `Error`) from a decline (a string), and the
+  panel says the package stopped, with no Retry.
+- **The title in the view's words**: *x86-64 · as built*, not *x86-64 · O0*, beside a choice that says *as built*.
+- **Built before the listing it is switched with** (§6, *Building*). The draft's worker answered after the run's
+  `result`, not after the clif leg's first result as §6 said, and the page asked for a switched listing's code only
+  once that listing had landed, so the panel said it was building after the listing had changed. The run's `result`
+  is the right point: the build never runs before the compile's result, though while it builds (milliseconds on the
+  corpus) the worker does nothing else. The page now asks for the new listing's code
+  before its clif request, and the worker builds it before that request's listing, which §4's hold allows ("held
+  until the new code is built").
+- **Asked only once the package is in.** The draft asked with the load still under way and said `loading` on its own
+  guess: an ask the worker would not answer (a superseded run's) left the load `loading` for good, and Retry forgot
+  asks the worker would still answer and asked again. Now a want posts the load from idle, the ask waits for `ready`,
+  and every ask of a live generation is answered once.
+- **Intent is a move, a press or a focus.** The draft's rest began at `pointerenter`, which a browser sends when a view
+  is drawn under a pointer that has not moved, so a clif view opened under a still pointer fetched the target under
+  it, against G3. The rest now begins at the first `pointermove`; a press fetches at once.
+- **The callee after `; `**, as §4's sketch reads, not after an arrow.
+- **Marks: rows with no pc stay unmarked.** Inside a current block some rows carry no pc, so the block reads as two.
+  Across the web examples, both listings and both targets, 141 rows with no pc sit between two rows of one pc: 139
+  are register moves regalloc puts at a block's top, where Cranelift's emit has no source range open, and 2 are the
+  code of a clif instruction that itself has no pc (the optimised `iconst.i64 0` in map-fold, whose clif row is
+  unmarked too). A row says neither which it is, so the panel marks neither; telling them apart needs the Rust side.
+
+Changed by the whole-branch review's fix pass:
+
+- **A view's code is the listing it was built from.** The panel read which listing it showed from the switch, which
+  during a switch's hold already names the new listing while the view still shows the old one, so a clif view opened
+  or rebuilt in that window put the new listing's code and title beside the old listing. The worker's listing reply
+  now says which listing it is, and the view keeps that with the rows.
+- **A listing never waits on a download.** The worker held a clif request behind every machine code request taken
+  before it, its package load included; it now holds it only behind those whose package was in.
+- **A switch builds only what an open panel shows**, not every target asked for this generation: the listing waits for
+  each build.
+- **Current rows carry the current-row bar**, as the state table's current row does, so the block is marked by a shape
+  and not by colour alone.
+- **A pin made before the panel's rows come is scrolled to when they come**, as the listing's rows are when they come
+  after a pin made in another view.
+- **The target type is the bindings' `McTarget`**, and every list of targets and every per-target table is checked
+  against it, so a target added on the Rust side is a type error on the page until the panel can show it.

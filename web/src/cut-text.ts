@@ -12,6 +12,8 @@ export const CUT_TEXT_SELECTORS: readonly string[] = [
   '.clif-cell',
   '.program-text',
   '.machine-panel .panel-name',
+  '.panel[data-panel="code"] .panel-name',
+  '.mc-title',
   '.rxm-register dd',
   '.rxm-frame',
   '.rxm-cell-line',

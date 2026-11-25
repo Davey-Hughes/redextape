@@ -137,7 +137,7 @@ export const VIEWS = [
     parts: [1, 2, 2],
     build(host: HTMLElement, panels: StoredPanels, sizes: Shares, onSizes: (s: Shares) => void): Mounted {
       const pane = new ClifPane(host, inertEvents({ panelSizes: onSizes }), panels, sizes)
-      pane.setProgram({ listing: clifListing })
+      pane.setProgram({ listing: clifListing, level: 'as-built' })
       const at = { function: 0, inst: 0 }
       const draw = (c: Counts) => {
         const count = c.rows?.values ?? 0
@@ -255,16 +255,35 @@ export function drawnAs(host: HTMLElement, values: string): string {
 }
 
 /**
- * Each boundary the view draws, top to bottom, as the two regions it parts and how far under its bottom the lower one
- * begins, in whole pixels: `listing|machine 0` where the boundary takes the place of the gap above that region.
+ * Each boundary the view draws, top to bottom, as the two regions it parts and how far under its bottom what is drawn
+ * next begins, in whole pixels: `listing|machine 0` where the boundary takes the place of the gap above it. What is
+ * drawn next is the lower region, or the header of a closed region between the two, as a CLIF view's closed machine
+ * code panel is (`codeUnder` measures the row under that one).
  */
 export const underBoundaries = (host: HTMLElement): string[] =>
   boundaryKeys(host).map((k) => {
     const [above = '', below = ''] = k.split('|')
-    const gap =
-      region(host, below).getBoundingClientRect().top - boundary(host, above, below).getBoundingClientRect().bottom
+    const bar = boundary(host, above, below)
+    let next = bar.nextElementSibling
+    while (next !== null && getComputedStyle(next).display === 'none') next = next.nextElementSibling
+    const gap = (next ?? region(host, below)).getBoundingClientRect().top - bar.getBoundingClientRect().bottom
     return `${k} ${Math.round(gap)}`
   })
+
+/**
+ * How far under the closed machine code panel of a CLIF view the region below it begins, and how far under the
+ * boundary above the panel the panel does, in whole pixels: the gap a panel keeps above itself, and none.
+ */
+export const codeUnder = (host: HTMLElement): readonly [number, number] => {
+  const code = panelOf(host, 'code')
+  const after = code.nextElementSibling as HTMLElement
+  const before = code.previousElementSibling as HTMLElement
+  const top = code.getBoundingClientRect()
+  return [
+    Math.round(after.getBoundingClientRect().top - top.bottom),
+    Math.round(top.top - before.getBoundingClientRect().bottom),
+  ]
+}
 
 /** The header of the panel named `name`, and its count, its title and its maximise button. */
 export const header = (host: HTMLElement, name: string) =>

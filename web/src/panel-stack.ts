@@ -114,6 +114,16 @@ export class PanelStack {
 
   constructor(regions: readonly StackRegion[], sizes: Shares, onSizes: (sizes: Shares) => void) {
     // CHECKED BEFORE ANYTHING IS DRAWN: a stack that throws has changed none of its regions' elements.
+    // **ONE REGION AND ONE PANEL TO A NAME.** Every lookup by name takes the first match, and the workspace stores a
+    // share by its region's name and an open state by its panel's: a second of one name would read and write the
+    // first's, and a boundary beside either would name both.
+    for (const [what, names] of [
+      ['region', regions.map((r) => r.name)],
+      ['panel', regions.flatMap((r) => r.panels.map((p) => p.el.dataset.panel ?? ''))],
+    ] as const) {
+      const twice = names.find((n, i) => names.indexOf(n) !== i)
+      if (twice !== undefined) throw new Error(`two ${what}s named ${twice} in one stack`)
+    }
     for (const r of regions) {
       if (r.partOf === undefined) continue
       const whole = regions.find((w) => w.name === r.partOf)

@@ -62,7 +62,10 @@ describe('the help page', () => {
         ' build from the rxm program, stepped one clif instruction at a time by the rules the compiled program runs' +
         " by. Its <strong>as built</strong> and <strong>optimised</strong> buttons switch between redextape's" +
         " lowering before Cranelift's passes and Cranelift's output at every opt level from O1 up, the same for every" +
-        " target. Its step cap counts loop iterations, as the compiled program's does, not instructions. In the TM," +
+        ' target. Its <strong>machine code</strong> panel shows the x86-64 or arm64 code Cranelift makes from it, as' +
+        ' Linux calls it, in AT&amp;T or Intel syntax on x86-64; each instruction that comes from an rxm instruction' +
+        ' links it, and the panel marks and follows the code of the clif instruction about to run. Its step cap' +
+        " counts loop iterations, as the compiled program's does, not instructions. In the TM," +
         ' rxm and clif views, a value, an instruction or a line cut short reads whole in a tooltip while the pointer' +
         ' rests on it. Each combination of views keeps its own arrangement,',
     )
@@ -84,10 +87,18 @@ describe('the help page', () => {
     expect(sentence).not.toContain(`<strong>${label}</strong>`)
   })
 
+  /** Each clause and sentence, read against the page's text as a reader sees it, its markup gone. */
   it('holds each clause of the CLIF tooltip’s gloss', () => {
-    const help = readRelative('../../help.html').replace(/\s+/g, ' ')
+    const help = readRelative('../../help.html')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
     expect(KIND_GLOSS.clif).not.toBeNull()
-    for (const clause of String(KIND_GLOSS.clif).split(': ')) expect(help).toContain(clause)
+    const clauses = String(KIND_GLOSS.clif).split(/: |\. /)
+    expect(clauses, 'the gloss names the machine code panel').toContain(
+      'Its machine code panel shows the x86-64 or arm64 code Cranelift makes from it',
+    )
+    for (const clause of clauses) expect(help).toContain(clause)
   })
 })
 

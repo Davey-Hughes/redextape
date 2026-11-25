@@ -51,7 +51,10 @@
           backends build from the rxm program, stepped one clif instruction at a time by the rules the compiled program
           runs by. Its <strong>as built</strong> and <strong>optimised</strong> buttons switch between redextape's
           lowering before Cranelift's passes and Cranelift's output at every opt level from O1 up, the same for every
-          target. Its step cap counts loop iterations, as the compiled program's does, not instructions. In the TM, rxm
+          target. Its <strong>machine code</strong> panel shows the x86-64 or arm64 code Cranelift makes from it, as
+          Linux calls it, in AT&amp;T or Intel syntax on x86-64; each instruction that comes from an rxm instruction
+          links it, and the panel marks and follows the code of the clif instruction about to run. Its step cap counts loop
+          iterations, as the compiled program's does, not instructions. In the TM, rxm
           and clif views, a value, an instruction or a line cut short reads whole in a tooltip while the pointer rests
           on it. Each combination of views keeps its own arrangement, so views come back where they were left. A window
           about 640 px wide or narrower, at the browser's usual text size, has no room for the buttons; the workspace

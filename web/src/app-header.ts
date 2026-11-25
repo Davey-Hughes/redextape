@@ -331,7 +331,9 @@ export const KIND_GLOSS: Readonly<Record<PaneKind, string | null>> = {
   rxm: "redextape's register machine: the IR between the source and the Turing machine",
   lambda: null,
   tm: null,
-  clif: "Cranelift's IR: what the native backends build from the rxm program",
+  clif:
+    "Cranelift's IR: what the native backends build from the rxm program. Its machine code panel shows the x86-64 or" +
+    ' arm64 code Cranelift makes from it',
 }
 
 /** A `views` toggle's tooltip: `toggleSentence`'s words, then its kind's `KIND_GLOSS` line where it has one. */

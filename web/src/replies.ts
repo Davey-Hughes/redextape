@@ -13,6 +13,7 @@ import {
   type Leg,
   type LegFrame,
   type LegProgram,
+  type McTarget,
   type RunReply,
 } from './protocol'
 import type { ProgramResult } from './readout'
@@ -86,6 +87,15 @@ export function createReplies(deps: {
    * CLIF part. Optional, for `unseen`'s reason: a caller that shows no CLIF view needs none of them.
    */
   clif?: { loaded(state: 'loading' | 'ready' | 'failed'): void; settled(): void; absent(): void }
+  /**
+   * The page's machine code (`machine-code.ts`'s `MachineCode`): each `compiled`'s generation, where each target's
+   * package load stands, from each `mc-load`, and each `mc` answer. Optional, for `clif`'s reason.
+   */
+  mc?: {
+    compiled(gen: number): void
+    loaded(target: McTarget, state: 'loading' | 'ready' | 'failed'): void
+    answered(reply: Extract<RunReply, { kind: 'mc' }>): void
+  }
 }): {
   onReply(session: SessionId, reply: RunReply): void
 } {
@@ -101,6 +111,7 @@ export function createReplies(deps: {
     frame = (cb: () => void) => void requestAnimationFrame(cb),
     setProgram,
     clif,
+    mc,
   } = deps
 
   /**
@@ -308,6 +319,7 @@ export function createReplies(deps: {
         clif?.settled()
         return
       case 'compiled':
+        mc?.compiled(reply.gen)
         resetLegs(legs, reply.statuses)
         // THE NEW PROGRAM'S STEP 0 GOES IN WITH THE RESET, before the one `draw()` below, so every view goes from the
         // old program's picture to the new one's in one frame: drawn from the emptied rings, it would be blank first.
@@ -378,13 +390,22 @@ export function createReplies(deps: {
         clif?.loaded(reply.state)
         draw()
         return
+      case 'mc-load':
+        mc?.loaded(reply.target, reply.state)
+        draw()
+        return
+      // ANOTHER GENERATION'S NEVER GETS HERE (`SessionClient` drops it), so an answer is the program's as it now stands.
+      case 'mc':
+        mc?.answered(reply)
+        draw()
+        return
       // ANOTHER GENERATION'S NEVER GETS HERE (`SessionClient` drops it). ONE OF ANOTHER EPOCH IS DROPPED: it answers a
       // request a newer one replaced, and the page emptied the leg, or held it, for the newer one as it posted it.
       case 'clif-listing': {
         const leg = sessions.legOf({ session, leg: 'clif' })
         if (reply.epoch !== leg.epoch) return
         const compiled: ClifCompiled =
-          reply.listing === null ? { error: reply.error ?? '' } : { listing: reply.listing }
+          reply.listing === null ? { error: reply.error } : { listing: reply.listing, level: reply.level }
         // **A LISTING FOR A HELD RING WAITS FOR ITS FIRST FRAMES** (`ClifHold.landing`), and the ring keeps the frames
         // of the listing it replaces on the page until they come. A reason has no frames to wait for, and empties the
         // ring.

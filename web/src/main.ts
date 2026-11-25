@@ -37,6 +37,7 @@ import { schemeName } from './base16'
 import { createBase16Dialog } from './base16-dialog'
 import { BUILD } from './build-info'
 import { watchIntent } from './clif-intent'
+import type { ClifPane } from './clif-pane'
 import { ClifSync } from './clif-sync'
 import { type CaptureTable, classMapFrom, createGrammarRegistry, treeSitterColour } from './colour'
 import { createCompile } from './compile'
@@ -78,6 +79,7 @@ import { navKeymap } from './lsp-nav'
 import type { LanguageId } from './lsp-protocol'
 import { documentUri, LANGUAGE_IDS, LANGUAGE_LABEL } from './lsp-protocol'
 import { applyEdits, revealRange } from './lsp-text'
+import { MachineCode } from './machine-code'
 import { createNotices, floatInRun, type Notice, type NoticeAction } from './notice'
 import { createOutlinePanel } from './outline'
 import { paletteDeclarations } from './palettes'
@@ -715,6 +717,16 @@ async function main(): Promise<EditorView> {
   /** Where the `pkg-clif` load stands, which a CLIF view says while it has no listing. */
   let clifLoadState: ClifLoad = 'idle'
   /**
+   * The program's machine code, which every CLIF view's machine code panel shows: asked of the program's session, whose
+   * generation its answers are kept for. **THUNKS OVER `sessions`**, which is declared below and read only once a view
+   * draws.
+   */
+  const machineCode = new MachineCode({
+    gen: () => sessions.entryOf(SOURCE_SESSION).client.gen,
+    load: (target) => sessions.entryOf(SOURCE_SESSION).client.mcLoad(target),
+    ask: (target, listing) => sessions.entryOf(SOURCE_SESSION).client.machineCode(target, listing),
+  })
+  /**
    * **THE ONE PLACE THE PAGE SAYS `loading` ITSELF**, and it asks the worker for the load as it does, which the worker
    * always answers with a `clif-load`; the worker says when any other load starts. Only from `idle` or `failed`, since
    * a load asked for or in needs no other.
@@ -906,6 +918,7 @@ async function main(): Promise<EditorView> {
       state: () => clifLoadState,
       retry: () => clifSync.retry(),
     },
+    machineCode,
     // `choose` IS A THUNK over `chooseClifListing`, for `fieldWidth`'s reason.
     clifListing: {
       current: () => clifListing,
@@ -1786,6 +1799,12 @@ async function main(): Promise<EditorView> {
     // same fraction of a pixel in every browser.
     const leg = sessions.legOf({ session: SOURCE_SESSION, leg: 'clif' })
     const going = leg.pending
+    // **THE NEW LISTING'S MACHINE CODE IS ASKED FOR FIRST**, so the worker builds it before the listing, which the hold
+    // keeps back until its frames come: the panel then changes in the listing's frame.
+    machineCode.switching(
+      listing,
+      panes.of('clif').flatMap((e) => (e.pane as ClifPane).machineShown() ?? []),
+    )
     clifSync.want(clifWanted())
     positions.forget('clif')
     // **THE STEP LINE GOES ON SAYING WHERE THE LINK WAS TAKING THE LEG WHILE THE CHOICE HOLDS IT**
@@ -2147,6 +2166,7 @@ async function main(): Promise<EditorView> {
       settled: () => clifSync.settled(),
       absent: forgetClifPart,
     },
+    mc: machineCode,
   })
 
   view = new EditorView({

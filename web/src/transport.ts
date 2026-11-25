@@ -37,6 +37,8 @@ export function createTransport(deps: {
   clifLoad?: NonNullable<PaneEvents['clifLoad']>
   /** The program's one listing, handed to every view as `fieldWidth` is, for a CLIF view to show and switch. */
   clifListing?: NonNullable<PaneEvents['clifListing']>
+  /** The page's machine code, handed to every view as `clifLoad` is, for a CLIF view's machine code panel. */
+  machineCode?: NonNullable<PaneEvents['machineCode']>
   linkWiring: () => LinkWiring
 }): {
   play<T>(leg: LegState<T>): void
@@ -117,6 +119,7 @@ export function createTransport(deps: {
     ...(deps.fieldWidth !== undefined ? { fieldWidth: deps.fieldWidth } : {}),
     ...(deps.clifLoad !== undefined ? { clifLoad: deps.clifLoad } : {}),
     ...(deps.clifListing !== undefined ? { clifListing: deps.clifListing } : {}),
+    ...(deps.machineCode !== undefined ? { machineCode: deps.machineCode } : {}),
     legReason: () => slot.resolve(sessions).status.reason,
     back: () => {
       taken(slot).hist.back()

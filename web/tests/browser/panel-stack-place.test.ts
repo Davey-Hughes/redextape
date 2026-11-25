@@ -327,6 +327,8 @@ describe('a region that is a part of another', () => {
     ['a part built as the whole', { part: { share: 1 } }, /part's share .* not 1/],
     ['a part built as nothing', { part: { share: 0 } }, /part's share .* not 0/],
     ['a whole built with no share', { whole: { share: null } }, /whole has a part/],
+    ['two regions of one name', { other: { name: 'whole' } }, /two regions named whole/],
+    ['two panels of one name', { other: { panels: [panel('part')] } }, /two panels named part/],
   ])('throws for %s', (_, over, message) => {
     expect(() => new PanelStack(built(over), {}, () => {})).toThrow(message)
   })

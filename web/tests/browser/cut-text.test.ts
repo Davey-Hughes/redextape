@@ -341,7 +341,7 @@ describe.each(VIEWS)('in the $kind view', (view) => {
     if (view.kind === 'clif') {
       const l = factClif()
       const rows = l.rows.map((r) => (r.kind === 'Inst' ? { ...r, indent: 4 } : r))
-      ;(pane as ClifPane).setProgram({ listing: { ...l, rows } })
+      ;(pane as ClifPane).setProgram({ listing: { ...l, rows }, level: 'as-built' })
       await pick(host, 'clif-compact')
       if (menuOf(moreOf(host)).matches(':popover-open')) await userEvent.keyboard('{Escape}')
       first = rows.findIndex((r) => r.kind === 'Inst' && r.pc !== null)

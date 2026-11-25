@@ -161,8 +161,20 @@ export const ROW_HEIGHT = 24
  * `setLink`'s scroll must NOT consult that — see its own doc for why a link click scrolls regardless of
  * `Follow`'s state. `targetScrollTop` below is a thin following-gated wrapper around this.
  */
-export function centredScrollTop(row: number, rowHeight: number, viewportHeight: number, totalHeight: number): number {
-  const centred = row * rowHeight - Math.floor(viewportHeight / 2) + Math.floor(rowHeight / 2)
+export function centredScrollTop(
+  row: number,
+  rowHeight: number,
+  viewportHeight: number,
+  totalHeight: number,
+  last: number = row,
+): number {
+  // A BLOCK FROM `row` TO `last` IS CENTRED AS A WHOLE, and one taller than the viewport has `row` at the top. Centred
+  // on one of its rows, a block of an even count sits half a row off its middle, and one as tall as the viewport loses
+  // its end row out of view.
+  const centred =
+    last > row && (last - row + 1) * rowHeight > viewportHeight
+      ? row * rowHeight
+      : Math.floor(((row + last + 1) * rowHeight) / 2) - Math.floor(viewportHeight / 2)
   return Math.max(0, Math.min(centred, Math.max(0, totalHeight - viewportHeight)))
 }
 
@@ -244,10 +256,19 @@ export class Follow {
     this.#seen = top
   }
 
-  /** Where to scroll so `stateRow` is centred, or `null` when not following. Clamped into the document. */
-  targetScrollTop(stateRow: number, rowHeight: number, viewportHeight: number, totalHeight: number): number | null {
+  /**
+   * Where to scroll so `stateRow` is centred, or the block from it to `last` (`centredScrollTop`), or `null` when not
+   * following. Clamped into the document.
+   */
+  targetScrollTop(
+    stateRow: number,
+    rowHeight: number,
+    viewportHeight: number,
+    totalHeight: number,
+    last: number = stateRow,
+  ): number | null {
     if (!this.#following) return null
-    return centredScrollTop(stateRow, rowHeight, viewportHeight, totalHeight)
+    return centredScrollTop(stateRow, rowHeight, viewportHeight, totalHeight, last)
   }
 }
 

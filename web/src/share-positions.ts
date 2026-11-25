@@ -151,10 +151,11 @@ export class LinkPositions {
    * **A REPLY OF ANOTHER GENERATION ENDS THE LINK'S POSITIONS**: the program session answers only its current
    * generation, so it is a recompile's, and a recompile drops them (spec §5.4). Until it answers, the step line says the
    * leg is recompiling in place of where it was going. **A `clif-load` IS NO GENERATION'S**: it says whether the worker
-   * holds the CLIF package, so it ends nothing.
+   * holds the CLIF package, so it ends nothing, and nor does an `mc-load`.
    */
   onReply(reply: RunReply): void {
-    if (this.#gen === null || reply.kind === 'lambda-tree' || reply.kind === 'clif-load') return
+    if (this.#gen === null || reply.kind === 'lambda-tree' || reply.kind === 'clif-load' || reply.kind === 'mc-load')
+      return
     if (reply.gen !== this.#gen) {
       this.#drop()
       return

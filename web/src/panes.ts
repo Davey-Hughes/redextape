@@ -22,7 +22,7 @@ export const LEG_PANELS = {
   lambda: ['map'],
   rxm: ['listing', 'registers', 'stack', 'heap'],
   tm: ['rules', 'diagram'],
-  clif: ['listing', 'values', 'stack', 'heap'],
+  clif: ['listing', 'code', 'values', 'stack', 'heap'],
 } as const satisfies { readonly [K in Leg]: readonly string[] }
 
 /**

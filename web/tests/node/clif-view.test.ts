@@ -298,11 +298,11 @@ describe('the notice', () => {
   const listing: ClifListing = { functions: [], rows: [] }
 
   it('gives way to a listing', () => {
-    expect(clifNotice('ready', { listing }, '')).toBeNull()
+    expect(clifNotice('ready', { listing, level: 'as-built' }, '')).toBeNull()
   })
 
   it('shows a listing it holds whatever the load says', () => {
-    expect(clifNotice('failed', { listing }, '')).toBeNull()
+    expect(clifNotice('failed', { listing, level: 'as-built' }, '')).toBeNull()
   })
 
   it('says why a program has no CLIF', () => {

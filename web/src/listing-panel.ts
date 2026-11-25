@@ -13,7 +13,7 @@ export class ListingPanel {
   readonly panel: Panel
   #grid: VirtualGrid
   #cellClass: string
-  #fillInstr: (pc: number, cell: HTMLElement) => void
+  #fillInstr: (pc: number, cell: HTMLElement, row: HTMLElement) => void
   #fillLabel: ((name: string, cell: HTMLElement) => void) | undefined
   #source: { readonly listing: readonly string[]; readonly labels: Labels } | null = null
   #rows: readonly ListingRow[] = []
@@ -25,6 +25,8 @@ export class ListingPanel {
   #focused: ReadonlySet<number> = new Set()
   /** The instruction about to run at the step on display, or `null` for none. */
   #next: number | null = null
+  /** The last instruction of the block from `#next` that following keeps in view: `#next` itself, or a later one. */
+  #last: number | null = null
   /** The step on display, or `null` with no step to show. */
   #step: number | null = null
 
@@ -36,14 +38,15 @@ export class ListingPanel {
     readonly classes: GridOptions['classes']
     readonly cellClass: string
     readonly idPrefix: string
-    fillInstr(pc: number, cell: HTMLElement): void
+    /** An instruction's row: what `cell` says, and any mark of the caller's own on `row`, as the marks here are. */
+    fillInstr(pc: number, cell: HTMLElement, row: HTMLElement): void
     /** What a label's row says; absent, `name:`, as the rxm view's labels read. */
     fillLabel?(name: string, cell: HTMLElement): void
     activate(pc: number): void
     onToggle(open: boolean): void
   }) {
     this.#cellClass = o.cellClass
-    this.#fillInstr = (pc, cell) => o.fillInstr(pc, cell)
+    this.#fillInstr = (pc, cell, row) => o.fillInstr(pc, cell, row)
     this.#fillLabel = o.fillLabel?.bind(o)
     const { panel, grid } = followedGridPanel({
       name: o.name,
@@ -73,6 +76,7 @@ export class ListingPanel {
     this.#linked = new Set()
     this.#focused = new Set()
     this.#next = null
+    this.#last = null
     this.#step = null
     this.#grid.reset()
   }
@@ -102,10 +106,14 @@ export class ListingPanel {
     this.#focused = new Set(pcs)
   }
 
-  /** Draw the listing at a step: `next` is the instruction about to run there, and `step` the step's number. */
-  show(next: number | null, step: number | null): void {
+  /**
+   * Draw the listing at a step: `next` is the instruction about to run there, `step` the step's number, and `last`
+   * the end of the block from `next` that following keeps in view, `next` alone where none is given.
+   */
+  show(next: number | null, step: number | null, last: number | null = next): void {
     this.#next = next
     this.#step = step
+    this.#last = last
     this.#grid.draw()
   }
 
@@ -120,6 +128,7 @@ export class ListingPanel {
     return {
       count: this.#rows.length,
       follow: nextRow,
+      followLast: this.#last === null ? null : (this.#rowOf[this.#last] ?? null),
       // THE STEP THIS DRAW SHOWS, NOT WHETHER THE FOLLOWED ROW MOVED — `TmPane.#tableRows`'s reason, one leg over:
       // the row above is the instruction the machine is ABOUT to run, and a jump to itself leaves that row
       // unchanged, so a hold keyed on `follow` alone would never release (Plan 7 part 5 spec amendment 21).
@@ -134,7 +143,7 @@ export class ListingPanel {
           else this.#fillLabel(row.name, cell)
           return
         }
-        this.#fillInstr(row.pc, cell)
+        this.#fillInstr(row.pc, cell, el)
         if (i === nextRow) {
           el.classList.add('is-next')
           el.setAttribute('aria-current', 'step')

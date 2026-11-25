@@ -220,6 +220,7 @@ describe('a `clif-listing` reply with no listing', () => {
       gen: 1,
       epoch: 0,
       listing: { functions: [], rows: [] },
+      level: 'as-built',
       error: null,
     })
     expect(absent, 'a listing').toBe(0)
@@ -259,7 +260,7 @@ describe('a CLIF leg held for a listing chosen', () => {
     const withClif: SessionEntry = {
       ...entry,
       legs: { ...entry.legs, clif },
-      programs: { ...entry.programs, clif: { listing: LEFT } },
+      programs: { ...entry.programs, clif: { listing: LEFT, level: 'as-built' } },
     }
     holdClifLeg(clif, part)
     return { entry: withClif, clif }
@@ -269,6 +270,7 @@ describe('a CLIF leg held for a listing chosen', () => {
     gen,
     epoch,
     listing: CHOSEN,
+    level: 'optimised',
     error: null,
   })
   const chunk = (epoch: number, gen = 1): RunReply => ({
@@ -315,6 +317,7 @@ describe('a CLIF leg held for a listing chosen', () => {
       replies.onReply(SOURCE, listing(clif.epoch))
       expect(clif.clifHold?.landing?.compiled, `precondition: the listing is kept on the leg (${end})`).toEqual({
         listing: CHOSEN,
+        level: 'optimised',
       })
       if (end === 'compiled') replies.onReply(SOURCE, compiled(null, []))
       else rewindLeg(clif)

@@ -154,6 +154,17 @@ describe('centredScrollTop', () => {
   it('agrees with a following `Follow.targetScrollTop` for the same row', () => {
     const f = new Follow()
     expect(f.targetScrollTop(250, 24, 300, 50_000)).toBe(centredScrollTop(250, 24, 300, 50_000))
+    expect(f.targetScrollTop(250, 24, 300, 50_000, 261)).toBe(centredScrollTop(250, 24, 300, 50_000, 261))
+  })
+
+  // TWELVE ROWS IN A 301 PX VIEWPORT: rows 9 to 20 span 216 to 504 px, so their middle, 360, goes to the viewport's
+  // middle, 150, and the block shows whole, 6 px from the top and 7 from the bottom. Centred on its sixth row, row 14,
+  // the box would scroll to 336 - 150 + 12 = 198, and row 20 end at 504 - 198 = 306, past the viewport's 301.
+  it('centres a block of rows as a whole, and puts the first at the top of a viewport it overflows', () => {
+    expect(centredScrollTop(9, 24, 301, 10_000, 20)).toBe(210)
+    expect(centredScrollTop(9, 24, 287, 10_000, 20)).toBe(9 * 24)
+    expect(centredScrollTop(100, 24, 240, 10_000, 100)).toBe(centredScrollTop(100, 24, 240, 10_000))
+    expect(centredScrollTop(410, 24, 240, 10_000, 415)).toBe(10_000 - 240)
   })
 })
 

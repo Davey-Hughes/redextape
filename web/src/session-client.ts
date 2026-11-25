@@ -1,4 +1,4 @@
-import type { Leg, Listing, RunReply, RunRequest } from './protocol'
+import type { Leg, Listing, McTarget, RunReply, RunRequest } from './protocol'
 
 /**
  * What the client needs from a `Worker`, and nothing more.
@@ -24,8 +24,9 @@ export class SessionClient {
     this.#onSupersede = onSupersede
     port.addEventListener('message', (e) => {
       // A `clif-load` HAS NO GENERATION TO MATCH: it says whether the worker holds `pkg-clif`, which outlives every
-      // run. NOR IS IT A RUN'S ANSWER, so it ends no wait for one.
-      if (e.data.kind === 'clif-load') {
+      // run. NOR IS IT A RUN'S ANSWER, so it ends no wait for one. An `mc-load` says the same of a machine code
+      // package.
+      if (e.data.kind === 'clif-load' || e.data.kind === 'mc-load') {
         onReply(e.data)
         return
       }
@@ -151,6 +152,20 @@ export class SessionClient {
     if (this.#gen === 0) return
     this.#port.postMessage({ kind: 'clif', gen: this.#gen, epoch, listing })
   }
+  /** Ask the worker to load `target`'s machine code package and build nothing: `clifLoad`'s twin. */
+  mcLoad(target: McTarget): void {
+    this.#port.postMessage({ kind: 'mc-load', gen: this.#gen, target })
+  }
+
+  /**
+   * Ask the worker for the live generation's machine code on `target` as `listing`, answered by an `mc` of this
+   * generation. Not a supersede, for `rewind`'s reason, and never before the first build.
+   */
+  machineCode(target: McTarget, listing: Listing): void {
+    if (this.#gen === 0) return
+    this.#port.postMessage({ kind: 'mc', gen: this.#gen, target, listing })
+  }
+
   /** This client's generation — the one a `lambda-tree` request must carry to be answered. */
   get gen(): number {
     return this.#gen

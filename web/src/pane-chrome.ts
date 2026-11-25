@@ -1,4 +1,5 @@
 import type { FieldWidth } from './field-width'
+import type { MachineCode } from './machine-code'
 import type { Shares } from './panel-stack'
 import type { ClifLoad, Leg, Listing } from './protocol'
 import type { SessionId } from './session-client'
@@ -72,6 +73,12 @@ export type PaneEvents = {
    * for the shown listing again after a load that failed. OPTIONAL for `panel`'s reason.
    */
   clifLoad?: { state(): ClifLoad; retry(): void }
+  /**
+   * The page's machine code, which a CLIF view's machine code panel shows (`machine-code.ts`'s `MachineCode`): each
+   * target's load, the program's answers, and the asks for them. OPTIONAL for `panel`'s reason: a CLIF view built
+   * without it shows a panel that says it has no machine code.
+   */
+  machineCode?: Pick<MachineCode, 'load' | 'intent' | 'code' | 'want' | 'retry'>
   /**
    * Why this view's leg cannot run, as its step bar says it, or `''` while nothing stops it: read through the slot, as
    * the controls' handlers are, so it follows a rebind. OPTIONAL for `panel`'s reason.

@@ -47,7 +47,7 @@ function mount(listing: Listing, display?: ClifDisplay) {
   host.style.height = '800px'
   const clifDisplay = vi.fn()
   const pane = new ClifPane(host, { ...paneEvents(), clifDisplay }, {}, {}, display)
-  pane.setProgram({ listing: listings[listing] })
+  pane.setProgram({ listing: listings[listing], level: listing })
   pane.render(null, controlState(false, ''))
   return { host, pane, clifDisplay }
 }

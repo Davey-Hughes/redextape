@@ -112,7 +112,7 @@ describe('the CLIF view with a listing', () => {
   it('shows the listing once it arrives, and no notice, a function header as Cranelift prints it', () => {
     const { host, pane } = mount('ready', null)
     expect(sentence(host), 'precondition: a notice before the listing').toBe('Loading clif…')
-    pane.setProgram({ listing })
+    pane.setProgram({ listing, level: 'as-built' })
     pane.render(null, controlState(false, ''))
     expect(notice(host)).toBeNull()
     const first = host.querySelector<HTMLElement>('.clif-row[aria-rowindex="1"] .clif-cell')

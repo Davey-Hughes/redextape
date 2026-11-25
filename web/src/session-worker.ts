@@ -30,7 +30,7 @@
  */
 import init, { compile, tapeNames } from '../../pkg/redextape_wasm.js'
 import { type Claim, claimLive, liveHandle } from './claim'
-import { type ClifHandle, type ClifModule, clifLoader } from './clif-loader'
+import { type ClifHandle, type ClifModule, clifLoader, type McModule } from './clif-loader'
 import { LEGS, perLeg, unhandled } from './legs'
 import type { LinkIndexWire } from './link'
 import type {
@@ -40,6 +40,7 @@ import type {
   LambdaTreeWire,
   Leg,
   Listing,
+  McTarget,
   ResultLegs,
   RunReply,
   RunRequest,
@@ -137,11 +138,100 @@ const ready = init()
  * `pkg-clif`, loaded the first time the page asks for it, for a stepper or on intent, and kept once it loads. **A
  * LITERAL SPECIFIER**, which the licence scan reads to find the package's licences.
  */
-const loadClif = clifLoader(async () => {
+const loadClif = clifLoader<ClifModule>(async () => {
   const clif = await import('../../pkg-clif/redextape_clif_wasm.js')
   await clif.default()
   return clif
 })
+
+/**
+ * Each target's machine code package, loaded the first time the page asks for that target, and kept once it loads.
+ * **LITERAL SPECIFIERS**, one per package, for `loadClif`'s reason.
+ */
+const loadMc: { readonly [T in McTarget]: () => Promise<McModule> } = {
+  'x86-64': clifLoader<McModule>(async () => {
+    const mc = await import('../../pkg-mc-x86-64/redextape_mc_wasm.js')
+    await mc.default()
+    return mc
+  }),
+  arm64: clifLoader<McModule>(async () => {
+    const mc = await import('../../pkg-mc-arm64/redextape_mc_wasm.js')
+    await mc.default()
+    return mc
+  }),
+}
+
+/** The targets whose package is in, after which a load fetches nothing and says nothing of loading. */
+const mcIn = new Set<McTarget>()
+
+/** `target`'s package, loaded or already in, said to the page as an `mc-load`: `loadClifAndSay`'s twin. */
+async function loadMcAndSay(target: McTarget): Promise<McModule | null> {
+  if (!mcIn.has(target)) ctx.postMessage({ kind: 'mc-load', target, state: 'loading' })
+  let mc: McModule
+  try {
+    mc = await loadMc[target]()
+  } catch (e) {
+    ctx.postMessage({ kind: 'mc-load', target, state: 'failed', error: String(e) })
+    return null
+  }
+  mcIn.add(target)
+  ctx.postMessage({ kind: 'mc-load', target, state: 'ready' })
+  return mc
+}
+
+/**
+ * The `mc` requests of generation `gen` taken so far whose package was in, settled once each has answered or been
+ * dropped: what a `clif` request of `gen` taken after them waits on before it builds (`onClif`). **ONE GENERATION'S
+ * ALONE**: a request waits on its run's `result`, which a superseded run never posts, so an older generation's would
+ * hold a newer `clif` for good. **NONE WHOSE PACKAGE IS STILL TO LOAD**: the listing must never wait on a download.
+ */
+let mcTaken: { readonly gen: number; readonly done: Promise<void> } = { gen: 0, done: Promise.resolve() }
+
+/**
+ * Answer an `mc` request from the live session's `clifInput()`. **AFTER THE RUN'S `result`**, as a CLIF pass is, so a
+ * compile never waits on it, **AND, ITS PACKAGE IN, BEFORE A `clif` REQUEST TAKEN AFTER IT BUILDS**, so that the code
+ * of a listing switched to lands before the listing (machine code panel design §6, *Building*); the page asks only
+ * once a package is in, and a request whose package is still to load holds no listing back. **EVERY AWAIT IS
+ * FOLLOWED BY A CHECK THAT THE GENERATION IS STILL LIVE**, and a request for one that is not gets no answer, since the
+ * page asks again for the generation it now shows.
+ */
+function onMc(req: Extract<RunRequest, { kind: 'mc' }>): Promise<void> {
+  const loaded = mcIn.has(req.target)
+  const answered = answerMc(req)
+  if (!loaded) return answered
+  const before = mcTaken.gen === req.gen ? mcTaken.done : Promise.resolve()
+  // A THROW IS THE LISTENER'S TO REPORT, through `answered`; the wait only needs to know it ended.
+  mcTaken = { gen: req.gen, done: Promise.all([before, answered]).then(nothing, nothing) }
+  return answered
+}
+
+const nothing = (): void => {}
+
+async function answerMc(req: Extract<RunRequest, { kind: 'mc' }>): Promise<void> {
+  if (live?.gen !== req.gen) return
+  await runResult.posted
+  const mc = await loadMcAndSay(req.target)
+  if (mc === null) return
+  const held = live?.gen === req.gen ? live : null
+  if (held === null) return
+  const { gen, target, listing } = req
+  const input = held.session.clifInput()
+  if (input === null) {
+    const error = held.session.rxmStatus().reason
+    ctx.postMessage({ kind: 'mc', gen, target, listing, code: null, error, trapped: false })
+    return
+  }
+  try {
+    const code = mc.machineCode(input, listing)
+    ctx.postMessage({ kind: 'mc', gen, target, listing, code, error: null, trapped: false })
+  } catch (e) {
+    // A DECLINE IS THROWN AS ITS SENTENCE, A STRING; A TRAP IS AN `Error` (`WebAssembly.RuntimeError`), whose message
+    // ("unreachable") says nothing of the program, so it must not read as the program's decline.
+    const trapped = e instanceof Error
+    const error = trapped ? e.message : String(e)
+    ctx.postMessage({ kind: 'mc', gen, target, listing, code: null, error, trapped })
+  }
+}
 
 /** The newest generation this worker has been asked for. */
 let latest = 0
@@ -581,7 +671,7 @@ async function recordClif(gen: number, epoch: number, listing: Listing): Promise
   held.clif = { session: stepper, listing }
   const rows = clifRead(gen, () => stepper.listing())
   if (rows === null) return
-  ctx.postMessage({ kind: 'clif-listing', gen, epoch, listing: rows, error: null })
+  ctx.postMessage({ kind: 'clif-listing', gen, epoch, listing: rows, level: listing, error: null })
   if ((await clifRecorded(gen, () => recordFresh(RECORDINGS.clif, worker, gen, epoch))) === null) return
   const after = clifOwner(gen, epoch)
   if (after === null) return
@@ -653,7 +743,8 @@ let clifIn = false
  * **THE EPOCH IS RAISED AND THE STEPPER DROPPED AT ONCE**, so a loop in flight on the old stepper stops at its next
  * chunk and an `extend` of the new epoch finds nothing to step; the flag is cleared for the new loop, as a rewind
  * clears it. **THE BUILD WAITS FOR THE RUN'S `result`**, and `runResult` is that run's while its session is live: the
- * next `run` replaces it and drops the session before this thread reads another request.
+ * next `run` replaces it and drops the session before this thread reads another request. **AND FOR THE GENERATION'S
+ * `mc` REQUESTS TAKEN BEFORE IT** (`onMc`).
  */
 async function onClif(req: Extract<RunRequest, { kind: 'clif' }>): Promise<void> {
   if (live?.gen !== req.gen || req.epoch <= epoch.clif) return
@@ -664,7 +755,10 @@ async function onClif(req: Extract<RunRequest, { kind: 'clif' }>): Promise<void>
   // fill with it: another listing's end, and its count of steps.
   if (posted !== null) posted = { ...posted, clif: CLIF_ABSENT }
   if (req.listing === null) return
+  // READ NOW, as the request is taken: the `mc` requests the page posted before this one, ahead of a listing switch.
+  const mcBefore = mcTaken.gen === req.gen ? mcTaken.done : null
   await runResult.posted
+  if (mcBefore !== null) await mcBefore
   await recordClif(req.gen, req.epoch, req.listing)
 }
 
@@ -775,6 +869,12 @@ ctx.addEventListener('message', async (e: MessageEvent<RunRequest>) => {
         break
       case 'clif':
         await onClif(req)
+        break
+      case 'mc-load':
+        await loadMcAndSay(req.target)
+        break
+      case 'mc':
+        await onMc(req)
         break
       default:
         unhandled(req)
