@@ -42707,3 +42707,278 @@ engines read alike:
 | 0; 468; `2a96b84`, 50; 82, 1549 | the checks on the merged tree: main's diff under `crates/`; the files `biome ci` checked; the comment guard's base and its changed files; the node project's files and tests | `wc -l < $L/13-crates-diff.log; strip $L/13-lint.log \| grep -aoE 'Checked [0-9]+ files'; strip $L/13-comments.log; strip $L/13-node.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' '` |
 | 305; 3449, 2; 98.16, 92.41, 98.74, 99.38; 1 each; built | the coverage run on the merged tree: files; tests passed and expected to fail; statements, branches, functions and lines; the tests of `clif-app-failed` and `clif-app-threw`, passed; `build:app` | `for f in $L/13-coverage*.log; do print "${f:t}"; strip $f \| grep -aE 'Test Files  \|Tests  \|All files\|unit-exit\|^ FAIL \|clif-app-(failed\|threw)\.test\.ts' \| tr -s ' '; done; strip $L/13-build-app.log \| grep -aE 'built in\|error' \| tail -n 2` |
 | 5, 36 | Firefox over the 5 `result-*` files on the merged tree: files and tests | `grep '^firefox files:' $L/13-exits.txt; strip $L/13-firefox.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' '` |
+
+#### A CLIF RUN THAT A FAULT STOPPED SHOWS A CONS OR BOX MADE AFTER THE FAULT AS A PLAIN 0, WHERE ITS VALUES PANEL READ `nil` OR `box #0` (2026-11-24, branch `clif-fault-tags`, `b627fe3..26cdc08`, 4 commits, plus this entry, rebased onto `e65a533` as `e65a533..dcdcc3e`; the fixes of the review of the whole branch in `dcdcc3e..0e398a8`, 3 commits, and this entry brought up to them in `10a2bbc`; the fixes of that review's re-review in `10a2bbc..2cc3ec0`, 2 commits; and this entry brought up to them in the commit after)
+
+**This closes PR 1's review minor 3**, which #190's entry, `#### CLIF VIEW PR 2: THE VIEW`, lists under WHAT THIS DID
+NOT CLOSE, at line 38683 of this file: "after a fault, `cons` and `new_box` give a 0 tagged `List` or `Box` while reads
+in the same state are tagged `Value`, so a stopped run's state can show a list- or box-tagged 0".
+
+The two commits that make the change, `7e79438`, the stepper's rule, and `9068b30`, the web tests, were drafted outside
+this repo's usual flow, in a cloud sandbox that had no browser and ran Node 22, and were applied here on `b627fe3`. Here
+they were reviewed, each new test was seen to fail without the fix, and the gates CI runs were run (VERIFICATION). The
+review found the code right and four minor points, in the tests and in the design's wrapping, which `5476067` and
+`26cdc08` fix. The lane's record is `~/temp/redextape-duet-patches-record/fault-tags/`, `$R` below; the review is
+`$R/findings.md`.
+
+After #196 merged, the branch was rebased onto `e65a533`, which made those four commits `1066585`, `8020ae2`, `b7c797e`
+and `056b8e6`, and this entry `dcdcc3e`; the entry names the commits it was verified at. A review of the whole branch at
+`dcdcc3e`, `$R/final-review.md`, found the code and its tests right, and two minor points and a nit: a sentence of this
+entry that was false, and web tests whose claim held for almost any row they read. `6a29622`, `82e5666` and `0e398a8`
+fix them, and `10a2bbc` brought the entry up to them (*WHAT THE WHOLE-BRANCH REVIEW FOUND*). A re-review of those four
+commits at `10a2bbc` closed both points and found one more sentence of the first point's class, in the design, and two
+nits, which `e047b6f` and `2cc3ec0` fix and this revision of the entry takes in.
+
+##### WHAT CHANGED
+
+**How it showed.** A callee that faults or trips a cap leaves through its exit block, which returns to its caller, and
+the caller runs on to its next guard (`crates/redextape-native/src/lib.rs`, *After a fault*). A `cons` or box right
+after such a call runs once the runtime has latched the fault, so `Runtime` allocates nothing and returns 0, and the
+stepper tagged that 0 by the import alone, `List` for a cons and `Box` for a box. Built from `b627fe3`'s stepper, the
+values panel reads `nil` for `fn f(x) { head(nil) } cons(f(0), nil)`, and `box #0`, a box that does not exist, for
+`fn f(x) { head(nil) } let mut v = f(0); let get = |x| v; get(0)`, in both listings.
+
+**The rule.** `Stepper::answer` passes every word a runtime call answers through `answered_tag`, which gives `Value`
+once `Runtime::faulted` says the run has stopped, as `stored_tag` did for the three reads alone; `stored_tag` now gives
+the tag the heap stores with the word read, and `Value` for a read that faulted. Every import but `rt_box_set` and
+`rt_leave`, which answer no word, goes through the rule. A cons or box that the heap cap refuses defines no value, since
+the stepper ends the step at the cap before it sets the call's result. `Stepper::raise_caps` clears that stop through
+`Runtime::raise_cap`, and the call runs again on the next step, so the repeat keeps its `List` or `Box`. The app's
+`[continue]` never repeats it: it calls `ClifLeg::raise_cap`, which raises the steps cap alone and resumes a steps pause
+and no other, and a heap pause ends the recording as `heap-full`, which has no continue. The design's §5.4 says the same
+in its sentence on tags: "constants and arithmetic make plain numbers, as every runtime call does once a fault or a cap
+has stopped the run"; and, since `0e398a8`, that `Stepper::raise_caps` repeats the call a cap refused and that the
+view's `[continue]` resumes a steps pause and no other.
+
+##### THE TESTS
+
+- `crates/redextape-clif/tests/state.rs`'s `a_cons_or_box_after_a_fault_is_a_plain_number` builds both programs in both
+  listings, runs each to its `Fault`, holds that nothing was allocated, finds the value the cons or box call sets by the
+  call itself (`result_of_call`), and holds the four words `(0, Value)` in one assertion, so a failure shows every case
+  and listing that fails.
+- `tests/state.rs`'s `a_cons_or_box_repeated_after_a_heap_pause_is_a_list_or_box`, from `6a29622`, holds the other side
+  of the rule: the same two programs with a callee that does not fault, `fn f(x) { x }`, under a heap cap of 0, in both
+  listings. Each must pause at `Capped(Heap)` with the call's value unset; after `raise_caps(DEFAULT_CAPS)` and one
+  step, the repeated call's word is `(1, List)` or `(1, Box)`, the four words held in one assertion.
+- `stepper.rs`'s unit tests hold the rule's parts apart: `a_read_takes_the_tag_its_cell_stores`,
+  `a_faulting_read_is_a_plain_number`, `a_word_answered_while_the_run_goes_on_keeps_its_tag`, and
+  `a_word_answered_after_the_run_stopped_is_a_plain_number`, at a fault and at a cap.
+- `web/tests/node/clif-fault-tags.test.ts` runs the two programs through `pkg/`'s `clifInput()` and `pkg-clif/`'s
+  `ClifSession` in both listings, and holds that `clifValues`, the values panel's reader, gives the value the call set
+  the text `0`. `web/tests/node/clif-fault-fixture.ts` holds the two programs, their controls and `madeBy`, which finds
+  that value in the listing's rows, the declaration `fn0 = u0:0 sig0` and the call `v15 = call fn0(…)`. It names an
+  import by its place in `RtFn`'s order, as the listing does, so a change to that order must change the fixture too. At
+  a fault's end nearly every value in `$main` reads `0`, so that `0` cannot show which row was read; since `82e5666`
+  each case has a control, the same program with `fn f(x) { x }`, whose call's value must read `#1` or `box #1` in both
+  listings, on the row `madeBy` finds; since `2cc3ec0` each control also holds that the row is the one its fault case
+  reads, the same value name.
+- `web/tests/browser/clif-fault-tags.test.ts` runs the two programs in the app, steps the clif view to the run's end,
+  and holds that its values panel reads that value `0`, found in the as-built listing, the one the view opens on. Since
+  `82e5666` it runs the two controls after them, which must read `#1` and `box #1`, on their fault cases' rows in the
+  as-built listing since `2cc3ec0`; run after, a control cannot leave a `0` for a fault case to pass on.
+
+##### THE SABOTAGES
+
+S1 to SP are the first review's. Each saved the file it edits, `stepper.rs` or, for SP, the browser test, made one edit,
+ran, put the file back from the copy and compared it with `cmp`; `$R/fin/sab-restores.txt` has 7 lines that say so. S1
+is the fix reverted, `stepper.rs` as on `b627fe3`, so its Rust run holds `b627fe3`'s unit test and not the branch's
+four; SA to SE each break one line of the rule. For S1, `pkg-clif/` was built from that stepper, wasm sha256
+`ededb92f…`, for the web tests, and built again after the restore, `6d9e3520…`, the hash of the review's first build.
+Every assertion the first review's fixes changed fired under one of them.
+
+The whole-branch review's fixes added five more, run on the files as `6a29622` and `82e5666` commit them, each restored
+the same way; `$R/fix2/sab/restores.txt` has 5 lines that say so. SR1 and SR2 edit `stepper.rs`, W1 and W2
+`clif-fault-fixture.ts`. SR1 is the class the repeat's test is there for, a stop the stepper keeps after the raise has
+cleared the runtime's, made by a field on the stepper that `raise_caps` sets and `answer` reads. S1b is S1 again with
+the controls in place: `stepper.rs` as on `e65a533`, which is `b627fe3`'s, and `pkg-clif/` built from it, `ededb92f…`
+again, and built again after the restore, `6d9e3520…` again.
+
+The re-review's fixes added SM, run on the files as `2cc3ec0` commits them and restored the same way;
+`$R/fix3/sab/restores.txt` has 1 line that says so. It edits `clif-fault-fixture.ts`: the cons control's program becomes
+`fn f(x) { x } cons(f(0) + 1, nil)`, whose cons sets another value than the fault case's cons does.
+
+| Id | The one edit | Failed, at | Logs in `$R` |
+|---|---|---|---|
+| S1 | `stepper.rs` as on `b627fe3` | Rust: `a_cons_or_box_after_a_fault_is_a_plain_number` alone, 1 of 41 tests, at its one assertion, `state.rs:165`, with the four words `List`, `List`, `Box`, `Box`. Node: both cases at `clif-fault-tags.test.ts:46`, `nil` and `box #0` in both listings. Chromium: both cases at `clif-fault-tags.test.ts:60`, `v15` `nil` and `v21` `box #0`, after the precondition that the panel shows the value | `fin-sab-S1-rust.log`, `fin-sab-S1-node.log`, `fin-sab-S1-browser.log` |
+| SA | `stored_tag` gives `List` for a read that faulted | `a_faulting_read_is_a_plain_number` alone, at `stepper.rs:521` | `fin-sab-SA.log` |
+| SB | `stored_tag` gives `Value` always | `a_read_takes_the_tag_its_cell_stores` at `stepper.rs:514`, and 3 older tests in `state.rs` | `fin-sab-SB.log` |
+| SC | `answered_tag` gives `Value` always | `a_word_answered_while_the_run_goes_on_keeps_its_tag` at `stepper.rs:528`, and 5 older tests in `state.rs` | `fin-sab-SC.log` |
+| SD | `answered_tag` gives `tag` always | `a_word_answered_after_the_run_stopped_is_a_plain_number` at its fault assertion, `stepper.rs:541`, "List after a fault", and `state.rs:165` with the four words `List`, `List`, `Box`, `Box` | `fin-sab-SD.log` |
+| SE | `answered_tag` reads `rt.fault` alone | `a_word_answered_after_the_run_stopped_is_a_plain_number` alone, at its cap assertion, `stepper.rs:542`, "List at a cap" | `fin-sab-SE.log` |
+| SP | the browser test looks for `v150` and `v210`, values the panel does not show | both cases at the precondition, `clif-fault-tags.test.ts:59`, in Chromium | `fin-sab-SP-browser.log` |
+| SR1 | `raise_caps` sets a mark on the stepper, and every word answered after it is tagged `Value` | `a_cons_or_box_repeated_after_a_heap_pause_is_a_list_or_box` alone, 1 of 45 tests, at its one assertion, `state.rs:198`, with the four words `1` tagged `Value` | `fix2/sab-SR1.log` |
+| SR2 | the stepper sets a runtime call's result before it checks for a cap | the same test alone, 1 of 45, at its precondition, `state.rs:190`: "the refused call set v15" | `fix2/sab-SR2.log` |
+| W1 | `madeBy` returns one below the call's value | Node: 4 of 4, the fault cases at `clif-fault-tags.test.ts:55` and the controls at `:70`, `undefined` in each listing. Chromium: 4 of 4, the fault cases at the precondition, `clif-fault-tags.test.ts:66`, `v14` and `v20` not shown, and the controls at `:75` | `fix2/sab-W1-node.log`, `fix2/sab-W1-browser.log` |
+| W2 | the cons case names import 8, which `$main` also calls once | Node: the cons control alone, 1 of 4, at `:70`, `0` in both listings; the cons fault case passed on that row | `fix2/sab-W2-node.log` |
+| S1b | `stepper.rs` as on `e65a533` | Node: the two fault cases, 2 of 4, at `:55`, `nil` and `box #0` in both listings; the controls passed. Chromium: the two fault cases, 2 of 4, at `:67`, `v15` `nil` and `v21` `box #0`, after the precondition; the controls passed | `fix2/sab-S1-node.log`, `fix2/sab-S1-browser.log` |
+| SM | the cons control's program is `fn f(x) { x } cons(f(0) + 1, nil)` | Node: the cons control alone, 1 of 4, at its assertion of the row, `clif-fault-tags.test.ts:71`, `v24` where the fault case reads `v15`, as built. Chromium: the cons control alone, 1 of 4, at `clif-fault-tags.test.ts:76`, `v24` against `v15` | `fix3/sab-SM-node.log`, `fix3/sab-SM-browser.log` |
+
+##### THE REVIEW'S FIXES
+
+The review (`$R/findings.md`, *Findings*) found no critical or important point in the code and four minor ones.
+`5476067` fixes the first three and `26cdc08` the fourth.
+
+- **M1, a test named for half of what it held.** `a_read_takes_the_tag_its_cell_stores` also held that a faulting read
+  is a plain number, and its sibling on `answered_tag` held that a word answered while the run goes on keeps its tag.
+  Each of those is now a test of its own, named for it.
+- **M2, an assertion after the claim, and loops that stopped at their first case.** The browser test's check that the
+  heap panel draws no line came after its claim, so a regression stopped before it, and neither program allocates on
+  `b627fe3`'s stepper either; it is gone, and the node test holds that nothing was allocated from the state's counts.
+  The Rust and node tests asserted inside their loops, so with the fix reverted the Rust test stopped at the cons as
+  built and its box case was never seen to fail. The Rust test now reads every case and listing, and the node test both
+  listings, before one assertion.
+- **M3, names that said more than the assertions held.** The web tests were named "as a plain 0" and held only that no
+  value read as a list or box, which a run that lost the call's value would pass. They now find the call's value and
+  hold its text `0`.
+- **M4, a short line.** The fix's clause in the design's §5.4 left a 59-character line in a paragraph wrapped near 115
+  columns. The paragraph's tail is wrapped again, which also joins a 38-character line it had on `b627fe3`; no word
+  changes.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+The review of `e65a533..dcdcc3e`, a fresh read rather than one leaning on `$R/findings.md`, is `$R/final-review.md`: the
+code and its tests right, no critical or important point, and two minor points and a nit. Each was checked again before
+it was fixed.
+
+- **M1, a false sentence.** WHAT CHANGED said that `[continue]` repeats a cons or box a cap refused, so the repeat keeps
+  its `List` or `Box`, and the pull request's text said so too. A refused cons or box is a heap pause, which the app's
+  `[continue]` does not resume (*The rule.*); `Stepper::raise_caps` alone repeats the call, and there the repeat does
+  keep its tag, which no test held. *The rule.* says so now; the design's §5.4, which said `[continue]` repeats the call
+  a cap refused, says since `0e398a8` that `Stepper::raise_caps` does; and `6a29622` holds the repeat's tags (THE TESTS;
+  SR1 and SR2). A search for `continue` in everything the branch adds or changes, and in its first five commits'
+  messages, found the repeat put down to `[continue]` in those two places and in the pull request's text, and nowhere
+  else. The re-review searched past the branch's changes and found one more in the same design, #189's §8, "`[continue]`
+  after each cap resumes to the outcome a run with the raised cap reaches", which since `0e398a8` contradicted §5.4;
+  `e047b6f` gives that resume to `Stepper::raise_caps`, which the tests behind §8 call, and says the view's `[continue]`
+  does so at a steps pause alone.
+- **M2, a claim almost every row met.** At a fault's end nearly every value in `$main` reads `0`, so the web tests' `0`
+  could not tell the call's value from its neighbours, and which row they read rested on `madeBy` and the import's place
+  in `RtFn`'s order alone; W2 is a wrong row the fault case passed on. `82e5666` adds the controls (THE TESTS), which W1
+  and W2 fail and S1b passes.
+- **The nit.** The sabotages were a part of VERIFICATION; they have their own section now, as in the two entries before
+  this one.
+
+A re-review of `6a29622`, `82e5666`, `0e398a8` and `10a2bbc` at `10a2bbc`, `$R/final-review.md`'s *Re-review at
+10a2bbc*, found M1 and M2 closed, re-ran SR2 and the web tests, and found one more phrase and two nits:
+
+- **m1, one more sentence of M1's class**, the design's §8 (M1's bullet above), fixed in `e047b6f`. A sweep of the whole
+  design for `[continue]` then checked the three sentences left against `leg.rs` and `record-loop.ts` and kept them:
+  §2's "▶ at the end or `[continue]` extends by `EXTEND_STEPS`", on the rxm leg's recording; §4's *End*, "`[continue]`
+  works as the rxm view's does for the same cap"; and §10's "`[continue]` behaves as in the rxm view". The other two
+  places it appears are the sentences `0e398a8` and `e047b6f` wrote.
+- **A helper's doc that said the program was typed.** The browser test's `shownAtEnd` said its program was "typed into
+  the app"; the harness's `compile` replaces the editor's text and waits for the build, as `2cc3ec0`'s doc now says.
+- **A row no test held.** `82e5666` said the controls read on the row the fault case reads, which held, but only by
+  `$main` making the same import calls in both programs. Since `2cc3ec0` each control holds that its call's value name
+  is its fault case's, in both listings in the node test and in the as-built listing in the browser test; SM fails it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The Firefox tier's failures on this machine, which `b627fe3`'s code fails too.** Firefox is not in CI. At `9068b30`,
+  before the review's fixes, `pnpm run test:firefox` ran 267 files: 24 failed, and 88 tests failed and 2111 passed.
+  Those 24 files and the new browser test ran again with `pkg-clif/` built from `b627fe3`'s stepper, and `web/src` as on
+  `b627fe3`, which this branch does not change: 86 tests failed, 84 of the 88 by name and the new test's 2 cases, which
+  that stepper fails. Of the other 4, `clif-worker.test.ts`'s "drops the stepper for a request with no listing" failed
+  in 1 of 3 runs of its file alone on the branch and in 1 of 4 on `b627fe3`'s stepper, at "expected 2 to be less than or
+  equal to 1". The other 3 are cases of `view-keys.test.ts` and `view-keys-format-on-blur.test.ts`, which fail 17 cases
+  and 1 on `b627fe3`'s code, and in two more runs on the branch 17 and 1, then 16 and 1. The new browser test passed its
+  2 cases in Firefox at `26cdc08`, and its 4, with the controls, at `2cc3ec0`.
+- **CI's LLVM job and `scripts/check-slow.sh` were not run here.** The branch changes no code outside
+  `crates/redextape-clif` and `web/tests`, and the clif package's slow tests, which `check-slow.sh` runs among the
+  workspace's, passed: `cargo test --release -p redextape-clif -- --ignored`, 2 tests.
+
+##### VERIFICATION
+
+**The gates at `26cdc08`**, by `$R/fin/gate-heavy.sh` and `$R/fin/gate-light.sh`, each leg's exit in
+`$R/fin/gate-exits.txt` and `$R/fin/light-exits.txt`, each log `$R/fin-<leg>.log` or `$R/fin-light-<leg>.log`. The heavy
+legs ran under the machine's heavy lock, and those that open a browser under its browser lock after the wait for port
+63315.
+
+- `scripts/check-all.sh --no-llvm`, with the pinned tree-sitter: exit 0. The workspace's nextest ran 2050 tests, all
+  passed, and skipped 35; the wasm-bindgen browser leg passed 36; it reports itself green but partial, the LLVM tier
+  skipped.
+- `cargo llvm-cov nextest --workspace --fail-under-lines 90`, after `cargo llvm-cov clean`: exit 0, 2050 tests passed,
+  lines 95.55%.
+- `cargo test --release -p redextape-clif -- --ignored`: exit 0, 2 tests passed.
+- The eight scans CI runs, `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
+  `check-shared-docs`, `check-colours`, `check-grammar-wasm` and `check-lua`, each `--self-test` then alone;
+  `node scripts/check-comments.mjs --self-test`, and `--base b627fe3` as CI runs it on a pull request, "no history and
+  no grown block in 5 changed files"; `check-licences.sh` and `check-licence-editions.sh` from `web/`, each
+  `--self-test` then alone; `pnpm exec biome ci --error-on-warnings`, 533 files; and `pnpm run typecheck`: 24 legs, each
+  exit 0.
+- `pnpm run test:coverage`, CI's web job, the node and Chromium tiers: exit 0, 352 files; 3976 tests passed and 2 failed
+  as expected; statements 97.93%, branches 92.25%, functions 98.7%, lines 99.15%.
+- `pnpm run build:app`: exit 0.
+- Firefox, which CI does not run, on the new browser test alone: exit 0, its 2 cases passed.
+
+**At `0e398a8`**, the whole-branch review's last fix, by `$R/fix2/prove.sh`, each leg's exit in
+`$R/fix2/prove-exits.txt` and each log `$R/fix2/<leg>.log`, the browser leg under the browser lock after the wait for
+port 63315: `cargo nextest run -p redextape-clif`, 45 tests passed and 2 skipped;
+`cargo clippy -p redextape-clif --all-targets -- -D warnings`; `cargo fmt --all --check`;
+`node scripts/check-comments.mjs --base e65a533`, "no history and no grown block in 5 changed files"; the node test
+file, 4 tests passed; the browser test file in Chromium, 4 tests passed; `pnpm exec biome ci --error-on-warnings`, 463
+files; and `pnpm run typecheck`: 8 legs, each exit 0. The full gates were not run again: the fixes change tests, the
+design and this entry, and no code outside the tests.
+
+**At `2cc3ec0`**, the re-review's last fix, by `$R/fix3/prove.sh`, each leg's exit in `$R/fix3/prove-exits.txt` and each
+log `$R/fix3/<leg>.log`, the browser legs under the browser lock after the wait for port 63315:
+`node scripts/check-comments.mjs --base e65a533`, "no history and no grown block in 5 changed files"; the node test
+file, 4 tests passed; the browser test file in Chromium, 4 tests passed, and in Firefox, with `REDEXTAPE_FIREFOX=1`, 4
+tests passed, the controls' first run there; `pnpm exec biome ci --error-on-warnings`, 463 files; and
+`pnpm run typecheck`: 6 legs, each exit 0. These two commits change no Rust, so the clif package's tests stand as at
+`0e398a8`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with
+`R=~/temp/redextape-duet-patches-record/fault-tags` and `strip` standing for `sed 's/\x1b\[[0-9;]*m//g'`. The rows down
+to the one on `clif-worker`'s failures were run at `26cdc08` by `$R/fin/figures.zsh`, whose output is
+`$R/fin/figures.log`, each command above what it printed. The rows after them, down to the one on `$R/fix2/prove.sh`'s
+runs, were added at `0e398a8` by `$R/fix2/figures.zsh`, which ran every row again but the one that writes
+`$R/fin/ff-*.fails`, output `$R/fix2/figures.log`; the earlier rows printed what they printed at `26cdc08`. The last
+rows were added at `2cc3ec0` by `$R/fix3/figures.zsh`, which ran every row again the same way, output
+`$R/fix3/figures.log`; the earlier rows printed what they printed before.
+
+| Value | What | Produced by |
+|---|---|---|
+| 4; `7e79438`, `9068b30`, `5476067`, `26cdc08` | commits in `b627fe3..26cdc08`, oldest first | `git rev-list --count b627fe3..26cdc08; git log --reverse --format=%h b627fe3..26cdc08 \| paste -sd " "` |
+| `stepper.rs` and `tests/state.rs` under `crates/redextape-clif`, the clif view design, and three files under `web/tests` | the files the branch changes | `git diff --name-only b627fe3 26cdc08` |
+| 38683 | the line of #190's entry's bullet this closes | `grep -n "^- \*\*PR 1's review minor 3\*\*" docs/superpowers/plans/2026-07-19-redextape-roadmap.md \| cut -d: -f1` |
+| 7 | the lines of `$R/fin/sab-restores.txt` that say a file was restored and `cmp` equal | `grep -c "cmp equal" $R/fin/sab-restores.txt` |
+| 41, 1; `state.rs:165`; `List`, `List`, `Box`, `Box` | S1's Rust run: tests run, failed; where; the four words' tags | `grep Summary $R/fin-sab-S1-rust.log; grep -o "panicked at [^ ]*" $R/fin-sab-S1-rust.log; grep "left:" $R/fin-sab-S1-rust.log \| grep -o "tag: [A-Za-z]*" \| paste -sd " "` |
+| 2 of 2; `:46`; `nil`, `nil`, `box #0`, `box #0` | S1's node run: tests failed; the line; the texts read, each case as built then optimised | `strip $R/fin-sab-S1-node.log \| grep -aE "Tests \|clif-fault-tags.test.ts:[0-9]+"; strip $R/fin-sab-S1-node.log \| grep -aE "^\+ +\"" \| tr -s " " \| paste -sd " "` |
+| 2 of 2; `:60`; `v15` `nil`, `v21` `box #0` | S1's Chromium run: tests failed; the line; the value and its text in each case | `strip $R/fin-sab-S1-browser.log \| grep -aE "AssertionError\|Tests \|clif-fault-tags.test.ts:[0-9]+"` |
+| 1, 4, 6, 2, 1 of 44; `stepper.rs` 521, 514, 528, 541, 542; 3 and 5 in `state.rs`; `state.rs` 165 | SA to SE: tests failed; where the new unit tests failed; the older tests SB and SC failed; where SD failed the Rust integration test | `for s in SA SB SC SD SE; do print -- "-- $s"; grep Summary $R/fin-sab-$s.log; grep -oE "panicked at [^ ]*" $R/fin-sab-$s.log; grep -E "failed: [A-Z]" $R/fin-sab-$s.log; done` |
+| 2 of 2; `:59`; `v150`, `v210` | SP's Chromium run: tests failed; the line; the values it looked for | `strip $R/fin-sab-SP-browser.log \| grep -aE "AssertionError\|Tests \|clif-fault-tags.test.ts:[0-9]+"` |
+| `ededb92f`; `6d9e3520`, `6d9e3520` | the first 8 digits of `pkg-clif/`'s wasm sha256: built from `b627fe3`'s stepper; after the restore, and at the review's first build | `grep -h pkg-clif $R/fin/sab/sha-S1-pkg-clif.txt $R/fin/sab/sha-restored-pkg-clif.txt $R/sab/sha-before.txt \| cut -c1-8` |
+| 7 lines, each `exit=0`; 24, 0 | the heavy legs; the light legs that exited 0, and that did not | `cat $R/fin/gate-exits.txt; grep -c "exit=0" $R/fin/light-exits.txt; grep -vc -e "exit=0" -e "^HEAD" $R/fin/light-exits.txt` |
+| 2050, 2050, 35; 1; green but partial | `check-all.sh`'s nextest: tests run, passed, skipped; its browser leg's lines of 36 passed; its verdict | `grep -m1 Summary $R/fin-check-all.log; grep -c "test result: ok. 36 passed" $R/fin-check-all.log; grep "^green" $R/fin-check-all.log` |
+| 2050; 95.55% | `cargo llvm-cov`: tests passed; TOTAL lines | `grep Summary $R/fin-llvm-cov.log; grep "^TOTAL" $R/fin-llvm-cov.log \| awk "{print \$10}"` |
+| 2 | the clif package's slow tests passed | `grep -c "^test .* \.\.\. ok$" $R/fin-clif-ignored.log` |
+| 352; 3976, 2; 97.93%, 92.25%, 98.7%, 99.15% | coverage: files passed; tests passed and failing as expected; statements, branches, functions, lines | `strip $R/fin-web-coverage.log \| grep -aE "^ +(Test Files\|Tests) \|^(Statements\|Branches\|Functions\|Lines) "` |
+| 533; 5 | the files `biome ci` checked; the changed files the comment check read | `grep -o "Checked [0-9]* files" $R/fin-light-biome.log; tail -1 $R/fin-light-comments.log` |
+| 2 of 2 | the new browser test's cases passed in Firefox at `26cdc08` | `strip $R/fin-firefox-fault-tags.log \| grep -aE "✓\|×\|^ +Tests "` |
+| 267, 24; 88, 2111; 25, 24, 86 | the Firefox tier at `9068b30`: files, failed; tests failed, passed; the run on `b627fe3`'s stepper: files, failed; tests failed | `strip $R/gate-firefox.log \| grep -aE "^ +(Test Files\|Tests) "; strip $R/sab-S1-firefox-baseline.log \| grep -aE "^ +(Test Files\|Tests) "` |
+| 88; 86; 84; 4, by name; 2, the new test's | the failed tests by name: at `9068b30`; on `b627fe3`'s stepper; in both; at `9068b30` alone; on `b627fe3`'s stepper alone | `strip $R/gate-firefox.log \| grep -a "^ FAIL " \| grep -a " > " \| sed -E "s/^ FAIL +\\|[^\|]*\\| //" \| sort -u >\| $R/fin/ff-branch.fails; strip $R/sab-S1-firefox-baseline.log \| grep -a "^ FAIL " \| grep -a " > " \| sed -E "s/^ FAIL +\\|[^\|]*\\| //" \| sort -u >\| $R/fin/ff-main.fails; wc -l < $R/fin/ff-branch.fails; wc -l < $R/fin/ff-main.fails; comm -12 $R/fin/ff-branch.fails $R/fin/ff-main.fails \| wc -l; comm -23 $R/fin/ff-branch.fails $R/fin/ff-main.fails; comm -13 $R/fin/ff-branch.fails $R/fin/ff-main.fails` |
+| 17, 1 | `view-keys.test.ts`'s and `view-keys-format-on-blur.test.ts`'s failed cases on `b627fe3`'s stepper | `grep -E "view-keys(-format-on-blur)?.test.ts" $R/fin/ff-main.fails \| cut -d">" -f1 \| sort \| uniq -c` |
+| 17, 1; 16, 1 | the same, in two more runs of those files and two others on the branch | `for f in $R/green-firefox-recheck-{1,2}.log; do strip $f \| grep -a "^ FAIL " \| grep -a "view-keys" \| sed -E "s/^ FAIL +\\|[^\|]*\\| //" \| cut -d">" -f1 \| sort \| uniq -c; done` |
+| `1 0 0 1 0 0 0`; `expected 2 to be less than or equal to 1` | the failures of `clif-worker`'s "drops the stepper for a request with no listing" in runs of its file alone, the branch's 3 then the 4 on `b627fe3`'s stepper; where it failed | `for f in $R/green-firefox-clif-worker-{1..3}.log $R/sab-S1-firefox-clif-worker-{1..4}.log; do strip $f \| grep -a "^ FAIL " \| grep -c "drops the stepper for a request with no listing"; done \| paste -sd " "; strip $R/green-firefox-clif-worker-1.log \| grep -ao "AssertionError: .*"` |
+| 3; `6a29622`, `82e5666`, `0e398a8` | commits in `dcdcc3e..0e398a8`, the whole-branch review's fixes, oldest first | `git rev-list --count dcdcc3e..0e398a8; git log --reverse --format=%h dcdcc3e..0e398a8 \| paste -sd " "` |
+| `tests/state.rs` under `crates/redextape-clif`, the clif view design, and three files under `web/tests` | the files the fixes change | `git diff --name-only dcdcc3e 0e398a8` |
+| 5 | the lines of `$R/fix2/sab/restores.txt` that say a file was restored and `cmp` equal | `grep -c "cmp equal" $R/fix2/sab/restores.txt` |
+| 45, 1; `state.rs:198`; `1` tagged `Value`, four times | SR1: tests run, failed; where; the four words | `grep Summary $R/fix2/sab-SR1.log; grep -o "panicked at [^ ]*" $R/fix2/sab-SR1.log; grep "left:" $R/fix2/sab-SR1.log \| grep -oE "word: \"[0-9]+\", tag: [A-Za-z]*" \| paste -sd " "` |
+| 45, 1; `state.rs:190`; `v15` | SR2: tests run, failed; where; the value the refused call set | `grep Summary $R/fix2/sab-SR2.log; grep -o "panicked at [^ ]*" $R/fix2/sab-SR2.log; grep -o "the refused call set v[0-9]*" $R/fix2/sab-SR2.log` |
+| 4 of 4; `:55`, `:70`; `undefined` | W1's node run: tests failed; the lines; the texts read | `strip $R/fix2/sab-W1-node.log \| grep -aE "Tests \|clif-fault-tags.test.ts:[0-9]+"; strip $R/fix2/sab-W1-node.log \| grep -aE "^\+ +" \| tr -s " " \| paste -sd " "` |
+| 4 of 4; `:66`, `v14`, `v20`; `:75` | W1's Chromium run: tests failed; the fault cases' line and the values they looked for; the controls' line | `strip $R/fix2/sab-W1-browser.log \| grep -aE "AssertionError\|Tests \|clif-fault-tags.test.ts:[0-9]+"` |
+| 1 of 4; `:70`; `0`, `0` | W2's node run: tests failed, the cons control alone; the line; the texts read | `strip $R/fix2/sab-W2-node.log \| grep -aE "✓\|×\|Tests \|clif-fault-tags.test.ts:[0-9]+"; strip $R/fix2/sab-W2-node.log \| grep -aE "^\+ +\"" \| tr -s " " \| paste -sd " "` |
+| 2 of 4; `:55`; `nil`, `nil`, `box #0`, `box #0` | S1b's node run: tests failed, the two fault cases; the line; the texts read, each case as built then optimised | `strip $R/fix2/sab-S1-node.log \| grep -aE "✓\|×\|Tests \|clif-fault-tags.test.ts:[0-9]+"; strip $R/fix2/sab-S1-node.log \| grep -aE "^\+ +\"" \| tr -s " " \| paste -sd " "` |
+| 2 of 4; `:67`; `v15` `nil`, `v21` `box #0` | S1b's Chromium run: tests failed; the line; the value and its text in each fault case | `strip $R/fix2/sab-S1-browser.log \| grep -aE "AssertionError\|Tests \|clif-fault-tags.test.ts:[0-9]+"` |
+| `ededb92f`; `6d9e3520` | the first 8 digits of `pkg-clif/`'s wasm sha256 for S1b: built from `e65a533`'s stepper; after the restore | `grep -h pkg-clif $R/fix2/S1-exits.txt \| cut -c1-8` |
+| 8 legs, each `exit=0` | `$R/fix2/prove.sh`'s legs at `0e398a8` | `cat $R/fix2/prove-exits.txt` |
+| 45, 2; 4; 4; 463; 5 | at `0e398a8`: the clif package's tests passed, skipped; the node test file's tests passed; the browser test file's; the files `biome ci` checked; the changed files the comment check read | `grep Summary $R/fix2/nextest-clif.log; strip $R/fix2/node-fault-tags.log \| grep -aE "^ +Tests "; strip $R/fix2/browser-fault-tags.log \| grep -aE "^ +Tests "; strip $R/fix2/biome.log \| grep -o "Checked [0-9]* files"; tail -1 $R/fix2/comments.log` |
+| 2; `e047b6f`, `2cc3ec0` | commits in `10a2bbc..2cc3ec0`, the re-review's fixes, oldest first | `git rev-list --count 10a2bbc..2cc3ec0; git log --reverse --format=%h 10a2bbc..2cc3ec0 \| paste -sd " "` |
+| the clif view design and two files under `web/tests` | the files the re-review's fixes change | `git diff --name-only 10a2bbc 2cc3ec0` |
+| 76, 158, 206, 289, 329 | the design's lines that name `[continue]`: §2's, §4's, §5.4's, §8's and §10's | `grep -n "\[continue\]" docs/superpowers/specs/2026-11-18-clif-view-design.md \| cut -d: -f1 \| paste -sd " "` |
+| 1 | the lines of `$R/fix3/sab/restores.txt` that say a file was restored and `cmp` equal | `grep -c "cmp equal" $R/fix3/sab/restores.txt` |
+| 1 of 4; `:71`; `v24`, `v15` | SM's node run: tests failed; the line; the value the cons control's call sets as built, and its fault case's | `strip $R/fix3/sab-SM-node.log \| grep -aE "Tests \|AssertionError\|clif-fault-tags.test.ts:[0-9]+"` |
+| 1 of 4; `:76`; `v24`, `v15` | SM's Chromium run: the same | `strip $R/fix3/sab-SM-browser.log \| grep -aE "Tests \|AssertionError\|clif-fault-tags.test.ts:[0-9]+"` |
+| 6 legs, each `exit=0` | `$R/fix3/prove.sh`'s legs at `2cc3ec0` | `cat $R/fix3/prove-exits.txt` |
+| 4; 4; 4; 463; 5 | at `2cc3ec0`: the node test file's tests passed; in Chromium; in Firefox; the files `biome ci` checked; the changed files the comment check read | `for f in node chromium firefox; do strip $R/fix3/$f-fault-tags.log \| grep -aE "^ +Tests "; done; strip $R/fix3/biome.log \| grep -o "Checked [0-9]* files"; tail -1 $R/fix3/comments.log` |

@@ -200,11 +200,12 @@ back to the user: D1's optimised listing was agreed on the condition that it nee
 `extern "C"` `rt_*` functions, the JIT and LLVM stay on `Runtime<NoTags>`. The stepper uses `Runtime::new(caps)`
 (no host-stack `depth_cap`) with `VecTags<WordTag>` and calls the same methods the `rt_*` wrappers call. Tags
 flow from the runtime calls (a cons cell's words take its arguments' tags; `rt_head`, `rt_tail` and `rt_box_get`
-return the stored tag; constants and arithmetic make plain numbers); the rule is written once, beside the
-stepper's value tracking. A cap stop pauses at the call that tripped it; `Runtime` gains the one method that undoes
-that call's own effect (a tick's or an enter's count) and clears the stop once the cap is raised, so `[continue]`
-repeats the call under the raised cap and the rule stays in `Runtime`. Which cap tripped is read from which call
-tripped it. The compiled bodies of the
+return the stored tag; constants and arithmetic make plain numbers, as every runtime call does once a fault or a cap
+has stopped the run); the rule is written once, beside the stepper's value tracking. A cap stop pauses at the call
+that tripped it; `Runtime` gains the one method that undoes that call's own effect (a tick's or an enter's count)
+and clears the stop once the cap is raised, so `Stepper::raise_caps` repeats the call under the raised cap and the
+rule stays in `Runtime`. The view's `[continue]` raises the steps cap alone, so it resumes a steps pause and no
+other, as the rxm view's does. Which cap tripped is read from which call tripped it. The compiled bodies of the
 `rt_*` symbols in native-rt's staticlib are compared before and after and must be identical.
 
 ### §5.5 The package
@@ -288,8 +289,8 @@ Two PRs, each with its own plan and roadmap entry:
 - **Optimised listing.** §5.3's equality over the whole snapshot corpus.
 - **Native rules.** For every program of the native oracle corpus and the snapshot corpus, both listings, the
   stepper's outcome (value, fault text, or which cap) equals the JIT's at the same caps with `Runtime::new(caps)`,
-  except the programs §5.5's frame-memory list names. `[continue]` after each cap resumes to the outcome a run with
-  the raised cap reaches.
+  except the programs §5.5's frame-memory list names. `Stepper::raise_caps` after each cap's pause resumes to the
+  outcome a fresh run under the raised caps reaches; the view's `[continue]` does so at a steps pause alone (§5.4).
 - **Listing text.** The rows joined, with each pc column put back in Cranelift's `@xxxx` form, equal
   `func.display()`, both listings, every corpus program.
 - **Runtime.** `rt_*` bodies identical (§5.4); native-rt's fault-text tests unchanged.

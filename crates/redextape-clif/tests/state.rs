@@ -12,8 +12,8 @@ mod common;
 use common::{TIGHT, corpus, program_of};
 use cranelift_codegen::ir::{ExternalName, Function, Inst, InstructionData, Opcode};
 use redextape_clif::{ClifAt, ClifEnd, ClifState, ClifValue, ClifWindow, Stepper};
-use redextape_core::tm::{DEFAULT_CAPS, Program};
-use redextape_core::trace::WordTag;
+use redextape_core::tm::{Caps, DEFAULT_CAPS, Program};
+use redextape_core::trace::{RxmCap, WordTag};
 use redextape_core::viewmodel::{RxmBox, RxmCell, RxmWord};
 use redextape_native::{Listing, RtFn, build_listing};
 
@@ -172,6 +172,68 @@ fn tags_follow_boxes() {
             assert_eq!(state.cells.first().map(|c| &c.head), Some(&RxmWord::of(list, WordTag::List)), "{name}");
         }
     }
+}
+
+/// A callee that faults returns to its caller, which runs on to its next guard, so the caller's `cons` or
+/// box runs after the fault. The runtime then returns 0 without allocating, a plain number, as a read in
+/// the same state is. Every case's word is read in both listings before one assertion holds them all, so a
+/// failure shows each case and listing that fails rather than stopping at the first.
+#[test]
+fn a_cons_or_box_after_a_fault_is_a_plain_number() {
+    let cases = [
+        ("fn f(x) { head(nil) } cons(f(0), nil)", RtFn::Cons),
+        ("fn f(x) { head(nil) } let mut v = f(0); let get = |x| v; get(0)", RtFn::Box),
+    ];
+    let mut made = Vec::new();
+    for (src, import) in cases {
+        for listing in LISTINGS {
+            let name = format!("{src} {}", listing.name());
+            let funcs = build(src, listing);
+            let mut stepper = Stepper::new(&funcs, DEFAULT_CAPS);
+            stepper.run(u64::MAX);
+            assert!(matches!(stepper.status(), Some(ClifEnd::Fault { .. })), "{name}: {:?}", stepper.status());
+            let state = stepper.state(WINDOW);
+            assert_eq!((state.heap_len, state.box_len), (0, 0), "{name}: nothing was allocated");
+            let value = result_of_call(&funcs[0], import);
+            let word = state.values.into_iter().find(|v| v.value == value).map(|v| v.word);
+            made.push((name, word));
+        }
+    }
+    let plain: Vec<_> = made.iter().map(|(name, _)| (name.clone(), Some(RxmWord::of(0, WordTag::Value)))).collect();
+    assert_eq!(made, plain);
+}
+
+/// The heap cap refuses a `cons` or box before the call sets its value, so the run pauses at the call
+/// with that value unset. `Stepper::raise_caps` clears the runtime's stop, and the call runs again on the
+/// next step; the run has not stopped then, so the word it makes is a list or box, not the plain 0 a
+/// stopped run makes. Every case's word is read in both listings before one assertion holds them all.
+#[test]
+fn a_cons_or_box_repeated_after_a_heap_pause_is_a_list_or_box() {
+    let cases = [
+        ("fn f(x) { x } cons(f(0), nil)", RtFn::Cons, RxmWord::of(1, WordTag::List)),
+        ("fn f(x) { x } let mut v = f(0); let get = |x| v; get(0)", RtFn::Box, RxmWord::of(1, WordTag::Box)),
+    ];
+    let no_heap = Caps { heap: 0, ..DEFAULT_CAPS };
+    let mut made = Vec::new();
+    let mut want = Vec::new();
+    for (src, import, word) in cases {
+        for listing in LISTINGS {
+            let name = format!("{src} {}", listing.name());
+            let funcs = build(src, listing);
+            let value = result_of_call(&funcs[0], import);
+            let mut stepper = Stepper::new(&funcs, no_heap);
+            stepper.run(u64::MAX);
+            assert_eq!(stepper.status(), Some(&ClifEnd::Capped(RxmCap::Heap)), "{name}");
+            let unset = stepper.state(WINDOW).values.iter().all(|v| v.value != value);
+            assert!(unset, "{name}: the refused call set v{value}");
+            stepper.raise_caps(DEFAULT_CAPS);
+            assert!(stepper.step(), "{name}: the repeat ended the run with {:?}", stepper.status());
+            let state = stepper.state(WINDOW);
+            made.push((name.clone(), state.values.into_iter().find(|v| v.value == value).map(|v| v.word)));
+            want.push((name, Some(word.clone())));
+        }
+    }
+    assert_eq!(made, want);
 }
 
 #[test]

@@ -337,16 +337,16 @@ impl<'f> Stepper<'f> {
     /// The word `import`'s `Runtime` method returns, with its tag, or `None` for one that returns nothing.
     /// `a` and `b` are the call's arguments after the runtime pointer, with their tags, `(0, Value)` past
     /// those it takes. A cell or box stores its words' tags; a read returns the tag stored with the word it
-    /// read; every other import makes a plain number.
+    /// read; every other import makes a plain number, as every import does once the run has stopped.
     fn answer(&mut self, import: RtFn, [a, b]: [(u64, WordTag); 2]) -> Option<(u64, WordTag)> {
         let rt = &mut self.rt;
-        match import {
+        let answer = match import {
             RtFn::Cons => Some((rt.cons(a, b), WordTag::List)),
-            RtFn::Head => Some((rt.head(a.0), stored_tag(rt, rt.heap().head(a.0)))),
-            RtFn::Tail => Some((rt.tail(a.0), stored_tag(rt, rt.heap().tail(a.0)))),
+            RtFn::Head => Some((rt.head(a.0), stored_tag(rt.heap().head(a.0)))),
+            RtFn::Tail => Some((rt.tail(a.0), stored_tag(rt.heap().tail(a.0)))),
             RtFn::IsEmpty => Some((u64::from(heap::is_empty(a.0)), WordTag::Value)),
             RtFn::Box => Some((rt.new_box(a), WordTag::Box)),
-            RtFn::BoxGet => Some((rt.box_get(a.0), stored_tag(rt, rt.heap().box_get(a.0)))),
+            RtFn::BoxGet => Some((rt.box_get(a.0), stored_tag(rt.heap().box_get(a.0)))),
             RtFn::BoxSet => {
                 rt.box_set(a.0, b);
                 None
@@ -358,7 +358,8 @@ impl<'f> Stepper<'f> {
                 None
             }
             RtFn::Faulted => Some((rt.faulted(), WordTag::Value)),
-        }
+        };
+        answer.map(|(word, tag)| (word, answered_tag(rt, tag)))
     }
 
     /// Sets `names` in the running frame to `values`, each with the tag at its index in `tags`.
@@ -478,14 +479,16 @@ fn refusal(import: RtFn) -> Option<(Tripped, RxmCap)> {
     }
 }
 
-/// The tag `read`, a read of `rt`'s heap, found stored with its word, or `Value` once a fault or a cap has
-/// stopped the run, since `Runtime`'s reads then return 0 without reading. `Runtime::faulted` is the
-/// runtime's own answer to whether it has stopped, so the rule is not restated here.
-fn stored_tag(rt: &Runtime<VecTags<WordTag>>, read: Result<(u64, WordTag), HeapFault>) -> WordTag {
-    if rt.faulted() != 0 {
-        return WordTag::Value;
-    }
+/// The tag `read`, a read of the heap, found stored with its word, or `Value` for a read that faulted.
+fn stored_tag(read: Result<(u64, WordTag), HeapFault>) -> WordTag {
     read.map_or(WordTag::Value, |(_, tag)| tag)
+}
+
+/// The tag of a word `rt` answered a call with: `tag`, or `Value` once a fault or a cap has stopped the run,
+/// since `Runtime`'s heap calls then return 0 without allocating or reading, and its guards 1.
+/// `Runtime::faulted` is the runtime's own answer to whether it has stopped, so the rule is not restated here.
+fn answered_tag(rt: &Runtime<VecTags<WordTag>>, tag: WordTag) -> WordTag {
+    if rt.faulted() != 0 { WordTag::Value } else { tag }
 }
 
 /// `inst`'s srcloc, the rxm pc it was lowered from, or `None` for an instruction lowered from none.
@@ -501,20 +504,42 @@ mod tests {
     use redextape_core::trace::WordTag;
     use redextape_native_rt::Runtime;
 
-    use super::stored_tag;
+    use super::{answered_tag, stored_tag};
 
-    /// Once the run has stopped, a read returns 0 without reading, so its word is no list, whatever the
-    /// cell it names holds.
     #[test]
-    fn a_read_after_the_run_stopped_is_a_plain_number() {
+    fn a_read_takes_the_tag_its_cell_stores() {
         let mut rt = Runtime::<VecTags<WordTag>>::new(DEFAULT_CAPS);
         let inner = rt.cons((7, WordTag::Value), (0, WordTag::Value));
         let outer = rt.cons((inner, WordTag::List), (0, WordTag::Value));
-        assert_eq!(stored_tag(&rt, rt.heap().head(outer)), WordTag::List);
-        rt.fault = Some("head of empty list".to_string());
-        assert_eq!(stored_tag(&rt, rt.heap().head(outer)), WordTag::Value);
-        rt.fault = None;
-        rt.hit_cap = true;
-        assert_eq!(stored_tag(&rt, rt.heap().head(outer)), WordTag::Value);
+        assert_eq!(stored_tag(rt.heap().head(outer)), WordTag::List);
+    }
+
+    /// A read that faults, the head of nil here, finds no word stored, so the 0 it answers is no list.
+    #[test]
+    fn a_faulting_read_is_a_plain_number() {
+        let rt = Runtime::<VecTags<WordTag>>::new(DEFAULT_CAPS);
+        assert_eq!(stored_tag(rt.heap().head(0)), WordTag::Value);
+    }
+
+    #[test]
+    fn a_word_answered_while_the_run_goes_on_keeps_its_tag() {
+        let running = Runtime::<VecTags<WordTag>>::new(DEFAULT_CAPS);
+        for tag in [WordTag::Value, WordTag::List, WordTag::Box] {
+            assert_eq!(answered_tag(&running, tag), tag);
+        }
+    }
+
+    /// Once the run has stopped, a heap call returns 0 without allocating or reading, so its word is no list
+    /// or box, whatever the call would make or the cell it names holds.
+    #[test]
+    fn a_word_answered_after_the_run_stopped_is_a_plain_number() {
+        let mut faulted = Runtime::<VecTags<WordTag>>::new(DEFAULT_CAPS);
+        faulted.fault = Some("head of empty list".to_string());
+        let mut capped = Runtime::<VecTags<WordTag>>::new(DEFAULT_CAPS);
+        capped.hit_cap = true;
+        for tag in [WordTag::Value, WordTag::List, WordTag::Box] {
+            assert_eq!(answered_tag(&faulted, tag), WordTag::Value, "{tag:?} after a fault");
+            assert_eq!(answered_tag(&capped, tag), WordTag::Value, "{tag:?} at a cap");
+        }
     }
 }
