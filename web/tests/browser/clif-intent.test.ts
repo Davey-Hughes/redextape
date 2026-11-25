@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { commands, userEvent } from 'vitest/browser'
 import { INTENT_MS, watchIntent } from '../../src/clif-intent'
 import { sleep } from './clif-fixture'
-import { pageCentreOf } from './harness'
+import { pageCentreOf, until } from './harness'
 
 /**
  * **INTENT IS WHAT THE USER DID** (CLIF view design §6, *Loading*): a pointer that moved onto the element and stayed
@@ -52,8 +52,8 @@ describe('watchIntent', () => {
     const at = pageCentreOf(before)
     await commands.mouse('move', at.x, at.y)
     before.replaceWith(w.el)
+    await until(() => w.entered() > 0, 'the browser to enter the element under the still pointer')
     await sleep(INTENT_MS + 150)
-    expect(w.entered(), 'precondition: the browser entered the element under the still pointer').toBeGreaterThan(0)
     expect(w.fetched()).toBe(0)
   })
 
@@ -84,6 +84,45 @@ describe('watchIntent', () => {
   })
 
   /**
+   * As `main.ts` moves the toggles into the shut workspace menu while the pointer rests on one: the browser sends the
+   * moved element no `pointerleave`, and a rest on it in the open menu must still ask, as one retrying a failed load
+   * does. The rests' timers are faked, as above.
+   */
+  it('fetches on a rest after it was moved from under a resting pointer', async () => {
+    const w = watched()
+    const group = document.createElement('div')
+    group.append(w.el)
+    const menu = document.createElement('div')
+    menu.popover = 'manual'
+    document.body.append(group, menu)
+    const heard: string[] = []
+    for (const type of ['pointerenter', 'pointermove', 'pointerleave'])
+      w.el.addEventListener(type, () => heard.push(type))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const at = pageCentreOf(w.el)
+      await commands.mouse('move', at.x, at.y)
+      vi.advanceTimersByTime(INTENT_MS)
+      expect(w.fetched(), 'precondition: the first rest fetched').toBe(1)
+      menu.append(group)
+      await commands.mouse('move', AWAY.x, AWAY.y)
+      expect(heard, 'precondition: the moved element heard no pointerleave').not.toContain('pointerleave')
+      menu.showPopover()
+      heard.length = 0
+      const there = pageCentreOf(w.el)
+      await commands.mouse('move', there.x, there.y)
+      vi.advanceTimersByTime(INTENT_MS)
+      expect(heard.slice(0, 2), 'precondition: the pointer entered it in the open menu and moved on it').toEqual([
+        'pointerenter',
+        'pointermove',
+      ])
+      expect(w.fetched(), 'a rest in the open menu').toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
    * **COUNTED AROUND THE PRESS'S OWN `pointerdown`**: before it reaches the element, on the way down, and after
    * `watchIntent`'s listener, so a rest the move to it began cannot be counted as the press, however long the press takes.
    */
@@ -105,7 +144,7 @@ describe('watchIntent', () => {
     } finally {
       document.removeEventListener('pointerdown', down, { capture: true })
     }
-    expect(before, 'precondition: the press reached the element').toBeGreaterThanOrEqual(0)
+    expect(after, 'precondition: the press reached the element').toBeGreaterThanOrEqual(0)
     expect(document.activeElement, 'precondition: the press focused nothing').toBe(document.body)
     expect(after - before, 'the press').toBe(1)
   })

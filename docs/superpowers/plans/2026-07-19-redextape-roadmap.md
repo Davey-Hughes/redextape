@@ -43415,3 +43415,166 @@ rows from `15; 0` to `159; 72`, which ran at `97cb6c4`, after the review at `c4d
 | 2; 5; 390 px | the node test's refusal cases; the types `ts_bindings.rs` gates; the width `licences-narrow.test.ts` renders at | `rg -c "it\('refuses" web/tests/node/mc-package.test.ts; rg -c 'export_to_string' crates/redextape-mc/tests/ts_bindings.rs; rg -o 'at 390 px' web/tests/browser/licences-narrow.test.ts` |
 | three | the `.wasm` builds `licences.ts`'s header counted on `main` | `git show b627fe3:web/scripts/licences.ts \| rg -o 'compiled into the three ..wasm. builds'` |
 | 300 | the steps the A/B compares the state at | `rg -o 'first 300 steps' $R/branch-review-probe/clif-ab.mjs` |
+
+#### A CLIF TOGGLE MOVED FROM UNDER A RESTING POINTER RESTS AGAIN AT ITS NEXT ENTRY, AND WHAT #199'S ENTRY SAYS THAT IS NOT SO (2026-11-24, branch `intent-followup`, `2a96b84..730cb68`, 3 commits, plus this entry)
+
+#199 (`intent-pointermove`, squashed into `main` as `2a96b84`) merged with its branch at `9a79c65`, before the
+independent review of its whole branch had been acted on. That review, `$R/review.md` with
+`R=~/temp/redextape-duet-patches-record/intent`, found the code sound and five minor points. Their fixes were made on
+`intent-pointermove` after `9a79c65` and were not pushed before the merge; this branch takes the two code commits onto
+`2a96b84` by cherry-pick, with `web/` byte-equal to that branch's `1f1c6ab`, adds the design sentence the re-review
+asked for, and says here what #199's merged entry says that is not so. The two code commits were re-reviewed before
+this branch was cut (`$R/review.md`, *Re-review at 1f1c6ab*): push as is, no new findings. This branch's runs are in
+`$R/followup/`, by `$R/followup/gate.sh`; the runs on `intent-pointermove` this entry cites are in `$R/fix/`.
+
+| Commit | What |
+|---|---|
+| `0e6e00e` | `pointerenter` clears a rest, so a toggle moved from under a resting pointer rests again; its test case (`ea0d32b` on `intent-pointermove`) |
+| `9274238` | the still-pointer case times its rest from the browser's enter; the press case's precondition reads the element (`4a92b08`) |
+| `730cb68` | the clif view design's §8 names the moved-element case among what the intent test holds |
+
+##### THE REVIEW, AND WHAT THIS BRANCH DOES
+
+1. **A toggle moved from under a resting pointer kept its rest.** Fixed by `0e6e00e`; *THE MOVED TOGGLE* below.
+2. **The gate's exit record was blind.** No code: the record's runners now read the exit first, and the first item of
+   *WHAT #199'S ENTRY SAYS THAT IS NOT SO* gives each leg's summary line instead.
+3. **The machine code branch's SHAs were stale.** No code: the second item below.
+4. **The still-pointer case timed its rest from the draw, not from the browser's enter**, so under load a late enter
+   could let a watcher that rests at `pointerenter` pass it. `9274238` waits until the browser is seen to enter the
+   element, then sleeps past a rest.
+5. **The preconditions sample once.** No code: each catches a load that came before its check, and does not prove none
+   is coming, since a rest's timer still pending at the read passes it.
+
+Its two nits: the press case's precondition read a counter at the document, which a press that misses the element
+also sets, and now reads the element's own listener (`9274238`); the watcher's comment gave a keyboard user's reason
+for a press as well as a focus, and now gives the press its own (`0e6e00e`). Of the re-review's two notes, the
+optional one, that the clif view design's §8 did not name the moved-element case, is `730cb68`; the other, that the
+new case moves its element in the DOM and not across the page, is under *WHAT THIS DID NOT CLOSE*.
+
+##### THE MOVED TOGGLE
+
+`main.ts` moves the view toggles into the shut workspace menu as the window narrows past 40rem. The review's probe
+(`$R/review-logs/probe-moved2-*.log`) moved a toggle's group into a closed popover under a pointer resting on it, the
+toggle from 64,24 to 311,271: neither Chromium nor Firefox sent the moved toggle any event, `pointerleave` included,
+at the move or when the pointer then moved away, so the rest `watchIntent` had begun stayed set, and a later rest on
+it in the open popover fetched nothing where `e65a533`'s watcher fetched. A rest left set means a fetch was already
+asked, and `askClifLoad` acts only from `idle` or `failed`, so what was lost against `e65a533` was a rest retrying a
+failed load; a press or a focus still retried. `0e6e00e` clears the rest at `pointerenter` as at `pointerleave`, so
+each entry starts clean. `pointerenter` still starts no rest, so a toggle drawn under a still pointer still fetches
+nothing.
+
+`clif-intent.test.ts` has a fifth case: an element moved into a shut popover from under a resting pointer, and seen to
+get no `pointerleave`, fetches again on a rest in the open popover, both rests' timers faked. With `clif-intent.ts` as
+at `2a96b84` it fails at its claim, `a rest in the open menu: expected 1 to be 2`, after its preconditions held, and
+passes as `0e6e00e` has it.
+
+##### WHAT #199'S ENTRY SAYS THAT IS NOT SO
+
+The merged entry is roadmap:41874-42027.
+
+- **That `gate-exits.txt` records each gate leg's pass**, roadmap:41982 (*"each leg into its log in `$R/logs/` and its
+  exit into `gate-exits.txt`, every one 0"*) and the counts row at roadmap:42026 (*"8 legs, each exit 0"*, by `cut`
+  of that file). The runners, `$R/scripts/browsergate.sh` and `webgate.sh`, wrote `echo "$(git -C "$W" rev-parse
+  --short HEAD) $leg exit=$? ..."`: the command substitution runs first and resets `$?`, so each line holds
+  `git rev-parse`'s exit, not the leg's. The legs did pass, and the record of each is its log's summary line, in
+  `$R/logs/` at `cc9cff7`: `gate-clif.log`, `Test Files 20 passed (20)` and `Tests 105 passed (105)`;
+  `gate-firefox.log`, 10 and 18 passed; `gate-coverage.log`, 299 files, `3390 passed | 2 expected fail (3392)`, `All
+  files` 98.09, 92.29, 98.72 and 99.33, and no `does not meet`; `gate-node.log`, 81 files and 1527 tests passed;
+  `gate-biome.log`, `Checked 461 files` and no error; `gate-typecheck.log`, no `error TS`, `FAILED` or `ELIFECYCLE`,
+  since `tsc` prints nothing when it passes; `gate-buildapp.log`, `✓ built`; `gate-checkall.log`, `green, but PARTIAL`,
+  the LLVM and browser tiers skipped. The runners now read the exit straight after the leg. The entry's scans line,
+  `scans-exits.txt`, stands: its runner reads each exit straight after its scan.
+- **That the machine code branch's commits are `93c65d2`, `54422b8` and `f6b5761`**, roadmap:41879, :41912, :41926,
+  :41970, :41973, :42005 and :42006. That branch was rebased before the entry was written, and the three are on no
+  pushed branch. As `git fetch origin` shows them on this date, the intent change is `a7dac04` and the commit that made
+  its test hold on a slow machine `ce104fe`, both on `origin/machine-code-panel` (#200) at `2378798`, and the files the
+  entry compared with, `f6b5761`'s, are `2378798`'s blob for blob. Against `2378798` the entry's two figures hold:
+  `clif-intent.ts` at `cc9cff7` differs from it by 0 lines, and `clif-intent.test.ts` by 3 hunks.
+- **That a toggle moved under a resting pointer was not measured**, roadmap:41967-41971 (*"and is not measured
+  here"*). The review measured it in Chromium and Firefox, and `0e6e00e` closes it: *THE MOVED TOGGLE* above.
+
+##### WHAT THIS DID NOT CLOSE
+
+Re-checked on this base.
+
+- **No file parks the pointer.** The browser tier's three setup files move no pointer, so a file still inherits the
+  last one's; a clif toggle drawn under it loads nothing, and #199's five preconditions name a load that came first.
+- **#200's `watchIntent`** is `2378798`'s, `a7dac04`'s, without `0e6e00e`'s clear at `pointerenter`: `clif-intent.ts`
+  differs between `2378798` and this branch by that change alone, and #200, rebased onto this, must take this side.
+- **`clif-fetch`'s pass case still races real time** against `INTENT_MS`; the file is as `cc9cff7` left it.
+- **`holdRequests`** leaves a hold no request came for on the context until `releaseRequests` in the same file;
+  `clif-worker.test.ts` is its one caller, and no file was checked for a hold left at its end.
+- **Touch and pen** are held by reading alone: `watchIntent` listens for `pointerdown` whatever the pointer's type, and
+  no browser test taps.
+- **The moved-element case moves the element in the DOM, not across the page.** `watched()` fixes it at 20,20, so in
+  the popover it is drawn where it was; the case holds the DOM move, which is the mechanism, and the review's probe
+  held a change of place.
+- **Not run on this base:** the coverage tier, `build:app`, `check-all.sh`, CI's LLVM job, `check-slow.sh` and `cargo
+  llvm-cov`. The branch changes `clif-intent.ts`, its test, a design sentence and this file.
+
+##### VERIFICATION
+
+**At `730cb68`**, each leg into its log in `$R/followup/`, read by its summary line, with one or two browser tabs at a
+time, since CI shares this machine. `clif-intent.test.ts` in Chromium, `intent.log`: 5 tests passed. The 20 `clif-*`
+browser files in Chromium, `clif.log`: 106 tests passed. `clif-intent` and the 9 `clif-app` and `clif-fetch` files in
+Firefox, `REDEXTAPE_FIREFOX=1`, `firefox.log`: 10 files and 19 tests passed, the moved-element case among them with its
+precondition that the moved element heard no `pointerleave`. The pair, `clif-app-failed-intent.test.ts` then
+`clif-app-failed.test.ts` in one tab, `--no-cache` and `VITEST_MAX_WORKERS=1`: 3 of 3 passed, in that order
+(`pair-1.log` to `-3.log`). The node tier, `node.log`, 81 files and 1527 tests; `biome ci --error-on-warnings`, 461
+files and no error; `pnpm run typecheck`, no `error TS`, `FAILED` or `ELIFECYCLE`; `check-comments.mjs --base
+2a96b84`, no history and no grown block.
+
+**Sabotages**, each restored from its saved copy and `cmp` equal. On this base, `clif-intent.ts` as at `2a96b84`
+(`sab-main.log`): 1 of 5, the moved-element case at its claim. On `intent-pointermove` at `4a92b08`, whose `web/` is
+`9274238`'s byte for byte (`$R/fix/`): `clif-intent.ts` as at `e65a533`, 2 of 5, the still-pointer case at its claim,
+`expected 1 to be +0`, after its wait for the enter, and the press case; the press made at a point away from the
+element, 1 of 5, the press case at its precondition, `the press reached the element: expected -1 to be greater than or
+equal to 0`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at
+`730cb68`, the last code commit, with the worktree clean and after `git fetch origin`, with
+`R=~/temp/redextape-duet-patches-record/intent`, `X=$R/fix`, `U=$R/followup` and
+`RM=docs/superpowers/plans/2026-07-19-redextape-roadmap.md`, and `noansi`, a `sed` that strips colour codes, by
+`$U/figures.zsh`, which prints each command above its output into `$U/figures.log`.
+
+| Value | What | Produced by |
+|---|---|---|
+| `730cb68`, 0 | the commit the rows read, and the worktree's changed or untracked files | `git rev-parse --short HEAD; git status --short \| wc -l` |
+| 3 | the commits in the heading's range | `git rev-list --count 2a96b84..730cb68` |
+| `(#199)`, 0 | `2a96b84` is #199's squash, and lines its tree differs from `9a79c65`'s | `git log -1 --format=%s 2a96b84 \| grep -o '(#199)'; git diff 9a79c65 2a96b84 \| wc -l` |
+| 0 | lines `web/` differs from `1f1c6ab`'s | `git diff 1f1c6ab 730cb68 -- web \| wc -l` |
+| 5; 1 | the review's minor findings; the re-review's verdict | `grep -cE '^[0-9]+\. \*\*' $R/review.md; grep -c 'Verdict: push as is' $R/review.md` |
+| 41874 to 42027 | the merged entry: its heading's line, its last row's, and nothing after | `sed -n '41874p' $RM \| cut -c1-60; sed -n '42027p' $RM \| cut -c1-40; sed -n '42028p' $RM \| wc -c` |
+| 41982 42026; 41879 41912 41926 41970 41973 42005 42006; 41971 | the merged entry's lines naming `gate-exits`; the three stale SHAs; *not measured* | `awk 'NR>=41874 && NR<=42027 && /gate-exits/ {print NR}' $RM \| paste -sd' '`, and the same for `/93c65d2\|54422b8\|f6b5761/` and `/not measured/` |
+| 1, 1; `exit=0` | the runners' `exit=$?` after a substitution; what that prints after a failure | `grep -c 'exit=\$? status' $X/saved/browsergate.sh.orig $X/saved/webgate.sh.orig; bash -c 'false; echo "A $(true) exit=$?"'` |
+| 20, 105 | at `cc9cff7`, the `clif-*` files in Chromium | `noansi $R/logs/gate-clif.log \| grep -aE 'Test Files\|Tests  '` |
+| 10, 18 | at `cc9cff7`, the Firefox files | `noansi $R/logs/gate-firefox.log \| grep -aE 'Test Files\|Tests  '` |
+| 299; 3390 and 2; 98.09, 92.29, 98.72, 99.33; 0 | at `cc9cff7`, coverage: files; tests passed and expected to fail; `All files`; thresholds missed | `noansi $R/logs/gate-coverage.log \| grep -aE 'Test Files\|Tests  \|^All files'; grep -ac 'does not meet' $R/logs/gate-coverage.log` |
+| 81, 1527 | at `cc9cff7`, the node tier | `noansi $R/logs/gate-node.log \| grep -aE 'Test Files\|Tests  '` |
+| 461, 0 | at `cc9cff7`, biome's files, and lines naming an error | `grep -aoE 'Checked [0-9]+ files' $R/logs/gate-biome.log; grep -aci 'error' $R/logs/gate-biome.log` |
+| 0 | at `cc9cff7`, `typecheck`'s lines naming a `tsc` error, a failed test or a failed command | `noansi $R/logs/gate-typecheck.log \| grep -acE 'error TS\|FAILED\|ELIFECYCLE'` |
+| `✓ built` | at `cc9cff7`, `build:app` | `noansi $R/logs/gate-buildapp.log \| grep -ao '✓ built'` |
+| `green, but PARTIAL`, LLVM and browser skipped | at `cc9cff7`, `check-all.sh` | `noansi $R/logs/gate-checkall.log \| grep -ao 'green, but PARTIAL — these tiers were SKIPPED: LLVM browser'` |
+| 0, 0, 0 | remote branches holding `93c65d2`, `54422b8`, `f6b5761` | `for s in 93c65d2 54422b8 f6b5761; do print -- "$s $(git branch -r --contains $s \| wc -l)"; done` |
+| `2378798`; `a7dac04`, `ce104fe` on it | `origin/machine-code-panel`, and the two commits on it | `git rev-parse --short origin/machine-code-panel; for s in a7dac04 ce104fe; do git merge-base --is-ancestor $s origin/machine-code-panel && print -- "$s on it"; done` |
+| `5f5183f` and `34a356c`, at both | `f6b5761`'s and `2378798`'s `clif-intent.test.ts` and `clif-intent.ts` | `for r in f6b5761 2378798; do print -- "$r $(git rev-parse --short ${r}:web/tests/browser/clif-intent.test.ts) $(git rev-parse --short ${r}:web/src/clif-intent.ts)"; done` |
+| 0; 3 | lines `clif-intent.ts` at `cc9cff7` differs from `2378798`'s; hunks its test differs | `git diff 2378798 cc9cff7 -- web/src/clif-intent.ts \| wc -l; git diff -U0 2378798 cc9cff7 -- web/tests/browser/clif-intent.test.ts \| grep -c '^@@'` |
+| 12 added, 7 removed; `same` | `clif-intent.ts` from `2378798` to `730cb68`, and that diff being `0e6e00e`'s | `git diff --numstat 2378798 730cb68 -- web/src/clif-intent.ts; cmp <(git diff 2378798 730cb68 -- web/src/clif-intent.ts) <(git diff 0e6e00e~ 0e6e00e -- web/src/clif-intent.ts) && print same` |
+| no events at the move or the move away; then `branch=1 main=2`, in both | the review's probe, Chromium and Firefox | `for b in chromium firefox; do print -- "== $b"; grep -aoE '^PROBE [234] [^\|]*' $R/review-logs/probe-moved2-$b.log \| sort -u \| cut -c1-110; done` |
+| 311,271 from 64,24 | where the probe's toggle was drawn after the move, and before | `grep -aoh 'PROBE toggle now at [0-9,]*, was [0-9,]*' $R/review-logs/probe-moved2-chromium.log \| sort -u` |
+| 5 | `clif-intent.test.ts`'s cases | `grep -c "^  it(" web/tests/browser/clif-intent.test.ts` |
+| 1 of 5, `a rest in the open menu: expected 1 to be 2`; `cmp equal` | the sabotage on this base, and its restore | `noansi $U/sab-main.log \| grep -aE 'Tests  \|^ +→\|cmp equal' \| cut -c1-110` |
+| 0 | lines `web/` at `4a92b08` differs from `9274238`'s | `git diff 4a92b08 9274238 -- web \| wc -l` |
+| 2 of 5; 1 of 5, each at the message *VERIFICATION* quotes | the sabotages at `4a92b08`: `e65a533`'s watcher; the press away | `for f in main-intent press-missed; do print -- "== $f"; noansi $X/sab-$f-4a92b08.log \| grep -aE 'Tests  \|^ +→' \| cut -c1-110; done` |
+| 5 | at `730cb68`, `clif-intent.test.ts` in Chromium | `noansi $U/intent.log \| grep -aE 'Tests  '` |
+| 20, 106 | at `730cb68`, the `clif-*` files in Chromium | `noansi $U/clif.log \| grep -aE 'Test Files\|Tests  '` |
+| 10, 19, the moved-element case passed | at `730cb68`, the Firefox files | `noansi $U/firefox.log \| grep -aE 'Test Files\|Tests  \|moved from under' \| cut -c1-140` |
+| 3 of 3, each `2 passed (2)`, `clif-app-failed-intent` first | at `730cb68`, the pair | `for f in $U/pair-*.log; do noansi $f \| grep -aE '^ +✓' \| grep -aoE 'tests/browser/[^ ]+' \| uniq \| paste -sd' '; noansi $f \| grep -aE 'Tests  '; done` |
+| 81, 1527 | at `730cb68`, the node tier | `noansi $U/node.log \| grep -aE 'Test Files\|Tests  '` |
+| 461, 0 | at `730cb68`, biome's files, and lines naming an error | `grep -aoE 'Checked [0-9]+ files' $U/biome.log; grep -aci 'error' $U/biome.log` |
+| 0 | at `730cb68`, `typecheck`'s lines naming a `tsc` error, a failed test or a failed command | `noansi $U/typecheck.log \| grep -acE 'error TS\|FAILED\|ELIFECYCLE'` |
+| no history and no grown block | at `730cb68`, `check-comments.mjs --base 2a96b84` | `cat $U/comments.log` |
+| 0 | the browser tier's setup files' pointer moves | `git grep -cE "mouse\(.move" 730cb68 -- web/tests/browser/setup.ts web/tests/browser/collect.ts web/tests/browser/firefox-input.ts \| wc -l` |
+| 0 | lines `clif-fetch.test.ts` differs from `cc9cff7`'s | `git diff cc9cff7 730cb68 -- web/tests/browser/clif-fetch.test.ts \| wc -l` |
+| `clif-worker.test.ts` | the files that call `holdRequests` | `git grep -l 'commands.holdRequests' 730cb68 -- web/tests/browser` |
+| 0 | browser test files that tap | `git grep -c '\.tap(' 730cb68 -- web/tests/browser \| wc -l` |

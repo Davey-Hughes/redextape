@@ -299,8 +299,9 @@ Two PRs, each with its own plan and roadmap entry:
 - **No fetch without intent.** A browser test loads the page with the default workspace, waits for the first compile
   to settle, and sees no request for the CLIF package; resting the pointer on the toggle, or focusing it, makes one;
   a workspace showing a CLIF view makes one at start. `watchIntent`'s own test holds that an element drawn under a
-  still pointer fetches nothing, a pass fetches nothing, and a rest, a press and a focus each fetch. Each assertion
-  is checked to fail when the behaviour is sabotaged.
+  still pointer fetches nothing, a pass fetches nothing, and a rest, a press and a focus each fetch, as does a rest on
+  an element moved from under a resting pointer, which the browser sends no `pointerleave`. Each assertion is checked
+  to fail when the behaviour is sabotaged.
 - **Recording.** No CLIF frames are recorded while no CLIF view is shown; the other legs' frames are unchanged.
 - **Links.** Each direction of §4's links, in both listings, including an rxm instruction that marks no optimised row.
 - **Hot paths.** rxm recording and compile time measured with the groundwork's §7.2 harness
