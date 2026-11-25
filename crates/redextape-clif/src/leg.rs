@@ -207,13 +207,3 @@ impl ClifLeg {
         self.raised |= raised;
     }
 }
-
-/// Why `ClifLeg::new` refused a program, as a sentence a page can show: `Unsupported`'s own words, and for
-/// `TooDeep` the guard it passed, since its node means nothing to a reader of the CLIF.
-#[must_use]
-pub fn decline_reason(e: &LowerError) -> String {
-    match e {
-        LowerError::Unsupported { what, .. } => what.clone(),
-        LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
-    }
-}

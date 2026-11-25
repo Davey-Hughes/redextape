@@ -43075,3 +43075,343 @@ Coverage was not rerun.
 leg's exit in `$L/r3-exits.txt`: the node tier, 83 files and 1553 tests with `pkg-clif` rebuilt for #197's change,
 `check-comments.mjs --base f818cca`, the attribution check, `pnpm run typecheck` and `biome ci` exited 0. The browser legs
 were not run at this head; CI runs them.
+
+#### MACHINE CODE PANEL PR 1: THE PACKAGES, NO UI. `pkg-mc-x86-64/` AND `pkg-mc-arm64/` COMPILE WHAT `clifInput()` HANDS THEM TO THE SNAPSHOTS' BYTES AND LIST EACH FUNCTION'S CODE AS ROWS (2026-11-24, branch `mc-packages`, `b627fe3..11d46f6`, 16 commits, plus this entry)
+
+**2026-11-24, after the pull request was opened:** a review of the whole branch at `c4dc416`, its head after the rebase
+onto `e65a533`, found one minor point and seven nits, so `69e71c5`, `ef8c76c`, `f3b6305` and `97cb6c4` followed this
+entry's first writing and the commits after them correct it in place (*WHAT THE REVIEWS CHANGED* gives each); the entry
+names the branch's earlier commits by their SHAs from before the rebase.
+
+**Spec §7, PR 1** (`docs/superpowers/specs/2026-11-24-machine-code-panel-design.md`): the machine code panel's first
+pull request, which lands §5 with the build, CI and licence wiring, and adds no UI. The design and the first commit,
+`7025bee`, which commits it, were drafted outside the repo's usual flow, in a cloud sandbox that had no browser and ran
+Node 22, and were taken here as an outside contributor's draft. A review of `7025bee` found 1 important finding, 8 minor
+and 4 nits, and `9c53d52..01d5172`, 9 commits, fix all but two of the nits. A review of the whole branch found 4 minor
+findings and 4 nits, and `632d240..24810d6`, 5 commits, fix them; *WHAT THE REVIEWS CHANGED* gives each. `11d46f6`,
+asked for by the panel's lane, gives the listing's target a type. No page imports either package, and the one file under
+`web/src` the branch changes is `third-party-licences.json`, which gains 10 entries for the crates the two packages
+compile in. PR 2, the panel, is §6 with its browser tests and a Firefox run. The lane's record is
+`~/temp/redextape-duet-patches-record/mc-packages/`, `$R` below, and the review of `7025bee` is in
+`~/temp/redextape-duet-patches-record/mc/`, `$M` below: `$M/review-commit-1.md`, with `$R/outcomes.md` saying what each
+of its findings became. The review of the whole branch is `$R/branch-review.md`.
+
+##### WHAT THE PACKAGES ARE
+
+**The compile (§5.1).** `redextape-native` gains, under `clif`, `machine_code(prog, listing, target)`, the target a
+triple such as `x86_64-unknown-linux-gnu`: each subroutine compiled with the JIT's flags at the listing's level, `none`
+as built and `speed` optimised, for that target's ISA with no CPU features. For each it returns the code's bytes, its
+source-location ranges as rxm pcs, and its relocations, each naming the runtime import or subroutine it reaches.
+`codegen_snapshots::machine_code_equals_the_snapshots` holds every function's size and fnv1a64 hash equal to its
+snapshot's `none` or `speed` machine code line, for the 72 corpus programs on both snapshot targets. `7025bee` takes the
+`cfg(feature = "cranelift")` gates off `jit_flags`, `cranelift_opt_level` and the two imports they use, so the flags
+have one definition in the `clif`-only build too; both stay `pub(crate)`. `RtFn::symbol` is public and ungated, so
+`redextape-mc` can name a runtime call.
+
+**The rows (§5.2), `redextape-mc`, a new crate.** `machine_listing(prog, listing, target)` gives an `McListing`: each
+function's header row and its instruction rows, each row with its offset, bytes, text, the rxm pc of the range it lies
+in and, for a call or an address, the function it reaches. x86-64 is decoded by `iced-x86`, in AT&T syntax as Cranelift
+prints its own code and in Intel syntax; arm64 by `yaxpeax-arm`. Data reads as data: x86-64's constants, from the lowest
+rip-relative target to the end, are `.quad` rows, and the zeros that align them one `.zero N` row; arm64's far-call
+addresses, the bytes an `Abs8` relocation fills in, are `.8byte` rows. Bytes no decoder reads are `.byte`, but for a
+whole arm64 word, which is `.inst 0x…`. A call through a register is named by the load that filled it, a `movabsq` on
+x86-64 and an `ldr` from an `.8byte` on arm64. Each target is a feature, and `ts` exports `McListing`, `McFunction`,
+`McRow`, `McRowKind` and `McTarget` to `web/bindings/`, where the listing's target reads `"x86-64" | "arm64"`.
+
+**The packages (§5.3), `redextape-mc-wasm`, a new cdylib.** wasm-pack builds it twice: `pkg-mc-x86-64/` with its default
+feature, `x86`, and `pkg-mc-arm64/` with `--no-default-features --features arm64`; a build with both targets or neither
+stops at a `compile_error!`. It exports `machineCode(input, listing)`, which takes what `Session::clifInput` writes and
+a listing's name and returns the whole listing, and `target()`, the package's target. It keeps no state.
+
+**The wiring**, at each place `pkg-clif/` has one: the workspace members, `web/package.json`'s two build scripts and
+`build`, `.gitignore`, the Dockerfile's wasm stage and its copies, CI's `web` job, `.pre-commit-config.yaml`'s
+fresh-clone note, `scripts/check-all.sh`'s rows, `scripts/build-web-bindings.sh`, the comment budget,
+`docs/development.md` and `docs/architecture.md`. `web/scripts/licences.ts` reads both builds, each with its own
+features. `iced-x86` and `yaxpeax-arm` publish no licence file, so `web/scripts/crate-licences/` holds iced's
+`LICENSE.txt` at its tag `v1.22.0` and `yaxpeax-arch` 0.3.3's `LICENSE`, the 0BSD text of `yaxpeax-arm`'s author.
+`web/tests/node/mc-package.test.ts` runs both real wasm32 builds in node, 41 tests: each of the 7 web examples at both
+listings, every function's size and hash against its snapshot section, and the call names, the two syntaxes and the two
+refusals.
+
+**The new crates**: `iced-x86` 1.22.0 (MIT); `yaxpeax-arm` 0.5.0 and `yaxpeax-arch` 0.3.3 (0BSD); and `bitvec` 1.1.1,
+`funty` 2.0.0, `radium` 0.7.0, `tap` 1.0.1 and `wyz` 0.5.1 (MIT), which `yaxpeax-arm` pulls in. Each is its latest
+release on crates.io but `radium` and `wyz`, whose 1.1.1 and 0.6.1 fall outside `bitvec` 1.1.1's requirements.
+`lazy_static` and `num-traits`, already in the lock, join the licences page.
+
+##### SIZE AND SPEED
+
+**The two packages at `11d46f6`**, as `pnpm run build:mc-x86-wasm` and `build:mc-arm64-wasm` built them with rustc
+1.100.0: `pkg-mc-x86-64/`'s wasm is 3,967,036 B raw and 839,133 B gzip -9, 83.9% of §5.3's stop at 1 MB gzipped, taken
+as 1,000,000 B; `pkg-mc-arm64/`'s is 1,911,366 B raw and 621,797 B gzip -9. No page fetches either, so what the app
+downloads does not change in this PR. CI's `web` job builds both, which took 33 s and 9 s here with the dependencies
+already compiled.
+
+**iced's encoding features, measured and not taken.** Built at `01d5172` with `iced-x86`'s `no_vex`, `no_evex`, `no_xop`
+and `no_d3now` features as well, `pkg-mc-x86-64/`'s wasm is 3,899,387 B raw and 813,928 B gzip -9, against 3,967,091 B
+and 839,231 B without them: 1.71% and 3.02% smaller. The bar for taking them was a gzip size 5% smaller, so the
+dependency is as the draft had it.
+
+**`pkg/` and `pkg-clif/`.** `cargo tree -p redextape-wasm --target wasm32-unknown-unknown` names none of the crates this
+branch changes, and `pkg/`'s wasm built at this branch is byte for byte the main checkout's. `pkg-clif/`'s bytes change,
+since `redextape-native` and `redextape-clif`, which it links, change: its wasm is 1,257,170 B raw and 390,787 B gzip -9
+at `11d46f6`, where the main checkout's is 1,258,017 B raw. Its behaviour does not: no snapshot changes,
+`clif-package.test.ts` and `redextape-clif`'s tests pass, and the branch review's A/B of the main checkout's `pkg-clif/`
+against `01d5172`'s, over 68 corpus programs at both listings, comparing the listing, the state at each of the first 300
+steps, the status and the status after `findEnd`, found 136 of 136 equal.
+
+**Compile time.** One `machineCode(clifInput, listing)` call in node through the built package, the median of 20 after 3
+warm calls (`$R/scripts/timing-fin.mjs`, over the 68 corpus programs with a λ source that `pkg/` compiles): the corpus's
+largest program by code, `first-order-37`, 1,912 B and 442 rows on arm64 as built, takes 1.18 to 1.35 ms a call over
+both targets and both listings. The slowest call is `example-map-fold`'s on arm64 as built, 1.71 ms, and the median of
+the 272 calls' medians, 68 programs at two targets and two listings, is 0.28 ms. The run held the heavy lock, so no
+other lane's wasm build or full gate ran beside it. The node process then exits 1, from `pkg/`'s trap on the saturation
+programs (*WHAT THIS DID NOT CLOSE*), after the timings print.
+
+##### WHAT THE REVIEWS CHANGED
+
+**The review of `7025bee`** (`$M/review-commit-1.md`), which found the module-free compile equal to the snapshots, the
+wiring at every place `pkg-clif/` has it, and one important defect:
+
+- **I1, x86-64 padding read as code**, `9c53d52`. The zeros that align the constants decoded two bytes at a time as
+  `addb %al, (%rax)`, 234 such rows over the corpus, and only an odd last byte became `.zero 1`. They are now taken at
+  the instruction boundary where they start, before the decoder reads them: 124 `.zero N` rows, N 1 to 7, each after a
+  `retq` and before the `.quad` rows. The corpus test, which rejected only rows a decoder refused and so could not see
+  this, also rejects an instruction row whose bytes are all zeros, and fails on `7025bee`'s decoder with those 234 rows.
+- **M7, CI's coverage run could not see the crate**, `7eae4f7`. The tests compiled only with both targets, and
+  `--workspace` turns on `x86` alone, so the run ran none of them and read `lib.rs` and `x86.rs` 0% covered. Each test
+  now walks the targets the build has.
+- **M4, the vendored yaxpeax licence**, `4d5d009`. It read `Copyright (c) iximeow` where the `yaxpeax-arch` 0.3.3
+  `LICENSE` it came from reads `Copyright (c) 2020 iximeow`; it is now that file byte for byte, and the generator's note
+  says where each vendored text comes from.
+- **M1, the docs said the session worker imports the packages, and M8, the node test held `fact.rxt` alone**, `5eab806`.
+  `docs/development.md` names the node test as what reads them, and the test runs all 7 web examples.
+- **M3, `ts` turned on `redextape-core`'s `ts`**, `2f44635`. The exported types hold none of core's, so `ts` turns on
+  `ts-rs` alone.
+- **M5, `decline_reason` was a copy of `redextape-clif`'s**, `aaa267f`. There is one, in `redextape-native` beside
+  `build_clif`, whose builds raise the error, and both crates re-export it, so a page that shows both says one sentence.
+- **M6, a relocation to anything but an import or a subroutine was dropped**, `43c301e`. On arm64 the eight bytes it
+  fills in would then decode as instructions, and on x86-64 the load would name nothing. `machine_code` refuses it as
+  `Unsupported`, which reaches a page as the decline reason; no corpus program has one.
+- **M2, `McRow::callee`'s doc** named a relocation inside the row and the example `u0:14 rt_cons`, `fe1757e`. A runtime
+  call is a load and a call through the register, named from the load, and `rt_cons` is `u0:0`.
+- **The nits**, `01d5172`. An arm64 word no decoder reads is one `.inst 0x…` word, where four bytes followed `.inst`,
+  which GNU as reads as four instructions, and a tail short of a word is `.byte`; `Listing::opt_level` is private.
+  iced's decimal immediates and the data finder's reach are left (*WHAT THIS DID NOT CLOSE*).
+
+**The review of the whole branch** (`$R/branch-review.md`), whose verdict was ready for a pull request once this entry
+was written:
+
+- **M1, the `.inst` test could not tell byte order**, `632d240`. It decoded `ff ff ff ff`, which reads the same either
+  way round, and passed with the word read big-endian. It decodes `ef be ad de`, a word yaxpeax-arm refuses, and expects
+  `.inst 0xdeadbeef`.
+- **M3, how each decoder tells data from code holds for today's code only, and was written down nowhere in the tree, and
+  N1, the corpus test's name**, `2fb0ab8`. Each module doc says what data the decoder finds and that no other is there
+  because redextape-native emits no `br_table` and no float, so whoever adds either finds the decoder to change.
+  `..._and_no_data_reads_as_code` is `..._and_no_zeros_read_as_code`, which is what it holds.
+- **M2, `docs/architecture.md` named one export, and N2, comments that spoke of the panel as present**, `794b1ca`. The
+  doc names `machineCode` and `target`, and calls `redextape-mc` a program's machine code as rows. The review named the
+  comments in `scripts/check-all.sh`, `web/scripts/licences.ts` and `rt_imports.rs`; a search for their siblings found
+  `redextape-mc`'s crate doc, `machine_code_equals_the_snapshots`' doc and `licences.ts`'s header, which counted three
+  `.wasm` builds where the generator reads five. Each says what holds before the panel and after it.
+- **N3, no row clippied `redextape-mc` with `arm64` alone**, `4900ea1`. With `arm64` alone it was built only by the
+  wasm32 rows, `cargo check`s in which a warning does not fail; `scripts/check-all.sh` gains the clippy row beside them.
+- **M4, the design's statements the code does not meet**, `24810d6`: §5.1's signature and `jit_flags`' visibility,
+  §5.2's `.inst` for a short tail, and §8's "`pkg/` and `pkg-clif/` byte-identical", which now says `pkg-clif/`'s
+  behaviour is unchanged and its bytes are not; a 183-character line of §4 is wrapped.
+- **N4** was a sentence of `aaa267f`'s message, which the squash drops; nothing in the tree says it.
+
+**Asked for by the panel's lane**, `11d46f6`. `McListing`'s `target` was a `String`, so the page would have written
+`'x86-64' | 'arm64'` by hand. It is an `McTarget`, which has both targets in every build and serialises each as the
+package's `target()` export names it, so the JSON a package returns does not change and `mc-package.test.ts` passes as
+it was. `ts_bindings.rs`'s gates cover the fifth export, and a corpus test holds a listing's target, serialised, to
+`Target::name`. `serde_json` joins the crate's dev-dependencies for that test.
+
+**The review of the whole branch after the pull request was opened** (`$R/final-review.md`), at `c4dc416`, which found
+the core, the wiring after the rebase and every earlier finding sound:
+
+- **m1, nothing held the exported `McTarget`'s strings to the ones a package sends**, `69e71c5`. `11d46f6`'s test holds
+  serde's names, but ts-rs takes serde's renames only where no `ts` attribute overrides them, and no TypeScript file
+  imported `McTarget` or `McListing`: with `ts(rename = "x86_64")` on `X86_64`, all 15 of the crate's tests passed.
+  `ts_bindings.rs` asserts that `McTarget`'s TypeScript is `"x86-64" | "arm64"`, and `mc-package.test.ts` drops its
+  hand-written types, types what the packages return as `McListing` and `McRow`, and has each `PACKAGES` name satisfy
+  `McTarget`, which `tsc` checks against the generated file.
+- **n1, two comments still spoke of the panel as present, and n2, `machine_code`'s `# Errors`**, `ef8c76c`.
+  `module_free.rs`'s module doc said `machine_code` compiles for "its machine code panel", and `Target::name`'s that a
+  view and a stored workspace use the name; each says what holds before the panel and after it. A second search of the
+  branch's added lines in `crates/`, `scripts/`, `web/scripts/` and the two docs for `panel`, `a view`, `a page` and
+  `the site` finds the rest naming the panel as the owner of a type or a directory, or saying what a page or a view can
+  or must do with what a package returns. The `# Errors` names the relocation refusal `43c301e` added.
+- **n3, the `arm64`-alone and `ts`-alone rows of `scripts/check-all.sh` had clippy and no test**, against its header's
+  "every config gets clippy AND tests", `f3b6305`. No `cfg` in the crate builds code only when a target is absent, so
+  each build's tests are a part of the both-target row's; the rows' comment says so, rather than adding rows that would
+  run them again.
+- **n4, the design after the rebase**, `97cb6c4`. Its non-goal on copies, "clif copies are §9 piece 2", named a piece
+  #196 withdrew; it now reads as the panel's branch has it in `c11594d`, byte for byte, so that branch rebases onto this
+  one without a conflict there. §7 gave each PR a plan, and neither has one. §5.3's line of 159 characters is rewrapped.
+  §4's 72-character line, which `24810d6`'s wrap left, stays, since the panel's branch rewrites the lines after it.
+- **n5, a counts row that no longer re-ran**, in this entry's correction: the row of the pre-commit hook's logs printed
+  16, not 15, since this entry's own commit wrote `$R/fin/commit-entry.log`, which the row's glob matched. Its command
+  leaves that log out.
+- **n6 and n7 are the pull request body's.** It maps every SHA the rebase changed, and says that `632d240`'s message,
+  which credits its test's doc with raising the comment budget that `2fb0ab8` raised, is not one the squash carries.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The panel, PR 2.** No page imports either package and the site serves neither, though the Docker image builds both
+  and the licences page lists their crates, as #189 did for `pkg-clif/` before #190.
+- **The data finders hold for today's code only.** An x86-64 jump table would turn the code after it into `.quad` rows,
+  and on arm64 any data but a relocated far-call address, a constant pool or a jump table, would decode as instructions.
+  redextape-native emits no `br_table` and no float, so neither occurs; each module doc says so.
+- **A Cranelift library call's relocation is declined**, `machine_code` returning `Unsupported`, not named; no program
+  reaches one today.
+- **iced prints small immediates in decimal** (`movl $4`) where Cranelift's own text reads `$0x4`. iced's one setting
+  covers immediates and displacements alike, and Cranelift prints `8(%rsp)`, so either choice reads unlike the snapshot
+  somewhere.
+- **§8's "prologue rows carry none" and "every row inside a range carries its pc"** hold by construction, through
+  `pc_at` and `machine_code`'s filter of the default source location; no test asks them.
+- **`arm64.rs` is outside CI's coverage figure**: `--workspace` builds `redextape-mc` with `x86` alone. Its tests run in
+  `scripts/check-all.sh`'s row with both targets.
+- **Found on `main`, not this branch: `pkg/`'s `compile` throws `RuntimeError: unreachable` in node for `saturation-00`,
+  `-01` and `-02`**, whose sources hold the literals 4,294,967,295 and 18,446,744,073,709,551,615. It is #189's open
+  item, a number literal of 33,554,431 or more aborting `pkg/`'s compile. To reproduce, `initSync` `pkg/` in node and
+  call `compile('33554431 + 1\n', 'unary')`, which throws where `compile('33554430 + 1\n', 'unary')` compiles. Run each
+  in a fresh process: after the trap every later call in the same instance throws too (`$R/fin/repro/one.mjs` runs one
+  source; `$R/fin/repro/saturation.mjs` runs them in one process). The probes here skip the three; the node test reads
+  the web examples alone.
+
+##### VERIFICATION
+
+**The gate at `11d46f6`**, the last code commit, run by `$R/scripts/heavy-fin.sh`, then `$R/scripts/coverage-fin.sh` and
+`$R/scripts/slow-fin.sh`, each leg into a log in `$R/fin/` and a line with its exit in `$R/fin/summary.log`. The
+packages this branch changes were built first. The same legs but the last two ran at `24810d6`, before `11d46f6`, and
+each exited 0. The pre-commit hook, which runs `cargo fmt`, clippy with `-D warnings` and the scans on the files a
+commit changes, passed on each of the 15 commits after `7025bee` (`$R/commit-*.log`, `$R/fin/commit-*.log`).
+
+| Leg | Result | Log in `$R/fin/` |
+|---|---|---|
+| `pnpm run build:clif-wasm`, `build:mc-x86-wasm`, `build:mc-arm64-wasm` and `build:bindings` | exit 0, each | `build-pkgs.log`, `build:*.log` |
+| the eight scans CI runs, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and lua, and `check-comments.mjs`, each `--self-test` then the scan, the last with `--base b627fe39b7` | exit 0, each | `check-*.log` |
+| `../scripts/check-licences.sh` and `../scripts/check-licence-editions.sh`, each `--self-test` then the check | exit 0, each | `check-licence*.log` |
+| `pnpm exec biome ci --error-on-warnings` | 531 files, no fixes applied | `biome-ci.log` |
+| `pnpm run typecheck` | exit 0 | `typecheck.log` |
+| `pnpm run test:node` | 85 files, 1788 tests passed, among them `mc-package.test.ts`'s 41 and `clif-package.test.ts` | `test-node.log` |
+| `pnpm run build:app` | exit 0 | `build-app.log` |
+| `scripts/check-all.sh --no-llvm --no-browser` | exit 0; the workspace's nextest 2054 passed and 35 skipped; `redextape-mc` with both targets 15 passed; the new `arm64` clippy row clean | `check-all-no-llvm.log` |
+| `cargo llvm-cov clean --verbose`, then `cargo llvm-cov nextest --workspace --fail-under-lines 90` | exit 0; 2054 passed and 35 skipped; lines 95.47%, regions 95.10%; of `redextape-mc`'s lines, `lib.rs` 108 of 116 and `x86.rs` 65 of 75, where `7025bee` ran none | `llvm-cov-clean.log`, `llvm-cov.log` |
+| `scripts/check-all.sh --llvm-only`, owed since `7025bee` takes `cfg(feature = "cranelift")` gates off | exit 0; `--features llvm` 126 passed, `--no-default-features --features llvm` 51 passed | `check-all-llvm-only.log` |
+| `docker build --target wasm`, then the whole image, untagged (`$R/scripts/docker-check-fin.sh`), since stage 1 reads `crates/` and stage 2 `web/` | exit 0, each; stage 1 wrote `pkg-mc-x86-64/`'s wasm at 3,963,649 B and `pkg-mc-arm64/`'s at 1,908,222 B, with the image's own toolchain, and the image's html directory lists the site's pages | `docker.log` |
+| `pnpm run test:coverage`, CI's `web` job's run of the node and Chromium tiers, under the browser lock | exit 0; 351 files; 4017 tests passed and 2 failed as expected; statements 97.93%, branches 92.25%, functions 98.7%, lines 99.15% | `test-coverage.log` |
+| `scripts/check-slow.sh`, CI's `rust-slow` job, after the coverage run (`$R/scripts/slow-fin.sh`) | exit 0, "slow tier green", 35 tests passed | `check-slow.log` |
+
+**The browser tier.** No browser test reads either package, but two read `web/src/third-party-licences.json`, which this
+branch changes: `pages.test.ts` renders every package on the licences page with its texts, and `licences-narrow.test.ts`
+renders the page at 390 px with every licence open. So the Chromium tier ran as CI's `web` job runs it, and those two
+files ran alone as well, after it: 13 tests passed (`$R/fin/licences-browser.log`). Firefox, which CI does not run, was
+not run: the one change a page reads is the licences list's data. `check-all.sh`'s browser tier tests
+`crates/redextape-wasm` alone, which this branch does not change, and was not run.
+
+**Sabotages.** Each saved a copy of the file it broke, ran the test, restored the file from the copy and compared it
+with `cmp`; each names its log and its saved copy.
+
+- `632d240`, the byte order: `arm64.rs`'s `u32::from_le_bytes` as `from_be_bytes`. The test fails, reading
+  `.inst 0xefbeadde` where it expects `.inst 0xdeadbeef` (`$R/fin/m1-sabotage.log`, `$R/fin/arm64.rs.orig`). The same
+  edit at `01d5172`, under the test that decoded `ff ff ff ff`, passed it, 1 passed
+  (`$R/branch-review-probe/sabotage-endian.log`): the branch review's M1.
+- `11d46f6`, the target's name: `McTarget::Arm64` serialised as `aarch64`. The new test fails, `"aarch64"` against
+  `"arm64"` (`$R/fin/mctarget-sabotage.log`, `$R/fin/lib.rs.orig`).
+- `43c301e`, the relocation filter: the old filter put back. `a_relocation_naming_no_import_or_subroutine_is_refused`
+  fails (`$R/m6-test-sabotage.log`, `$R/sabotage-module_free.rs.orig`).
+- `5eab806`, the node test: one hash in `example-map-fold.clif`'s arm64 `speed` section changed. That case alone fails,
+  1 failed and 40 passed (`$R/m8-node-test-sabotage.log`, `$R/sabotage-example-map-fold.clif.orig`).
+- `01d5172`, the `.inst` text: the old text put back. The unit test fails, reading `.inst 0xff, 0xff, 0xff, 0xff` and
+  `.inst 0x1f, 0x20` (`$R/nits-test-sabotage.log`, `$R/sabotage-arm64.rs.orig`).
+- `69e71c5`, the exported target's strings: `#[cfg_attr(feature = "ts", ts(rename = "x86_64"))]` on `McTarget::X86_64`.
+  `mc_target_exports_the_strings_the_packages_send` fails, reading `"x86_64" | "arm64"`, 15 passed and 1 failed
+  (`$R/fix3/m1-sabotage-rust.log`, `$R/fix3/lib.rs.orig`); with the bindings regenerated, `tsc` fails at the x86-64
+  entry's `satisfies McTarget`, `mc-package.test.ts(29,30)`, TS1360 (`$R/fix3/m1-sabotage-tsc.log`). The same edit
+  before the fix passed all 15 of the crate's tests (`$R/final-review-probe/sabotage-ts-rename.log`): the review's m1.
+  With `lib.rs` restored and the bindings regenerated, `web/bindings/McTarget.ts` is byte for byte its copy from before
+  (`$R/fix3/McTarget.ts.before`).
+
+`9c53d52`'s corpus test, run against `7025bee`'s decoder, fails at its one assertion with the 234 `addb %al, (%rax)`
+rows (`$R/i1-test-on-7025bee.log`).
+
+**After the review at `c4dc416`**, at `97cb6c4`, the last code commit, each run into a log in `$R/fix3/` and a line with
+its exit in `$R/fix3/summary.log` (`$R/fix3/prove.sh`): `cargo fmt --all --check`; the clippy rows
+`scripts/check-all.sh` lists for `redextape-mc`, with `x86,arm64,ts`, with `arm64` alone and with `ts` alone,
+`redextape-mc-wasm`'s clippy, which the `--workspace` row runs, and `redextape-native`'s with its default features, with
+none and with `clif`; `cargo nextest run -p redextape-mc --features x86,arm64,ts`, 16 passed, and with
+`-p redextape-mc-wasm` beside it, the features `--workspace` gives the crate, 6 passed; `pnpm run build:bindings`, after
+which `git status` shows no tracked file changed; `pnpm run typecheck`; `mc-package.test.ts` and
+`bindings-contract.test.ts` in node, 42 passed; `biome ci --error-on-warnings`, 461 files; and
+`check-comments.mjs --base e65a533`, every area within a budget none of the four commits moves. Each exited 0.
+`-p redextape-mc` alone has no default feature and so no test, which nextest reports with exit 4. The pre-commit hook
+passed on each of the four commits (`$R/fix3/commit-{m1,n1n2,n3,n4}.log`); on `69e71c5`'s first try it failed on
+`redextape-mc`'s comment budget, and the new test's doc went from three lines to two rather than the budget rising. No
+package was rebuilt, since the four change nothing a package compiles but doc comments, and no browser test, full tier
+or LLVM row ran.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at `11d46f6`,
+with `R=~/temp/redextape-duet-patches-record/mc-packages` and `M=~/temp/redextape-duet-patches-record/mc`, but for the
+rows from `15; 0` to `159; 72`, which ran at `97cb6c4`, after the review at `c4dc416`.
+
+| Value | What | Produced by |
+|---|---|---|
+| `11d46f6` | the last code commit, at which every command here ran | `git rev-parse --short HEAD` |
+| 16; 9; 5; 1 | commits in the range; the first review's fixes, `9c53d52..01d5172`; the second's, `632d240..24810d6`; the panel lane's | `git rev-list --count b627fe3..11d46f6; git rev-list --count 7025bee..01d5172; git rev-list --count 01d5172..24810d6; git rev-list --count 24810d6..11d46f6` |
+| 1; 8; 4; 2 | the first review's important findings; its minor; its nits; the nits left | `rg -c '^\*\*I[0-9]\.' $M/review-commit-1.md; rg -c '^\*\*M[0-9]\.' $M/review-commit-1.md; rg -c '^\| nit ' $R/outcomes.md; rg -c '^\| nit .*\| LEFT \|' $R/outcomes.md` |
+| 4; 4 | the whole-branch review's minor findings; its nits | `rg -c '^\*\*M[0-9]\.' $R/branch-review.md; rg -c '^- \*\*N[0-9]\.\*\*' $R/branch-review.md` |
+| `web/src/third-party-licences.json`; 10; 0 | the one file under `web/src` the range changes; the licences entries it adds; removes | `git diff --name-only b627fe3 11d46f6 -- web/src; git diff b627fe3 11d46f6 -- web/src/third-party-licences.json \| rg -c '^\+.*"name"'; git diff b627fe3 11d46f6 -- web/src/third-party-licences.json \| rg '^-.*"name"' \| wc -l` |
+| 72; 2; 7 | the snapshot corpus's programs; the snapshot targets; the web examples | `ls crates/redextape-native/snapshots/*.clif \| wc -l; rg -o 'const TARGETS: \[&str; [0-9]\]' crates/redextape-native/src/codegen_snapshots.rs; ls web/src/examples/*.rxt \| wc -l` |
+| 4; 1 | the `cfg(feature = "cranelift")` gates `7025bee` takes out of `codegen.rs`; the `cfg(any(...))` gate out of `rt_imports.rs` | `git show 7025bee -- crates/redextape-native/src/codegen.rs \| rg -c '^-#\[cfg\(feature = "cranelift"\)\]'; git show 7025bee -- crates/redextape-native/src/rt_imports.rs \| rg -c '^-\s*#\[cfg\(any\(feature = "cranelift", feature = "llvm"\)\)\]'` |
+| bitvec 1.1.1, funty 2.0.0, iced-x86 1.22.0, radium 0.7.0, tap 1.0.1, wyz 0.5.1, yaxpeax-arch 0.3.3, yaxpeax-arm 0.5.0 | the third-party crates the lock adds | `git diff b627fe3 11d46f6 -- Cargo.lock \| rg -A1 '^\+name = ' \| rg -o '^\+(name\|version) = "[^"]+"' \| paste - - \| rg -v redextape` |
+| MIT, 0BSD, 0BSD, MIT, MIT, MIT, MIT, MIT | their licences, `iced-x86` first | `for cv in iced-x86-1.22.0 yaxpeax-arm-0.5.0 yaxpeax-arch-0.3.3 bitvec-1.1.1 funty-2.0.0 radium-0.7.0 tap-1.0.1 wyz-0.5.1; do print -r -- "$cv $(rg -m1 '^license' ~/.local/share/cargo/registry/src/*/$cv/Cargo.toml)"; done` |
+| 1.22.0, 0.5.0, 0.3.3, 1.1.1, 2.0.0, 1.1.1, 1.0.1, 0.6.1 | the latest release on crates.io of `iced-x86`, `yaxpeax-arm`, `yaxpeax-arch`, `bitvec`, `funty`, `radium`, `tap` and `wyz`, on 2026-11-24 | `for c in iced-x86 yaxpeax-arm yaxpeax-arch bitvec funty radium tap wyz; do curl -s -A 'crate-version-check' "https://crates.io/api/v1/crates/$c" \| python3 -c 'import json,sys; print(json.load(sys.stdin)["crate"]["max_stable_version"])'; done` |
+| `"0.7"`; `"0.5"` | `bitvec` 1.1.1's requirements on `radium` and `wyz` | `rg -A1 '^\[dependencies\.(radium\|wyz)\]' ~/.local/share/cargo/registry/src/*/bitvec-1.1.1/Cargo.toml \| rg version` |
+| 1; 1 | `lazy_static` and `num-traits` in `b627fe3`'s lock | `for c in lazy_static num-traits; do git show b627fe3:Cargo.lock \| rg -c "^name = \"$c\""; done` |
+| 41 | `mc-package.test.ts`'s tests | `sed 's/\x1b\[[0-9;]*m//g' $R/fin/mc-package-node.log \| rg 'Tests '` |
+| 3967036 839133; 1911366 621797; 1257170 390787 | `pkg-mc-x86-64/`'s, `pkg-mc-arm64/`'s and `pkg-clif/`'s wasm, raw and gzip -9 | `for f in pkg-mc-x86-64/redextape_mc_wasm_bg.wasm pkg-mc-arm64/redextape_mc_wasm_bg.wasm pkg-clif/redextape_clif_wasm_bg.wasm; do print -r -- "$(stat -c %s $f) $(gzip -9 -c $f \| wc -c)"; done` |
+| .8391 | `pkg-mc-x86-64/`'s gzip size over 1,000,000 B | `print -r -- "scale=4; $(gzip -9 -c pkg-mc-x86-64/redextape_mc_wasm_bg.wasm \| wc -c) / 1000000" \| bc` |
+| 1 MB | §5.3's stop | `rg -o 'if either passes 1 MB gzipped' docs/superpowers/specs/2026-11-24-machine-code-panel-design.md` |
+| 33; 9 | seconds `build:mc-x86-wasm` and `build:mc-arm64-wasm` took at the gate | `rg 'build:mc-(x86\|arm64)-wasm' $R/fin/build-pkgs.log` |
+| 1.100.0 | rustc | `rustc --version` |
+| 3899387 813928; 3,967,091 and 839,231; 1.71%, 3.02% | `pkg-mc-x86-64/` with iced's four features; without, at `01d5172`; the drop | `f=$R/iced-probe/pkg-mc-x86-64-trim/redextape_mc_wasm_bg.wasm; print -r -- "$(stat -c %s $f) $(gzip -9 -c $f \| wc -c)"; rg '^head\|^drop' $R/iced-probe/result.txt` |
+| redextape-core, redextape-wasm, redextape-wire; 0; identical | the workspace crates in `pkg/`'s wasm32 tree; files the range changes in them; `pkg/`'s wasm built at this branch against the main checkout's | `cargo tree --locked -p redextape-wasm --target wasm32-unknown-unknown -e normal --prefix none \| rg -o '^redextape-[a-z-]+' \| sort -u; git diff --name-only b627fe3 11d46f6 -- crates/redextape-core crates/redextape-wire crates/redextape-wasm \| wc -l; cmp $R/fin/pkg-head/redextape_wasm_bg.wasm ~/projects/redextape/pkg/redextape_wasm_bg.wasm && print identical` |
+| 1258017 | the main checkout's `pkg-clif/` wasm | `stat -c %s ~/projects/redextape/pkg-clif/redextape_clif_wasm_bg.wasm` |
+| 136; 0; 68 | the A/B's comparisons; those that differ; programs, each at two listings | `tail -1 $R/branch-review-probe/clif-ab.log` |
+| 0 | snapshot files the range changes | `git diff --name-only b627fe3 11d46f6 -- crates/redextape-native/snapshots \| wc -l` |
+| `first-order-37 arm64 as-built  1912 bytes 442 rows`; 1.18, 1.21, 1.31, 1.35 ms; 1.71 ms; 0.28 ms, 272 calls; 68 | the largest call by code; `first-order-37`'s four calls; the slowest call, `example-map-fold` on arm64 as built; the median over all calls; the programs timed | `rg -A1 '^largest by code' $R/fin/timing.txt; rg '^[0-9.]+ ms  (first-order-37\|example-map-fold arm64 as-built)\|median of all\|programs timed' $R/fin/timing.txt \| sort -u` |
+| 72, 652; 234, 43; 124; 156; 1354 | the probe's programs and functions; on `7025bee`, the all-zero `addb` rows and `.zero` rows; at `11d46f6`, the `.zero` rows; the `.quad` rows; arm64's `.8byte` rows | `rg '^COUNT\|^PROGS' $R/probe/dump-7025bee.log $R/fin/probe-dump.log` |
+| 10, 30, 4, 28, 12, 23, 17; 124; 124 | the `.zero N` rows by N from 1 to 7; those after a `retq`; the rows after a `.zero` that are `.quad` | `rg '^ROW ' $R/fin/probe-dump.log \| rg -o '\| \.zero [0-9]+ \|' \| sort \| uniq -c; rg -c '^ROW .*\| \.zero [0-9]+ \| prev: retq$' $R/fin/probe-dump.log; rg '^ROW .*prev: \.zero [0-9]+$' $R/fin/probe-dump.log \| rg -c '\| \.quad '` |
+| 234 | the rows `9c53d52`'s corpus test finds on `7025bee`'s decoder | `rg -o '^[0-9]+ rows:' $R/i1-test-on-7025bee.log` |
+| 0 of 113; 0 of 76 | lines covered in `lib.rs` and `x86.rs` by `cargo llvm-cov nextest -p redextape-mc -p redextape-mc-wasm` at `7025bee` | `rg 'redextape-mc/src/(lib\|x86).rs' $R/cov-before-7025bee.log` |
+| 5 | the `.wasm` builds `licences.ts` reads | `rg -c "^  \['redextape-" web/scripts/licences.ts` |
+| 183 | the width of the design line `24810d6` wraps, at `01d5172` | `git show 01d5172:docs/superpowers/specs/2026-11-24-machine-code-panel-design.md \| awk 'NR==150 {print length}'` |
+| 4294967295; 18446744073709551615 | the saturation programs' literals | `rg -o '^;;   .*' crates/redextape-native/snapshots/saturation-0{0,1,2}.clif` |
+| threw, threw, threw, compiled, threw, compiled | `pkg/`'s compile in a fresh node process on the three saturation sources, `33554430 + 1`, `33554431 + 1` and `1 + 1` | `cat $R/fin/repro/one.log` |
+| 34; 0 | the gate's legs at `11d46f6` that exited 0; that did not | `rg -c '^11d46f6 .* exit=0 ' $R/fin/summary.log; rg '^11d46f6 .* exit=[1-9]' $R/fin/summary.log \| wc -l` |
+| 2054, 35; 15; 1 | `check-all.sh --no-llvm --no-browser`'s workspace nextest, passed and skipped; `redextape-mc`'s row with both targets, passed; the `arm64` clippy row, run | `rg -m1 'Summary' $R/fin/check-all-no-llvm.log; sed -n '/^==> cargo nextest run -p redextape-mc --features x86,arm64,ts$/,/Summary/p' $R/fin/check-all-no-llvm.log \| rg 'Summary'; rg -c '==> cargo clippy -p redextape-mc --features arm64 --all-targets -- -D warnings' $R/fin/check-all-no-llvm.log` |
+| 2054, 35; 95.47%, 95.10%; 116 and 8, 75 and 10, 17 and 17 | llvm-cov's tests, passed and skipped; its lines and regions; lines and lines missed in `redextape-mc`'s `lib.rs` and `x86.rs` and `redextape-mc-wasm`'s `lib.rs` | `rg 'Summary \[' $R/fin/llvm-cov.log; rg '^TOTAL\|redextape-mc/src/\|redextape-mc-wasm/src/' $R/fin/llvm-cov.log` |
+| 126; 51 | `check-all.sh --llvm-only`: `--features llvm`, passed; `--no-default-features --features llvm`, passed | `rg 'Summary \[' $R/fin/check-all-llvm-only.log` |
+| 85, 1788; 531 | the node tier's files and tests, passed; the files `biome ci` checked | `sed 's/\x1b\[[0-9;]*m//g' $R/fin/test-node.log \| rg 'Test Files\|Tests '; rg -o 'Checked [0-9]+ files' $R/fin/biome-ci.log` |
+| 351; 4017 and 2; 97.93, 92.25, 98.7, 99.15; 2, 13 | `test:coverage`: files passed; tests passed and failing as expected; statements, branches, functions and lines; the two licences files alone, files and tests passed | `sed 's/\x1b\[[0-9;]*m//g' $R/fin/test-coverage.log \| rg -a '^ +(Test Files\|Tests) \|^All files'; sed 's/\x1b\[[0-9;]*m//g' $R/fin/licences-browser.log \| rg -a '^ +(Test Files\|Tests) '` |
+| 3963649; 1908222 | `pkg-mc-x86-64/`'s and `pkg-mc-arm64/`'s wasm in the Docker image's wasm stage | `rg '^/app/pkg-mc-.*_bg.wasm [0-9]+$' $R/fin/docker.log` |
+| 35; 1 | `check-slow.sh`'s tests passed; its closing line | `rg -c 'test .* \.\.\. ok$' $R/fin/check-slow.log; rg -c '^slow tier green' $R/fin/check-slow.log` |
+| `.inst 0xefbeadde`; 0 passed, 1 failed; 1 passed | the `.inst` test with the word read big-endian, on the tree `632d240` commits; its summary; the same edit under the old test at `01d5172`, its summary | `rg -o 'left: \[".inst 0x[0-9a-f]+"' $R/fin/m1-sabotage.log; rg 'Summary' $R/fin/m1-sabotage.log $R/branch-review-probe/sabotage-endian.log` |
+| `"aarch64"`, `"arm64"`; 1 failed | the target test with arm64 serialised as `aarch64`: what it read and wanted; its summary | `rg 'left:\|right:\|Summary' $R/fin/mctarget-sabotage.log \| head -3` |
+| 1 failed; 1 failed | the relocation test with the old filter; the `.inst` text test with the old text | `rg 'Summary' $R/m6-test-sabotage.log $R/nits-test-sabotage.log` |
+| 1 failed, 40 passed | the node test with one snapshot hash changed | `sed 's/\x1b\[[0-9;]*m//g' $R/m8-node-test-sabotage.log \| rg 'Tests '` |
+| 15; 0 | the pre-commit hook's logs for the commits after `7025bee`, without `$R/fin/commit-entry.log`, which this entry's commit wrote; those with a failed hook | `ls $R/commit-*.log $R/fin/commit-*.log \| rg -v commit-entry \| wc -l; rg -l 'Failed' $R/commit-*.log $R/fin/commit-*.log \| rg -v commit-entry \| wc -l` |
+| `69e71c5`, `ef8c76c`, `f3b6305`, `97cb6c4` | the commits after the review at `c4dc416`, oldest first | `git log --reverse --format=%h c4dc416..97cb6c4 \| paste -sd' '` |
+| 1; 7 | that review's minor findings; its nits | `rg -c '^\*\*m[0-9]\.' $R/final-review.md; rg -c '^- \*\*n[0-9]\.' $R/final-review.md` |
+| 16; 6; 0 | `redextape-mc`'s tests at `97cb6c4`: passed with `x86,arm64,ts`; passed with `-p redextape-mc-wasm` beside it; run with no feature | `rg 'Summary' $R/fix3/nextest-mc-both.log $R/fix3/nextest-mc-default-with-wasm.log $R/fix3/nextest-mc-default.log` |
+| `"x86_64" \| "arm64"`; 15 passed, 1 failed; `mc-package.test.ts(29,30)`, TS1360; 15 passed | m1's sabotage: what the new Rust test read, and its summary; where `tsc` failed with the bindings regenerated; the crate's tests under the same edit before the fix | `rg -F 'left:' $R/fix3/m1-sabotage-rust.log \| head -1; rg 'Summary' $R/fix3/m1-sabotage-rust.log; rg -o 'mc-package.test.ts\([0-9,]+\): error TS[0-9]+' $R/fix3/m1-sabotage-tsc.log; rg 'Summary' $R/final-review-probe/sabotage-ts-rename.log` |
+| identical; identical | `lib.rs`'s saved copy against `69e71c5`'s; `web/bindings/McTarget.ts`, regenerated, against its copy from before the sabotage | `cmp $R/fix3/lib.rs.orig <(git show 69e71c5:crates/redextape-mc/src/lib.rs) && print identical; cmp $R/fix3/McTarget.ts.before web/bindings/McTarget.ts && print identical` |
+| 41; 42, 2; 461; 0 | `mc-package.test.ts`'s tests passed, alone, with the file `69e71c5` commits; the node run's tests and files passed at `97cb6c4`; the files `biome ci` checked; tracked files `build:bindings` changed | `sed 's/\x1b\[[0-9;]*m//g' $R/fix3/m1-vitest.log \| rg 'Tests '; sed 's/\x1b\[[0-9;]*m//g' $R/fix3/vitest-node.log \| rg 'Test Files\|Tests '; rg -o 'Checked [0-9]+ files' $R/fix3/biome.log; wc -l < $R/fix3/git-status-after-bindings.txt` |
+| 15; `nextest-mc-default exit=4` | the runs at `97cb6c4` that exited 0; the one that did not | `rg -c '^97cb6c4 .* exit=0$' $R/fix3/summary.log; rg '^97cb6c4 .* exit=[1-9]' $R/fix3/summary.log` |
+| 4; 0 | the hook's logs for the four commits; those with a failed hook | `ls $R/fix3/commit-{m1,n1n2,n3,n4}.log \| wc -l; rg -l 'Failed' $R/fix3/commit-{m1,n1n2,n3,n4}.log \| wc -l` |
+| 0.1454; 0.1454 | `redextape-mc`'s comment budget at `c4dc416` and at `97cb6c4` | `for c in c4dc416 97cb6c4; do git show ${c}:scripts/comment-budget.json \| rg -o '"crates/redextape-mc": [0-9.]+'; done` |
+| 159; 72 | at `c4dc416`, the widths of §5.3's line `97cb6c4` rewraps and of §4's line it leaves | `git show c4dc416:docs/superpowers/specs/2026-11-24-machine-code-panel-design.md \| awk 'NR==194 {a=length} NR==151 {b=length} END {print a"; "b}'` |
+| 2; 5; 390 px | the node test's refusal cases; the types `ts_bindings.rs` gates; the width `licences-narrow.test.ts` renders at | `rg -c "it\('refuses" web/tests/node/mc-package.test.ts; rg -c 'export_to_string' crates/redextape-mc/tests/ts_bindings.rs; rg -o 'at 390 px' web/tests/browser/licences-narrow.test.ts` |
+| three | the `.wasm` builds `licences.ts`'s header counted on `main` | `git show b627fe3:web/scripts/licences.ts \| rg -o 'compiled into the three ..wasm. builds'` |
+| 300 | the steps the A/B compares the state at | `rg -o 'first 300 steps' $R/branch-review-probe/clif-ab.mjs` |

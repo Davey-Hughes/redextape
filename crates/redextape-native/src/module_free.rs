@@ -1,19 +1,25 @@
 //! CLIF without a `cranelift_module::Module`, so with no ISA: the `clif` feature, which builds for
 //! wasm32. `build_clif` builds the functions `codegen::define_all` builds, numbered and imported as
 //! a `Module` numbers and imports them, which `module_free_clif_equals_the_module_paths` checks.
-//! `build_listing` builds them for the CLIF view, as built or optimised.
+//! `build_listing` builds them for the CLIF view, as built or optimised, and `machine_code` compiles
+//! them for a target whose ISA the build has.
 
+use cranelift_codegen::binemit::Reloc;
 use cranelift_codegen::control::ControlPlane;
-use cranelift_codegen::ir::{ExtFuncData, ExternalName, FuncRef, Function, UserExternalName, UserFuncName};
-use cranelift_codegen::isa::{CallConv, TargetFrontendConfig};
+use cranelift_codegen::entity::PrimaryMap;
+use cranelift_codegen::ir::{
+    ExtFuncData, ExternalName, FuncRef, Function, UserExternalName, UserExternalNameRef, UserFuncName,
+};
+use cranelift_codegen::isa::{self, CallConv, TargetFrontendConfig};
 use cranelift_codegen::settings::{self, Configurable, Flags, OptLevel};
 use cranelift_codegen::{CodegenResult, Context};
+use cranelift_codegen::{MachReloc, RelocTarget};
 use cranelift_frontend::FunctionBuilderContext;
 use redextape_core::core::NodeId;
 use redextape_core::tm::{LowerError, Program};
 
 use crate::analysis::{Subroutine, partition};
-use crate::codegen::{Callee, FuncImports, rt_signature, translate_subroutine, word_signature};
+use crate::codegen::{Callee, FuncImports, jit_flags, rt_signature, translate_subroutine, word_signature};
 use crate::rt_imports::RtFn;
 use crate::shared::{MAX_REGISTERS, param_count, reg_over_cap};
 
@@ -58,6 +64,16 @@ fn unsupported(what: String) -> LowerError {
 
 fn codegen_error(e: impl std::fmt::Display) -> LowerError {
     unsupported(format!("native codegen: {e}"))
+}
+
+/// Why `build_clif` or a build from it refused a program, as a sentence a page can show: `Unsupported`'s own words,
+/// and for `TooDeep` the guard it passed, since its node means nothing to a reader of the CLIF.
+#[must_use]
+pub fn decline_reason(e: &LowerError) -> String {
+    match e {
+        LowerError::Unsupported { what, .. } => what.clone(),
+        LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
+    }
 }
 
 /// Each subroutine of `prog` as CLIF for a target with `config`, in `partition`'s order: the text
@@ -127,6 +143,108 @@ impl Listing {
             Listing::Optimised => "optimised",
         }
     }
+
+    /// The level whose machine code goes with this listing: the code the JIT makes from the CLIF it
+    /// lists. *As built* is what O0 compiles, with no Cranelift pass, and *optimised* what every level
+    /// from O1 up compiles (`codegen::cranelift_opt_level` gives `speed`, or `speed_and_size`, whose
+    /// code the snapshots hold equal to `speed`'s).
+    fn opt_level(self) -> crate::OptLevel {
+        match self {
+            Listing::AsBuilt => crate::OptLevel::O0,
+            Listing::Optimised => crate::OptLevel::O3,
+        }
+    }
+}
+
+/// One function's machine code, as `machine_code` compiles it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineFunction {
+    /// The function's code bytes, its relocations' placeholders included.
+    pub bytes: Vec<u8>,
+    /// The ranges of `bytes` lowered from one rxm instruction, in order and apart. Code in no range,
+    /// the prologue's and the exit's, was lowered from none.
+    pub ranges: Vec<CodeRange>,
+    /// Each place in `bytes` a call or an address is filled in when the code is linked, in order.
+    pub relocs: Vec<CodeReloc>,
+}
+
+/// Bytes `start..end` of a function's code, lowered from the rxm instruction at `pc`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CodeRange {
+    pub start: u32,
+    pub end: u32,
+    pub pc: u32,
+}
+
+/// A relocation at byte `offset`, naming the function `define_all`'s `Module` gives the index
+/// `callee` (`index`'s numbering: the runtime imports in `RtFn::ALL`'s order, then the
+/// subroutines in `partition`'s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CodeReloc {
+    pub offset: u32,
+    pub callee: u32,
+    /// Whether the eight bytes at `offset` are the callee's whole absolute address (`Reloc::Abs8`): on arm64
+    /// a far call's address, placed as data beside the code that loads it; on x86-64 a `movabs` immediate.
+    pub absolute: bool,
+}
+
+/// Each subroutine of `prog` compiled for `target` (a triple, `x86_64-unknown-linux-gnu`) with the
+/// JIT's flags at `listing`'s level and no host CPU features: the code the snapshot gate's machine code
+/// sections describe, byte for byte (`machine_code_equals_the_snapshots`), in `partition`'s order. The
+/// CLIF is `build_clif`'s for the target's own frontend config; its value labels change no byte.
+///
+/// # Errors
+/// `build_clif`'s, and `LowerError::Unsupported` when this build has no ISA for `target`, a function
+/// does not compile, or a relocation in its code names no import or subroutine (`code_relocs`).
+pub fn machine_code(prog: &Program, listing: Listing, target: &str) -> Result<Vec<MachineFunction>, LowerError> {
+    let flags = jit_flags(listing.opt_level()).map_err(codegen_error)?;
+    let isa = isa::lookup_by_name(target).map_err(codegen_error)?.finish(flags).map_err(codegen_error)?;
+    let funcs = build_clif(prog, isa.frontend_config())?;
+    let mut out = Vec::with_capacity(funcs.len());
+    for func in funcs {
+        let base = func.params.base_srcloc();
+        let names = func.params.user_named_funcs().clone();
+        let mut ctx = Context::for_function(func);
+        let code =
+            ctx.compile(&*isa, &mut ControlPlane::default()).map_err(|e| codegen_error(format!("{:?}", e.inner)))?;
+        let ranges = code
+            .buffer
+            .get_srclocs_sorted()
+            .iter()
+            .filter_map(|range| {
+                let loc = if range.loc.is_abs() { range.loc.as_abs() } else { range.loc.relocate(base) };
+                (!loc.is_default() && range.start < range.end).then(|| CodeRange {
+                    start: range.start,
+                    end: range.end,
+                    pc: loc.bits(),
+                })
+            })
+            .collect();
+        let relocs = code_relocs(code.buffer.relocs(), &names)?;
+        out.push(MachineFunction { bytes: code.code_buffer().to_vec(), ranges, relocs });
+    }
+    Ok(out)
+}
+
+/// `relocs` as `CodeReloc`s, each naming its callee by `names`.
+///
+/// # Errors
+/// `LowerError::Unsupported` for a relocation to anything but a runtime import or a subroutine, such as a
+/// Cranelift library call: its target has no index to name, and on arm64 the address it fills in is data that
+/// only a relocation marks, so dropping it would decode that address as instructions.
+fn code_relocs(
+    relocs: &[MachReloc],
+    names: &PrimaryMap<UserExternalNameRef, UserExternalName>,
+) -> Result<Vec<CodeReloc>, LowerError> {
+    relocs
+        .iter()
+        .map(|reloc| match &reloc.target {
+            RelocTarget::ExternalName(ExternalName::User(name)) if let Some(callee) = names.get(*name) => {
+                Ok(CodeReloc { offset: reloc.offset, callee: callee.index, absolute: reloc.kind == Reloc::Abs8 })
+            }
+            target => Err(codegen_error(format!("a relocation to {target:?}, which names no import or subroutine"))),
+        })
+        .collect()
 }
 
 /// Each subroutine of `prog` as `listing` shows it, built for `isa_free_config` in `partition`'s order.
@@ -167,13 +285,18 @@ fn optimise(func: Function, flags: &Flags) -> CodegenResult<Function> {
 mod tests {
     use std::collections::BTreeSet;
 
-    use cranelift_codegen::ir::{Function, ValueLabelAssignments};
+    use cranelift_codegen::binemit::Reloc;
+    use cranelift_codegen::entity::{EntityRef, PrimaryMap};
+    use cranelift_codegen::ir::{
+        ExternalName, Function, LibCall, UserExternalName, UserExternalNameRef, ValueLabelAssignments,
+    };
     use cranelift_codegen::isa;
     use cranelift_codegen::settings;
+    use cranelift_codegen::{MachReloc, RelocTarget};
     use redextape_core::tm::{Instr, LowerError, Program, Reg, label_reg, lower_program, reg_str};
     use redextape_core::{desugar::desugar, parser::parse};
 
-    use super::{Listing, MAX_REGISTERS, build_clif, build_listing, isa_free_config};
+    use super::{CodeReloc, Listing, MAX_REGISTERS, build_clif, build_listing, code_relocs, isa_free_config};
 
     /// How many of `func`'s defined values (each block's parameters, then its instructions' results, in
     /// layout order) carry labels, and the registers those labels name.
@@ -286,5 +409,21 @@ mod tests {
             panic!("a register index of MAX_REGISTERS was not refused as `Unsupported`");
         };
         assert!(what.contains("MAX_REGISTERS"), "{what}");
+    }
+
+    #[test]
+    fn a_relocation_naming_no_import_or_subroutine_is_refused() {
+        let mut names = PrimaryMap::new();
+        let rt = names.push(UserExternalName { namespace: 0, index: 3 });
+        let reloc =
+            |name| MachReloc { offset: 8, kind: Reloc::Abs8, target: RelocTarget::ExternalName(name), addend: 0 };
+        let named = code_relocs(&[reloc(ExternalName::User(rt))], &names);
+        assert_eq!(named, Ok(vec![CodeReloc { offset: 8, callee: 3, absolute: true }]));
+        for name in [ExternalName::LibCall(LibCall::FloorF64), ExternalName::User(UserExternalNameRef::new(1))] {
+            let Err(LowerError::Unsupported { what, .. }) = code_relocs(&[reloc(name.clone())], &names) else {
+                panic!("a relocation to {name:?} was not refused as `Unsupported`");
+            };
+            assert!(what.contains("names no import or subroutine"), "{what}");
+        }
     }
 }

@@ -597,6 +597,61 @@ fn the_isa_free_listings_equal_the_snapshot_sections() {
     );
 }
 
+/// `redextape-mc` compiles with no `Module`, in wasm32, so its code must be the code
+/// the snapshots describe: each function's size and hash equal its `;; function` line in the `none:
+/// machine code` section for the as-built listing and the `speed: machine code` one for the optimised,
+/// on every snapshot target. Each source range lies inside its function's code, and every relocation
+/// names a declared function.
+#[cfg(feature = "cranelift")]
+#[test]
+fn machine_code_equals_the_snapshots() {
+    if writing() {
+        return;
+    }
+    let mut differing = Vec::new();
+    for (key, src) in corpus() {
+        let prog = program_of(&key, &src);
+        let declared = u32::try_from(RtFn::ALL.len() + partition(&prog).unwrap().len()).unwrap();
+        let path = format!("{SNAPSHOT_DIR}/{key}.clif");
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        for target in TARGETS {
+            for (listing, level) in [(Listing::AsBuilt, "none"), (Listing::Optimised, "speed")] {
+                let title = format!("{target} {level}: machine code");
+                let lines: Vec<&str> = section(&on_disk, &title)
+                    .unwrap_or_else(|| panic!("{key}.clif: no {title}"))
+                    .lines()
+                    .filter(|line| line.starts_with(";; function "))
+                    .collect();
+                let funcs = crate::machine_code(&prog, listing, target).unwrap();
+                let first = RtFn::ALL.len();
+                let got: Vec<String> = funcs
+                    .iter()
+                    .enumerate()
+                    .map(|(k, f)| {
+                        let id = first + k;
+                        format!(";; function u0:{id}: {} bytes, fnv1a64 {:016x}", f.bytes.len(), fnv1a64(&f.bytes))
+                    })
+                    .collect();
+                if got != lines {
+                    differing.push(format!("{key}.clif: {title}"));
+                }
+                for f in &funcs {
+                    let size = u32::try_from(f.bytes.len()).unwrap();
+                    assert!(f.ranges.windows(2).all(|w| w[0].end <= w[1].start), "{key} {title}: ranges overlap");
+                    assert!(f.ranges.iter().all(|r| r.start < r.end && r.end <= size), "{key} {title}: range out");
+                    assert!(f.relocs.iter().all(|r| r.offset < size && r.callee < declared), "{key} {title}: reloc");
+                }
+            }
+        }
+    }
+    assert!(
+        differing.is_empty(),
+        "{} section(s) differ from the module-free machine code:\n  {}",
+        differing.len(),
+        differing.join("\n  ")
+    );
+}
+
 /// The CLIF stepper's runtime bounds depth by `caps.stack` alone, and its runs are compared with the JIT's,
 /// whose depth cap is `native_depth_cap`. The comparison is exact only while the two are equal, at the caps
 /// it runs at, for every program it runs.

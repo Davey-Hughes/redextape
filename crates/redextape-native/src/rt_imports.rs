@@ -21,10 +21,10 @@ macro_rules! rt_imports {
             /// Every import, in declaration order.
             pub const ALL: [RtFn; [$(stringify!($variant)),*].len()] = [$(Self::$variant,)*];
 
-            /// The symbol it is declared under. It shares `address`'s cfg so that wherever it is
-            /// compiled, `address` checks the name against native-rt.
-            #[cfg(any(feature = "cranelift", feature = "llvm"))]
-            pub(crate) fn symbol(self) -> &'static str {
+            /// The symbol it is declared under, by which `redextape-mc` names a runtime call. Wherever
+            /// `address` is compiled too, it checks the name against native-rt.
+            #[must_use]
+            pub fn symbol(self) -> &'static str {
                 match self {
                     $(Self::$variant => stringify!($func),)*
                 }

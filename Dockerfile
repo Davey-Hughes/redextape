@@ -8,7 +8,7 @@
 # CI builds this image on every push to `main` (see .forgejo/workflows/ci.yml's `docker` job), and
 # again every Sunday and on a manual dispatch, because nothing else rebuilds `:latest` without a merge.
 
-########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp, /app/pkg-clif  ####
+########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp, /app/pkg-clif, /app/pkg-mc-*  ####
 FROM rust:slim-bookworm AS wasm
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -29,6 +29,10 @@ RUN wasm-pack build crates/redextape-lsp-wasm --release --target web --out-dir /
 # `pkg-clif/`, the CLIF view's package, for the same reason, and before `web/` imports it: no PR runs this stage
 # to notice the line missing once it does.
 RUN wasm-pack build crates/redextape-clif-wasm --release --target web --out-dir /app/pkg-clif
+# The machine code panel's two packages, one per target, for the same reason.
+RUN wasm-pack build crates/redextape-mc-wasm --release --target web --out-dir /app/pkg-mc-x86-64
+RUN wasm-pack build crates/redextape-mc-wasm --release --target web --out-dir /app/pkg-mc-arm64 \
+    -- --no-default-features --features arm64
 
 ########################  2. Web bundle (Vite) → /app/web/dist  ################################
 FROM node:26-slim AS web
@@ -43,6 +47,8 @@ COPY web/ ./
 COPY --from=wasm /app/pkg /app/pkg
 COPY --from=wasm /app/pkg-lsp /app/pkg-lsp
 COPY --from=wasm /app/pkg-clif /app/pkg-clif
+COPY --from=wasm /app/pkg-mc-x86-64 /app/pkg-mc-x86-64
+COPY --from=wasm /app/pkg-mc-arm64 /app/pkg-mc-arm64
 # **THE COMMITTED GRAMMAR `.wasm`, AND NOTHING IN CI CATCHES THEIR ABSENCE.** `web/src/colour.ts`
 # imports them as `../../grammars/<g>/<g>.wasm?url`, so `build:app` below cannot resolve them without
 # this line — and the `docker` job never runs on a PR, exactly as the note in stage 1 says of
@@ -53,7 +59,7 @@ COPY grammars/ /app/grammars/
 ARG COMMIT_HASH
 ENV COMMIT_HASH=$COMMIT_HASH
 # `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced
-# /app/pkg, /app/pkg-lsp and /app/pkg-clif.
+# /app/pkg, /app/pkg-lsp, /app/pkg-clif and the two /app/pkg-mc-* packages.
 RUN pnpm run build:app
 
 ########################  3. Runtime (static nginx)  ##########################################

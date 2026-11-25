@@ -8,6 +8,8 @@ members = [
     "crates/redextape-grammar-check",
     "crates/redextape-lsp",
     "crates/redextape-lsp-wasm",
+    "crates/redextape-mc",
+    "crates/redextape-mc-wasm",
     "crates/redextape-native",
     "crates/redextape-native-rt",
     "crates/redextape-test-support",

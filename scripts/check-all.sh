@@ -165,6 +165,17 @@ LEGS=(
   "base|clippy|-p redextape-clif --features ts --all-targets"
   "base|test|-p redextape-clif --features ts"
   "base|wasm|-p redextape-clif --lib --features ts"
+  # Each target of `redextape-mc` is a feature, and each package holds one target, so each builds alone for
+  # wasm32; `--workspace` turns on `x86` alone, through `redextape-mc-wasm`'s default, and runs the corpus tests on
+  # x86-64 only, so arm64's run in a row of their own. arm64 alone and `ts` alone, which no other row builds
+  # natively, are clippied alone with no test row: no code in the crate is built only when a target is absent, so
+  # their tests are the arm64 and `ts` halves of the row that tests both targets, and a row would run them again.
+  "base|clippy|-p redextape-mc --features x86,arm64,ts --all-targets"
+  "base|test|-p redextape-mc --features x86,arm64,ts"
+  "base|clippy|-p redextape-mc --features arm64 --all-targets"
+  "base|clippy|-p redextape-mc --features ts --all-targets"
+  "base|wasm|-p redextape-mc --lib --features x86"
+  "base|wasm|-p redextape-mc --lib --features arm64"
   # `probe-no-tm-scratch-ceiling` switches `MAX_SCRATCH_TM_BYTES`' check off for one browser probe, and its doc in
   # `crates/redextape-wasm/Cargo.toml` says why. It changes which tests `crates/redextape-wasm/src/session.rs` compiles,
   # so it is a config like `ts`, and a config no leg builds is one whose tests never run.
@@ -193,6 +204,8 @@ LEGS=(
   "base|wasm|-p redextape-native-rt --lib"
   "base|wasm|-p redextape-clif --lib"
   "base|wasm|-p redextape-clif-wasm --lib"
+  "base|wasm|-p redextape-mc-wasm --lib"
+  "base|wasm|-p redextape-mc-wasm --lib --no-default-features --features arm64"
   "llvm|probe|"
   "llvm|clippy|-p redextape-native --features llvm --all-targets"
   "llvm|test|-p redextape-native --features llvm"

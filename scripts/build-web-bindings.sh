@@ -101,7 +101,8 @@ OLD_DIR="${TMP_DIR}.old"   # never pre-created — appending to a unique name ke
 CORE_DIR="$TMP_DIR/core"
 WIRE_DIR="$TMP_DIR/wire"
 CLIF_DIR="$TMP_DIR/clif"
-mkdir -p "$CORE_DIR" "$WIRE_DIR" "$CLIF_DIR"
+MC_DIR="$TMP_DIR/mc"
+mkdir -p "$CORE_DIR" "$WIRE_DIR" "$CLIF_DIR" "$MC_DIR"
 
 LOCK_HELD=0
 
@@ -175,6 +176,9 @@ env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
 # `--lib`: the crate's integration tests export nothing, and building them would only add to the wait.
 env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
   TS_RS_EXPORT_DIR="$CLIF_DIR" cargo test -p redextape-clif --features ts --lib export_bindings
+# The machine code panel's types are the same for every target, so the crate exports them with none.
+env -u TS_RS_IMPORT_EXTENSION -u TS_RS_LARGE_INT -u TS_RS_USE_V11_HASHMAP \
+  TS_RS_EXPORT_DIR="$MC_DIR" cargo test -p redextape-mc --features ts --lib export_bindings
 
 # Checked independently, one leg at a time: an empty leg directory must fail loudly even when the others are
 # full — see the header comment for why a single combined check cannot catch that.
@@ -191,6 +195,7 @@ check_leg_produced_files() {
 check_leg_produced_files "$CORE_DIR" "redextape-core"
 check_leg_produced_files "$WIRE_DIR" "redextape-wire"
 check_leg_produced_files "$CLIF_DIR" "redextape-clif"
+check_leg_produced_files "$MC_DIR" "redextape-mc"
 
 # A type of the same name exported from TWO crates — say a `Span` added to redextape-wire carrying the
 # canonical derive — lands on the same basename in each leg's own directory, and the plain `mv` below would
@@ -233,12 +238,15 @@ check_no_leg_collisions() {
 check_no_leg_collisions "$CORE_DIR" "redextape-core" "$WIRE_DIR" "redextape-wire"
 check_no_leg_collisions "$CORE_DIR" "redextape-core" "$CLIF_DIR" "redextape-clif"
 check_no_leg_collisions "$WIRE_DIR" "redextape-wire" "$CLIF_DIR" "redextape-clif"
+check_no_leg_collisions "$CORE_DIR" "redextape-core" "$MC_DIR" "redextape-mc"
+check_no_leg_collisions "$WIRE_DIR" "redextape-wire" "$MC_DIR" "redextape-mc"
+check_no_leg_collisions "$CLIF_DIR" "redextape-clif" "$MC_DIR" "redextape-mc"
 
 # Every leg proved non-empty independently, and no two collide: merge them into TMP_DIR itself so the
 # tree that gets swapped in below keeps the same flat layout web/bindings has. mv's directory-destination
 # form takes any number of sources, so each leg is one more argument here, not a new check shape.
-mv "$CORE_DIR"/*.ts "$WIRE_DIR"/*.ts "$CLIF_DIR"/*.ts "$TMP_DIR/"
-rm -rf "${CORE_DIR:?}" "${WIRE_DIR:?}" "${CLIF_DIR:?}"
+mv "$CORE_DIR"/*.ts "$WIRE_DIR"/*.ts "$CLIF_DIR"/*.ts "$MC_DIR"/*.ts "$TMP_DIR/"
+rm -rf "${CORE_DIR:?}" "${WIRE_DIR:?}" "${CLIF_DIR:?}" "${MC_DIR:?}"
 
 # Generation succeeded and produced files: web/bindings.tmp.* is a complete, good tree. Everything past
 # this point that touches the SHARED name web/bindings runs under the lock.

@@ -932,6 +932,8 @@ jobs:
         run: pnpm run build:lsp-wasm
       - name: Build the CLIF WASM package (same reason, for `../../../pkg-clif` in tests/node/clif-package.test.ts)
         run: pnpm run build:clif-wasm
+      - name: Build the machine code WASM packages (same reason, for `pkg-mc-*` in tests/node/mc-package.test.ts)
+        run: pnpm run build:mc-x86-wasm && pnpm run build:mc-arm64-wasm
       - name: Generate the wire-type bindings (web/bindings is gitignored; typecheck resolves against it)
         run: pnpm run build:bindings
       # THE LICENCES PAGE'S LIST, REGENERATED AND COMPARED. In this job and not with the hygiene scans in

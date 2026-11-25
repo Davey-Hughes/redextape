@@ -77,7 +77,10 @@ pub mod shared;
 #[cfg(feature = "cranelift")]
 pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
 #[cfg(feature = "clif")]
-pub use module_free::{Listing, build_clif, build_listing, isa_free_config};
+pub use module_free::{
+    CodeRange, CodeReloc, Listing, MachineFunction, build_clif, build_listing, decline_reason, isa_free_config,
+    machine_code,
+};
 #[cfg(feature = "clif")]
 pub use rt_imports::RtFn;
 

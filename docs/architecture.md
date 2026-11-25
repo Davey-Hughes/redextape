@@ -31,7 +31,7 @@ The plan sequence, and the running log of what implementation falsified:
 
 ## Architecture
 
-Twelve crates under `crates/`.
+Fourteen crates under `crates/`.
 
 **`redextape-core`** — the whole language, with **no dependencies** at default features (`cargo tree
 -p redextape-core --edges normal` lists only itself; `serde` and `ts-rs` are optional dependencies,
@@ -120,6 +120,16 @@ the end found in chunks, the status, the steps, the frame and the value.
 `redextape-lsp-wasm` is into `pkg-lsp/`, a module of its own so that `pkg/` carries no Cranelift. Its one exported
 type, `ClifSession`, is built from what `Session::clifInput` writes and a listing's name, and answers through
 `redextape-wire`'s serializer.
+
+**`redextape-mc`** is the thirteenth: a program's machine code as rows, with no `#[wasm_bindgen]` of its own. It
+compiles the same CLIF for one target through `redextape-native`'s `machine_code`, with the flags the JIT and the
+codegen snapshots use, so its bytes are the snapshots' bytes, and disassembles them into rows that carry each
+instruction's offset, bytes, text and the rxm pc of its source range: x86-64 by `iced-x86`, in AT&T and Intel syntax,
+and arm64 by `yaxpeax-arm`. Each target is a feature.
+
+**`redextape-mc-wasm`** is the fourteenth: that crate's `#[wasm_bindgen]` surface, built twice, into `pkg-mc-x86-64/`
+and `pkg-mc-arm64/`, so that each target is a download of its own. It exports two functions: `machineCode` takes
+what `Session::clifInput` writes and a listing's name and returns the rows, and `target` names the package's target.
 
 ### The oracle
 

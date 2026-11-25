@@ -1,7 +1,7 @@
 /**
  * THE LICENCES THE SITE SHIPS — about pages design §8. Writes `src/third-party-licences.json`, which the licences page
  * renders: redextape's own licence, then every npm package whose code or font reaches the browser, every crate
- * compiled into the three `.wasm` builds, the toolchains' runtimes compiled in beside them, and the colour schemes a
+ * compiled into the five `.wasm` builds, the toolchains' runtimes compiled in beside them, and the colour schemes a
  * built-in palette's colours are adapted from, each with the licence texts its own package carries.
  *
  *     node scripts/licences.ts            # write src/third-party-licences.json
@@ -40,8 +40,14 @@ const WEB = fileURLToPath(new URL('..', import.meta.url))
 const REPO = join(WEB, '..')
 const OUT = join(WEB, 'src', 'third-party-licences.json')
 
-/** The crates whose `.wasm` the site serves. */
-const WASM_CRATES = ['redextape-wasm', 'redextape-lsp-wasm', 'redextape-clif-wasm']
+/** The crates whose `.wasm` the web build makes, each with its package's features: `redextape-mc-wasm` makes two. */
+const WASM_CRATES: readonly (readonly string[])[] = [
+  ['redextape-wasm'],
+  ['redextape-lsp-wasm'],
+  ['redextape-clif-wasm'],
+  ['redextape-mc-wasm'],
+  ['redextape-mc-wasm', '--no-default-features', '--features', 'arm64'],
+]
 
 /** Where each shipped package sits on the licences page. */
 export type Group = 'code' | 'wasm' | 'toolchain' | 'font' | 'palette'
@@ -123,12 +129,15 @@ const LICENCE_FILE = /licen[cs]e|copying|copyright|notice/i
 /**
  * The crates whose package carries no licence file, each read from its directory under `scripts/crate-licences/`;
  * any other such crate still stops the generator. `wasmtime/LICENSE` is the `LICENSE` `cranelift-codegen` 0.137.2
- * publishes, the Apache-2.0 WITH LLVM-exception text of the repository all three are published from.
+ * publishes, the Apache-2.0 WITH LLVM-exception text of the repository all three are published from. `iced/` is iced's
+ * `LICENSE.txt` at tag `v1.22.0`; `yaxpeax-arch/` is `yaxpeax-arch` 0.3.3's `LICENSE`, `yaxpeax-arm`'s author's 0BSD.
  */
 const CRATE_LICENCES: ReadonlyMap<string, string> = new Map([
   ['cranelift-assembler-x64', 'wasmtime'],
   ['cranelift-bitset', 'wasmtime'],
+  ['iced-x86', 'iced'],
   ['wasmtime-internal-core', 'wasmtime'],
+  ['yaxpeax-arm', 'yaxpeax-arch'],
 ])
 
 /** Code-unit order: a locale's collation moves `aa` in Danish and `z` in Estonian, and this file must not move. */
@@ -303,15 +312,16 @@ export function generate(): string {
         maxBuffer: 64 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'inherit'],
       })
-    const meta = JSON.parse(cargo(['metadata', '--format-version', '1', '--locked'])) as Metadata
+    // `--all-features` also describes optional dependencies, such as `yaxpeax-arm`, which only the arm64 build holds.
+    const meta = JSON.parse(cargo(['metadata', '--format-version', '1', '--locked', '--all-features'])) as Metadata
     const byKey = new Map(meta.packages.map((p) => [`${p.name} ${p.version}`, p]))
     const keys = new Set<string>()
-    for (const crate of WASM_CRATES) {
+    for (const build of WASM_CRATES) {
       const tree = cargo([
         'tree',
         '--locked',
         '-p',
-        crate,
+        ...build,
         '--target',
         'wasm32-unknown-unknown',
         '-e',

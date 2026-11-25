@@ -43,7 +43,6 @@ use cranelift_codegen::ir::{
     AbiParam, Block, FuncRef, Function, Inst, InstBuilder, Signature, SourceLoc, Value, ValueLabel, types,
 };
 use cranelift_codegen::isa::TargetFrontendConfig;
-#[cfg(feature = "cranelift")]
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 #[cfg(feature = "cranelift")]
@@ -52,7 +51,6 @@ use cranelift_module::{FuncId, Linkage, Module, ModuleError};
 use redextape_core::core::BinOp;
 use redextape_core::tm::{Program, Reg, reg_label};
 
-#[cfg(feature = "cranelift")]
 use crate::OptLevel;
 use crate::analysis::Subroutine;
 use crate::lower::{Banks, BodyPos, LowerFault, LowerSink, lower_subroutine};
@@ -79,7 +77,6 @@ fn codegen_error(msg: impl std::fmt::Display) -> CodegenError {
 ///
 /// Both Cranelift drivers (`jit::build_and_run` and `aot::emit_object`) route through here, so the
 /// JIT and the AOT object can never be built at different levels for the same `OptLevel`.
-#[cfg(feature = "cranelift")]
 pub(crate) fn cranelift_opt_level(opt: OptLevel) -> &'static str {
     match opt {
         OptLevel::O0 => "none",
@@ -95,7 +92,6 @@ pub(crate) fn cranelift_opt_level(opt: OptLevel) -> &'static str {
 /// `is_pic=false` on every host. On x86-64 that flag makes a module-local symbol's address
 /// (`func_addr`, `symbol_value`) a RIP-relative `lea` the JIT cannot redirect when out of reach, so
 /// the JIT's code takes none. `shared::BYTES_PER_VAR` assumes `is_pic=false` too.
-#[cfg(feature = "cranelift")]
 pub(crate) fn jit_flags(opt: OptLevel) -> Result<settings::Flags, settings::SetError> {
     let mut flags = settings::builder();
     for (name, value) in

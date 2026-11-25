@@ -1,0 +1,32 @@
+[package]
+name = "redextape-mc"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# One feature per target, each turning on that target's Cranelift ISA and its disassembler. A wasm32
+# build turns on one; the native tests turn on both.
+x86 = ["cranelift-codegen/x86", "dep:iced-x86"]
+arm64 = ["cranelift-codegen/arm64", "dep:yaxpeax-arm", "dep:yaxpeax-arch"]
+ts = ["dep:ts-rs"]
+
+[dependencies]
+redextape-core = { path = "../redextape-core", features = ["serde"] }
+# `clif` alone, which builds for wasm32; the ISA comes from this crate's own target features.
+redextape-native = { path = "../redextape-native", default-features = false, features = ["clif"] }
+cranelift-codegen = { version = "0.137.2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+iced-x86 = { version = "1.22.0", optional = true, default-features = false, features = ["std", "decoder", "gas", "intel"] }
+yaxpeax-arm = { version = "0.5.0", optional = true, default-features = false, features = ["std", "fmt"] }
+yaxpeax-arch = { version = "0.3", optional = true, default-features = false }
+ts-rs = { version = "12", optional = true }
+
+[dev-dependencies]
+redextape-test-support = { path = "../redextape-test-support" }
+serde_json = "1"

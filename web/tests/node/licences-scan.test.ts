@@ -95,7 +95,8 @@ describe('the licences scan', () => {
  * those must be only `alloc`, `core` and `std`, which the Rust repository's own licence covers — so
  * `compiler-builtins`, built from that tree too, would fail here the day it panics. **WHAT NEITHER CAN SEE** is a crate
  * that panics nowhere, from either place: `compiler-builtins` is listed from the names in an unstripped build, which
- * `pkg/` is not. Read from the builds `pkg/`, `pkg-lsp/` and `pkg-clif/` hold, which CI's web job makes before its tests run.
+ * `pkg/` is not. Read from the builds `pkg/`, `pkg-lsp/`, `pkg-clif/` and the two machine code packages hold, which CI's web job makes
+ * before its tests run.
  */
 describe('the toolchain list', () => {
   const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
@@ -103,6 +104,8 @@ describe('the toolchain list', () => {
     'pkg/redextape_wasm_bg.wasm',
     'pkg-lsp/redextape_lsp_wasm_bg.wasm',
     'pkg-clif/redextape_clif_wasm_bg.wasm',
+    'pkg-mc-x86-64/redextape_mc_wasm_bg.wasm',
+    'pkg-mc-arm64/redextape_mc_wasm_bg.wasm',
   ]
   const read = (build: string): string => readFileSync(join(ROOT, build)).toString('latin1')
 

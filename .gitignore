@@ -11,6 +11,10 @@
 /pkg-lsp/
 # ...and the CLIF view's, built by `pnpm run build:clif-wasm` from `crates/redextape-clif-wasm`, for the same reason.
 /pkg-clif/
+# ...and the machine code panel's, one per target, built by `pnpm run build:mc-x86-wasm` and `build:mc-arm64-wasm`
+# from `crates/redextape-mc-wasm`, for the same reason.
+/pkg-mc-x86-64/
+/pkg-mc-arm64/
 **/pkg/
 *.wasm
 # ...except the four committed grammar parsers, which the web app (the source's) and its browser tests load through
