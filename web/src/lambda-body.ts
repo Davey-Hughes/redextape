@@ -68,6 +68,7 @@ const MARKS = {
   'is-next-redex': 'next redex:',
   'is-contractum': 'just produced:',
   'is-linked': 'linked:',
+  'is-result': 'result:',
 } as const
 type Mark = keyof typeof MARKS
 
@@ -84,15 +85,16 @@ type MarkSpan = {
 }
 
 /**
- * Where each mark on `tree` falls in `lines`: the next redex, the contractum, and every node `linked` names. A
- * mark whose node no line shows — folded away inside another node — is left out, as no token of it is drawn.
+ * Where each mark on `tree` falls in `lines`: the next redex, the contractum, every node `linked` names, and the root
+ * when `result` says it is the run's result. A mark whose node no line shows — folded away inside another node — is
+ * left out, as no token of it is drawn.
  *
  * **ONE PASS OVER EVERY TOKEN, NOT ONE PER ROW DRAWN.** A row outside the virtual window is not in the DOM, so a
  * mark that spans rows is drawn by each of its rows from the line indices kept here, not measured from elements.
  * **AND NOT ONE PER MARK**: every node's rows are found at once, as a link to a construct reduction has copied
  * hundreds of times would otherwise pay the whole pass once per copy.
  */
-function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[]): MarkSpan[] {
+function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[], result: boolean): MarkSpan[] {
   const marks: [Mark, number][] = []
   const add = (mark: Mark, node: number | null) => {
     if (node !== null) marks.push([mark, node])
@@ -100,6 +102,8 @@ function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[]
   add('is-next-redex', tree.wire.nextRedex)
   add('is-contractum', tree.wire.contractum)
   for (const l of linked) add('is-linked', l)
+  // THE RESULT ONLY ON A CHIP, A Nat OR A Bool: a list's root is its constructor's λ, which does not read as the value.
+  if (result && tree.chip(0) !== null) add('is-result', 0)
   if (marks.length === 0) return []
   // Each node's first token, as its row and its place in that row, and its last row; -1 where none is drawn.
   const first = new Int32Array(tree.count).fill(-1)
@@ -129,7 +133,9 @@ function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[]
   const out: MarkSpan[] = []
   for (const [mark, node] of marks) {
     const f = first[node] as number
-    if (f >= 0) out.push({ mark, node, first: f, at: at[node] as number, last: last[node] as number })
+    const l = last[node] as number
+    // A RESULT OVER MORE THAN ONE ROW, an opened chip, IS LEFT UNMARKED: the design gives it no lane in the strip.
+    if (f >= 0 && (mark !== 'is-result' || f === l)) out.push({ mark, node, first: f, at: at[node] as number, last: l })
   }
   return out
 }
@@ -325,6 +331,7 @@ export class LambdaBody {
   #tree: Tree | null = null
   #lines: readonly Line[] = []
   #linked: readonly number[] = []
+  #result = false
   /** Where the marks on `#tree` fall in `#lines`, kept until either changes. */
   #spans: readonly MarkSpan[] = []
   #outline = false
@@ -440,10 +447,24 @@ export class LambdaBody {
     this.#paint()
   }
 
-  /** Show `lines` of `tree`. `stale` says the tree belongs to a step other than the one on display. */
-  showTree(tree: Tree, lines: readonly Line[], outline: boolean, linked: readonly number[], stale: boolean): void {
+  /**
+   * Show `lines` of `tree`. `stale` says the tree belongs to a step other than the one on display; `result`, that its
+   * root is the run's result, marked when it is a chip on one row.
+   */
+  showTree(
+    tree: Tree,
+    lines: readonly Line[],
+    outline: boolean,
+    linked: readonly number[],
+    stale: boolean,
+    result = false,
+  ): void {
     const same =
-      tree === this.#tree && lines === this.#lines && outline === this.#outline && sameList(linked, this.#linked)
+      tree === this.#tree &&
+      lines === this.#lines &&
+      outline === this.#outline &&
+      sameList(linked, this.#linked) &&
+      result === this.#result
     this.#flat.hidden = true
     this.#spacer.hidden = false
     if (!same) {
@@ -451,7 +472,8 @@ export class LambdaBody {
       this.#tree = tree
       this.#lines = lines
       this.#linked = linked
-      this.#spans = markSpans(tree, lines, linked)
+      this.#result = result
+      this.#spans = markSpans(tree, lines, linked, result)
       this.#outline = outline
       this.#active = Math.min(this.#active, Math.max(0, lines.length - 1))
       this.#painted = ''

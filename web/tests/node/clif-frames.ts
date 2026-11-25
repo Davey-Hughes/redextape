@@ -26,6 +26,7 @@ export const FACT_95: ClifState = {
     { value: 26, word: { word: '1', tag: 'Value' }, regs: [] },
   ],
   values_len: 17,
+  returned: null,
   depth: 4,
   frames: [
     { function: 1, inst: 27 },

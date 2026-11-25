@@ -26,6 +26,8 @@ const HOVER_X = 4
 const picker = () => document.querySelector('#encoding') as HTMLSelectElement
 const clif = () => host('clif-0') as HTMLElement
 const stepOf = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
+const control = (pane: HTMLElement, label: string) =>
+  [...pane.querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
 
 /** A real hover at `HOVER_X`, at `el`'s middle height: a new `position`, as the call scales it in place. */
 async function hover(el: Element): Promise<void> {
@@ -67,10 +69,16 @@ beforeAll(async () => {
 
 describe('the cut-text watcher in the app', () => {
   it("gives fact(12)'s result its whole text in the clif view", async () => {
+    // ONE STEP BEFORE THE END, the latest at which the value is cut: at the end the result's row spans the panel and
+    // wraps rather than cut it (`result-values.test.ts`).
+    const [, last = ''] = /^step [\d,]+ of ([\d,]+)$/.exec(stepOf(clif())) ?? []
+    const before = (Number(last.replaceAll(',', '')) - 1).toLocaleString('en')
+    await userEvent.click(control(clif(), '◀') as HTMLButtonElement)
+    await until(() => stepOf(clif()) === `step ${before} of ${last}`, 'the clif view to step back from its end')
     const result = FACT_12?.value ?? ''
     const values = () =>
       [...clif().querySelectorAll<HTMLElement>('.rxm-register dd')].filter((d) => d.firstChild?.textContent === result)
-    if (values().length === 0) throw new Error(`no value reads ${result} at the run's end`)
+    if (values().length === 0) throw new Error(`no value reads ${result} at the step before the run's end`)
     const dd = await firstCut(values)
     if (dd === undefined) throw new Error('precondition: the result is not cut where a hover reaches it')
     await hover(dd)

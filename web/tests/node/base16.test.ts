@@ -162,7 +162,14 @@ describe('the mapping (spec §5.1)', () => {
       'tok-operator': 'base0C',
       accent: 'base0E',
       'tok-keyword': 'base0E',
+      result: 'base0B',
+      'result-word': 'base0B',
     })
+  })
+
+  // THE SCHEME'S GREEN, AS EMERALD IS THE BUILT-INS': the binder takes it too, and the binder rule leaves these out.
+  it('maps result and result-word to base0B', () => {
+    expect([BASE16_MAPPING.result, BASE16_MAPPING['result-word']]).toEqual(['base0B', 'base0B'])
   })
 
   it('maps a scheme onto every token', () => {

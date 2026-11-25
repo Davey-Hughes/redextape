@@ -61,6 +61,13 @@ export type Counts = {
   readonly lines?: number
   /** The word every rxm frame saved, as its one saved register. */
   readonly saved?: string
+  /**
+   * The run has ended with this word, and the view is told to mark it: rxm's `next` is `null` and `rr` holds it, and
+   * clif's `next` is `null` and `returned` is the last value drawn, which holds it.
+   */
+  readonly result?: string
+  /** The register the rxm frame's last instruction wrote. */
+  readonly wrote?: string
 }
 
 /** `n` of what `one` makes, its index given. */
@@ -97,11 +104,14 @@ export const VIEWS = [
     build(host: HTMLElement, panels: StoredPanels, sizes: Shares, onSizes: (s: Shares) => void): Mounted {
       const pane = new RxmPane(host, inertEvents({ panelSizes: onSizes }), panels, sizes)
       pane.setProgram(FACT3)
-      const draw = (c: Counts) =>
+      const draw = (c: Counts) => {
+        pane.setResult(c.result !== undefined)
         pane.render(
           frameOf({
             pc: 3,
-            next: 3,
+            next: c.result === undefined ? 3 : null,
+            rr: valueWord(c.result ?? '0'),
+            wrote: c.wrote ?? null,
             depth: c.depth,
             heap_len: c.cells,
             box_len: c.boxes,
@@ -114,6 +124,7 @@ export const VIEWS = [
           }),
           CONTROLS,
         )
+      }
       draw({ depth: 1, cells: 1, boxes: 0 })
       return { host, pane, draw }
     },
@@ -129,13 +140,16 @@ export const VIEWS = [
       pane.setProgram({ listing: clifListing })
       const at = { function: 0, inst: 0 }
       const draw = (c: Counts) => {
+        const count = c.rows?.values ?? 0
+        const word = (i: number) => (c.result !== undefined && i === count - 1 ? valueWord(c.result) : wordOf(c, i))
         const s: ClifState = {
           step: 1,
           at,
-          next: at,
+          next: c.result === undefined ? at : null,
           pc: null,
-          values: many(c.rows?.values ?? 0, (i) => ({ value: i, word: wordOf(c, i), regs: [...(c.regs ?? [])] })),
-          values_len: c.rows?.values ?? 0,
+          values: many(count, (i) => ({ value: i, word: word(i), regs: [...(c.regs ?? [])] })),
+          values_len: count,
+          returned: c.result === undefined ? null : count - 1,
           depth: c.depth,
           frames: many(c.rows?.stack ?? 0, () => at),
           heap_len: c.cells,
@@ -143,6 +157,7 @@ export const VIEWS = [
           box_len: c.boxes,
           boxes: [],
         }
+        pane.setResult(c.result !== undefined)
         pane.render(s, CONTROLS)
       }
       draw({ depth: 1, cells: 1, boxes: 0 })

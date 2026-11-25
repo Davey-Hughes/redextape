@@ -14,7 +14,7 @@ import {
   STYLE_IDS,
   STYLE_LABELS,
 } from '../../src/skin'
-import { DAY, NIGHT, storedHalf } from './base16-fixtures'
+import { adjustedHalf, beforeResult, CLOSING, DAY, NIGHT, storedHalf } from './base16-fixtures'
 
 function fakeRoot(): SkinRoot & { attrs: Map<string, string>; props: Map<string, string> } {
   const attrs = new Map<string, string>()
@@ -111,7 +111,7 @@ describe('skin — custom', () => {
     expect(readPaletteChoice('custom', null)).toBe(DEFAULT_PALETTE)
   })
 
-  it('writes each stored half over the default palette’s variant, and keeps the default palette’s for a half not stored', () => {
+  it('draws each stored half as stored, and the default palette’s variant for a half not stored', () => {
     const p = resolvePalette('custom', { dark: night })
     expect(p.id).toBe('custom')
     expect(p.dark).toEqual(night.tokens)
@@ -121,11 +121,20 @@ describe('skin — custom', () => {
     expect(q.dark).toEqual(PALETTES.material.dark)
   })
 
-  it('falls back token by token to the default palette where a stored half lacks one', () => {
+  // COMPLETED, NOT FILLED FROM ANOTHER PALETTE: a token the half lacks is the one its own scheme gives, mapped and,
+  // for an adjusted half, adjusted, so an import stored before a token existed draws it in the scheme's colours.
+  it('completes a stored half that lacks a token from the colours it stored, not from the default palette', () => {
     const { fg: _, ...lacking } = night.tokens
     const p = resolvePalette('custom', { dark: { ...night, tokens: lacking } })
-    expect(p.dark.fg).toBe(PALETTES.material.dark.fg)
+    expect(p.dark.fg).toBe(NIGHT[5])
     expect(p.dark.bg).toBe(NIGHT[0])
+    const closing = adjustedHalf('Closing', CLOSING, 'dark')
+    const q = resolvePalette('custom', { light: beforeResult(storedHalf('Day', DAY)), dark: beforeResult(closing) })
+    expect([q.light.result, q.light['result-word']]).toEqual([DAY[11], DAY[11]])
+    expect([q.dark.result, q.dark['result-word']]).toEqual([closing.tokens.result, closing.tokens['result-word']])
+    expect(q.dark['result-word']).not.toBe(CLOSING[11])
+    expect(q.light.result).not.toBe(PALETTES.material.light.result)
+    expect(q.dark['result-word']).not.toBe(PALETTES.material.dark['result-word'])
   })
 
   it('draws the default palette for custom with nothing stored', () => {

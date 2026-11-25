@@ -9,7 +9,18 @@ import {
   passes,
   summaryLines,
 } from '../../src/base16-check'
-import { currentLayout, EMBER, keyed, legacyLayout, NEON, NIGHT, readSchemeOk, STUCK, TWINS } from './base16-fixtures'
+import {
+  CLOSING,
+  currentLayout,
+  EMBER,
+  keyed,
+  legacyLayout,
+  NEON,
+  NIGHT,
+  readSchemeOk,
+  STUCK,
+  TWINS,
+} from './base16-fixtures'
 
 /**
  * The check (Plan 7 part 6b spec §5.3), `base16-check.ts`'s, on schemes read from the fixtures: its summary, what
@@ -30,7 +41,7 @@ describe('the check (spec §5.3)', () => {
   it('counts the checks a scheme fails and gives the worst, in one line', () => {
     const c = check(legacyLayout('Ember', EMBER))
     expect(passes(c)).toBe(false)
-    expect(summaryLines(c)).toEqual(['Ember · dark, detected: 17 of 35 contrast checks below WCAG AA, worst 3.31:1'])
+    expect(summaryLines(c)).toEqual(['Ember · dark, detected: 17 of 39 contrast checks below WCAG AA, worst 3.31:1'])
   })
 
   it('lists the failures grouped by scheme colour pair, in words, the furthest below its floor first', () => {
@@ -57,12 +68,23 @@ describe('the check (spec §5.3)', () => {
     ])
   })
 
+  // THE WORD IS READ ON THE MARK, so its pair names the tint as well as the surface under it.
+  it('says a result word that fails on its own ground', () => {
+    expect(failureLines(check(currentLayout('Closing', CLOSING, 'dark')))).toEqual([
+      'base0C on base01: operators on panels — 2.23:1, needs 4.5',
+      'base0C on base00: operators on the page — 2.57:1, needs 4.5',
+      'base0B on base0B over base01: the result word on the result mark over panels — 3.75:1, needs 4.5',
+      'base0B on base0B over base00: the result word on the result mark over the page — 4.31:1, needs 4.5',
+    ])
+  })
+
   it('says what still fails, and where, when no lightness passes', () => {
     const c = check(currentLayout('Neon', NEON, 'dark'))
     // accents fail 4.5 on panels and 3 on headers, one pair of colours: the line gives the floor it misses by most. The
     // warnings' 1.09:1 against their 3 sits below the text's 1.28:1 against 4.5, as each misses its floor by less.
     expect(failureLines(c)).toEqual([
-      'base0B on base01: binders on panels — 1.03:1, needs 4.5',
+      'base0B on base0B over base01: the result word on the result mark over panels — 1.03:1, needs 4.5',
+      'base0B on base01: binders and the result mark on panels — 1.03:1, needs 4.5',
       'base0C on base01: operators on panels — 1.05:1, needs 4.5',
       'base04 on base01: dim text, plain code and punctuation on panels and headers — 1.09:1, needs 4.5',
       'base05 on base01: text, the focus ring and names on panels and headers — 1.25:1, needs 4.5',
@@ -72,7 +94,7 @@ describe('the check (spec §5.3)', () => {
       'base08 on base01: error text on panels and headers — 1.74:1, needs 4.5',
     ])
     expect(adjustLine(c)).toBe(
-      'apply adjusted moves 2 colours’ lightness; 16 checks still fail, where no lightness passes on both base00 and base01',
+      'apply adjusted moves 3 colours’ lightness; 17 checks still fail, where no lightness passes on both base00 and base01 or on base0B over both base00 and base01',
     )
   })
 
@@ -85,10 +107,10 @@ describe('the check (spec §5.3)', () => {
     expect(adjustLine(twins)).toBe('apply adjusted moves 1 colour’s lightness, and every check then passes')
     const stuck = check(legacyLayout('', STUCK))
     expect(summaryLines(stuck)).toEqual([
-      'untitled · dark, detected: every contrast check passes; binders too close to 8 other colours',
+      'untitled · dark, detected: 2 of 39 contrast checks below WCAG AA, worst 3.57:1; binders too close to 8 other colours',
     ])
     expect(adjustLine(stuck)).toBe(
-      'apply adjusted moves no colour’s lightness; binders stay too close to 8 other colours, where no lightness sets them apart',
+      'apply adjusted moves no colour’s lightness; 2 checks still fail, where no lightness passes on base0B over both base00 and base01; binders stay too close to 8 other colours, where no lightness sets them apart',
     )
   })
 

@@ -24,6 +24,8 @@ export type ValuesView = {
     readonly unwritten: boolean
     /** The rxm registers a CLIF value stands for, from its value labels; an rxm register's row has none. */
     readonly regs?: readonly string[]
+    /** Whether the row holds the run's result, which the panel marks with its tint, its edge and the word. */
+    readonly result: boolean
     /** What the row's marks mean, in words: its `aria-description`, so no mark is colour alone. */
     readonly says: readonly string[]
   }[]
@@ -48,7 +50,8 @@ export type HeapView = {
  * The registers (spec §6.3): each name and word, the register the last step wrote marked *changed*, and each local
  * the current call has not written dimmed and marked `·`, with a legend saying what that means. Every mark also says
  * itself in an `aria-description`, so none is colour alone. A CLIF value's row names the rxm registers it stands for
- * after its word, in a `span.value-regs`.
+ * after its word, in a `span.value-regs`. The run's result is marked `is-result`, and the word `result` at the end of
+ * its `dd`, in a `span.result-word`, says so; the registers and the word go in one `span.result-tail`.
  */
 export function valuesPanel(o: MachinePanelOptions): MachinePanel<ValuesView> {
   const body = document.createElement('div')
@@ -70,12 +73,24 @@ export function valuesPanel(o: MachinePanelOptions): MachinePanel<ValuesView> {
         name.textContent = r.unwritten ? `· ${r.name}` : r.name
         const value = document.createElement('dd')
         value.textContent = r.text
+        let regs: HTMLElement | null = null
         if (r.regs !== undefined && r.regs.length > 0) {
-          const regs = document.createElement('span')
+          regs = document.createElement('span')
           regs.className = 'value-regs'
           regs.textContent = r.regs.join(', ')
-          value.append(' ', regs)
         }
+        if (r.result) {
+          const word = document.createElement('span')
+          word.className = 'result-word'
+          word.textContent = 'result'
+          // THE REGISTERS AND THE WORD AS ONE BOX, `style.css`'s `.result-tail`: the row breaks before it as a whole.
+          const tail = document.createElement('span')
+          tail.className = 'result-tail'
+          if (regs !== null) tail.append(regs, ' ')
+          tail.append(word)
+          value.append(' ', tail)
+          item.classList.add('is-result')
+        } else if (regs !== null) value.append(' ', regs)
         if (r.changed) item.classList.add('is-changed')
         if (r.unwritten) item.classList.add('is-unwritten')
         if (r.says.length > 0) value.setAttribute('aria-description', r.says.join('; '))

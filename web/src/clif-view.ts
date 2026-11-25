@@ -2,7 +2,7 @@ import { n } from './format'
 import type { Labels } from './label-rows'
 import type { HeapView, StackView, ValuesView } from './machine-panels'
 import type { ClifCompiled, ClifLoad } from './protocol'
-import { frames, heapView, wordText } from './rxm-view'
+import { frames, heapView, resultFirst, wordText } from './rxm-view'
 import type { ClifAt, ClifListing, ClifRow, ClifRowKind, ClifState } from './types'
 import type { ClifDisplay } from './workspace'
 
@@ -138,18 +138,24 @@ export function clifLeads(l: ClifListing, layout: ClifLayout): number[] {
  * the window hides.
  *
  * **NONE IS UNWRITTEN**: the state lists only the values the running frame has set.
+ *
+ * At the run's result (`result`) the row of `s.returned` is marked and put first. **FOUND BY ITS NUMBER, NEVER BY AN
+ * `rr` LABEL**: a listing can leave several values standing for `rr`, and only one is returned.
  */
-export function clifValues(s: ClifState): ValuesView {
+export function clifValues(s: ClifState, result: boolean): ValuesView {
   const hidden = s.values_len - s.values.length
   return {
-    rows: s.values.map((v) => ({
-      name: `v${v.value}`,
-      text: wordText(v.word),
-      regs: v.regs,
-      changed: false,
-      unwritten: false,
-      says: [],
-    })),
+    rows: resultFirst(
+      s.values.map((v) => ({
+        name: `v${v.value}`,
+        text: wordText(v.word),
+        regs: v.regs,
+        changed: false,
+        unwritten: false,
+        result: result && v.value === s.returned,
+        says: [],
+      })),
+    ),
     notes: hidden > 0 ? [{ text: `+${n(hidden)} more ${hidden === 1 ? 'value' : 'values'}`, legend: false }] : [],
   }
 }

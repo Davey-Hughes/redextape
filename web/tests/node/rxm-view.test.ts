@@ -221,8 +221,28 @@ describe('what the panels are handed', () => {
   })
 
   it('says a hidden argument and a hidden local in the singular', () => {
-    const notes = (s: RxmState) => rxmValues(s).notes.map((note) => note.text)
+    const notes = (s: RxmState) => rxmValues(s, false).notes.map((note) => note.text)
     expect(notes(frameOf({ args_len: 1, locals_len: 1 }))).toEqual(['+1 more argument', '+1 more local'])
     expect(notes(frameOf({ args_len: 3, locals_len: 2 }))).toEqual(['+3 more arguments', '+2 more locals'])
+  })
+
+  it('puts rr first and marks it at the result', () => {
+    const s = frameOf({ next: null, rr: valueWord('15'), args: [valueWord('5')], locals: [valueWord('0')] })
+    expect(rxmValues(s, true).rows.map((r) => [r.name, r.result])).toEqual([
+      ['rr', true],
+      ['pc', false],
+      ['a0', false],
+      ['r0', false],
+    ])
+  })
+
+  it('keeps the order of pc, rr, the arguments and the locals otherwise', () => {
+    const s = frameOf({ next: null, rr: valueWord('15'), args: [valueWord('5')], locals: [valueWord('0')] })
+    expect(rxmValues(s, false).rows.map((r) => [r.name, r.result])).toEqual([
+      ['pc', false],
+      ['rr', false],
+      ['a0', false],
+      ['r0', false],
+    ])
   })
 })

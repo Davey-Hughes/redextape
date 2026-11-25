@@ -14,6 +14,8 @@ export type ClientPort = {
 export class SessionClient {
   #gen = 0
   #awaitingRun = false
+  /** The encoding each generation's run was posted under: `encodingOf`. */
+  #encodings = new Map<number, string>()
   #port: ClientPort
   #onSupersede: () => void
 
@@ -96,10 +98,21 @@ export class SessionClient {
    */
   request(gen: number, src: string, encoding: string, width: number | null = null, clif: Listing | null = null): void {
     if (gen !== this.#gen) return
+    this.#encodings.set(gen, encoding)
     // A `null` WIDTH IS AUTO, POSTED AS NO `width` KEY, NOT `width: undefined`: an auto request carries none.
     this.#port.postMessage(
       width === null ? { kind: 'run', gen, src, encoding, clif } : { kind: 'run', gen, src, encoding, width, clif },
     )
+  }
+
+  /**
+   * The encoding the run of `gen` was posted under, `null` for a generation no run was posted for: what a view of
+   * that generation's frames reads their fields in. **KEPT PER GENERATION**, not as the last one posted: a session's
+   * views show the last answered generation's frames until the one posted after it answers, and a run's bit order
+   * is its own encoding's.
+   */
+  encodingOf(gen: number): string | null {
+    return this.#encodings.get(gen) ?? null
   }
 
   /**

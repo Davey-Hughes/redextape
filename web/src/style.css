@@ -63,6 +63,8 @@
   --tok-operator: light-dark(#00757c, #89ddff);
   --tok-punct: light-dark(#5a6c76, #979797);
   --tok-binder: light-dark(#527407, #c3e88d);
+  --result: light-dark(#047857, #34d399);
+  --result-word: light-dark(#065f46, #34d399);
   /* palette:fallback:end */
 
   /* The construct a click linked (`.linked` below). A SEPARATE HUE FROM `--accent`, not a tint of it —
@@ -72,6 +74,9 @@
      palette author sets hues and the marks built from them follow. */
   --link-bg: color-mix(in oklab, var(--tok-nat) 20%, transparent);
   --link-edge: var(--tok-nat);
+  /* The ground of a run's result mark, whose edge is `--result`. ITS SHARE IS `contrast.ts`'s `RESULT_TINT`:
+     `--result-word` is held to its floor on this ground as composited at that share, so the two change together. */
+  --result-bg: color-mix(in oklab, var(--result) 20%, transparent);
 }
 
 /* Paper and Terminal, as overrides of the Instrument shape above. The app sets `data-style` on
@@ -1077,6 +1082,17 @@ button.view-title[aria-expanded="true"] {
   white-space: pre;
   text-overflow: ellipsis;
 }
+/* THE RUN'S BIT ORDER, LAST ON THE LINE AT THE RESULT, TAKES ONLY THE ROOM THE OTHER PARTS LEAVE: a flex basis of 0 and
+   no minimum, so it never starts a row of its own, and it grows into that room up to its own width, on one line. The
+   line's height is then the same with it or without it. `TmPane` keeps it only where it is drawn whole and the state
+   name is no more cut, and drops it otherwise, before a frame shows it cut. */
+.tm-line > .tm-endian {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: max-content;
+  overflow: hidden;
+  white-space: pre;
+}
 /* THE STEP TEXT TAKES THE ROOM IT NEEDS AT THE RUN'S NEWEST STEP (the TM width design, decision 28), so the line's
    rows are settled by the run's total and stay as they are while a playing run's count gains digits; a row gained
    then would push the tapes and everything under them down mid-run. `TmPane` puts the readout at the newest step in
@@ -1128,6 +1144,15 @@ button.view-title[aria-expanded="true"] {
   border-color: currentColor;
   border-radius: var(--radius);
   font-weight: 600;
+}
+/* THE RUN'S RESULT ON THE REG TAPE, FIELD 0'S CELLS IN ONE BOX: the tint and an inset edge, which take no room, so the
+   cells stand where they would unmarked, and only the word after the box (`.cells > .result-word`) moves the rest of
+   the row. */
+.tm-result {
+  display: flex;
+  flex: 0 0 auto;
+  background: var(--result-bg);
+  box-shadow: inset 0 0 0 1px var(--result);
 }
 
 .controls {
@@ -1828,6 +1853,23 @@ button.view-title[aria-expanded="true"] {
 .term .is-linked .is-next-redex,
 .term .is-next-redex:has(.is-linked) {
   outline-offset: 1px;
+}
+/* THE RUN'S RESULT (the return-value highlight design): the root, a chip on one row, in the result's ground and edge
+   with the word after it. The edge is an `outline`, as the next redex's is, which never marks a node at a normal form,
+   so it composes with the contractum's and the link's box-shadows. ITS GROUND REPLACES THEIRS, never lies over them:
+   the word's floor is met on the result's tint over the surface alone. The triple is named because the link and
+   contractum pair rule outranks this one. */
+.term .is-result,
+.term .is-result.is-linked.is-contractum {
+  background: var(--result-bg);
+  outline: 1px solid var(--result);
+  outline-offset: -1px;
+}
+/* The word, in `.result-word`'s size and colour. Its alternative text is empty: `data-marks` already says `result:`
+   where the run starts, and a reader would hear it twice. */
+.term .is-result::after {
+  content: "result" / "";
+  padding-inline: 0.5ch;
 }
 
 /* A MARK ON A NODE OF MORE THAN ONE ROW is a bar in the strip at the rows' start (`LANES` or `NARROW_LANES` in
@@ -2916,6 +2958,21 @@ main {
   --row-bar: 3px 0 0 var(--accent);
 }
 
+/* THE WORD ON A RUN'S RESULT MARK, after the value it marks: smaller than the value, so the value stays what is read
+   first, and in `--result-word`, the colour held to the text floor on the mark's own ground, `--result-bg`. */
+.result-word,
+.term .is-result::after {
+  font-size: 0.75em;
+  color: var(--result-word);
+}
+/* The word among REG's cells, a flex row: it keeps its own width rather than shrink with the row, is centred since it
+   is smaller than the cells, and is padded so it touches neither the box's edge nor the cell after it. */
+.cells > .result-word {
+  flex: 0 0 auto;
+  align-self: center;
+  padding-inline: 0.5ch;
+}
+
 /* THE REGISTERS (spec §6.3): name and word in a wrapping grid. The register the last instruction wrote is outlined —
    a shape, not a colour — and a local the current call has not written is dimmed behind its `·`. */
 .rxm-register-list {
@@ -2950,6 +3007,25 @@ main {
 }
 .rxm-register.is-unwritten {
   opacity: 0.55;
+}
+/* THE RUN'S RESULT, FIRST IN THE LIST AND ACROSS EVERY COLUMN, so it is never cut: its value wraps rather than end in
+   an ellipsis, breaking first before what follows the value, which `.result-tail` keeps as one box, and inside the
+   value only where the value alone is wider than the row. The edge is a box-shadow because `is-changed` owns the
+   outline, and one row can be both. */
+.rxm-register.is-result {
+  grid-column: 1 / -1;
+  background: var(--result-bg);
+  box-shadow: inset 0 0 0 1px var(--result);
+}
+.rxm-register.is-result dd {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* WHAT FOLLOWS THE RESULT'S VALUE, the rxm registers it stands for and the word, AS ONE BOX: a line break falls between
+   the value and the box before any falls inside it, so a narrow row reads the value, then `rr result` under it. The box
+   wraps inside only where it alone is wider than the row. */
+.result-tail {
+  display: inline-block;
 }
 .rxm-note {
   margin: 0;

@@ -1,5 +1,5 @@
 import { schemeName } from './base16'
-import type { CustomPalette } from './custom-palette'
+import { type CustomPalette, halfTokens } from './custom-palette'
 import { COLOUR_TOKENS, PALETTE_IDS, PALETTES, type Palette, type PaletteId } from './palettes'
 
 /**
@@ -94,8 +94,9 @@ export function readPaletteChoice(raw: string | null, custom: CustomPalette | nu
 }
 
 /**
- * The palette a choice draws. For `custom`, each half is the default palette's variant with that half's tokens written
- * over it, and a half not imported is the default palette's, since a palette never depends on the style.
+ * The palette a choice draws. For `custom`, each imported half is its tokens, completed from its own scheme where it
+ * lacks one (`custom-palette.ts`'s `halfTokens`), and a half not imported is the default palette's, since a palette
+ * never depends on the style.
  */
 export function resolvePalette(choice: PaletteChoice, custom: CustomPalette | null): Palette {
   if (choice !== 'custom') return PALETTES[choice]
@@ -103,8 +104,8 @@ export function resolvePalette(choice: PaletteChoice, custom: CustomPalette | nu
   return {
     id: 'custom',
     name: PALETTE_CHOICE_LABELS.custom,
-    light: { ...base.light, ...custom?.light?.tokens },
-    dark: { ...base.dark, ...custom?.dark?.tokens },
+    light: custom?.light === undefined ? base.light : halfTokens(custom.light),
+    dark: custom?.dark === undefined ? base.dark : halfTokens(custom.dark),
   }
 }
 

@@ -10,7 +10,7 @@ import {
   type SchemeCheck,
   summaryLines,
 } from './base16-check'
-import type { CustomHalf, CustomPalette } from './custom-palette'
+import { type CustomHalf, type CustomPalette, halfTokens } from './custom-palette'
 import { createPanel } from './panel'
 import { DEFAULT_PALETTE, PALETTE_CHOICE_LABELS } from './skin'
 
@@ -192,7 +192,8 @@ export function createBase16Dialog(deps: Base16DialogDeps): Base16Dialog {
 
   /**
    * **NOW**, when a half is stored (spec §8.2): each half's name, a `remove` beside it, and a `changes` panel for
-   * the colours an adjusted half moved, read off its stored colours and tokens. A remove closes the dialog: its
+   * the colours an adjusted half moved, read off its stored colours and the tokens the page draws from it, which
+   * complete a half stored before a token was added as `halfTokens` does. A remove closes the dialog: its
    * *undo* is on the notice line, outside the modal and inert while it is open.
    */
   const showStored = (): void => {
@@ -222,7 +223,7 @@ export function createBase16Dialog(deps: Base16DialogDeps): Base16Dialog {
       line.append(remove)
       if (half.adjusted) {
         const list = element('ul', 'base16-changes')
-        list.append(...movedColours(half.colours, half.tokens).map(changeItem))
+        list.append(...movedColours(half.colours, halfTokens(half)).map(changeItem))
         // THE HALF IS A LABEL, IN THE STYLE'S CASE; THE NAME IS THE SCHEME'S, AND KEEPS ITS OWN.
         const label = element('p', 'base16-changes-label', `${variant} — `)
         label.append(element('span', 'base16-scheme-name', name))

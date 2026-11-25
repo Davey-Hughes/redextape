@@ -39,6 +39,7 @@ const CELLS_AND_BOX_64: ClifState = {
     { value: 2, word: { word: '1', tag: 'Value' }, regs: ['a1'] },
   ],
   values_len: 3,
+  returned: null,
   depth: 2,
   frames: [
     { function: 1, inst: 0 },
@@ -213,17 +214,43 @@ describe('the layouts', () => {
 
 describe('the values', () => {
   it('has a row per value, with its registers and no marks', () => {
-    const view = clifValues(FACT_95)
+    const view = clifValues(FACT_95, false)
     expect(view.rows).toHaveLength(17)
-    expect(view.rows[1]).toEqual({ name: 'v1', text: '2', regs: ['a0'], changed: false, unwritten: false, says: [] })
+    expect(view.rows[1]).toEqual({
+      name: 'v1',
+      text: '2',
+      regs: ['a0'],
+      changed: false,
+      unwritten: false,
+      result: false,
+      says: [],
+    })
     expect(view.rows[0]?.regs).toEqual([])
     expect(view.notes).toEqual([])
   })
 
   it('says how many values the window hides, as the rxm registers do', () => {
-    const cut = (shown: number) => clifValues({ ...FACT_95, values: FACT_95.values.slice(0, shown) }).notes
+    const cut = (shown: number) => clifValues({ ...FACT_95, values: FACT_95.values.slice(0, shown) }, false).notes
     expect(cut(16)).toEqual([{ text: '+1 more value', legend: false }])
     expect(cut(15)).toEqual([{ text: '+2 more values', legend: false }])
+  })
+
+  it('puts the returned value first by its number', () => {
+    // TWO VALUES STAND FOR rr, as sum_to(5)'s v3 and v8 do as built: the returned one is found by its number, so v11
+    // stays where it was, unmarked.
+    const values = FACT_95.values.map((v) => (v.value === 23 ? { ...v, regs: ['rr'] } : v))
+    const s: ClifState = { ...FACT_95, next: null, values, returned: 23 }
+    const rows = clifValues(s, true).rows
+    expect(rows.map((r) => r.name)).toEqual([
+      'v23',
+      ...FACT_95.values.filter((v) => v.value !== 23).map((v) => `v${v.value}`),
+    ])
+    expect(rows.filter((r) => r.result).map((r) => r.name)).toEqual(['v23'])
+    expect(rows.find((r) => r.name === 'v11')?.regs).toEqual(['rr'])
+    expect(
+      clifValues(s, false).rows.map((r) => r.name),
+      'the step before',
+    ).toEqual(FACT_95.values.map((v) => `v${v.value}`))
   })
 })
 

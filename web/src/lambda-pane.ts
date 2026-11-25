@@ -95,6 +95,8 @@ export class LambdaPane {
   #onLinkNode: ((node: number) => void) | undefined
   /** The construct `draw()` says is pinned, or `null` — this view marks every node that carries it. */
   #pin: number | null = null
+  /** Whether `draw()` says the tree's root is the run's result (`result-mark.ts`). */
+  #result = false
   /** The pin the view last scrolled to, so a new pin scrolls once and a held one does not keep scrolling. */
   #revealed: number | null = null
   /**
@@ -262,12 +264,13 @@ export class LambdaPane {
   }
 
   /**
-   * What `draw()` knows about the tree for the displayed step (spec §4). Called every frame, after `render`;
-   * the layout is reused while its inputs are unchanged.
+   * What `draw()` knows about the tree for the displayed step (spec §4), and whether its root is the run's result.
+   * Called every frame, after `render`; the layout is reused while its inputs are unchanged.
    */
-  renderTree(treeFor: TreeFor, pin: number | null = null): void {
+  renderTree(treeFor: TreeFor, pin: number | null = null, result = false): void {
     this.#treeFor = treeFor
     this.#pin = pin
+    this.#result = result
     this.#redraw()
   }
 
@@ -493,7 +496,7 @@ export class LambdaPane {
     const lines = this.#lines(tree)
     const linked = this.#pin === null ? [] : tree.nodesLinkedTo(this.#pin)
     this.#shownLines = lines
-    this.#body.showTree(tree, lines, this.#display.layout === 'outline', linked, stale)
+    this.#body.showTree(tree, lines, this.#display.layout === 'outline', linked, stale, this.#result)
     // A NEW PIN IS SCROLLED TO ONCE, and only when its first node is off screen — a click in this view
     // pins what is under the pointer, so it never moves; a source click brings the construct in.
     if (this.#pin !== this.#revealed) {

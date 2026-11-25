@@ -353,6 +353,21 @@ describe('SessionClient generation', () => {
     expect(p.sent).toEqual([{ kind: 'run', gen: g2, src: 'fresh', encoding: 'binary', clif: null }])
   })
 
+  it('remembers the encoding posted for a generation', () => {
+    const p = port()
+    const c = new SessionClient(p, () => {})
+    c.supersede()
+    const gen = c.supersede()
+    c.request(gen, 'a', 'binary')
+    expect(c.encodingOf(gen)).toBe('binary')
+    expect(c.encodingOf(gen - 1), 'a generation claimed and never posted').toBeNull()
+    const next = c.supersede()
+    c.request(gen, 'b', 'unary')
+    expect(p.sent, 'precondition: the request for the old generation is refused').toHaveLength(1)
+    expect(c.encodingOf(gen), 'after the refused request').toBe('binary')
+    expect(c.encodingOf(next), 'the new generation, before its request').toBeNull()
+  })
+
   it('extend addresses the current generation and does not advance it', () => {
     const p = port()
     const c = new SessionClient(p, () => {})

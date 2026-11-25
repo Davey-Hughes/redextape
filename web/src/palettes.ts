@@ -40,6 +40,12 @@ export const COLOUR_TOKENS = [
   'tok-operator',
   'tok-punct',
   'tok-binder',
+  // TWO TOKENS BECAUSE THE WORD IS READ ON THE MARK: `result` is a result mark's edge and, mixed over the surface
+  // (`style.css`'s `--result-bg`), its ground; `result-word` is the word on that ground, held to the text floor there
+  // (`contrast.ts`'s `groundOf`). Each colour palette's `result` stands `BINDER_APART` from every token but
+  // `result-word`, so the mark reads as no other; Grayscale's is a grey of its ramp, and its edge and word carry it.
+  'result',
+  'result-word',
 ] as const
 
 export type ColourToken = (typeof COLOUR_TOKENS)[number]
@@ -92,6 +98,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#00757c',
       'tok-punct': '#5a6c76',
       'tok-binder': '#527407',
+      result: '#047857',
+      'result-word': '#065f46',
     },
     dark: {
       bg: '#212121',
@@ -113,6 +121,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#89ddff',
       'tok-punct': '#979797',
       'tok-binder': '#c3e88d',
+      result: '#34d399',
+      'result-word': '#34d399',
     },
   },
   paper: {
@@ -138,6 +148,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#7c2d92',
       'tok-punct': '#665f56',
       'tok-binder': '#166b16',
+      result: '#1f7a4d',
+      'result-word': '#17603c',
     },
     dark: {
       bg: '#191714',
@@ -159,6 +171,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#d6a2f0',
       'tok-punct': '#a39a8f',
       'tok-binder': '#86c47a',
+      result: '#62d394',
+      'result-word': '#62d394',
     },
   },
   terminal: {
@@ -184,6 +198,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#6b2fa0',
       'tok-punct': '#526457',
       'tok-binder': '#a51375',
+      result: '#0b7a5a',
+      'result-word': '#065f46',
     },
     dark: {
       bg: '#0b0e14',
@@ -205,6 +221,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#d2a8ff',
       'tok-punct': '#8b97aa',
       'tok-binder': '#f76fc6',
+      result: '#34d399',
+      'result-word': '#34d399',
     },
   },
   instrument: {
@@ -230,6 +248,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#6d28d9',
       'tok-punct': '#4f6477',
       'tok-binder': '#9f1188',
+      result: '#15803d',
+      'result-word': '#166534',
     },
     dark: {
       bg: '#101820',
@@ -251,6 +271,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#c4a8f5',
       'tok-punct': '#8ea3b5',
       'tok-binder': '#f472dc',
+      result: '#4ade80',
+      'result-word': '#4ade80',
     },
   },
   /**
@@ -283,6 +305,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#656565',
       'tok-punct': '#656565',
       'tok-binder': '#2e2e2e',
+      result: '#464646',
+      'result-word': '#2e2e2e',
     },
     dark: {
       bg: '#101010',
@@ -304,6 +328,8 @@ export const PALETTES: Readonly<Record<PaletteId, Palette>> = {
       'tok-operator': '#8c8c8b',
       'tok-punct': '#8c8b8b',
       'tok-binder': '#d1d1d1',
+      result: '#b9b9b9',
+      'result-word': '#d1d1d1',
     },
   },
 }

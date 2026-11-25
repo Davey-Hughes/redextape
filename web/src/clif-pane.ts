@@ -65,6 +65,8 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   /** How the listing is laid out: the view's own choice, as a λ view's *expand all* is. */
   #layout: ClifLayout
   #frame: ClifState | null = null
+  /** Whether `#frame` is the run's result, which the values mark: `setResult`. */
+  #result = false
   #listing: ListingPanel
   #values: MachinePanel<ValuesView>
   #stack: MachinePanel<StackView>
@@ -207,6 +209,14 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     this.#listing.setFocus(this.#ordinalsOf(pcs))
   }
 
+  /**
+   * Whether the frame the next `render` draws is the run's result, which the values mark (`draw.ts`, by
+   * `result-mark.ts`). **A PURE SETTER**, set before that `render` as `setFocus` is, so the frame is drawn once.
+   */
+  setResult(on: boolean): void {
+    this.#result = on
+  }
+
   render(frame: ClifState | null, controls: ControlState): void {
     this.#frame = frame
     this.steps.update(controls)
@@ -232,7 +242,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     const shown = this.#shown
     const next = frame?.next ?? null
     this.#listing.show(next === null || shown === null ? null : shown.rows.ordinalOf(next), frame?.step ?? null)
-    this.#values.show(frame === null ? null : clifValues(frame))
+    this.#values.show(frame === null ? null : clifValues(frame, this.#result))
     this.#stack.show(frame === null || shown === null ? null : clifStack(frame, shown.listing))
     this.#heap.show(frame === null ? null : clifHeap(frame))
   }

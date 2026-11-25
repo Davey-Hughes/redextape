@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { mapScheme } from '../../src/base16'
+import { CONTRAST_FLOORS, contrastRatio, groundOf } from '../../src/contrast'
 import {
   CUSTOM_PALETTE_VERSION,
   type CustomPalette,
+  halfTokens,
   parseCustomPalette,
   serializeCustomPalette,
   withHalf,
   withoutHalf,
 } from '../../src/custom-palette'
-import { DAY, NIGHT, storedHalf } from './base16-fixtures'
+import { adjustedHalf, beforeResult, CLOSING, DAY, NIGHT, storedHalf } from './base16-fixtures'
 
 const NIGHT_HALF = storedHalf('Night', NIGHT)
 const DAY_HALF = storedHalf('Day', DAY)
@@ -73,6 +76,39 @@ describe('the custom palette store (Plan 7 part 6b spec §7.1)', () => {
     })
     const { 'tok-binder': _, ...rest } = NIGHT_HALF.tokens
     expect(parseCustomPalette(raw)?.dark?.tokens).toEqual(rest)
+  })
+
+  it('completes a half stored before the result tokens from its colours', () => {
+    const day = beforeResult(storedHalf('Day', DAY))
+    const closing = beforeResult(adjustedHalf('Closing', CLOSING, 'dark'))
+    expect([day.tokens.result, closing.tokens['result-word']]).toEqual([undefined, undefined])
+    const dayTokens = halfTokens(day)
+    expect([dayTokens.result, dayTokens['result-word']]).toEqual([DAY[11], DAY[11]])
+    const closingTokens = halfTokens(closing)
+    expect(closingTokens.result).toBe(CLOSING[11])
+    expect(closingTokens['result-word']).not.toBe(CLOSING[11])
+    for (const f of CONTRAST_FLOORS.filter(([fg]) => fg === 'result-word')) {
+      expect(contrastRatio(closingTokens['result-word'], groundOf(closingTokens, f))).toBeGreaterThanOrEqual(4.5)
+    }
+    expect(closingTokens).toEqual(adjustedHalf('Closing', CLOSING, 'dark').tokens)
+    expect(dayTokens).toMatchObject(day.tokens)
+    expect(closingTokens).toMatchObject(closing.tokens)
+  })
+
+  it('completes an unadjusted half from its colours alone, though its word fails a floor', () => {
+    const half = beforeResult(storedHalf('Closing', CLOSING))
+    const applied = mapScheme(half.colours)
+    expect(
+      CONTRAST_FLOORS.filter(([fg]) => fg === 'result-word').some(
+        (f) => contrastRatio(applied['result-word'], groundOf(applied, f)) < f[2],
+      ),
+      "precondition: Closing's word, base0B, fails a floor an adjustment would move it to meet",
+    ).toBe(true)
+    const tokens = halfTokens(half)
+    expect([tokens.result, tokens['result-word']], 'the result tokens, base0B as mapped').toEqual([
+      CLOSING[11],
+      CLOSING[11],
+    ])
   })
 
   it('replaces one half on an import and keeps the other', () => {

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { binderClashes, CONTRAST_FLOORS, contrastRatio } from '../../src/contrast'
+import { binderClashes, CONTRAST_FLOORS, contrastRatio, groundOf, RESULT_TINT, tooClose } from '../../src/contrast'
 import {
   COLOUR_TOKENS,
   PALETTE_CSS_PATTERN,
@@ -49,9 +49,36 @@ describe('palettes', () => {
   it('meets every contrast floor in every variant', () => {
     const failures: string[] = []
     for (const [name, v] of VARIANTS) {
-      for (const [fg, bg, floor] of CONTRAST_FLOORS) {
-        const r = contrastRatio(v[fg], v[bg])
-        if (r < floor) failures.push(`${name}: ${fg} on ${bg} is ${r.toFixed(2)}, floor ${floor}`)
+      for (const f of CONTRAST_FLOORS) {
+        const [fg, bg, floor, tint] = f
+        const r = contrastRatio(v[fg], groundOf(v, f))
+        const on = tint === undefined ? bg : `${tint} over ${bg}`
+        if (r < floor) failures.push(`${name}: ${fg} on ${on} is ${r.toFixed(2)}, floor ${floor}`)
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it('carries the result colours', () => {
+    const result = (v: Variant): string[] => [v.result, v['result-word']]
+    expect(PALETTE_IDS.map((id) => [id, ...result(PALETTES[id].light), ...result(PALETTES[id].dark)])).toEqual([
+      ['material', '#047857', '#065f46', '#34d399', '#34d399'],
+      ['paper', '#1f7a4d', '#17603c', '#62d394', '#62d394'],
+      ['terminal', '#0b7a5a', '#065f46', '#34d399', '#34d399'],
+      ['instrument', '#15803d', '#166534', '#4ade80', '#4ade80'],
+      ['grayscale', '#464646', '#2e2e2e', '#b9b9b9', '#d1d1d1'],
+    ])
+  })
+
+  // A RESULT MARK MUST NOT READ AS ANOTHER MARK OR CLASS, the binder's above all. Grayscale's tokens are greys of one
+  // ramp, where the mark's edge and its word tell it apart instead.
+  it('keeps result apart from every token but result-word in every palette but Grayscale', () => {
+    const coloured = VARIANTS.filter(([name]) => !name.startsWith('grayscale'))
+    expect(coloured).toHaveLength(8)
+    const failures: string[] = []
+    for (const [name, v] of coloured) {
+      for (const { token, apart } of tooClose(v, 'result', ['result-word'])) {
+        failures.push(`${name}: result ${v.result} is ${apart} from ${token} ${v[token]}`)
       }
     }
     expect(failures).toEqual([])
@@ -112,6 +139,11 @@ describe('style.css against the palettes', () => {
     const { light, dark } = PALETTES[DEFAULT_PALETTE]
     const want = new Map(COLOUR_TOKENS.map((t) => [t, `${light[t]} ${dark[t]}`] as const))
     expect(found).toEqual(want)
+  })
+
+  it('mixes --result-bg at RESULT_TINT, the share its word is measured on', () => {
+    const declared = /--result-bg:\s*([^;]+);/.exec(css)?.[1]
+    expect(declared).toBe(`color-mix(in oklab, var(--result) ${RESULT_TINT * 100}%, transparent)`)
   })
 
   // One direction only, deliberately: a palette may define a token no rule reads yet (`on-accent`), but a

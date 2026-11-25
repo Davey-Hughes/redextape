@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { mapScheme, type Scheme } from '../../src/base16'
 import { adjustVariant, hexToOklch, type Oklch, oklchToHex, someLuminancePasses } from '../../src/base16-adjust'
-import { binderClashes, CONTRAST_FLOORS, contrastRatio, relativeLuminance } from '../../src/contrast'
-import type { ColourToken, Variant } from '../../src/palettes'
+import {
+  binderClashes,
+  CONTRAST_FLOORS,
+  contrastRatio,
+  type Floor,
+  groundOf,
+  relativeLuminance,
+} from '../../src/contrast'
+import { type ColourToken, PALETTES, type Variant } from '../../src/palettes'
 import { BOXED, CLOSING, DAY, EMBER, keyed, NARROW, NEON, NIGHT, STUCK, TWINS } from './base16-fixtures'
 
 /**
@@ -13,13 +20,15 @@ import { BOXED, CLOSING, DAY, EMBER, keyed, NARROW, NEON, NIGHT, STUCK, TWINS } 
 
 const mapped = (colours: readonly string[]): Variant => mapScheme(keyed(colours) as Scheme['colours'])
 
-/** Every floor `v` fails, as `fg on bg`. */
+/** Every floor `v` fails, as `fg on bg`, or `fg on tint over bg` for a floor read on a tint. */
 const failing = (v: Variant): string[] =>
-  CONTRAST_FLOORS.filter(([fg, bg, floor]) => contrastRatio(v[fg], v[bg]) < floor).map(([fg, bg]) => `${fg} on ${bg}`)
+  CONTRAST_FLOORS.filter((f) => contrastRatio(v[f[0]], groundOf(v, f)) < f[2]).map(([fg, bg, , tint]) =>
+    tint === undefined ? `${fg} on ${bg}` : `${fg} on ${tint} over ${bg}`,
+  )
 
 /** Whether `hex`, as token `t` in `v`, meets every floor `t` has and, for `tok-binder`, stands apart. */
 const holds = (v: Variant, t: ColourToken, hex: string): boolean =>
-  CONTRAST_FLOORS.every(([fg, bg, floor]) => fg !== t || contrastRatio(hex, v[bg]) >= floor) &&
+  CONTRAST_FLOORS.every((f) => f[0] !== t || contrastRatio(hex, groundOf(v, f)) >= f[2]) &&
   (t !== 'tok-binder' || binderClashes({ ...v, [t]: hex }).length === 0)
 
 const SURFACES = ['bg', 'bg-raised', 'bg-chrome', 'rule'] as const
@@ -161,7 +170,7 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
     const v = mapped(CLOSING)
     expect(binderClashes(v)).toEqual([])
     const { tokens, moved } = adjustVariant(v)
-    expect(moved.map((m) => m.token)).toEqual(['tok-operator', 'tok-binder'])
+    expect(moved.map((m) => m.token)).toEqual(['tok-operator', 'tok-binder', 'result-word'])
     expect(binderClashes({ ...tokens, 'tok-binder': v['tok-binder'] })).toEqual([{ token: 'tok-operator', apart: 13 }])
     expect(binderClashes(tokens)).toEqual([])
     expect(failing(tokens)).toEqual([])
@@ -172,7 +181,10 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
     expect(binderClashes(v)).toEqual([])
     expect(failing(v)).not.toContain('tok-binder on bg')
     const { tokens, unfixed } = adjustVariant(v)
-    expect(unfixed).toEqual([{ token: 'tok-binder', rule: 'binder' }])
+    expect(unfixed).toEqual([
+      { token: 'result-word', rule: 'floors' },
+      { token: 'tok-binder', rule: 'binder' },
+    ])
     expect(tokens['tok-binder']).toBe(v['tok-binder'])
     expect(binderClashes(tokens).map((c) => c.token)).toEqual([
       'fg',
@@ -187,7 +199,7 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
       'tok-operator',
       'tok-punct',
     ])
-    expect(failing(tokens)).toEqual([])
+    expect(failing(tokens)).toEqual(['result-word on result over bg', 'result-word on result over bg-raised'])
   })
 
   // BOTH ARE SO, AND THE CHECK SAYS BOTH: the floors in the line about what still fails, the binder in its own.
@@ -204,10 +216,13 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
   it('keeps a binder named for the binder rule at the value its walk began from, the one its floors moved it to', () => {
     const v = mapped(BOXED.map((c, i) => (i === 11 ? '#202020' : c)))
     const { tokens, moved, unfixed } = adjustVariant(v)
-    expect(unfixed).toEqual([{ token: 'tok-binder', rule: 'binder' }])
+    expect(unfixed).toEqual([
+      { token: 'result-word', rule: 'floors' },
+      { token: 'tok-binder', rule: 'binder' },
+    ])
     expect(moved.find((m) => m.token === 'tok-binder')).toEqual({ token: 'tok-binder', from: '#202020', to: '#757575' })
     expect(holds(tokens, 'tok-binder', tokens['tok-binder'])).toBe(false)
-    expect(failing(tokens)).toEqual([])
+    expect(failing(tokens)).toEqual(['result-word on result over bg'])
   })
 
   it('keeps each token no lightness can fix at its own value, adjusts the rest, and names what is left', () => {
@@ -226,9 +241,10 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
       'tok-operator floors',
       'tok-punct floors',
       'tok-binder floors',
+      'result-word floors',
     ])
     for (const u of unfixed) expect(tokens[u.token], u.token).toBe(v[u.token])
-    expect(moved.map((m) => m.token)).toEqual(['focus-ring', 'warn'])
+    expect(moved.map((m) => m.token)).toEqual(['focus-ring', 'warn', 'result'])
     expect(failing(tokens).filter((f) => f.startsWith('focus-ring') || f.startsWith('warn'))).toEqual([])
   })
 
@@ -248,6 +264,8 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
       'tok-operator floors',
       'tok-punct floors',
       'tok-binder floors',
+      'result floors',
+      'result-word floors',
     ])
     // THE NEAREST PASSING COLOUR, AT ITS OWN HUE: warnings from `#e8c878` at lightness 0.843 to 0.466.
     expect([tokens.warn, tokens['focus-ring']]).toEqual(['#6f5600', '#5b5769'])
@@ -262,6 +280,43 @@ describe('adjustVariant (spec §6.2–§6.4)', () => {
     const v = mapped(NIGHT.map((c, i) => (i === 0 ? '#101010' : i === 1 ? '#b3b3b3' : c)))
     const { tokens } = adjustVariant(v)
     expect([tokens.warn, tokens['focus-ring']]).toEqual(['#785c00', '#625d70'])
+  })
+
+  it('walks the result word against the result its first pass left', () => {
+    const v = mapped(CLOSING)
+    const words = CONTRAST_FLOORS.filter(([fg]) => fg === 'result-word')
+    expect(words.map(([, bg, , tint]) => `${tint} over ${bg}`)).toEqual(['result over bg', 'result over bg-raised'])
+    expect(failing(v)).toEqual(
+      expect.arrayContaining(['result-word on result over bg', 'result-word on result over bg-raised']),
+    )
+    const { tokens, moved } = adjustVariant(v)
+    expect(tokens.result).toBe(v.result)
+    expect(moved.map((m) => m.token)).toContain('result-word')
+    for (const f of words) expect(contrastRatio(tokens['result-word'], groundOf(tokens, f))).toBeGreaterThanOrEqual(4.5)
+    // WHERE THE FIRST PASS MOVES THE RESULT, the word is held to the ground the moved result gives: a pale green the
+    // edge floor darkens, under a grey that meets 4.5 on the pale green's tint and not on the darker one's.
+    const pale = { ...PALETTES.material.light, result: '#a7f3d0', 'result-word': '#606060' }
+    for (const f of words) expect(contrastRatio(pale['result-word'], groundOf(pale, f))).toBeGreaterThanOrEqual(4.5)
+    const after = adjustVariant(pale)
+    expect(after.moved.map((m) => m.token)).toEqual(['result', 'result-word'])
+    const onMoved = { ...pale, result: after.tokens.result }
+    expect(words.some((f) => contrastRatio(pale['result-word'], groundOf(onMoved, f)) < 4.5)).toBe(true)
+    for (const f of words) {
+      expect(contrastRatio(after.tokens['result-word'], groundOf(after.tokens, f))).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  // A FOREGROUND READ ON A TINT WAITS FOR THE TINT BECAUSE THIS MODULE ORDERS IT, not because `COLOUR_TOKENS` happens
+  // to list `result` before `result-word`: here a table puts the word's floors on `fg`, which is listed first.
+  it('walks a foreground read on a tint after the tint has moved, even one listed before it', () => {
+    const floors = CONTRAST_FLOORS.map((f): Floor => (f[0] === 'result-word' ? ['fg', f[1], f[2], 'result'] : f))
+    const onTint = floors.filter(([fg, , , tint]) => fg === 'fg' && tint !== undefined)
+    expect(onTint).toHaveLength(2)
+    const v = { ...PALETTES.material.light, result: '#a7f3d0', fg: '#606060' }
+    for (const f of onTint) expect(contrastRatio(v.fg, groundOf(v, f))).toBeGreaterThanOrEqual(4.5)
+    const { tokens, moved } = adjustVariant(v, floors)
+    expect(moved.map((m) => m.token)).toEqual(['fg', 'result'])
+    for (const f of onTint) expect(contrastRatio(tokens.fg, groundOf(tokens, f))).toBeGreaterThanOrEqual(4.5)
   })
 
   it('moves nothing in a scheme that passes', () => {
@@ -389,7 +444,7 @@ describe('what apply adjusted cannot fix', () => {
       const { v, tokens, unfixed } = adjusted(colours)
       for (const { token, rule } of unfixed) {
         const meets = (hex: string): boolean =>
-          CONTRAST_FLOORS.every(([fg, bg, floor]) => fg !== token || contrastRatio(hex, tokens[bg]) >= floor)
+          CONTRAST_FLOORS.every((f) => f[0] !== token || contrastRatio(hex, groundOf(tokens, f)) >= f[2])
         // EACH KEEPS THE VALUE ITS WALK BEGAN FROM: its own, or, for a binder held to the binder rule, the value its
         // floors moved it to, which then meets them. The scan is from that value, at its hue and chroma.
         const began = tokens[token]

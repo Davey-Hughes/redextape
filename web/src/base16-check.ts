@@ -1,6 +1,6 @@
 import { BASE16_KEYS, BASE16_MAPPING, type Base16Key, mapScheme, type Scheme, schemeName } from './base16'
 import { type Adjustment, adjustVariant } from './base16-adjust'
-import { BINDER_APART, type BinderClash, binderClashes, CONTRAST_FLOORS, contrastRatio } from './contrast'
+import { BINDER_APART, type BinderClash, binderClashes, CONTRAST_FLOORS, contrastRatio, groundOf } from './contrast'
 import { COLOUR_TOKENS, type ColourToken, type Variant } from './palettes'
 
 /**
@@ -10,12 +10,13 @@ import { COLOUR_TOKENS, type ColourToken, type Variant } from './palettes'
  * scheme; this says how it measures.
  */
 
-/** A floor a mapped scheme misses: the pair, the floor, and the ratio it reaches. */
+/** A floor a mapped scheme misses: the pair, the floor, the ratio it reaches, and the tint it is read on, if any. */
 export type FloorFailure = {
   readonly fg: ColourToken
   readonly bg: ColourToken
   readonly floor: number
   readonly ratio: number
+  readonly tint?: ColourToken
 }
 
 /** A scheme held to the floors and the binder rule, as it is and as `apply adjusted` would leave it (spec §5.3). */
@@ -33,9 +34,11 @@ export type SchemeCheck = {
 }
 
 function floorFailures(v: Variant): FloorFailure[] {
-  return CONTRAST_FLOORS.map(([fg, bg, floor]) => ({ fg, bg, floor, ratio: contrastRatio(v[fg], v[bg]) })).filter(
-    (f) => f.ratio < f.floor,
-  )
+  return CONTRAST_FLOORS.map((f): FloorFailure => {
+    const [fg, bg, floor, tint] = f
+    const ratio = contrastRatio(v[fg], groundOf(v, f))
+    return tint === undefined ? { fg, bg, floor, ratio } : { fg, bg, floor, ratio, tint }
+  }).filter((f) => f.ratio < f.floor)
 }
 
 /**
@@ -62,8 +65,8 @@ export function passes(check: SchemeCheck): boolean {
 }
 
 /**
- * Each token in words (spec §5.3): what it colours as a foreground, and, for the four a foreground sits on, what that
- * surface is. `accent` is both, and reads the same either way.
+ * Each token in words (spec §5.3): what it colours as a foreground, and, for the four a foreground sits on and the one
+ * it is read on as a tint, what that is. `accent` and `result` are both, and read the same either way.
  */
 const WORDS: Readonly<Record<ColourToken, string>> = {
   bg: 'the page',
@@ -85,6 +88,8 @@ const WORDS: Readonly<Record<ColourToken, string>> = {
   'tok-operator': 'operators',
   'tok-punct': 'punctuation',
   'tok-binder': 'binders',
+  result: 'the result mark',
+  'result-word': 'the result word',
 }
 
 /** `a`, `a and b`, `a, b and c`, each once, in the order given. */
@@ -105,7 +110,7 @@ const clashColours = (clashes: readonly BinderClash[]): number =>
 
 /**
  * The summary (spec §5.3, 1): the scheme's name, its variant and how it was found, and how it measures — `Ember ·
- * dark, detected: 17 of 35 contrast checks below WCAG AA, worst 3.31:1`. A base24 scheme adds a second line.
+ * dark, detected: 17 of 39 contrast checks below WCAG AA, worst 3.31:1`. A base24 scheme adds a second line.
  */
 export function summaryLines(check: SchemeCheck): string[] {
   const { scheme, failures, clashes } = check
@@ -120,10 +125,17 @@ export function summaryLines(check: SchemeCheck): string[] {
   return lines
 }
 
-/** Where a token's floors sit, as scheme colours: `on base01`, `on both base00 and base01`. */
+/**
+ * Where a token's floors sit, as scheme colours: `on base01`, `on both base00 and base01`, or for a floor read on a
+ * mark's tint `on base0B over both base00 and base01`, as `failureLines` names that ground, since it is neither colour
+ * alone. A token's floors are all on a tint or none are.
+ */
 function surfacesOf(t: ColourToken): string {
-  const keys = [...new Set(CONTRAST_FLOORS.filter(([fg]) => fg === t).map(([, bg]) => BASE16_MAPPING[bg]))]
-  return keys.length === 2 ? `on both ${keys[0]} and ${keys[1]}` : `on ${list(keys)}`
+  const floors = CONTRAST_FLOORS.filter(([fg]) => fg === t)
+  const keys = [...new Set(floors.map(([, bg]) => BASE16_MAPPING[bg]))]
+  const tint = floors[0]?.[3]
+  const over = tint === undefined ? '' : `${BASE16_MAPPING[tint]} over `
+  return keys.length === 2 ? `on ${over}both ${keys[0]} and ${keys[1]}` : `on ${over}${list(keys)}`
 }
 
 /**
@@ -155,11 +167,13 @@ export function adjustLine(check: SchemeCheck): string | null {
  * What the scheme fails, grouped by scheme colour pair (spec §5.3, 3) — `base08 on base01: error text on panels and
  * headers — 3.53:1, needs 4.5` — the pair furthest below its floor first; then each colour the binder sits too close
  * to. The tokens of one pair are one pair of colours, so a group has one ratio, and its floor is the highest it fails.
+ * A floor read on a tint names it, `base0B on base0B over base00`, since its ground is neither colour alone.
  */
 export function failureLines(check: SchemeCheck): string[] {
   const groups = new Map<string, FloorFailure[]>()
   for (const f of check.failures) {
-    const pair = `${BASE16_MAPPING[f.fg]} on ${BASE16_MAPPING[f.bg]}`
+    const over = f.tint === undefined ? '' : `${BASE16_MAPPING[f.tint]} over `
+    const pair = `${BASE16_MAPPING[f.fg]} on ${over}${BASE16_MAPPING[f.bg]}`
     groups.set(pair, [...(groups.get(pair) ?? []), f])
   }
   const floors = [...groups]
@@ -167,8 +181,10 @@ export function failureLines(check: SchemeCheck): string[] {
       const floor = Math.max(...fs.map((f) => f.floor))
       const r = fs[0]?.ratio ?? 0
       const on = list(fs.map((f) => WORDS[f.bg]))
+      const tints = list(fs.flatMap((f) => (f.tint === undefined ? [] : [WORDS[f.tint]])))
+      const ground = tints === '' ? on : `${tints} over ${on}`
       const said = list(COLOUR_TOKENS.filter((t) => fs.some((f) => f.fg === t)).map((t) => WORDS[t]))
-      const what = said.endsWith(` on ${on}`) ? said : `${said} on ${on}`
+      const what = said.endsWith(` on ${ground}`) ? said : `${said} on ${ground}`
       return { line: `${pair}: ${what} — ${ratio(r)}:1, needs ${floor}`, below: r / floor }
     })
     .sort((a, b) => a.below - b.below)

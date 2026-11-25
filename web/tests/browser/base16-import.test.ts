@@ -136,7 +136,7 @@ describe('the base16 import dialog', () => {
     await openWith(legacyLayout('', STUCK))
     await userEvent.click(inDialog('button.base16-check'))
     expect(said('.base16-adjusts')).toEqual([
-      'apply adjusted moves no colour’s lightness; binders stay too close to 8 other colours, where no lightness sets them apart',
+      'apply adjusted moves no colour’s lightness; 2 checks still fail, where no lightness passes on base0B over both base00 and base01; binders stay too close to 8 other colours, where no lightness sets them apart',
     ])
     expect(applyButton().disabled).toBe(false)
     expect(adjustedButton().disabled).toBe(true)
@@ -185,10 +185,10 @@ describe('the base16 import dialog', () => {
     await openWith(legacyLayout('Ember', EMBER))
     await userEvent.click(inDialog('button.base16-check'))
     expect(said('.base16-result > p')).toEqual([
-      'Ember · dark, detected: 17 of 35 contrast checks below WCAG AA, worst 3.31:1',
+      'Ember · dark, detected: 17 of 39 contrast checks below WCAG AA, worst 3.31:1',
       'apply adjusted moves 4 colours’ lightness, and every check then passes',
     ])
-    expect(heard()).toBe('Ember · dark, detected: 17 of 35 contrast checks below WCAG AA, worst 3.31:1')
+    expect(heard()).toBe('Ember · dark, detected: 17 of 39 contrast checks below WCAG AA, worst 3.31:1')
     const toggle = inDialog<HTMLButtonElement>('.panel[data-panel="base16-details"] button.panel-toggle')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(inDialog('.base16-details-body').hidden).toBe(true)

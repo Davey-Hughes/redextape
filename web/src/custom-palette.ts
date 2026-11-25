@@ -1,5 +1,6 @@
-import { BASE16_KEYS, type Base16Key, type SchemeVariant } from './base16'
-import { COLOUR_TOKENS, type ColourToken } from './palettes'
+import { BASE16_KEYS, type Base16Key, mapScheme, type SchemeVariant } from './base16'
+import { adjustVariant } from './base16-adjust'
+import { COLOUR_TOKENS, type ColourToken, type Variant } from './palettes'
 
 /**
  * The one imported palette, `custom` (Plan 7 part 6b spec §7.1): a half per variant, each the scheme it came from
@@ -7,7 +8,7 @@ import { COLOUR_TOKENS, type ColourToken } from './palettes'
  *
  * **`tokens` IS STORED, NOT RECOMPUTED FROM `colours`**, so a later change to the mapping or the adjustment never
  * repaints a palette someone has already applied. `colours` is kept beside it so the dialog can show what an
- * adjustment changed.
+ * adjustment changed, and so a token added after a half was stored can be completed from it (`halfTokens`).
  */
 
 /** The `localStorage` key, namespaced for the reason `appearance.ts`'s `STORAGE_KEY` gives. */
@@ -22,7 +23,7 @@ export type CustomHalf = {
   readonly name: string
   /** The scheme's own sixteen, as read. */
   readonly colours: Readonly<Record<Base16Key, string>>
-  /** What is applied. A token missing here falls back to the default palette's. */
+  /** What is applied. A token missing here is completed from `colours` by `halfTokens`. */
   readonly tokens: Readonly<Partial<Record<ColourToken, string>>>
   /** Whether `apply adjusted` wrote `tokens`. */
   readonly adjusted: boolean
@@ -101,6 +102,19 @@ export function parseCustomPalette(raw: string | null): CustomPalette | null {
 function palette(light: CustomHalf | undefined, dark: CustomHalf | undefined): CustomPalette | null {
   if (light !== undefined) return dark === undefined ? { light } : { light, dark }
   return dark === undefined ? null : { dark }
+}
+
+/**
+ * Every token a stored half draws: the stored ones as stored, and each one it lacks, a token added after it was stored,
+ * as the button that stored it would have given it: mapped from `colours` and, for an `adjusted` half, adjusted beside
+ * the stored tokens, so a word added on a stored mark's tint is walked against that stored mark. COMPLETED, NEVER
+ * REPAINTED: no stored token changes, for the reason the module doc gives.
+ */
+export function halfTokens(half: CustomHalf): Variant {
+  const mapped: Variant = { ...mapScheme(half.colours), ...half.tokens }
+  const complete = COLOUR_TOKENS.every((t) => half.tokens[t] !== undefined)
+  const derived = half.adjusted && !complete ? adjustVariant(mapped).tokens : mapped
+  return { ...derived, ...half.tokens }
 }
 
 export function serializeCustomPalette(palette: CustomPalette): string {

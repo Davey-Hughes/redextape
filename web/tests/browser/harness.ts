@@ -380,7 +380,7 @@ export const lambdaStepText = () => stepTextOf('lambda-0')
 export const lambdaTerm = () => document.querySelector<HTMLElement>('[data-leaf="lambda-0"] .term')
 
 /** A mark the λ view draws: a bar piece's `data-lane`, and the `is-` class of a one-row node's run. */
-export type LambdaMark = 'next-redex' | 'contractum' | 'linked'
+export type LambdaMark = 'next-redex' | 'contractum' | 'linked' | 'result'
 
 /** The selector for each element a λ view draws `mark` with, bar piece or run, so an absence it finds is the mark's. */
 const anyMark = (mark: LambdaMark) => `.term-bar[data-lane="${mark}"], .term-mark.is-${mark}`
@@ -1080,6 +1080,25 @@ export function chooseOption(sel: string, value: string): void {
 /** The view hosts on the page — every `[data-leaf]` under `#views` but a Stage's tabs, which carry one too. */
 export const hosts = (): HTMLElement[] =>
   [...document.querySelectorAll<HTMLElement>('#views [data-leaf]')].filter((el) => el.getAttribute('role') !== 'tab')
+
+/**
+ * What a mark in the view `leaf` may not move, to compare at two steps: the box of every view host, `leaf`'s own
+ * included, the header's and `#results`', and the document's scroll size. **PLAIN NUMBERS**: a `DOMRect`'s sides are
+ * getters, which `toEqual` does not read, so two rects of any size compare equal.
+ */
+export function outside(leaf: string): Record<string, readonly number[]> {
+  if (host(leaf) === null) throw new Error(`no view at ${leaf}`)
+  const sides = (el: Element) => {
+    const r = el.getBoundingClientRect()
+    return [r.left, r.top, r.width, r.height]
+  }
+  const out: Record<string, readonly number[]> = {}
+  for (const h of hosts()) out[h.dataset.leaf ?? ''] = sides(h)
+  out.header = sides(queryEl('header.bar'))
+  out.results = sides(results())
+  out.scroll = [document.documentElement.scrollWidth, document.documentElement.scrollHeight]
+  return out
+}
 
 /** The layout storage holds, as written, or `null` where it holds none. */
 export const storedLayoutText = (): string | null => localStorage.getItem(LAYOUT_STORAGE_KEY)

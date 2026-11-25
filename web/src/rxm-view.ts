@@ -154,8 +154,19 @@ export function heapSummary(s: HeapWindow): string {
   return s.box_len === 0 ? cells : `${cells} · ${n(s.box_len)} ${s.box_len === 1 ? 'box' : 'boxes'}`
 }
 
-/** The registers panel at `s`: its rows, then how many arguments and locals the window hides, then the legend. */
-export function rxmValues(s: RxmState): ValuesView {
+/**
+ * `rows` with the result's row first and the others after it in their order. **FIRST, BECAUSE ITS ROW SPANS THE GRID'S
+ * WIDTH** (`style.css`'s `.is-result`): placed after other rows, it would leave the cells of the row before it empty.
+ */
+export function resultFirst<R extends { readonly result: boolean }>(rows: readonly R[]): R[] {
+  return [...rows.filter((r) => r.result), ...rows.filter((r) => !r.result)]
+}
+
+/**
+ * The registers panel at `s`: its rows, then how many arguments and locals the window hides, then the legend. At the
+ * run's result (`result`) `rr` holds it, and its row is marked and put first.
+ */
+export function rxmValues(s: RxmState, result: boolean): ValuesView {
   const rows = registerRows(s)
   const notes: { text: string; legend: boolean }[] = []
   const more = (hidden: number, what: string) => {
@@ -168,12 +179,14 @@ export function rxmValues(s: RxmState): ValuesView {
   const legend = unwrittenLegend(s, rows)
   if (legend !== null) notes.push({ text: legend, legend: true })
   return {
-    rows: rows.map((r) => {
-      const says: string[] = []
-      if (r.changed) says.push('changed by the last instruction')
-      if (r.unwritten) says.push(unwrittenMeaning(s))
-      return { ...r, says }
-    }),
+    rows: resultFirst(
+      rows.map((r) => {
+        const says: string[] = []
+        if (r.changed) says.push('changed by the last instruction')
+        if (r.unwritten) says.push(unwrittenMeaning(s))
+        return { ...r, result: result && r.name === 'rr', says }
+      }),
+    ),
     notes,
   }
 }

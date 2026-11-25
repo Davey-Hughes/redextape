@@ -42025,3 +42025,685 @@ codes, by `$R/scripts/figures.zsh`, which prints each command above its output i
 | the LLVM and browser tiers | what `check-all.sh` skipped | `noansi $R/logs/gate-checkall.log \| grep -a 'PARTIAL'` |
 | 8 legs, each exit 0 | the gate's legs | `cut -d' ' -f2,3 $R/logs/gate-exits.txt` |
 | 18, `cc9cff7` | the scans' runs that exited 0, and the commit they ran at | `grep -c 'exit=0' $R/logs/scans-exits.txt; head -1 $R/logs/scans-exits.txt` |
+
+#### AT THE LAST STEP OF A RUN THAT FINISHED WITH A VALUE, THE λ, TM, RXM AND CLIF VIEWS MARK THE RESULT WITH AN EMERALD TINT, AN EDGE AND THE WORD `result`, THE RXM AND CLIF VIEWS SHOW IT WHOLE IN THEIR FIRST ROW, AND A BINARY RUN'S TM STATUS LINE SAYS `little-endian` WHERE IT HAS ROOM (2026-11-23 and 24, branch `return-value-highlight`, built on `b627fe3`, merged with main's `e65a533` in `66ab998` and with main's `2a96b84` in `af7cdc3`; against main `2a96b84..af7cdc3`, 38 commits, plus the commit that brings this entry up to `af7cdc3`)
+
+The user, on 2026-11-21, asking for the program's result to be highlighted in each view at the end of a run: for the TM
+"the tape that holds that", for rxm and clif "the rr register (I presume)", for λ "the only value left"; and on
+2026-11-23, for the TM, "specify whether it's big or little endian ... maybe in the bar above only if there's space".
+They chose the mark, an emerald tint and edge with the word `result`, and the place a long result goes, its panel's
+first row, from screenshots of the real app (the design's *Approaches*). This is the second of the return-value lane's
+three pull requests: the first, #194, gave a text cut short in the TM, rxm and clif views a tooltip that reads it whole,
+and the third is list results. The branch was built on `b627fe3`, and of its 26 commits up to `0776dee`, 21 change
+`web/` or `crates/`. Up to `eda115d` they are 9: `6746d75` clif's returned value, `0683c5f` and `006592a` the colours,
+`2a1879a` and `9a6ac30` the rxm and clif views, `1521b36` the TM view, `a93dd45` the λ view, `13dbc60` the runs that end
+without a mark and the help page, and `eda115d` a case for a result that lands after the frames. After it come
+`09f5963`, the help page's sentence on the result, and the 11 commits of the whole-branch review's fixes, `1428439` to
+`ea000dd`, listed under *The review's fixes*. The other 5 change no code: `7ffb556` holds the design,
+`docs/superpowers/specs/2026-11-23-return-value-highlight-design.md`, `a4c3ade` the plan,
+`docs/superpowers/plans/2026-11-23-return-value-highlight.md`, and `417b336`, `5794b71` and `0776dee` this entry and the
+design's *As built*. Main then took #196, `e65a533`, which removed copies from the web app. `66ab998` merges it into the
+branch, and five commits follow before a second review: `6247aff`, a test file's doc, `a76742a`, the comment budget put
+back to main's, `cc9ba69`, a case for a view split after the run's end (*The merge with main*), `80149cc`, this entry
+and the design's *As built* brought up to `cc9ba69`, and `10f6c0e`, which has that case compile its own program.
+`9f44df0` brought this entry up to `10f6c0e`, and a second review of the whole branch at that commit found five things,
+which `57b7eeb`, `825bbe8` and `ad8fbdb` answer in tests and in the import dialog's words, and `dde2703` in this entry's
+text (*The second review's fixes*). Main then took #199, `2a96b84`, and `af7cdc3` merges it into the branch (*The merge
+with main*). Against main the branch is the 38 commits of `2a96b84..af7cdc3`. The lane's record is
+`~/temp/redextape-return-value-record/`; `$L` below is its `pr2/impl/`. **Every figure in this entry is read at
+`af7cdc3`**, the last commit to change code, the code it brings being main's, but those of each task's runs before its
+commit, its sabotages among them, which ran on that task's tree, those of the first merge's checks, which ran before its
+commits, and those of the gate and the built app's drive, which ran at `a76742a`, the tree to which `cc9ba69` adds one
+test case, `10f6c0e` changes it, the second review's fixes add three cases and the dialog's words, and `af7cdc3` adds
+#199; the gate's second coverage run ran at `cc9ba69`, and the flake probe on the trees its section names.
+
+##### WHAT CHANGED
+
+**When a view marks the result.** At the last step of a run that finished with a value, and at no other. A view marks it
+when the result reply the page holds is of the generation of the frames the view shows, the leg's recording `ended`, the
+view stands on its newest frame, that frame proves the run's end, and the leg's value is a decoded `Value` other than
+Unit's `()`. The proof is the frame's own: a TM frame with no rule to fire, an rxm frame with no instruction next, a
+clif frame with none next and a returned value, a λ tree at a normal form. The recording's end alone would not do, since
+`endOf` maps a cursor still `Running` to `ended`. So nothing is marked for a run stopped by its step cap or a full
+history, an overflow, a fault, a trap or a function's result (`Undecodable`). `resultMarked`, in the new
+`web/src/result-mark.ts`, decides, and `draw.ts` asks it for every view at every draw, so a result that lands after the
+frames marks the views with the draw it brings, and a step back takes the mark away.
+
+**The mark.** An emerald tint, an inset edge of 1px in the same colour, and the word `result` after what it marks,
+smaller than the value (0.75em) and in a colour held to the text floor on that tint: in rxm the `rr` register; in clif
+the value main returns; in the TM, REG's field 0, its cells in one box; in λ the root, when it is a chip, a numeral or a
+Bool, drawn on one row. In λ the edge is an outline, which composes with the link's and the contractum's box-shadows;
+the word is generated content with empty alternative text, and `data-marks` says `result:` where the root starts, as it
+says the other marks. Where the root is also the contractum or a pinned link, the result's ground is drawn alone, in
+place of theirs: the contractum keeps its underline and its words, the link its edge (*The review's fixes*).
+
+**Whole, in the first row.** In rxm's registers panel and clif's values panel the marked row comes first and spans every
+column, and its value wraps rather than ending in an ellipsis: the row breaks before what follows the value first, and
+inside the value only where the value alone is wider than the row. In clif the registers a value stands for and the word
+go in one box, so fact(12)'s result in a one-column panel reads `479001600`, then `rr result` under it. In the TM the
+word pushes the rest of REG's cells right. These moves stay inside the view, at the last step only.
+
+**clif's returned value** crosses from Rust as `ClifState::returned`, set only at a run's normal end: the operand of
+main's `return`, its aliases followed. sum_to(5) as built ends on `return v9`, with `v9 -> v8`, so its view marks `v8`
+and not `v3`, which also stands for `rr`. The frame's values always hold the returned value's row: where the first ones
+miss it, it takes the window's last place.
+
+**`little-endian`.** Under the binary encoding, the TM status line ends with ` · little-endian` at the result, a binary
+field's leftmost cell being its least significant digit, where the line has room for it: the words are dropped rather
+than wrapped, and weighed again when the line's width changes. The encoding is the one the session client posted for the
+generation on screen, which it now keeps for each generation it posts (`encodingOf`).
+
+**The colours.** Two palette tokens: `result`, the edge and the colour mixed at 20% into the ground, `--result-bg`; and
+`result-word`, the word. Each of the 5 built-in palettes sets both in its light and dark variants, and the stylesheet's
+fallback copy holds the default's: the user's emerald, `#047857` light and `#34d399` dark, with the darker `#065f46` for
+the light word. Four contrast floors join the others, 39 in all: the edge on `bg` and on `bg-raised` at 3, and the word
+at 4.5 on the edge's tint over each, measured on the colour the browser composites. Each colour palette's `result`
+stands `BINDER_APART` from every token but `result-word`; Grayscale's is a grey of its own ramp, where the edge and the
+word carry the mark. An imported base16 scheme gives both tokens its `base0B`, the green its binders take, so the binder
+rule leaves the two out. The import's check names the new floors, and *apply adjusted* walks the word after the
+surfaces' foregrounds, against the result its first pass left. A palette imported before this branch is completed from
+the scheme colours it stored, and its stored tokens are never repainted; the import dialog's changes panel lists the
+colours such a half moved from the tokens the page draws from it, completed ones included.
+
+**The help page** says it after the step controls: which views mark a number, a Bool and a list, a list by its pointer,
+that the λ view marks a number or a Bool only on one line, that no view marks a run that ends with `()`, with a function
+or with a value too large to print, that the rxm and clif views show the result whole in their first row, and that
+`little-endian` means a field's leftmost cell is its least significant digit.
+
+**The tests.** Rust: 2 new tests in `crates/redextape-clif/tests/state.rs`, C1 and C2 below, and the every-step test
+checks the window at a normal end. Node: the new `web/tests/node/result-mark.test.ts`, and cases in the contrast,
+palette, base16, custom palette, skin, rxm and clif view, tape and session client tests. Browser, 5 new files:
+`result-values` (both machine views, drawn by hand), `result-app` (rxm and clif in the app), `result-tm`,
+`result-lambda` (the word's ratio read on the ground the page draws among them) and `result-stopped` (the runs that end
+without a mark, `()` and a recording said to have ended before its run among them, both themes in every palette, nothing
+outside a view moving); a sixth, `result-copy`, went with the copies when main was merged in (*The merge with main*).
+`cut-text-app.test.ts`'s clif case now reads fact(12)'s result one step before the end, the latest step at which it is
+cut, and `base16-remove.test.ts` reads the changes panel of a half stored before the result tokens. N1, V1, A-rxm-1 and
+the like are the plan's names for the cases.
+
+##### THE REVIEW'S FIXES
+
+The review of the whole branch at `5794b71` (`$L/review.md`) found 3 important issues, the λ word under its floor on a
+layered ground, no app case for a run that ends with `()`, and this entry stopping at `eda115d`; 4 minor ones; and, with
+the small items the task reviews had left, 16 it ruled must be fixed before merge. Each finding was checked before it
+was acted on, and each held. The fixes are 11 commits, each test first where a case could fail first:
+
+- `1428439`, **the λ result's ground, drawn alone.** On a root that was both the result and the contractum, the plan's
+  pair rule laid `--result-bg` over the contractum's wash, and the word `result` read below its floor there.
+  is_even(6)'s root `true` is the contractum at the λ view's last step, and on that ground the browser read the word at
+  4.20:1 in Material light and 3.43:1 in Material dark, under 4.5:1 in 7 of the 10 variants; on a root that is also a
+  pinned link, in 6. Now `.term .is-result` draws the result's ground alone, and so does
+  `.term .is-result.is-linked.is-contractum`, named since `.term .is-linked.is-contractum` outranks the plain rule, so a
+  root that is all three takes it too. The contractum keeps its underline and its words, the link its edge. On the
+  ground drawn the word now reads 5.54:1 and 5.57:1 in Material light and dark, 5.25 and 6.34 in Paper, 5.32 and 6.93 in
+  Terminal, 4.68 and 6.68 in Instrument, and 9.07 and 8.52 in Grayscale, in each of the three cases. L2, L3 and a new
+  case for the triple measure it first, with `contrast.ts`'s `contrastRatio` against `CONTRAST_FLOORS`, on the grounds
+  the page paints composited on a canvas, then check the grounds. The λ word's size and colour now come from
+  `.result-word`'s rule.
+- `cbfbd9b`, **a run that ends with `()` in the app.** `let mut x = 0; x = 1;` runs to its end in the λ, TM, rxm and
+  clif views. The case first asserts that each readout segment reads `()`, each view stands at its last step and the λ
+  root is the numeral chip `0`, which the result's rule marks for a number, then counts the marks of the four views in
+  one assertion. Without the Unit test (D-5) it finds marks in each.
+- `9ec179e`, **the frame's proof of the end, in the app.** The case cuts the next program's rxm recording in the
+  messages from the worker, its first chunk halved and said to have ended, so the rxm view stands at its newest step
+  with an instruction still next while the program's result has landed, and asserts it marks nothing. Without
+  `draw.ts`'s reading of the frame's proof (M1) it fails. The λ half has no such case (*What this did not close*).
+- `fa1e2dd`, **the import dialog's changes panel** lists what a stored adjusted half moved from the tokens the page
+  draws from it, `halfTokens`, rather than from its stored tokens alone, so a half stored before the result tokens lists
+  base0B moved as the result word.
+- `8d08c76`, **comments and a test title that were false.** `resultField`'s doc and its test fixture's say REG's window
+  starts at cell 0 because the encoding's gadgets leave REG's head on its leading `#`, not because every halt does;
+  `contrast.ts`'s two lead lines name the tint and the two result tokens; `adjustVariant`'s doc names both tests that
+  pass a floor table; the result row's stylesheet comment says the break falls before the box after the value, and the
+  TM word's gives its reasons; `skin.test.ts`'s title says a stored half is drawn as stored.
+- `7d6596f`, **comment lines over 120 columns.** Its message says the seven the review found are rewrapped in it. It
+  rewraps or shortens five of them, in `machine-panels.ts`, `result-mark.ts` (shortened, since a wrap would take its
+  block past the comment guard's cap), `tm-pane.ts` and two in `result-stopped.test.ts`; the other two, both in
+  `style.css`, were rewritten by `1428439` and `8d08c76`. It also rewraps the two over-long lines `1428439` added to
+  `result-lambda.test.ts`.
+- `cff0480`, X1's λ half is a precondition with its own message, since the λ run has no value there and its view marks
+  nothing whatever its history did; the TM half stays the claim.
+- `620ef0d`, the help page says the λ view marks a number or a Bool only on one line, and that a run ending with a value
+  too large to print has no mark.
+- `29ccfee`, T4 asserts that `little-endian` is drawn with a width and whole, not clipped.
+- `26028c1`, A-clif-2 asserts as built's end before the switch, and the optimised run's own total and values before the
+  row it marks, since both listings return v8; it switches back in a `finally`.
+- `ea000dd`, `contrast.test.ts`'s case for a dim text drawn in the page colour reads each floor on its own ground,
+  `groundOf`, a tinted floor on its tint.
+
+##### THE MERGE WITH MAIN
+
+While the branch was built, main took #196, `e65a533`, which removed copies from the web app: `git diff --stat b627fe3
+e65a533` gives 288 files changed, 5762 insertions and 31613 deletions. `66ab998` merges it into the branch, a merge and
+not a rebase, since 26 commits over that deletion would conflict commit after commit and the pull request is squashed.
+From `b627fe3`, 18 files were changed both on main, to `e65a533`, and on the branch, to `0776dee`; the merge conflicted
+in 6 of them, each settled by reading both sides:
+
+- `web/src/draw.ts`: main's removal of the copies' readings, `unlinked` and `onProgram` stands; the branch's `setResult`
+  follows main's `setFocus` with no copy guard, and the λ pass hands the view main's `pin` and the mark. The session
+  lookup the guard repeated is made once.
+- `web/src/linked-legs.ts`, `web/src/rxm-pane.ts` and `web/src/session-client.ts`: the branch's `setResult` and
+  `encodingOf` stay, and main's deletions beside them, `setEditorAvailable`, `setScratch` and `scratch()`, stand.
+- `web/src/tm-pane.ts`: main's narrower imports with `resultField` added, `setResult` kept beside main's deletion of
+  `setDetached`, and main's status line, without a copy's words, followed by `#fitEndian`.
+- This roadmap, rebuilt rather than resolved block by block: main's file whole, then this entry as it was at `0776dee`,
+  where the branch had only appended to the file. Main's file is an exact prefix of the result, its last two `####`
+  headings are #196's and this entry's, and the entry was byte-equal to `0776dee`'s.
+
+**The copy guard went with the copies.** The plan had `draw.ts` mark no view of a copy, by `unlinked` for the machine
+views and `sessions.entryOf(session).detached` for λ, and `result-copy.test.ts`'s 2 cases, an rxm copy and a λ copy at
+their run's end, asserted no mark; X-5 and X-5b, each letting `draw.ts` mark a copy, failed one case each. #196 deleted
+what the guard read, `SessionEntry.detached` and `unlinked`, and the harness helpers the file used, `copyShown` and
+`pickInViewMenu`, and on main `sessions.add` has one caller, which registers the program's session, so no view can show
+a copy. The merge commit drops the guard and the file, since the hook's typecheck refuses code that reads what main
+deleted, and `6247aff` drops the last sentence that sent a copy's case to that file. `result-lambda` and
+`result-stopped` read the λ term by main's `lambdaTerm()?.textContent` where they read `lambdaTermText()`, which main
+deleted; both read the text of the same element.
+
+**A view built after the run's end.** Each of `result-copy.test.ts`'s cases also asserted that the program's view, split
+from the copy's after the run had ended, marked the result, and no other `result-*` case split a view. `cc9ba69` adds
+one to `result-app.test.ts`: at fact(12)'s end it splits the rxm view through its `⋯` menu, pressed as a user presses,
+takes the second rxm view to its newest step, `step 181 of 181`, and asserts that it marks `rr`, first, `479001600
+result`, across the whole list. It passed in Chromium and in Firefox, 5 tests of 5 in its file. It cannot fail first,
+since it holds what was built; S-split, a `draw.ts` that tells a view the mark only when its leg's mark changes, fails
+it at `the rows marked`, and the file's other 4 cases pass under it. As `cc9ba69` wrote it, the case took fact(12) from
+the case before it, and run alone it failed at a precondition, `step 84 of 84` for `step 181 of 181`, on the run of
+sum_to(5) that the file's `beforeAll` compiles. `10f6c0e` has it set that case's viewport and compile fact(12) itself,
+as that case does: run alone it passed, 1 test with 4 skipped, and its file 5 of 5, in Chromium and in Firefox, and
+S-split, run again on it, fails it at `the rows marked` both run alone and in its file, whose other 4 cases pass under
+it.
+
+**The comment budget went out and back.** During the merge the hook's comment guard measured from `b627fe3`, the merge
+base before the merge, counted main's deleted test comments as the branch's, and asked for `web/tests`'s share to be
+written down from main's 0.2036 to 0.1967, which the merge commit holds. Measured from `e65a533` the branch removes no
+comment line in `web/tests`, and a share that fell only as code grew is no gain to lock, so `a76742a` puts main's 0.2036
+back and the branch leaves `scripts/comment-budget.json` as main has it.
+
+**What else the merge left.** A sweep of every exported symbol, class member, type field, CSS class, data attribute,
+Rust `pub` item and file that `b627fe3` had and `e65a533` lost, against the branch's added lines
+(`$L/11-sweep-list.txt`), found the hits above and the plan, whose facts are stated at `b627fe3` (*What this did not
+close*). `web/vite.config.ts`'s coverage thresholds are the same on both sides. The merge's checks, the node project
+and, in Chromium, the 5 `result-*` files and the 10 that drive the five conflicted modules, passed before the merge
+commit and again before its follow-ups: node, 82 files and 1547 tests; Chromium, 15 files and 169 tests. The merge's
+rulings, in the lane's ledger: a merge and not a rebase; the guard's removal inside the merge commit, since a merge
+commit that typechecks cannot keep code that reads what main deleted; and main's budget kept.
+
+**The second merge, with `2a96b84`.** After the second review's fixes main took #199, `2a96b84`, which changes 14 files
+from `e65a533`, with 381 insertions and 24 deletions, none under `crates/`: `web/src/clif-intent.ts`, `web/src/main.ts`
+and `web/vite.config.ts`, seven clif browser test files and two of their helpers, `clif-fixture.ts` and `engine.ts`, the
+clif view design and its own entry in this roadmap. Of those the branch had changed only this roadmap since `e65a533`,
+and `af7cdc3`, a merge for the same reasons as `66ab998`, conflicted there alone. The roadmap was rebuilt as before:
+main's file at `2a96b84` whole, then this entry as it was at `dde2703`. Main's file is an exact prefix of the result,
+its last two `####` headings are `2a96b84`'s and this entry's, and the entry was byte-equal to `dde2703`'s. The merge
+commit holds that resolution and nothing else, and the hook passed it. What #199 changed in the two files whose tests
+timed out in this branch's coverage runs, and the checks on the merged tree, are under *Verification*.
+
+##### THE SECOND REVIEW'S FIXES
+
+A second review of the whole branch, at `9f44df0` (`$L/review-pr201.md`), found 2 important issues and 3 minor ones.
+Each was checked before it was acted on, and each held, but for the input the first named. The fixes are 3 commits, test
+first where a case could fail first, and this entry's commit, which tells the probe:
+
+- `57b7eeb`, **a leg's own value, held by a test.** Nothing failed if `result-mark.ts` read another leg's value: with
+  `r.legs[leg].value` read as `r.legs.rxm.value` (12-I1), `result-mark.test.ts` passed 3 of 3 and the 5 `result-*`
+  browser files 35 of 35. A TM that outgrows its field halts with no rule to fire and its recording ended while the
+  other legs end with the program's value, so its own `Fault` is all that leaves it unmarked. The review named sum_to(5)
+  at width 4 as `field-width.test.ts` drives it, but that file's program is `let a = 9; let b = 9; a + b`, and
+  sum_to(5)'s width under binary is 4 already, where its TM ends with 15; `9 + 9` at width 4 halts in `overflow` at step
+  299 with REG opening on field 0's `#`, while rxm ends with 18. `result-mark.test.ts`'s `reads each leg's own value,
+  never another leg's` asks a result whose TM leg is a `Fault` and whose rxm leg is a `Value` about each leg, rxm first
+  as the control. `result-stopped.test.ts`'s `marks no TM that halted in overflow, beside an rxm view that marks the
+  value` sets the TM's width box to 4 as a user does, asserts the TM view at its newest step in the state `overflow` and
+  the rxm view marking `18`, then that the TM view draws no mark, and puts the width back to auto in a `finally`. 12-I1
+  fails each at its last assertion.
+- `825bbe8`, **an unadjusted stored half, completed and not adjusted.** With `half.adjusted && ` dropped from
+  `halfTokens`, every incomplete stored half was adjusted and every test passed, since both unadjusted fixtures, Day and
+  Night, pass every floor. `custom-palette.test.ts`'s `completes an unadjusted half from its colours alone, though its
+  word fails a floor` takes Closing, whose base0B fails the word's floor, stored as applied and before the result
+  tokens, and asserts that both result tokens are its base0B; 12-M2 fails it, alone of the node project, the word
+  adjusted to `#87b887`.
+- `ad8fbdb`, **the adjust line's ground for a tinted floor.** For STUCK the import dialog said no lightness passes `on
+  both base00 and base01`, where its base0B, `#767676`, reads 4.62:1 and 4.54:1; it fails only on its own tint over
+  each, 3.91:1 and 3.57:1. `surfacesOf` now names a tinted floor's ground as `failureLines` does, so the line reads
+  `where no lightness passes on base0B over both base00 and base01`. Three expectations say it, one more than the review
+  named: STUCK's in `base16-check.test.ts` and in `base16-import.test.ts`, and Neon's, which fails on both kinds of
+  ground and reads `where no lightness passes on both base00 and base01 or on base0B over both base00 and base01`.
+  STUCK's two failed before the change; 12-M1, `surfacesOf` as it was, fails all three.
+- **The flake probe** (the review's Important 2 and Minor 3): the pull request's text reported a probe this entry said
+  had not been made, and miscounted it. `$L/probe-flake/drive.zsh` ran `clif-app-failed`, `clif-app-threw`, `clif-app`
+  and `clif-app-failed-intent` in Chromium as one vitest run per round and tree, main's `e65a533` and then the branch,
+  each under the browser lock, in five phases: 1 warm-up round and 8 at full speed, then 8 under each CPU quota of 50%,
+  25% and 35%, in that order, so each file ran 33 times on each tree. The branch's tree moved from `80149cc` to
+  `10f6c0e` to `9f44df0` during it, commits that change no code those files run. Counted from its JSON files by
+  `$L/12-probe-tally.mjs`: `clif-app-failed.test.ts` failed no run at full speed or at 50%, 1 at 35% and 8 of 8 at 25%,
+  and `clif-app-threw.test.ts` 1 at 25% and no other, on each tree alike. Each of those failures was the file's
+  `beforeAll`, timed out after 10,000 ms waiting for the compile to finish; the other two files' failures fell alike
+  too, but for `clif-app-failed-intent` at 35%, once on main and twice on the branch. The named tests, `says the load
+  failed, and loads on Retry` and `takes the CLIF leg out of the readout when its stepper throws as a continue is
+  asked`, ran 24 and 32 times on each tree and never failed; at full speed their medians were 228 ms and 442 ms on the
+  branch, 236 ms and 445 ms on main. So the branch adds those tests no time at full speed and makes their files fail no
+  more often under load than main does; the probe did not reproduce the coverage runs' timeouts of the two tests on
+  either tree, so it does not say what caused them.
+
+##### THE RULINGS
+
+What the design left to the builder, the plan settled, and these were not reopened:
+
+- **The decision.** `resultMarked(r, leg, state, ended)` is true exactly when `r` is a result of the leg's generation,
+  the leg's `done` is `ended`, its play head is on its newest frame, `ended` holds, which is the frame's or the tree's
+  own proof of the end, and the leg's value is a `Value` whose text is not `()`. `draw.ts` asks again at every draw;
+  `replies.ts`'s `result` arm already calls `draw()`. The plan also had `draw.ts` pass `false` for a view of a copy,
+  which went with the copies (*The merge with main*).
+- **clif's returned value** is an `Option<u32>` on `ClifState`, set at a `Ran` end only, through `resolve_aliases`, and
+  the values window always holds its row.
+- **Two tokens, `result` and `result-word`,** appended to `COLOUR_TOKENS`. The ground mixes `result` at `contrast.ts`'s
+  `RESULT_TINT`, 0.2, which a palette test holds to the stylesheet's 20%; a floor may name a tint token, and is measured
+  on that token composited over its surface, per sRGB channel. The binder rule leaves the two tokens out.
+- **rxm and clif.** The result's row first, found in clif by its number, never by an `rr` label; it spans
+  `grid-column: 1 / -1`, its edge is an inset box-shadow, since `is-changed` owns the outline, and its `dd` wraps.
+- **TM.** `resultField` in `tape.ts`, REG field 0's cells in one `span.tm-result`, and `little-endian` from
+  `SessionClient.encodingOf`, kept only where it adds no row to the line and leaves the state name no more cut, decided
+  at each status draw and again when the status line's width changes.
+- **λ.** `MARKS` gains `'is-result': 'result:'`; the root is marked only as a chip on one row; the edge is an outline;
+  pair rules laid the result's ground over the link's and the contractum's, which the review's fix replaced; the word is
+  `::after { content: "result" / "" }`.
+
+Rulings made during the build, in the lane's ledger:
+
+- **The floor covers the word alone.** The pre-flight measured the other text on the tint below 4.5:1 and asked the user
+  whether the result's own text must meet a floor there; with no answer, the build follows the design, and the design's
+  *As built* gives the figures.
+- **The design's drawing over the plan's break rule** (Task 3's review). The plan had a result's row break at the space
+  before the word first, which drew fact(12) in clif as `479001600 rr`, then `result`; the design draws `479001600`,
+  then `rr result`. `9a6ac30` puts the registers and the word in one box, `span.result-tail`.
+- **D-3 holds the node test alone** (Task 3's review). At the step before the end the frame already rules the mark out,
+  so no app case can see the newest-step condition; the plan's row for D-3 named app cases in error, and nothing below
+  rests on D-3 for an app case.
+- **The TM's word may give REG's row a scroll bar** with classic scroll bars, at the last step only (Task 4's review):
+  accepted, as the design's *As built* says.
+- **L3 is drawn by hand** (Task 5's review): no pin in the app reaches sum_to(5)'s root, and the rule L3 checks is the
+  same either way.
+- **A view still `— recompiling` keeps the old run's mark** (Task 6's review): that step line shows only while every leg
+  still holds the old recording's frames, so the mark is the old run's, on its own frame.
+- **X-3 must fire** (Task 6's review). The review found that a real ⏭ can bring a new program's views to their end while
+  the last program's result is still the one stored; `eda115d` adds a case that holds the result reply back from the app
+  there and asserts no view is marked until it lands.
+
+The whole-branch review's findings were ruled on before the fixes (`task-10-findings.md`, in the SDD folder beside the
+plan's task briefs):
+
+- **The word on a layered λ ground** (the review's Important 1): of its three remedies, the result's ground drawn alone,
+  measured in the browser before the fix, the word's ratio asserted on the ground the page draws, and a sabotage that
+  restores the layered rule failing at that ratio.
+- **The frame's proof of the end** (Minor 1): a case where one could be made cheaply, and the gap recorded where it
+  could not.
+- **Of the triage's *may* items** only T4's whole words, A-clif-2's order, its stronger step check and its `finally`,
+  and `contrast.test.ts`'s ground were taken; the others, and the *leave* items, stay open (below).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The rest of the lane,** pull request 3, list results: their heap cells lit, an example whose result is a list, and a
+  mark on a λ list result. Until then a list result marks only its pointer word, rxm's `rr`, the clif value and TM field
+  0.
+- **Squeezed values,** a value cut mid-run while its panel has room, are a pull request of their own, outside this lane.
+- **Function results:** every leg answers `Undecodable`, so none is marked. A later feature, λ printing a function
+  result's normal form, may change that.
+- **The final `halt` or `return` row** of the rxm and clif listings: at the end no listing row is marked, and the
+  listing does not scroll there.
+- **A TM field wider than the frame's window** is marked where it is on screen; widening the window is not this
+  branch's.
+- **The result's own text has no floor on its tint** (F5): the user chose on 2026-11-25 to leave it so. The floors
+  hold the word alone there. The other text drawn on the tint is held only on the bare surface: the marked value in an
+  rxm or clif row and REG's cells in `fg`, rxm's `rr` label and clif's registers in `fg-dim`, and the λ chip in its
+  token's colour. Computed in node with `contrast.ts`'s `tinted` and `contrastRatio`, not measured in a browser, these
+  have a ratio under 4.5:1 on the tint over `bg` or `bg-raised` (the two in that order): in Material light, the default
+  palette, `fg` and `fg-dim` 3.94 and 3.46, `tok-nat` and `tok-bool` 3.93 and 3.45; in Material dark `fg-dim` 3.61 and
+  3.00, `tok-nat` and `tok-bool` 4.49 and 3.73; in Grayscale light `fg-dim`, `tok-nat` and `tok-bool` 3.93 and 3.34; in
+  Grayscale dark `fg-dim` 3.77 and 2.91, `tok-nat` and `tok-bool` 4.50 and 3.47; in Paper dark `fg-dim` 4.48 and 4.15;
+  in Terminal dark `fg-dim` 4.50 and 4.26; in Instrument light `fg-dim` 4.36 over `bg`; in Instrument dark `fg-dim` 4.40
+  and 4.03. A floor there changes a ruling: the tint's share, the palette values or the floor table.
+- **The λ ground on a root that is also the contractum or a pinned link:** the user confirmed it on 2026-11-25. The
+  review's Important 1 was ruled during the build: the result's ground drawn alone there, so the word meets its floor on
+  the ground the floors measure, the contractum keeping its underline and its words and the link its edge, rather than
+  new floors for the layered grounds, which could move palette colours. Keeping the contractum's wash or the link's
+  ground under the result's would cost one stylesheet rule, and on that ground the word reads under its floor in 7 of
+  the 10 built-in variants at is_even(6)'s root unless palette colours move (*The review's fixes*).
+- **The λ half of the frame's proof:** nothing fails if `draw.ts` passes `true` for `lambdaEnded(treeFor)`. M1-lambda,
+  that edit, left `result-stopped` and `result-lambda` passing whole. The λ mark needs a chip at the root, which is a
+  normal form, so a tree with a redex next never has one, and what the guard has left to refuse is a stale tree, which
+  no case reaches without rebuilding the harness. N2 holds `lambdaEnded` itself, in node.
+- **A value too large to print,** `TooLargeToPrint`, has no app case; the wasm tests reach one, with a small DAG that
+  decodes to an enormous value. N1 holds that it is unmarked, and the help page says such a run has no mark.
+- **With classic scroll bars,** the word can give REG's row a scroll bar at the last step, inside the view. No test
+  asserts it. Every Chromium project but `browser-scrollbars` launches with Playwright's `--hide-scrollbars`, under
+  which a scroll bar takes no width; `browser-scrollbars` runs the files `SCROLLBAR_FILES` lists,
+  `machine-row-scrollbars` and `state-diagram-local-scrollbars`, neither a result case; and in the Firefox projects,
+  which pass no such flag, no case reads REG's row for a scroll bar. A fix needs a mechanism that reserves a horizontal
+  bar's room, such as a bar always shown on REG's cells, or the word's width held at every step.
+- **The small items the review left open,** each a *may* not taken or a *leave*: `controlIn` repeated in `result-app`
+  and `cut-text-app`; an ill-typed `ResultLegs` fixture behind `as never` in `result-mark.test.ts`; no test that
+  `draw.ts` reads the encoding of the generation on screen; the session client's encodings, which grow by one entry a
+  run posted; the `::after` case, which does not assert the empty alternative text; the step helpers copied between the
+  `result-*` test files, among them the settings helper `result-lambda` took from `result-stopped` in `1428439`; the X-3
+  run, which proves only the λ assertion of its case; X-4, which proves only X5's first assertion; X4's skip of a
+  recompiling view, which could assert that view's mark instead; the hold in X-3's case, which lets clif replies arrive
+  before the held result; no test reaching `#fitEndian`'s state-name check, which no TM today reaches, since none halts
+  on a name long enough; the plan's *settled here*, which still gives the break rule `9a6ac30` replaced, and its facts
+  at `b627fe3`, which still name the copy guard, X6, `unlinked`, `setEditorAvailable` and `rxm-copy.test.ts`, the plan
+  being a record that the design's *As built* and this entry supersede; `result-stopped`'s case for a recording cut
+  short, which leaves the cut armed if it fails before the cut, so that one failure would spread to the cases after it;
+  Task 6's report, whose table is stale, a record outside the tree; and Task 8's affected set, run after its commit
+  rather than before.
+
+##### VERIFICATION
+
+**Test first.** Before each task's build its new cases failed. Task 1's Rust tests did not compile against `ClifState`,
+which had no field `returned`, and against a stub 3 of 54 tests failed. Task 2's node tests failed 42 of 159, and its
+browser tests 1 of 15; Task 3's node tests 4 of 50, and its browser cases 14 of 14; Task 4's 2 of 41 and 5 of 5; Task
+5's 4 of 5. In Task 3's fix round, A-clif-3's new line, `rr` on the line under the value, failed 1 of 4 before
+`span.result-tail`. Task 6's cases hold what Tasks 3 to 5 built, so they passed when written, and each is proven by its
+sabotage instead. Of the review's fixes, L2, L3 and the triple's case failed 3 of 6 at the word's ratio before
+`1428439`'s rule, and the changes panel's case 1 of 16 before `fa1e2dd`. The cases for `()`, for a recording cut short
+and for T4's whole words hold what was built, and each is proven by its sabotage instead; A-clif-2's stronger checks and
+`contrast.test.ts`'s ground have none, since the first strengthens a case and the second's data passes or fails alike on
+either ground. Of the second review's fixes, STUCK's adjust line failed first, 1 of 9 tests in node, and in the browser
+its case and the 8 after it, which met the dialog it left open, 9 of 15; the cases for a leg's own value and for an
+unadjusted half hold what was built, and each is proven by its sabotage instead.
+
+**Each task's affected set** passed before its commit, in node, in Chromium and, but for Task 2's, in Firefox, as files
+and tests; for the review's fixes, Firefox ran once, after the last of them; for the merge, node and Chromium before
+each of its commits, and Firefox in the gate; for the second review's fixes, before each commit, the whole node project,
+in Chromium the 5 `result-*` files, `field-width` and `base16-import`, and in Firefox `result-stopped`; and for the
+second merge, at its commit, the whole node project, the whole coverage run, which runs every browser file in Chromium,
+and in Firefox the 5 `result-*` files. Firefox was held to no failure: at `b627fe3` it passed 4 files and 52 tests. The
+rows for Task 6 and the review's fixes count `result-copy.test.ts`, 2 tests, which the merge removed.
+
+| Task | Node | Chromium | Firefox |
+|---|---|---|---|
+| 1 | 3, 62; and in Rust, 54 tests run, 54 passed, 2 skipped | 3, 15 | 3, 42 |
+| 2 | 8, 159; after its fix round, 8, 160 | 8, 83 | not run |
+| 3 | 3, 53 | 14, 258; after its fix round, 14, 258 | 5, 56; after its fix round, 2, 14 |
+| 4 | 3, 44 | 10, 109 | 4, 47 |
+| 5 | 1, 3 | 11, 116 | 4, 47 |
+| 6 | 2, 20 | 9, 71; after its fix round, `result-stopped` alone, 1, 7 | 5, 50; after its fix round, 1, 7 |
+| 10, the review's fixes, for each commit that changes a test or the code it runs | 1, 3; `fa1e2dd`'s, 3, 31; `8d08c76`'s, 5, 92; `620ef0d`'s, 2, 28 | 6, 35 to 36; `1428439`'s, 7, 43; `fa1e2dd`'s, 9, 92 | once, at the end: 10, 94 |
+| 11, the merge, before its commit and again before its follow-ups | 82, 1547; 82, 1547 | 15, 169; 15, 169 | in the gate, below |
+| 11, `cc9ba69`'s case, `result-app.test.ts` alone | not run | 1, 5 | 1, 5 |
+| 11, `10f6c0e`'s case, run alone and in `result-app.test.ts` | not run | 1, 1 with 4 skipped; 1, 5 | 1, 1 with 4 skipped; 1, 5 |
+| 12, the second review's fixes, before each of `57b7eeb`, `825bbe8` and `ad8fbdb` | 82, 1548; 82, 1549; 82, 1549 | 7, 82 each | 1, 10 each |
+| 13, the second merge, at `af7cdc3` | 82, 1549 | in the coverage run, 305 files with the node project's, 3449 tests passed and 2 expected to fail | 5, 36 |
+
+**The gate** ran whole on the first merged tree at `a76742a`, by `$L/11-gate-run.zsh`: `$L/10-gate-run.zsh` with the
+prefix `11-`, the Rust legs run again since main's side is in the tree, the comment guard's base `e65a533`, the pull
+request's base then, as CI reads it, and the Firefox set widened to the test files of the five conflicted modules. Each
+leg wrote `$L/11-<leg>.log`, and its exit and seconds to `$L/11-gate-exits.txt`, which has 37 leg lines, 2 of them with
+an exit other than 0. The coverage run failed 1 test of 3443, `clif-app-threw.test.ts`'s `takes the CLIF leg out of the
+readout when its stepper throws as a continue is asked`, which timed out waiting for the clif view to say what the
+stepper threw; that file passed alone, 1 test of 1 (`$L/11-coverage-rerun-clif-app-threw.log`). A failed run prints no
+coverage table, so the leg ran a second time, after `cc9ba69` had added its case, and passed whole: its figures are the
+ones below, and every other leg ran before that case. In Firefox 3 files of 18 failed 14 tests: 1 in `app`, 2 in
+`tm-follow-clamp` and 11 in `tm-view-narrow`, files the plan's Firefox set did not name. Run alone they failed the same
+14 (`$L/11-firefox-rerun-failed.log`), and run on main's `e65a533`, a plain export of it with the worktree's
+`node_modules`, wasm packages and bindings copied in, they failed the same 14 of 75
+(`$L/11-firefox-main-e65a533-failed.log`), so they are main's, and CI runs no Firefox. The other 15 files passed whole,
+the 5 `result-*` files among them. `scripts/check-all.sh` ran as `--no-browser` and then `--browser-only` under the
+browser lock, the two halves its header names the full gate, so the long Rust tier did not hold the lock. Before the
+merge the gate ran at `eda115d` (Task 7) and its web legs again at `ea000dd` (Task 10), each passing
+(`$L/07-gate-exits.txt`, `$L/10-gate-exits.txt`), the coverage leg at `ea000dd` on its second run, 357 files and 4029
+tests passed with 2 expected to fail. Its first run there failed 1 test of 4031, `clif-app-failed.test.ts`'s `says the
+load failed, and loads on Retry`, which timed out waiting for the clif view to say the load failed; that file passed
+alone, 1 test of 1 (`$L/10-coverage-rerun-clif-app-failed.log`). `clif-app-failed.test.ts` and `clif-app-threw.test.ts`
+each mount the app and drive its clif view, which the branch changes in `web/src/clif-pane.ts` and
+`web/src/clif-view.ts`, 27 lines in and 11 out against main. The flake probe (*The second review's fixes*) ran each 33
+times on each tree: their two tests never failed, and at full speed took 228 ms and 442 ms on the branch beside 236 ms
+and 445 ms on main. Both timeouts and the probe came before main's #199 changed both files (*The clif-app timeouts and
+#199*, below).
+
+| Leg | Result |
+|---|---|
+| `scripts/check-all.sh --no-browser`, in a unit capped at 16G, then `--browser-only` | exit 0 each; 11 nextest runs, 5318 tests passed and none failed; the browser tier, 36 passed |
+| `cargo llvm-cov nextest --workspace --fail-under-lines 90` | 2048 passed, 35 skipped; lines 95.55% |
+| `scripts/check-slow.sh` | 91 test binaries, 35 tests passed, 0 failed |
+| `pnpm run build:wasm`, `build:lsp-wasm`, `build:clif-wasm` and `build:bindings`; `scripts/check-licences.sh`, with `--self-test` and alone; `pnpm exec biome ci --error-on-warnings`, 467 files; `pnpm run typecheck` | exit 0 each |
+| `scripts/check-text-bytes.sh`, `check-citations.sh`, `check-attributions.sh`, `check-doc-figures.sh`, `check-shared-docs.sh`, `check-colours.sh`, `check-grammar-wasm.sh`, `check-lua.sh` and `check-licence-editions.sh`, each with `--self-test` and alone; `node scripts/check-comments.mjs`, with `--self-test` and with `--base e65a533` | exit 0 each |
+| `pnpm run test:coverage`, the node and Chromium tiers, in a unit capped at 16G | first run, at `a76742a`, 1 test failed of 3443, `clif-app-threw`'s, which passed alone; second run, at `cc9ba69`, 304 files, 3442 tests passed and 2 expected to fail; statements 98.14%, branches 92.39%, functions 98.74% and lines 99.37%, against thresholds of 95, 89, 97 and 97 |
+| `pnpm run build:app` | exit 0 |
+| `machine-row-scrollbars.test.ts` in its own project | 1 file, 3 tests passed |
+| in Firefox, `marks`, `rxm-pane`, `clif-pane`, `base16-remove` and the 5 `result-*` files, and `rxm-app`, `tm-grid`, `tm-follow-clamp`, `tm-status-line`, `tm-view-narrow`, `machine-view-chrome`, `app`, `pool-isolation` and `cut-text-app` | 18 files, 15 passed whole; 184 tests of 198 passed, and the 14 that failed, in `app`, `tm-follow-clamp` and `tm-view-narrow`, fail alike alone and on main's `e65a533` |
+
+**On the merged tree**, at `af7cdc3`, the checks ran by `$L/13-checks.zsh`, with the gate's helpers: each leg into
+`$L/13-<leg>.log`, and its exit and seconds into `$L/13-exits.txt`, every exit 0. Main changed nothing under `crates/`
+from `e65a533`, so no wasm package was rebuilt and no Rust leg ran. `pnpm run typecheck`; `biome ci
+--error-on-warnings`, 468 files; and the comment guard with `--base origin/main`, which it measured from `2a96b84`, the
+pull request's base now, over 50 changed files: exit 0 each. The node project: 82 files and 1549 tests passed. `pnpm run
+test:coverage`, under the browser lock in a unit capped at 16G, as the gate ran it, passed whole in 261 s: 305 files,
+3449 tests passed and 2 expected to fail; statements 98.16%, branches 92.41%, functions 98.74% and lines 99.38%, against
+thresholds of 95, 89, 97 and 97. `pnpm run build:app`: exit 0. In Firefox, the 5 `result-*` files: 5 files and 36 tests
+passed.
+
+**The clif-app timeouts and #199.** `2a96b84`'s entry tells of a timeout of the same file: #198's CI run 791 failed
+`clif-app-failed.test.ts` at line 43, `timed out after 10000ms waiting for the CLIF view to say the load failed`. By its
+account `clif-app-failed-intent.test.ts` ends with Playwright's pointer resting on the clif toggle, the next file in the
+tab draws the same header under it, the toggle's rest fires during `beforeAll` and the session worker loads `pkg-clif`,
+so the view's load fetches nothing, the armed abort is never spent and the notice never comes. #199 starts the rest at
+the first `pointermove` over the toggle and has a `pointerdown` fetch at once; has `clif-app-failed`,
+`clif-app-failed-intent` and `clif-app-threw` assert that no clif load was asked for or started before they arm their
+failure or stub, so that, in its words, "a file whose precondition is spent now fails at once, by its name, not after a
+10 s wait"; and has `failRequests` replace an armed abort rather than add to it, with `clif-app-failed` dropping its
+unspent one after its case. That is 15 lines in and 2 out in `clif-app-failed.test.ts`, and 13 in and 1 out in
+`clif-app-threw.test.ts`. Its entry says the two files in CI's order in one tab failed 2 of 2 on `e65a533`'s code and
+passed 5 of 5 with its change; it says nothing of `clif-app-threw` timing out in a whole run, nor of this branch's two
+timeouts, so nothing here reads #199 as their cure. Both timeouts, at `ea000dd` and at `a76742a`, and the flake probe,
+which ran the branch beside main's `e65a533`, came before #199. The one whole coverage run on the merged tree lost no
+test: `clif-app-failed` and `clif-app-threw` passed in it, 1 test each.
+
+**The sabotages.** Each saved the file it changed to `$L/sab/`, S-split's run on `10f6c0e`'s tree to
+`$L/11c-S-split.orig`, made the one edit, ran the named test files whole, S-split on `10f6c0e`'s tree its case alone as
+well, copied the file back and compared it with `cmp`, on its own task's tree. `$L/01-sab-results.txt` to
+`$L/06-sab-results.txt`, `$L/10-sab-results.txt`, `$L/11-sab-results.txt`, `$L/11c-sab-results.txt` and
+`$L/12-sab-results.txt` have 10, 11, 47, 8, 7, 10, 10, 1, 2 and 5 lines that say a file was restored and `cmp` equal,
+and none that says a restore was not; the second of `11c-sab-results.txt`'s 2 is `result-app.test.ts`, put back after
+`cc9ba69`'s form of its case ran alone. Some rows ran more than once, and the logs below are each row's last run,
+S-split's with its run on `cc9ba69`'s case; 12-I1 ran first against `9f44df0`'s tests, before the cases it was aimed at
+existed. A Rust row ran `cargo nextest run -p redextape-clif --features ts`; the browser rows ran in Chromium. *Tests
+failed* is of the tests in the files the row ran. C1 and C2 are the Rust tests
+`the_returned_value_is_main_s_return_operand_with_aliases_followed` and `the_values_window_holds_the_returned_value`,
+and the every-step test is `the_state_reads_only_set_values_at_every_step`. N1 is `result-mark.test.ts`'s `marks a
+finished value at the newest step, and nothing when any one condition fails`, and N2 its `reads the run's end off the
+frame`.
+
+| Id | The one edit | Failed, at | Tests failed | Log in `$L` |
+|---|---|---|---|---|
+| R1 | `returned` names the `return`'s operand without following its aliases | C1 at sum_to(5) as built, `Some(9)` for `Some(8)`; C2 at `[1, 2]` as built under 2 values, `v17` not set; the every-step test | 3 of 54 | `01-sab-R1.log` |
+| R2 | `returned` set at a fault too | C1 at `head([])` as built, `Some(8)` for `None`; the every-step test | 2 of 54 | `01-sab-R2.log` |
+| R3 | the window's last row not given to the returned value | C2 at `[1, 2]` as built under 2 values, `v15` not in the window; the every-step test | 2 of 54 | `01-sab-R3.log` |
+| R4 | the returned value's row put first in the window | C2 at the value order, `[15, 0]`; the every-step test | 2 of 54 | `01-sab-R4.log` |
+| R5 | the list and box cells found among the first values rather than the window shown | C2 alone, at `[1, 2]` as built, `#2` not among the cells | 1 of 54 | `01-sab-R5.log` |
+| S-P1 | Material light `result-word` `#047857` | `meets every contrast floor in every variant`, at the word over `bg` and `bg-raised`; `carries the result colours`; `holds the default palette as its fallback, token for token` | 3 of 159 | `02-sab-S-P1.log` |
+| S-P2 | `tinted` answers the surface under the tint | `composites a share of a colour over another as the browser draws it`, `measures a tinted floor on its ground`, and 9 others | 11 of 159 | `02-sab-S-P2.log` |
+| S-P3 | `binderClashes` leaves no token out | `leaves the result tokens out of the binder rule`, and 16 others | 17 of 159 | `02-sab-S-P3.log` |
+| S-P4 | Terminal light `result` `#136c2e` | `keeps result apart from every token but result-word in every palette but Grayscale`; `carries the result colours` | 2 of 159 | `02-sab-S-P4.log` |
+| S-P5 | `BASE16_MAPPING.result` `base0C` | `maps result and result-word to base0B`, and 8 others | 9 of 159 | `02-sab-S-P5.log` |
+| S-P6 | *apply adjusted* measures a tinted floor on the bare surface | `walks the result word against the result its first pass left`, and 9 others | 10 of 159 | `02-sab-S-P6.log` |
+| S-P7 | a stored half completed from the default palette | `completes a half stored before the result tokens from its colours`; skin's `completes a stored half that lacks a token from the colours it stored, not from the default palette` | 2 of 159 | `02-sab-S-P7.log` |
+| S-P8 | the fallback copy's `--result-word` removed | `holds the default palette as its fallback, token for token` | 1 of 159 | `02-sab-S-P8.log` |
+| S-P9 | `--result-bg` at 25% | `mixes --result-bg at RESULT_TINT, the share its word is measured on` | 1 of 159 | `02-sab-S-P9.log` |
+| S-P10 | the word measured on the imported result's tint, not the one the first pass left | `walks the result word against the result its first pass left`, at the result it moves; `walks a foreground read on a tint after the tint has moved, even one listed before it`; the cannot-fix table's `random 1` | 3 of 160 | `02-sab-S-P10.log` |
+| S-P11 | a foreground read on a tint walked among those on the surfaces, before its tint moves | `walks a foreground read on a tint after the tint has moved, even one listed before it` | 1 of 160 | `02-sab-S-P11.log` |
+| D-1 | the generation test dropped | N1 at `frames of another generation` | 1 of 3 | `03-sab-D-1-node.log` |
+| D-2 | the `done` test dropped | N1 at `a recording that stopped capped` | 1 of 3 | `03-sab-D-2-node.log` |
+| D-3 | the newest-step test dropped | N1 at `a step back`; `result-app.test.ts` passed whole | 1 of 3; 0 of 4 | `03-sab-D-3-node.log`, `03-sab-D-3-browser.log` |
+| D-4 | the `Value` test reduced to the Unit test | N1 at `the value "TooLargeToPrint"` | 1 of 3 | `03-sab-D-4-node.log` |
+| D-5 | the Unit test dropped | N1 at `a Unit value` | 1 of 3 | `03-sab-D-5-node.log` |
+| D-6 | `RUN_ENDED.clif` without its `returned` test | N2 at `a fault or a trap` | 1 of 3 | `03-sab-D-6-node.log` |
+| V-1 | `rxmValues` without `resultFirst` | V1 in rxm, `puts the result first, across every column, its word after the value`; A-rxm-1 at `the first row`, `pc` for `rr` | 2 of 14 | `03-sab-V-1-browser.log` |
+| V-2 | no `grid-column: 1 / -1` | V1, V3 (`shows a long result whole on one line where the row has room`) and V4 (`wraps only when the whole row is too narrow`), in each view | 6 of 10 | `03-sab-V-2-browser.log` |
+| V-2-app | V-2's edit, against `result-app.test.ts` | A-rxm-2, `shows fact(12)'s result whole`, at `the value, on one line` | 1 of 4 | `03-sab-V-2-app-browser.log` |
+| V-3 | the result's `dd` keeps `nowrap` | V4 in each view, at `the word, on the next line` | 2 of 10 | `03-sab-V-3-browser.log` |
+| V-4 | `overflow-wrap: normal` | V4 in each view, at `a character clipped` | 2 of 10 | `03-sab-V-4-browser.log` |
+| V-5 | clif marks the first value whose registers hold `rr` | V5, `marks the returned value, not a value labelled rr`; A-clif-1 at `the rows marked`, `v3`; and 5 others | 7 of 14 | `03-sab-V-5-browser.log` |
+| V-6 | the word put before the value | V1 at `what the dd draws after the word`, V3 and V4, in each view | 6 of 10 | `03-sab-V-6-browser.log` |
+| V-7 | `draw.ts` gives the machine views `false` | every case of `result-app.test.ts` | 4 of 4 | `03-sab-V-7-browser.log` |
+| V-8 | `valuesPanel` marks every row | V2, `draws today's rows at the step before`, in each view; V5 | 3 of 10 | `03-sab-V-8-browser.log` |
+| V-9 | `.result-tail` no longer one box | A-clif-3, `shows fact(12)'s result whole`, at `rr, on the next line` | 1 of 4 | `03-sab-V-9-browser.log` |
+| T-1 | `resultField` gives field 1's cells | `finds REG field 0 on screen`, `{from: 6, to: 10}` for `{from: 1, to: 5}`; T2, `boxes field 0 and puts the word after it at the TM view's last step`, at `the cells it holds`, `1010`; T3 | 1 of 13; 2 of 5 | `04-sab-T-1-node.log`, `04-sab-T-1-browser.log` |
+| T-2 | the `window_start` test dropped | `finds REG field 0 on screen`, at `a window from cell 3` | 1 of 13 | `04-sab-T-2-node.log` |
+| T-3 | `draw.ts` says every run is binary | T3, `says nothing of bit order under unary, and boxes the part on screen`, at `no word of bit order` | 1 of 5 | `04-sab-T-3-browser.log` |
+| T-4 | `#fitEndian` never drops the words | T5, `drops the words rather than wrap`, at `the words at the end`; T6 at its precondition | 2 of 5 | `04-sab-T-4-browser.log` |
+| T-5 | no `ResizeObserver` on `.tm-status` | T6, `takes the words back when the line widens`, at `the words back`; T5 | 2 of 5 | `04-sab-T-5-browser.log` |
+| T-6 | the word before the box | T2 at `right after the box`, `cell` for `result-word`; T3 | 2 of 5 | `04-sab-T-6-browser.log` |
+| T-7 | `encodingOf` answers the last encoding posted | `remembers the encoding posted for a generation`, at `a generation claimed and never posted` | 1 of 28 | `04-sab-T-7-node.log` |
+| T-8 | the `.tm-line > .tm-endian` rule removed | T5 at `the words at the end`, which wrap to a second row; T6 at its precondition | 2 of 5 | `04-sab-T-8-browser.log` |
+| L-1 | the root marked whether or not it is a chip | L4, `marks no list root`, at `a result mark, bar or run` | 1 of 5 | `05-sab-L-1-browser.log` |
+| L-2 | `showTree`'s unchanged test blind to the result | L5, `draws the mark when only the result changes`, at `the runs marked` | 1 of 5 | `05-sab-L-2-browser.log` |
+| L-3 | `'is-result': ''` in `MARKS` | L1, `marks the root chip at the λ view's last step, and not at the step before`, at `the words where it starts` | 1 of 5 | `05-sab-L-3-browser.log` |
+| L-4 | no `content` in the `::after` rule | L1 at `the word after it` | 1 of 5 | `05-sab-L-4-browser.log` |
+| L-5 | no `.is-result.is-linked` rule | L3, `keeps the link's box when the root is pinned`, at `the result's ground` | 1 of 5 | `05-sab-L-5-browser.log` |
+| L-6 | `draw.ts` gives the λ view `false` | L1, and L2, `marks a Bool root`, at `the runs marked` | 2 of 5 | `05-sab-L-6-browser.log` |
+| L-7 | no `.is-result.is-contractum` rule | L2 at `the result's ground` | 1 of 5 | `05-sab-L-7-browser.log` |
+| X-1 | `resultMarked` without its `done` and `ended` tests | X1, `marks no view whose leg stopped short with a known value`, at `a mark in the TM in Stage` | 1 of 6 | `06-sab-X-1-browser.log` |
+| X-2 | `resultMarked` true for any value, `Undecodable` among them | X3, `marks nothing for a function result`, at `a mark in tm-0` | 1 of 6 | `06-sab-X-2-browser.log` |
+| X-3 | the generation test dropped | X4's second case, `marks no old value at a new program's end before its result lands`, at `a mark in lambda-0 before its own result`, on `eda115d`'s tree | 1 of 7 | `06-sab-X-3-browser.log` |
+| X-4 | `.pane:has(.is-result) { margin-block-start: 1px }` | X5, `moves nothing outside the view`, at `what is outside lambda-0 in Explorer` | 1 of 6 | `06-sab-X-4-browser.log` |
+| X-5 | `draw.ts` marks a machine view of a copy | X6, `marks nothing on an rxm copy`, at `a mark on the copy` | 1 of 2 | `06-sab-X-5-browser.log` |
+| X-5b | `draw.ts` marks a λ copy | X6, `marks nothing on a λ copy`, at `a mark on the copy` | 1 of 2 | `06-sab-X-5b-browser.log` |
+| X-6 | Instrument dark `result-word` `#166534` | X2, `draws the mark in both themes in every palette`, at `the word, lambda-0 in instrument dark` | 1 of 6 | `06-sab-X-6-browser.log` |
+| X-7 | a λ result marked over several rows too | `marks no opened root chip over several rows`, at `a λ result mark, bar or run`, a bar | 1 of 6 | `06-sab-X-7-browser.log` |
+| I1-a | the pair rule that laid the result's ground over the contractum's restored | L2, `marks a Bool root that is also the contractum, the word on the result's ground alone`, at `where the word reads below its floor`, `material light 4.20` first | 1 of 6 | `10-sab-I1-a-browser.log` |
+| I1-b | the pair rule that laid it over the link's restored | L3, `keeps the link's box when the root is pinned, the word on the result's ground alone`, at `where the word reads below its floor`, `material light 4.21` first | 1 of 6 | `10-sab-I1-b-browser.log` |
+| I1-c | `.term .is-result.is-linked.is-contractum` dropped from the result's rule | `keeps the link's box and the contractum's underline when the root is both, the word on the result's ground alone`, at `where the word reads below its floor`, `material light 4.10` first | 1 of 6 | `10-sab-I1-c-browser.log` |
+| D-5, in the app | the Unit test dropped, against `result-stopped.test.ts` | `marks nothing for a run that ends with ()`, at `the marks in each view`, `{ 'lambda-0': 2, 'tm-0': 3, …(2) }` for none | 1 of 8 | `10-sab-D-5-browser.log` |
+| M1 | `draw.ts` passes `true` for the frame's proof of the end | `marks nothing at the newest frame of a recording said to have ended before its run did`, at `a mark in rxm-0` | 1 of 9 | `10-sab-M1-browser.log` |
+| M1-lambda | `draw.ts` passes `true` for `lambdaEnded(treeFor)` | none: a probe of the λ half, over `result-stopped` and `result-lambda` | 0 of 15 | `10-sab-M1-lambda-browser.log` |
+| M3 | the changes panel reads a stored half's stored tokens again | `lists the result word the page draws moved, which the stored tokens lack`, at `what the half stored today lists` | 1 of 16 | `10-sab-M3-browser.log` |
+| T4-w | `max-width: 3ch` on `.tm-endian` | T4, `says little-endian at the end of the status line when it has room`, at the status line's text, before the assertion it was aimed at, since `#fitEndian` drops a clipped part; T5 and T6 at the words' presence | 3 of 5 | `10-sab-T4-w-browser.log` |
+| T4-w2 | T4-w's clip, with `#fitEndian`'s test for a cut part answering false | T4 at `the words whole`, 128 for at most 24; T5 and T6 at a precondition | 3 of 5 | `10-sab-T4-w2-browser.log` |
+| S-split | `draw.ts` tells a view the mark only when its leg's mark changes, a memo kept per leg | `marks the result in a view split from the rxm view after its run has ended`, at `the rows marked`, `[]` for `['rr']`; on `10f6c0e`'s case, the same, its file run whole and the case alone | 1 of 5; on `10f6c0e`'s, 1 of 5, and 1 of 1 run with 4 skipped | `11-sab-S-split-browser.log`; `11c-sab-S-split-browser.log`, `11c-sab-S-split-alone-browser.log` |
+| 12-I1 | `result-mark.ts` reads `r.legs.rxm.value` for every leg | on `9f44df0`'s tests, none: `result-mark.test.ts` and the 5 `result-*` files passed whole; on `57b7eeb`'s, `reads each leg's own value, never another leg's`, at `the TM leg, which overflowed`, and `marks no TM that halted in overflow, beside an rxm view that marks the value`, at `a mark in the TM that overflowed`, 3 for none | 0 of 3 and 0 of 35; 1 of 4 and 1 of 36 | `12-sab-I1-head-node.log`, `12-sab-I1-head-browser.log`; `12-sab-I1-node.log`, `12-sab-I1-browser.log` |
+| 12-M2 | `halfTokens` adjusts every incomplete half, `half.adjusted && ` dropped | `completes an unadjusted half from its colours alone, though its word fails a floor`, at `the result tokens, base0B as mapped`, `#87b887` for `#78a878`; over the whole node project | 1 of 1549 | `12-sab-M2-node.log` |
+| 12-M1 | `surfacesOf` as at `825bbe8`, which reads a floor's surface and not its tint | `says what still fails, and where, when no lightness passes`, Neon's, and `names a binder too close to another colour, and says so when no lightness sets it apart`, STUCK's, at their adjust lines; `offers no apply adjusted for a failing scheme it would move no colour of, and says why`, at its adjust line, and the 8 cases after it, which time out on the dialog it left open | 2 of 9; 9 of 15 | `12-sab-M1-node.log`, `12-sab-M1-browser.log` |
+
+**S-P3 cannot fail two of the cases its row in the plan named:** the stored import's case, which compares a half's
+tokens with a fresh adjustment made under the same rule, and the cannot-fix table, which asks only that the tokens it
+names be unfixable and the rest pass. Its run failed 17 tests, `leaves the result tokens out of the binder rule` among
+them. **D-3 fails the node test alone**, as *The rulings* say: `result-app.test.ts` passed 4 of 4 under it. **X-3 did
+not fire at `13dbc60`**, where `result-stopped.test.ts` passed 6 of 6 under it, since no case then held a new program's
+views at their end before its result landed. It fires at `eda115d`, the run quoted above, against the case that commit
+adds. **T4-w fired before the assertion it was aimed at**, so T4-w2 proves that one. **X-5 and X-5b ran against
+`result-copy.test.ts`**, on Task 6's tree, and the merge with main removed that file with the guard they tested, so
+their rows record that run.
+
+**The built app, driven** at `a76742a`, by `$L/11-hand.zsh`, `$L/hand/drive.mjs` and `$L/hand/drive-is-even.mjs`: `vite
+build` of `a76742a`, `vite preview` under the browser lock, then Playwright's Chromium 156.0.8078.4 and its Firefox
+157.0, each in a new profile, in a window 1412 by 896, with real mouse clicks. sum_to(5) and then fact(12) were picked
+from *examples ▾*, the λ, rxm and clif views shown by their toggles beside the TM, and ⏭ pressed in each view once its
+recording had stopped growing; sum_to(5) was read in light and in dark, fact(12) in light. `drive-is-even.mjs` is
+`drive.mjs` with one more pass, is_even(6) and ⏭ in the λ view, read in light and in dark. `drive.mjs` ran 57 checks in
+each engine and `drive-is-even.mjs` 67, and none failed; the page reported no error, no rejection and no console error,
+and the drive met no control the merge removed. It ran before at `eda115d` (Task 7) and at `0776dee`, and those
+screenshots are kept in `$L/hand/at-eda115d/` and `$L/hand/at-0776dee/`; this run's 28 are in `$L/hand/`. The two
+engines read alike:
+
+| View | What it showed at its last step |
+|---|---|
+| rxm, sum_to(5) | `step 84 of 84`; `rr` first and the one row marked, its `dd` `15 result` |
+| clif, sum_to(5) | `step 183 of 183`; `v8` first and marked, `15 rr result`; `v3`, `0 rr`, unmarked |
+| TM, sum_to(5) | `step 12,976 of 12,976`; REG's box holding `1111`, the word right after it; the status line `halt · step 12,976 of 12,976 · width 4 · little-endian` |
+| λ, sum_to(5) | `step 951 of 951`; the chip `15` marked, its `data-marks` `result: ` and its `::after` `"result" / ""` |
+| each view, sum_to(5), light and dark | the ground, the edge and the word in `--result-bg`'s, `--result`'s and `--result-word`'s computed values; no rxm or clif listing row marked |
+| rxm, fact(12) | `step 181 of 181`; `479001600 result` on 1 line, in a list of 4 columns |
+| clif, fact(12) | `step 493 of 493`; `479001600 rr result` on 2 lines, in 1 column |
+| λ and TM, fact(12) | `step 1,406 of 1,406 — history is full` and `step 75,850 of 75,850 — history is full`; no mark, and no `little-endian` |
+| λ, is_even(6), light and dark | `step 654 of 654`; the root chip `true` marked, also the contractum, its `data-marks` `just produced: result: `; its ground `--result-bg`'s alone, with no contractum's wash under it |
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, after
+`af7cdc3`, with `L=~/temp/redextape-return-value-record/pr2/impl`, `strip` standing for `sed 's/\x1b\[[0-9;]*m//g'` and
+`loader` for `(--no-deprecation --import $L/02-ts-loader.mjs)`, which lets node load the web sources' imports.
+`$L/13-figures.zsh` runs them, and `$L/13-figures.log` is its output.
+
+| Value | What | Produced by |
+|---|---|---|
+| 2026-11-23; 2026-11-24 | the dates of the design's commit and of `af7cdc3`, in the heading | `git log -1 --format=%ad --date=short 7ffb556; git log -1 --format=%ad --date=short af7cdc3` |
+| 3; 4; 16 | the review's important findings; its minor ones; the items it ruled must be fixed before merge | `awk '/^### Important/,/^### Minor/' $L/review.md \| grep -cE '^\*\*[0-9]+\. '; awk '/^### Minor/,/^## Deferred/' $L/review.md \| grep -cE '^\*\*[0-9]+\. '; grep -oE 'Must be fixed before merge: [0-9]+' $L/review.md` |
+| 38; `66ab998`, with the parents `0776dee` and `e65a533`; `af7cdc3`, with the parents `dde2703` and `2a96b84`; 26 | the commits in `2a96b84..af7cdc3`; the two merges and their parents; the commits in `b627fe3..0776dee`, built on `b627fe3` | `git rev-list --count 2a96b84..af7cdc3; git log -1 --format='%h %p' 66ab998; git log -1 --format='%h %p' af7cdc3; git rev-list --count b627fe3..0776dee` |
+| 21: `ea000dd`, `26028c1`, `29ccfee`, `620ef0d`, `cff0480`, `7d6596f`, `8d08c76`, `fa1e2dd`, `9ec179e`, `cbfbd9b`, `1428439`, `09f5963`, `eda115d`, `13dbc60`, `a93dd45`, `1521b36`, `9a6ac30`, `2a1879a`, `006592a`, `0683c5f`, `6746d75` | those of the 26 that change `web/` or `crates/`, 9 of them up to `eda115d` | `git log --format=%h b627fe3..0776dee -- web crates \| paste -sd ' '` |
+| 5: `7ffb556`, the design; `a4c3ade`, the plan; `417b336`, `5794b71` and `0776dee`, the design and this roadmap | those of the 26 that change neither, and their files | `for c in $(git rev-list --reverse b627fe3..0776dee); do git diff --quiet $c^ $c -- web crates && print "$(git rev-parse --short $c): $(git diff --name-only $c^ $c \| paste -sd ' ')"; done` |
+| `6247aff`, `result-stopped.test.ts`; `a76742a`, `scripts/comment-budget.json`; `cc9ba69`, `result-app.test.ts`; `80149cc`, the design and this roadmap; `10f6c0e`, `result-app.test.ts`; `9f44df0`, this roadmap; `57b7eeb`, `result-stopped.test.ts` and `result-mark.test.ts`; `825bbe8`, `custom-palette.test.ts`; `ad8fbdb`, `base16-check.ts`, `base16-import.test.ts` and `base16-check.test.ts`; `dde2703`, this roadmap; `af7cdc3`, against its first parent, the 14 files of #199 | each commit after the first merge, and its files | `for c in $(git rev-list --reverse --first-parent 66ab998..af7cdc3); do print "$(git rev-parse --short $c): $(git diff --name-only $c^ $c \| paste -sd ' ')"; done` |
+| the files of *The review's fixes*; 11 commits after `5794b71` | the files each commit after `eda115d` changes | `for c in $(git rev-list --reverse eda115d..ea000dd); do print "$(git rev-parse --short $c): $(git diff --name-only $c^ $c \| paste -sd ' ')"; done` |
+| `web/src/result-mark.ts`; the 5 `result-*` browser files; `web/tests/node/result-mark.test.ts`; 0 | the files the branch adds against main under `web/src` and `web/tests`; those it deletes | `git diff --name-only --diff-filter=A 2a96b84 af7cdc3 -- web/src web/tests \| paste -sd ' '; git diff --name-only --diff-filter=D 2a96b84 af7cdc3 \| wc -l` |
+| the 6 files of *The merge with main* | the files the merge conflicted in | `strip $L/11-merge.log \| grep -a 'CONFLICT' \| sed -E 's/.* in //' \| sort \| paste -sd ' '` |
+| 18 | the files main, at `e65a533`, and the branch, at `0776dee`, both changed from `b627fe3`, in *The merge with main* | `comm -12 <(git diff --name-only b627fe3 e65a533 \| sort) <(git diff --name-only b627fe3 0776dee \| sort) \| wc -l` |
+| 288; 5762; 31613 | what main changed from `b627fe3`: files, insertions, deletions | `git diff --stat b627fe3 e65a533 \| tail -1` |
+| `result-copy.test.ts` deleted, `result-lambda` and `result-stopped` changed; 6; 5 | what `66ab998` does to those three browser files against `0776dee`; the `result-*` browser files at `0776dee` and at `66ab998` | `git diff --name-status 0776dee 66ab998 -- web/tests/browser/result-copy.test.ts web/tests/browser/result-lambda.test.ts web/tests/browser/result-stopped.test.ts \| paste -sd ' '; git ls-tree --name-only 0776dee web/tests/browser/ \| grep -c 'result-'; git ls-tree --name-only 66ab998 web/tests/browser/ \| grep -c 'result-'` |
+| the guard's reads of `unlinked` and `detached` at `0776dee`; at `af7cdc3` none, the one line found being main's comment on a detached subtree; 0; 1, `main.ts` | `draw.ts`'s copy guard before the merge and after it; `detached` in main's `sessions.ts`; the callers of `sessions.add` on main | `git show 0776dee:web/src/draw.ts \| grep -nE 'unlinked\|detached'; print -- '--'; git show af7cdc3:web/src/draw.ts \| grep -nE 'unlinked\|detached'; git show e65a533:web/src/sessions.ts \| grep -cw detached; git grep -nE '^ *sessions\.add\(' e65a533 -- web/src` |
+| 2; `copyShown`, `pickInViewMenu` and `lambdaTermText`, 1 then 0 each; `lambdaTerm`, 1 then 1 | `result-copy.test.ts`'s cases; the harness's exports of the helpers it and the λ files used, at `b627fe3` and at `e65a533` | `git show 0776dee:web/tests/browser/result-copy.test.ts \| grep -cE "^  it\("; for s in copyShown pickInViewMenu lambdaTermText lambdaTerm; do print -n "$s: "; git show b627fe3:web/tests/browser/harness.ts \| grep -cE "export (async )?(function\|const) $s\b" \| tr -d '\n'; print -n " -> "; git show e65a533:web/tests/browser/harness.ts \| grep -cE "export (async )?(function\|const) $s\b"; done` |
+| 0.2036 at `e65a533`, 0.1967 at `66ab998`, 0.2036 at `a76742a`, `cc9ba69`, `10f6c0e`, `ad8fbdb`, `2a96b84` and `af7cdc3`; 0 | the `web/tests` comment budget; the lines of the branch's diff of the file against main | `for c in 0776dee e65a533 66ab998 a76742a cc9ba69 10f6c0e ad8fbdb 2a96b84 af7cdc3; do print -n "$c "; git show ${c}:scripts/comment-budget.json \| grep '"web/tests"'; done; git diff 2a96b84 af7cdc3 -- scripts/comment-budget.json \| wc -l` |
+| 4672651, an exact prefix; `2a96b84`'s heading and then this entry's; byte-equal; byte-equal | the roadmap: main's file at `2a96b84`, its bytes, against the head of this one; the last two `####` headings; this entry at `af7cdc3` against `dde2703`'s; at `66ab998` against `0776dee`'s | `n=$(git show 2a96b84:$RM \| wc -c); print "main bytes $n"; head -c $n $RM \| cmp - <(git show 2a96b84:$RM) && print 'cmp: main is an exact prefix'; grep -n '^#### ' $RM \| tail -2 \| cut -c1-90; b=$(git show e65a533:$RM \| wc -c); git show af7cdc3:$RM \| tail -c +$((n+1)) \| cmp - <(git show dde2703:$RM \| tail -c +$((b+1))) && print 'cmp: the entry at af7cdc3 is byte-equal to dde2703'; git show 66ab998:$RM \| tail -n +41873 \| cmp - <(git show 0776dee:$RM \| sed -n '41180,$p') && print 'cmp: the entry at 66ab998 is byte-equal to 0776dee'` |
+| 2 | the new Rust tests | `git diff 2a96b84 af7cdc3 -- crates/redextape-clif/tests/state.rs \| grep -A1 '^+#\[test\]' \| grep -c '^+fn '` |
+| 39; 4 | the contrast floors; the new ones | `node $loader --input-type=module -e "const c = await import('./web/src/contrast.ts'); console.log(c.CONTRAST_FLOORS.length)"; grep -c "^  \['result" web/src/contrast.ts` |
+| 3, 3, 4.5, 4.5 | the new floors: the edge on `bg` and on `bg-raised`, and the word on its tint over each | `grep "^  \['result" web/src/contrast.ts` |
+| 5; `#047857`, `#065f46`, `#34d399`, `#34d399` | the built-in palettes; Material's `result` and `result-word`, light then dark | `node $loader --input-type=module -e "const { PALETTES } = await import('./web/src/palettes.ts'); console.log(Object.keys(PALETTES).length); for (const [id, p] of Object.entries(PALETTES)) console.log(id, p.light.result, p.light['result-word'], p.dark.result, p.dark['result-word'])"` |
+| 20%; 0.2 | the share of `result` in `--result-bg`; `RESULT_TINT` | `grep -o 'color-mix(in oklab, var(--result) [0-9]*%' web/src/style.css; grep -o 'RESULT_TINT = [0-9.]*' web/src/contrast.ts` |
+| 0.75em; 1px, in 2 rules | the word's size; the inset edge, on the TM's box and on a values row | `grep -A3 '^\.result-word,' web/src/style.css \| grep -o 'font-size: [0-9.]*em'; grep -o 'inset 0 0 0 1px var(--result)' web/src/style.css \| sort \| uniq -c` |
+| `.term .is-result` and `.term .is-result.is-linked.is-contractum`; `background: var(--result-bg)` | the λ result's rule: its selectors; its ground, drawn alone | `grep -B2 -A3 '^\.term \.is-result\.is-linked\.is-contractum {' web/src/style.css` |
+| `return v9`; `v9 -> v8`; 8 | sum_to(5) as built in clif: the `return` it ends on; one of its aliases; the value `returned` names | `node /home/davey/temp/redextape-return-value-record/pr2/plan/probe.mjs sum-to \| jq -c 'select(.enc == "binary") \| .["clif-as-built"] \| [.atText, .aliases, .returned]'` |
+| 5.49; 5.54 | Material's dark word on its tint over `bg`, and its light word, in the design's *As built* | `node $loader $L/08-tint-probe.mjs` |
+| 3.46, and `tok-nat` 3.45; 3.00; 2.91 | on `result`'s tint over `bg-raised`: Material light's `fg`; Material dark's `fg-dim`; Grayscale dark's `fg-dim`, in the design's *As built* | `node $loader $L/08-tint-probe.mjs` |
+| the ratios of F5's item in *What this did not close* | the text drawn on a result mark, by palette and variant, on the tint over `bg` and over `bg-raised`, computed in node | `node $loader $L/10-tint-text-probe.ts` |
+| 4.20, 3.43; 7; 6 | the word on the layered ground before `1428439`, in the browser: Material light and dark on L2's root, the contractum, the first case; the variants of 10 under 4.5 there; those on L3's, the second case, also linked | `strip $L/10-i1-red.log \| grep -a 'console.error] PROBE' \| sed -E 's/.*PROBE //' \| awk '{print int((NR-1)/10)+1, $0}'; strip $L/10-i1-red.log \| grep -a 'console.error] PROBE' \| awk '{b=int((NR-1)/10)+1; if ($NF+0 < 4.5) n[b]++} END {for (b=1; b<=3; b++) print "case", b, "below", n[b]+0}'; grep -nA1 -E "^describe\|^  it\\(" web/tests/browser/result-lambda.test.ts \| grep -v '^--'` |
+| 5.54, 5.57; 5.25, 6.34; 5.32, 6.93; 4.68, 6.68; 9.07, 8.52 | the word on the ground drawn after `1428439`, in the browser, light and dark: Material; Paper; Terminal; Instrument; Grayscale | `strip $L/10-i1-green.log \| grep -a 'PROBE' \| sed -E 's/.*PROBE //' \| sort -u` |
+| 4.25, 3.84; 5.00, 4.53, each rounded to two places | Day's word on its tint over base00 and over base01, with base0B `#2e6e2e` and with `#2a602a`, in the design's *As built* | `node $loader $L/02-probe-day.ts` |
+| `()` and `Ended`, each leg | `let mut x = 0; x = 1;` under binary and under unary: each leg's value and how its run ended, for the legs the probe runs | `node $L/08-unit-probe.mjs unit2 \| jq -c '[.enc, .tm.run, .tm.value, .rxm.run, .rxm.value, .lambda.run, .lambda.value, .["clif-as-built"].status, .["clif-as-built"].value]'` |
+| no field `returned`; 3 of 54; 42 of 159, 1 of 15; 4 of 50, 14 of 14; 1 of 4; 2 of 41, 5 of 5; 4 of 5; 3 of 6; 1 of 16; 1 of 9, 9 of 15 | before each build, tests failed: Task 1, compiled and then against a stub; Task 2, node and browser; Task 3, node and browser; Task 3's fix round; Task 4, node and browser; Task 5; `1428439`; `fa1e2dd`; `ad8fbdb`, node and browser | `for f in 01-red 01-red-stub 02-red 02-red-browser 03-red-node 03-red 03-fix-red 04-red-node 04-red-browser 05-red 10-i1-red 10-m3-red 12-m1-red-node 12-m1-red-browser; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Tests  \|Summary \[\|no field .returned.' \| sort -u \| tr -s ' ' \| paste -sd ' '; done` |
+| 4, 52; the figures of the affected-set table to Task 6 | Firefox at `b627fe3`, files and tests; each task's affected set before its commit, and after its fix round | `for f in 00-base-firefox 01-affected-rust 01-affected-node 01-affected-browser 01-affected-firefox 02-affected-node 02-affected-browser 02-fix-node 03-affected-node 03-affected-browser 03-affected-firefox 03-fix-affected-browser 03-fix-firefox 04-affected-node 04-affected-browser 04-affected-firefox 05-affected-node 05-affected-browser 05-affected-firefox 06-affected-node 06-affected-browser 06-affected-firefox 06-fix-browser 06-fix-firefox; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  \|Summary \[' \| tr -s ' ' \| paste -sd ' '; done` |
+| the figures of the affected-set table's row 10 | each review fix's affected set, in node and in Chromium, `$L/10-<tag>-affected-<tier>.log`; `8d08c76`'s and `620ef0d`'s node runs; Firefox at the end | `for t in i1 i2 m1 m3 x1 t4 ac2 ct; do for k in node browser; do print -n "10-$t-affected-$k: "; strip $L/10-$t-affected-$k.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done; done; for f in 10-c-node 10-h-node 10-affected-firefox; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| 82, 1547; 15, 169; the same again | the merge's checks before its commit, files and tests in node and in Chromium; before its follow-ups | `for f in 11-merge-node 11-merge-browser 11-follow-node 11-follow-browser; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| the *Tests failed* column | each sabotage's run | `for f in $L/0[1-6]-sab-[A-Z]*.log $L/10-sab-[A-Z]*.log $L/11-sab-[A-Z]*.log $L/12-sab-[A-Z]*.log; do print -n "${f:t}: "; strip $f \| grep -aE 'Tests  \|Summary \[' \| tr -s ' ' \| paste -sd ' '; done` |
+| the cases of the *Failed, at* column | the cases each sabotage's run failed | `for f in $L/0[2-6]-sab-[A-Z]*.log $L/10-sab-[A-Z]*.log $L/11-sab-[A-Z]*.log $L/12-sab-[A-Z]*.log; do print -n "${f:t}: "; strip $f \| grep -aE '^ *FAIL ' \| sed -E 's/^ *FAIL +//' \| sort -u \| sed -E 's/.* > //' \| paste -sd '\|'; done; for f in $L/01-sab-R*.log; do print -n "${f:t}: "; strip $f \| grep -aE '^ +FAIL ' \| sed -E 's/.* //' \| sort -u \| paste -sd ' '; done` |
+| the assertions of the *Failed, at* column | the assertion each failed case stopped at | `for f in $L/0[2-6]-sab-[A-Z]*.log $L/10-sab-[A-Z]*.log $L/11-sab-[A-Z]*.log $L/12-sab-[A-Z]*.log; do print -n "${f:t}: "; strip $f \| grep -a 'AssertionError' \| sed -E 's/^ +//' \| sort -u \| cut -c1-220 \| paste -sd '\|'; done; for f in $L/01-sab-R*.log; do print -n "${f:t}: "; strip $f \| grep -a -A3 'panicked at' \| grep -avE 'panicked at\|^--\|note: run with' \| sed -E 's/^ +//' \| sort -u \| paste -sd '\|'; done` |
+| 10, 11, 47, 8, 7, 10, 10, 1, 2, 5; 0 each | the lines of `$L/01-sab-results.txt` to `$L/06-sab-results.txt`, `$L/10-sab-results.txt`, `$L/11-sab-results.txt`, `$L/11c-sab-results.txt` and `$L/12-sab-results.txt` that say a file was restored and `cmp` equal; those that say a file was restored but not `cmp` equal | `for f in $L/0[1-6]-sab-results.txt $L/10-sab-results.txt $L/11-sab-results.txt $L/11c-sab-results.txt $L/12-sab-results.txt; do print "${f:t} $(grep -c 'restored, cmp equal' $f) $(grep -i 'restored' $f \| grep -vc 'cmp equal')"; done` |
+| 6 of 6 passed; 1 of 7 failed | X-3 at `13dbc60`; on `eda115d`'s tree, its last run | `grep -n '^X-3 ' $L/06-sab-results.txt; grep -a 'AssertionError' $L/06-sab-X-3-browser.log \| strip` |
+| `result-copy.test.ts`, each | the file X-5 and X-5b ran | `for f in $L/06-sab-X-5-browser.log $L/06-sab-X-5b-browser.log; do print -n "${f:t}: "; strip $f \| grep -aoE 'tests/browser/[a-z0-9-]+\.test\.ts' \| sort -u \| paste -sd ' '; done` |
+| 1, 5 in Chromium and in Firefox; 1 of 5, `the rows marked`, `[]` for `['rr']`; restored, `cmp` equal; 1 file, 38 lines in and 3 out | `cc9ba69`'s case: its file alone in each engine; S-split's run, its failed case and assertion; its restore; `cc9ba69`'s diff | `for f in 11-case-green-browser 11-case-firefox 11-sab-S-split-browser; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done; strip $L/11-sab-S-split-browser.log \| grep -aE '^ FAIL \|AssertionError' \| sort -u; cat $L/11-sab-results.txt; git diff --stat a76742a cc9ba69 \| tail -1` |
+| 1, 1 passed with 4 skipped, and 1, 5 passed, in Chromium and in Firefox; 1 failed with 4 skipped, at `step 84 of 84` for `step 181 of 181`; 1 failed of 5, and 1 failed with 4 skipped, at `the rows marked`, `[]` for `['rr']`; 2 restored, `cmp` equal; 1 file, 3 lines in | `10f6c0e`'s case: alone and its file in each engine; `cc9ba69`'s form of it alone; S-split on it, its file whole and the case alone; their restores; `10f6c0e`'s diff | `for f in 11c-case-alone-browser 11c-file-browser 11c-case-alone-firefox 11c-file-firefox 11c-head-case-alone-browser 11c-sab-S-split-browser 11c-sab-S-split-alone-browser; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done; for f in 11c-head-case-alone-browser 11c-sab-S-split-browser 11c-sab-S-split-alone-browser; do strip $L/$f.log \| grep -aE 'AssertionError' \| sort -u; done; cat $L/11c-sab-results.txt; git diff --stat 10f6c0e^ 10f6c0e \| tail -1` |
+| `a76742a` and `cc9ba69`; 37; 2, the first coverage run and Firefox | the heads the gate ran at; the leg lines in `$L/11-gate-exits.txt`; those whose exit is not 0 | `grep -oE 'HEAD [0-9a-f]+' $L/11-gate-exits.txt \| sort -u; grep -E '^[a-z0-9-]+ exit [0-9]+ [0-9]+s ' $L/11-gate-exits.txt \| wc -l; grep -E '^[a-z0-9-]+ exit [0-9]+ [0-9]+s ' $L/11-gate-exits.txt \| grep -v ' exit 0 '` |
+| each leg's exit and seconds | the legs of the gate | `grep -E '^[a-z0-9-]+ exit [0-9]+ [0-9]+s ' $L/11-gate-exits.txt \| cut -d' ' -f1-4 \| paste -sd ';'` |
+| 11; 5318; 0 | `check-all.sh --no-browser`: its nextest runs; tests passed; runs with a failure | `strip $L/11-check-all-no-browser.log \| grep -aE '^ *Summary \[' \| awk '{n++; p+=$(NF-3)} / failed/ {f++} END {print n, p, f+0}'; strip $L/11-check-all-no-browser.log \| grep -av '^unit-exit' \| tail -n 1` |
+| 36 | the browser tier's tests passed | `strip $L/11-check-all-browser-only.log \| grep -a '^test result:' \| head -1` |
+| 2048, 35; 95.55% | `cargo llvm-cov`: tests passed and skipped; lines | `strip $L/11-llvm-cov.log \| grep -aE '^ *Summary \[\|^TOTAL' \| tr -s ' '` |
+| 91; 35; 0 | `check-slow.sh`: test binaries; tests passed; failed | `strip $L/11-check-slow.log \| grep -a '^test result:' \| awk '{n++; p+=$4; f+=$6} END {print n, p, f}'` |
+| 1 each; 38, 0 | the wasm builds: each package's ready line; the bindings' tests passed and failed | `for f in 11-build-wasm 11-build-lsp-wasm 11-build-clif-wasm; do print -n "$f: "; strip $L/$f.log \| grep -ac 'Your wasm pkg is ready'; done; strip $L/11-build-bindings.log \| grep -a '^test result:' \| awk '{p+=$4; f+=$6} END {print "bindings: tests passed", p, "failed", f}'` |
+| 304; 3442, 2; 98.14, 92.39, 98.74, 99.37; 1 of 3443, `clif-app-threw`'s; 1 of 1 passed | the coverage leg's second run, at `cc9ba69`: files; tests passed and expected to fail; statements, branches, functions and lines; its first run, at `a76742a`, the test that failed; that file alone | `for f in $L/11-coverage*.log; do print "${f:t}"; strip $f \| grep -aE 'Test Files  \|Tests  \|All files\|unit-exit\|^ FAIL ' \| tr -s ' '; done` |
+| 1 of 4031, `clif-app-failed`'s, timed out; 1 of 1 passed; 357, 4029, 2 | the coverage leg at `ea000dd`: its first run, the test that failed and how; that file alone; its second run, files, tests passed and expected to fail | `strip $L/10-coverage.log \| grep -aE 'Tests  \|^ FAIL \|^Error: timed out' \| tr -s ' '; strip $L/10-coverage-rerun-clif-app-failed.log \| grep -aE 'Tests  ' \| tr -s ' '; strip $L/10-coverage-2.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' '` |
+| 2 files, 27 lines in and 11 out; `clif-app-failed.test.ts`, `clif-app-threw.test.ts` | the branch's change to `web/src/clif-pane.ts` and `web/src/clif-view.ts` against main; the two coverage files that mount the app | `git diff --stat 2a96b84 af7cdc3 -- web/src/clif-pane.ts web/src/clif-view.ts \| tail -1; grep -l "import('../../src/main')" web/tests/browser/clif-app-failed.test.ts web/tests/browser/clif-app-threw.test.ts` |
+| 97, 97, 89, 95 | the thresholds: lines, functions, branches, statements | `grep -o 'thresholds: {[^}]*}' web/vite.config.ts` |
+| 1, 3; 15 of 18 files, 184 of 198 tests; 18, the files the Firefox leg names | files and tests passed: `machine-row-scrollbars`; the Firefox set | `for f in 11-scrollbars 11-firefox-affected; do print -n "$f "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done; grep '^firefox files:' $L/11-gate-exits.txt \| tr ' ' '\n' \| grep -c '\.test\.ts$'; grep '^firefox files:' $L/11-gate-exits.txt \| tr ' ' '\n' \| grep '\.test\.ts$' \| sed -E 's@tests/browser/@@; s@\.test\.ts@@' \| paste -sd ' '` |
+| 10s, exit 0, 1 of 1; 3 files, 14 failed of 75, alone and on `e65a533`, the same cases; 14 | the two failing legs re-run alone, and the Firefox files that failed run on main's `e65a533`; the failed cases in the gate's Firefox run | `cat $L/11-reruns-exits.txt; for f in 11-coverage-rerun-clif-app-threw 11-firefox-rerun-failed 11-firefox-main-e65a533-failed; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done; diff <(strip $L/11-firefox-rerun-failed.log \| grep -a '^ FAIL ' \| sort -u) <(strip $L/11-firefox-main-e65a533-failed.log \| grep -a '^ FAIL ' \| sort -u) && print 'the same failed cases'; strip $L/11-firefox-affected.log \| grep -a '^ FAIL ' \| sort -u \| wc -l; strip $L/11-firefox-affected.log \| grep -aE '^ (✓\|❯) ' \| sed -E 's/ [0-9]+ms$//' \| tr -s ' '` |
+| 0 | the lines of the CI workflow that name Firefox | `grep -ci firefox .forgejo/workflows/ci.yml` |
+| 16G | the memory cap, and the legs that ran under it | `grep -o 'MemoryMax=[^ ]*' $L/11-gate-run.zsh \| sort -u; grep -oE '(locked )?capped [a-z${}:2-]+' $L/11-gate-run.zsh \| grep -v '^capped()'` |
+| 467 | the files `biome ci` checked | `strip $L/11-lint.log` |
+| `a76742a`; exit 0 each | the head the drive built; its runs | `cat $L/11-hand-exits.txt` |
+| 156.0.8078.4, 157.0; `[]` each; 57, 0 and 67, 0 each | the drive's engines; its errors, page errors and console errors; its checks, and those that failed, for `drive.mjs` and `drive-is-even.mjs` | `for e in chromium firefox; do for d in '' is-even-; do print -n "$e $d "; jq -c '[.version, .errors, .pageErrors, .consoleErrors]' $L/hand/$e-${d}summary.json \| tr -d '\n'; jq -c '[length, ([.[] \| select(.pass == false)] \| length)]' $L/hand/$e-${d}checks.json; done; done` |
+| 1412, 896 | the drive's window | `grep -nE '^const (WIDTH\|HEIGHT)' $L/hand/drive.mjs $L/hand/drive-is-even.mjs` |
+| the sum_to(5) rows of the drive's table | in each engine, light and dark | `for e in chromium firefox; do for t in light dark; do jq -c --arg t $t '.sumTo[$t].marks \| [$t, .rxm.step, .rxm.mark.dd // .rxm.rows[0].dd, .rxm.marked, .clif.step, .clif.mark.dd, .clif.mark.dt, .clif.v3, .clif.v3Marked, .tm.step, .tm.mark.cells, .tm.mark.next, .tm.status, .lambda.step, .lambda.mark.chip, .lambda.mark.dataMarks, .lambda.mark.after]' $L/hand/$e-summary.json; done; done` |
+| `true` each; 0 each | the ground, the edge and the word in their tokens' colours, in each view; the rxm and clif listing rows marked | `for e in chromium firefox; do for t in light dark; do jq -c --arg t $t '.sumTo[$t].marks \| [$t, (.[] \| [.kind, .mark.ground, .mark.edge, .mark.wordInColour, .listingMarks])]' $L/hand/$e-summary.json; done; done` |
+| the fact(12) rows of the drive's table | in each engine | `for e in chromium firefox; do jq -c '.fact12 \| [.rxm.step, .rxm.mark.dd, .rxm.mark.ddLines, .rxm.mark.columns, .clif.step, .clif.mark.dd, .clif.mark.ddLines, .clif.mark.columns, .lambda.step, .lambda.marks, .tm.step, .tm.boxes, .tm.endian]' $L/hand/$e-summary.json; done` |
+| the is_even(6) row of the drive's table | in each engine, light and dark | `for e in chromium firefox; do jq -c '.isEven \| [.end, (.light, .dark \| [.theme.dataTheme, .marks.marks, .marks.mark.chip, .marks.mark.dataMarks, .marks.mark.after, (.marks.root.classes \| join(" ")), .marks.root.backgroundImage, (.marks.root.backgroundColor == .marks.tokens.resultBg), .marks.mark.wordInColour, .marks.mark.edge])]' $L/hand/$e-is-even-summary.json; done` |
+| 28 | this drive's screenshots | `ls $L/hand/*.png \| wc -l` |
+| this roadmap | the files changed after `af7cdc3`, read on the tree of this entry's latest commit | `git diff --name-only af7cdc3` |
+| 2; 3 | the second review's important findings; its minor ones | `awk '/^### Important/,/^### Minor/' $L/review-pr201.md \| grep -cE '^\*\*[0-9]+\. '; awk '/^### Minor/,/^## Set aside/' $L/review-pr201.md \| grep -cE '^\*\*[0-9]+\. '` |
+| `9f44df0`, this roadmap; `57b7eeb`, `825bbe8` and `ad8fbdb`, the files *The second review's fixes* names | the commits after `10f6c0e` up to `ad8fbdb`, and their files | `for c in $(git rev-list --reverse 10f6c0e..ad8fbdb); do print "$(git rev-parse --short $c): $(git diff --name-only $c^ $c \| paste -sd ' ')"; done` |
+| the figures of the affected-set table's row 12; exit 0 each for the typecheck, `biome ci` and the comment guard against `origin/main`, then `e65a533` | each second-review commit's checks, `$L/12-<tag>-<tier>.log`, and their exits | `for t in i1 m2 m1; do for k in node browser firefox; do print -n "12-$t-$k: "; strip $L/12-$t-$k.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done; print "12-$t-exits: $(paste -sd ' ' $L/12-$t-exits.txt)"; done` |
+| 1, 4; 1, 10; 1, 20; 1, 9; 1, 15; 1, 3 and 5, 35 | the new cases unsabotaged, files and tests: `result-mark`, `result-stopped`, `custom-palette`, `base16-check`, `base16-import`; 12-I1 on `9f44df0`'s tests, node and browser | `for f in 12-i1-green-node 12-i1-green-browser 12-m2-green-node-2 12-m1-green-node-2 12-m1-green-browser 12-sab-I1-head-node 12-sab-I1-head-browser; do print -n "$f: "; strip $L/$f.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' ' \| paste -sd ' '; done` |
+| 299, `rule` `null`, REG from cell 0 `#0000#…`, a `Fault`, and rxm 18; width 4 and 15 | `9 + 9` under binary at width 4 in node over `pkg/`; sum_to(5) at width 4 | `cat $L/12-probe-overflow.log`, the output of `node $L/12-probe-overflow.mjs` |
+| 33 each; 1 at 35% and 8 at 25%, on each tree; 1 at 25%, on each tree; each a `beforeAll` timed out after 10,000 ms; 24 and 32; 0; 228 ms and 442 ms on the branch, 236 ms and 445 ms on main; the other two files' failures | the flake probe: the runs of `clif-app-failed` and `clif-app-threw` on each tree; the first's failed runs; the second's; what failed; the runs of each named test on each tree; their failures; their medians at full speed; `clif-app` and `clif-app-failed-intent` | `node $L/12-probe-tally.mjs` |
+| 50%, 35%, 25%; none at full speed or in the warm-up; the four files; warm-up, full speed, 50%, 25%, 35%; `80149cc`, `10f6c0e`, `9f44df0` | the flake probe: its CPU quotas; its files; its phases in the order they ran; the branch's heads | `grep -h -m1 'cpu.max' $L/probe-flake/q50-r01-main.log $L/probe-flake/q35-r01-main.log $L/probe-flake/q25-r01-main.log; grep -c 'cpu.max' $L/probe-flake/normal-r01-main.log $L/probe-flake/warmup-r01-main.log; grep -oE 'FILES=\(.*\)' $L/probe-flake/drive.zsh; grep -E ' done ' $L/probe-flake/rounds.txt`; the heads, the last block of `node $L/12-probe-tally.mjs` |
+| `2a96b84`, #199; 14 files, 381 insertions, 24 deletions; 0; this roadmap | main since `e65a533`: its commits; its diff; its lines under `crates/`; the files both it and the branch, at `dde2703`, changed | `git log --oneline e65a533..2a96b84 \| cut -c1-90; git diff --shortstat e65a533 2a96b84; git diff e65a533 2a96b84 -- crates \| wc -l; comm -12 <(git diff --name-only e65a533 2a96b84 \| sort) <(git diff --name-only e65a533 dde2703 \| sort)` |
+| the files of *The second merge, with `2a96b84`* | main's files since `e65a533` | `git diff --name-only e65a533 2a96b84 \| paste -sd ' '` |
+| this roadmap | the file `af7cdc3` conflicted in | `strip $L/13-merge.log \| grep -a 'CONFLICT' \| sed -E 's/.* in //' \| sort \| paste -sd ' '` |
+| 15 in and 2 out; 13 in and 1 out | #199's lines in `clif-app-failed.test.ts` and `clif-app-threw.test.ts` | `git diff --numstat e65a533 2a96b84 -- web/tests/browser/clif-app-failed.test.ts web/tests/browser/clif-app-threw.test.ts` |
+| no clif load asked for or started, in each | the precondition each of those two files gained in #199 | `git grep -n 'precondition: no clif load' 2a96b84 -- web/tests/browser/clif-app-failed.test.ts web/tests/browser/clif-app-threw.test.ts \| cut -c1-160` |
+| `af7cdc3`; exit 0 each; 261 s | the checks on the merged tree: their head; each leg's exit; the coverage leg's seconds | `grep -oE 'HEAD [0-9a-f]+' $L/13-exits.txt \| sort -u; grep -E '^[a-z0-9-]+ exit [0-9]+ [0-9]+s ' $L/13-exits.txt \| cut -d' ' -f1-4 \| paste -sd ';'` |
+| 0; 468; `2a96b84`, 50; 82, 1549 | the checks on the merged tree: main's diff under `crates/`; the files `biome ci` checked; the comment guard's base and its changed files; the node project's files and tests | `wc -l < $L/13-crates-diff.log; strip $L/13-lint.log \| grep -aoE 'Checked [0-9]+ files'; strip $L/13-comments.log; strip $L/13-node.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' '` |
+| 305; 3449, 2; 98.16, 92.41, 98.74, 99.38; 1 each; built | the coverage run on the merged tree: files; tests passed and expected to fail; statements, branches, functions and lines; the tests of `clif-app-failed` and `clif-app-threw`, passed; `build:app` | `for f in $L/13-coverage*.log; do print "${f:t}"; strip $f \| grep -aE 'Test Files  \|Tests  \|All files\|unit-exit\|^ FAIL \|clif-app-(failed\|threw)\.test\.ts' \| tr -s ' '; done; strip $L/13-build-app.log \| grep -aE 'built in\|error' \| tail -n 2` |
+| 5, 36 | Firefox over the 5 `result-*` files on the merged tree: files and tests | `grep '^firefox files:' $L/13-exits.txt; strip $L/13-firefox.log \| grep -aE 'Test Files  \|Tests  ' \| tr -s ' '` |

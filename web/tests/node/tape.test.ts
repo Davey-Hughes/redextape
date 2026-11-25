@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tapeLabel, tapeRows } from '../../src/tape'
+import { resultField, tapeLabel, tapeRows } from '../../src/tape'
 import type { TmState } from '../../src/types'
 import { tmStateOf } from './tm-machines'
 
@@ -91,5 +91,24 @@ describe('tapeLabel', () => {
   it('names an unnamed tape once, not twice', () => {
     const [row] = tapeRows(state(), [])
     expect(row === undefined ? '' : tapeLabel(row)).toBe('tape 0, head at cell 5, reading c')
+  })
+})
+
+describe('resultField', () => {
+  /** A one-tape frame whose REG window is `window` from cell `start`, its head home on cell 0. */
+  const reg = (window: string, start = 0): TmState => tmStateOf(0, start, window)
+
+  it('finds REG field 0 on screen', () => {
+    expect(resultField(reg('#1111#1010#____')), 'sum_to(5) under binary').toEqual({ from: 1, to: 5 })
+    expect(resultField(reg('#00000000001111110011000100111000#0000')), 'fact(12) under binary').toEqual({
+      from: 1,
+      to: 33,
+    })
+    expect(resultField(reg(`#${'1'.repeat(40)}`)), 'a unary field that runs past the window').toEqual({
+      from: 1,
+      to: 41,
+    })
+    expect(resultField(reg('#1111#1010#', 3)), 'a window from cell 3').toBeNull()
+    expect(resultField(reg('1111#1010#')), 'a first cell that is not #').toBeNull()
   })
 })

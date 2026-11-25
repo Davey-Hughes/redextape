@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { setFocus } from './highlight'
 import type { LambdaPane } from './lambda-pane'
-import type { LambdaTrees } from './lambda-trees'
+import type { LambdaTrees, TreeFor } from './lambda-trees'
 import { perLeg } from './legs'
 import { type Focus, isCoincident, type Link, runningFocus, sourceNodeOwner } from './link'
 import type { LambdaLinkState } from './link-status'
@@ -9,8 +9,10 @@ import type { LinkWiring } from './link-wiring'
 import { isLinkedLeg, LINKED, type LinkedLeg, perLinkedLeg } from './linked-legs'
 import type { PaneHost } from './pane-host'
 import { type LeafId, onPage, type PaneCollection } from './panes'
+import type { LegFrame } from './protocol'
 import { type Lines, type ProgramResult, programRows, programSegments } from './readout'
 import type { UnseenViews } from './replies'
+import { BINARY, lambdaEnded, RUN_ENDED, resultMarked } from './result-mark'
 import type { SessionId } from './session-client'
 import type { SessionRegistry } from './sessions'
 
@@ -190,6 +192,12 @@ export function createDraw(deps: {
       if (machine !== null && isLinkedLeg(boundLeg)) {
         const focusLink = running[boundLeg].link
         machine.setFocus(focusLink === null ? [] : LINKED[boundLeg].rows(focusLink, null))
+        // THE RESULT MARK, BEFORE `render` FOR `setFocus`'s REASON, asked again at every draw so that a result landing
+        // after the frames, or a step back, moves it. With it the run's bit order, from the encoding the frames'
+        // generation was posted under.
+        const ended = endedAt(boundLeg, leg.hist.current as LegFrame[LinkedLeg] | undefined)
+        const client = sessions.entryOf(p.slot.binding.session).client
+        machine.setResult(resultMarked(program(), boundLeg, leg, ended), client.encodingOf(leg.gen) === BINARY)
       }
       p.slot.render(sessions, p.pane, leg)
       // **THE SEED DROPPED THE PIN AND ITS SCROLL, AND BOTH ARE GIVEN BACK AFTER THE VIEW'S RENDER.** The view missed
@@ -264,10 +272,10 @@ export function createDraw(deps: {
       const session = p.slot.binding.session
       const leg = p.slot.resolve(sessions)
       pane.setBuild(trees.buildOf(session))
-      pane.renderTree(
-        leg.hist.current === undefined ? { kind: 'none' } : trees.want(session, leg.hist.currentStep),
-        pin,
-      )
+      // The result is asked again at every draw, as the machine views'.
+      const treeFor: TreeFor =
+        leg.hist.current === undefined ? { kind: 'none' } : trees.want(session, leg.hist.currentStep)
+      pane.renderTree(treeFor, pin, resultMarked(program(), 'lambda', leg, lambdaEnded(treeFor)))
     }
 
     // THE RUNNING FOCUS: a SECOND, INDEPENDENT layer from `l`/`link` above, computed here rather than
@@ -345,4 +353,9 @@ export function createDraw(deps: {
     // the same division `readout.show` above takes, and the reason `draw.ts` still needs no layout tree.
     stepBar.update()
   }
+}
+
+/** Whether the frame a view of `leg` shows proves its run's end, by `RUN_ENDED`; false with no frame. */
+function endedAt<K extends LinkedLeg>(leg: K, frame: LegFrame[K] | undefined): boolean {
+  return frame !== undefined && RUN_ENDED[leg](frame)
 }

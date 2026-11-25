@@ -8,7 +8,7 @@ import { createPanel, type Panel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
 import { StateDiagram } from './state-diagram'
 import { focusedRows, highlight, linkedRows, StateIndex } from './state-table'
-import { tapeLabel, tapeRows } from './tape'
+import { resultField, tapeLabel, tapeRows } from './tape'
 import type { TmProgram, TmState } from './types'
 import { radioGroup } from './view-header'
 import type { GridRows, VirtualGrid } from './virtual-grid'
@@ -16,6 +16,20 @@ import { DEFAULT_TM_DISPLAY, type TmDisplay } from './workspace'
 
 export { ROW_HEIGHT } from './state-table'
 export { OVERSCAN } from './virtual-grid'
+
+/**
+ * A tape row's cells with `field`'s in one `span.tm-result` box and the word `result` right after it, which pushes
+ * the rest of the row right.
+ */
+function withResult(cells: readonly HTMLElement[], field: { readonly from: number; readonly to: number }): Node[] {
+  const box = document.createElement('span')
+  box.className = 'tm-result'
+  box.append(...cells.slice(field.from, field.to))
+  const word = document.createElement('span')
+  word.className = 'result-word'
+  word.textContent = 'result'
+  return [...cells.slice(0, field.from), box, word, ...cells.slice(field.to)]
+}
 
 /** Mints each pane's grid a prefix for its cells' ids, which `aria-activedescendant` names. */
 let gridsMinted = 0
@@ -49,6 +63,15 @@ export class TmPane extends MachineViewChrome {
    * gives the step part the room of, so the line's rows do not change while a playing run's count gains digits.
    */
   #stepAtNewest = ''
+  /** Whether `#frame` is the run's result, whose REG field 0 the tapes mark: `setResult`. */
+  #result = false
+  /** Whether the run's fields read least significant digit first, which the status line says beside the result. */
+  #littleEndian = false
+  /**
+   * The status line's `little-endian` part while the result of a binary run shows, else `null`; on the line only
+   * while the line has room for it: `#fitEndian`.
+   */
+  #endian: HTMLElement | null = null
   #tapes: HTMLElement
   /**
    * The pane's own body — everything below the heading row, wrapped in one element for `host.replaceChildren`
@@ -111,6 +134,9 @@ export class TmPane extends MachineViewChrome {
     this.#onDisplay = on.tmDisplay
     this.#status = document.createElement('div')
     this.#status.className = 'tm-status'
+    // THE WORDS AFTER THE RESULT ARE WEIGHED AGAIN WHEN THE LINE'S WIDTH CHANGES, which no draw follows: a view
+    // narrowed with them kept would cut them or the state name, and one widened would not take them back.
+    new ResizeObserver(() => this.#fitEndian()).observe(this.#status)
     this.#line = document.createElement('span')
     this.#line.className = 'tm-line'
     this.#stateName = document.createElement('span')
@@ -362,6 +388,16 @@ export class TmPane extends MachineViewChrome {
     this.#focused = this.#index === null ? new Set() : focusedRows(this.#index, states)
   }
 
+  /**
+   * `LinkedPane`'s word of the run's result: at it the next `render` boxes REG's field 0 with the word `result` after
+   * it, and the status line says `little-endian` where `littleEndian` says the run's fields read so. A pure setter,
+   * for `setFocus`'s reason.
+   */
+  setResult(on: boolean, littleEndian: boolean): void {
+    this.#result = on
+    this.#littleEndian = littleEndian
+  }
+
   /** Spec §8's `steps` switch, per `PaneView.setStepsShown` — the view's header owns the slot. */
   override setStepsShown(shown: boolean): void {
     super.setStepsShown(shown)
@@ -386,8 +422,9 @@ export class TmPane extends MachineViewChrome {
 
     this.#drawStatus()
 
+    const field = this.#result ? resultField(frame) : null
     this.#tapes.replaceChildren(
-      ...tapeRows(frame, this.#names).map((row) => {
+      ...tapeRows(frame, this.#names).map((row, tape) => {
         const el = document.createElement('div')
         el.className = 'tape'
         // A LABELLED GROUP (spec §9.3): where the head is and what it reads, said when a reader reaches the row.
@@ -398,14 +435,13 @@ export class TmPane extends MachineViewChrome {
         label.textContent = row.label
         const cells = document.createElement('span')
         cells.className = 'cells'
-        cells.append(
-          ...row.cells.map((c, i) => {
-            const cell = document.createElement('span')
-            cell.className = i === row.headIndex && row.headInWindow ? 'cell head' : 'cell'
-            cell.textContent = c
-            return cell
-          }),
-        )
+        const drawn = row.cells.map((c, i) => {
+          const cell = document.createElement('span')
+          cell.className = i === row.headIndex && row.headInWindow ? 'cell head' : 'cell'
+          cell.textContent = c
+          return cell
+        })
+        cells.append(...(tape === 0 && field !== null ? withResult(drawn, field) : drawn))
         el.append(label, cells)
         return el
       }),
@@ -432,7 +468,7 @@ export class TmPane extends MachineViewChrome {
     // content in a box of its own, and `reserve` beside it as generated content, so it is neither in the line's text
     // nor read out.
     const parts: Node[] = []
-    const part = (content: string | Node, reserve?: string): void => {
+    const part = (content: string | Node, reserve?: string): HTMLElement => {
       const lead = parts.length === 0 ? [] : [' · ']
       const el = document.createElement('span')
       el.className = 'tm-part'
@@ -446,6 +482,7 @@ export class TmPane extends MachineViewChrome {
         el.append(shown)
       }
       parts.push(el)
+      return el
     }
     if (named) {
       // A `StateId` past the end yields no name rather than an index nobody can read — the same
@@ -457,8 +494,28 @@ export class TmPane extends MachineViewChrome {
     }
     if (this.#stepsShown && this.steps.step.textContent !== '') part(this.steps.step, this.#stepAtNewest)
     if (named) part(`width ${n(program.width)}`)
+    this.#endian = named && this.#result && this.#littleEndian ? part('little-endian') : null
+    this.#endian?.classList.add('tm-endian')
     this.#line.replaceChildren(...parts)
     this.#status.replaceChildren(...(parts.length === 0 ? [] : [this.#line]))
+    this.#fitEndian()
+  }
+
+  /**
+   * Keep the status line's `little-endian` only where the line has room for it: drawn whole, and the state name no
+   * more cut than without it. **DROPPED, NEVER WRAPPED** (the return-value highlight design, *TM*): a line that gained
+   * a row would move the tapes under it, at the one step the words are said. `.tm-endian` takes only the room the
+   * line's other parts leave (`style.css`), so the line's height is the same with the words or without them, and a
+   * change of width that drops them changes no size the status line's observer watches.
+   */
+  #fitEndian(): void {
+    const endian = this.#endian
+    if (endian === null) return
+    endian.remove()
+    const name = this.#stateName.getBoundingClientRect().width
+    this.#line.append(endian)
+    const cut = endian.scrollWidth > endian.clientWidth
+    if (cut || this.#stateName.getBoundingClientRect().width < name - 0.5) endian.remove()
   }
 
   /**

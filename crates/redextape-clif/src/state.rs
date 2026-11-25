@@ -58,10 +58,15 @@ pub struct ClifState {
     pub next: Option<ClifAt>,
     /// The rxm pc `at` was lowered from, `None` for an instruction lowered from none.
     pub pc: Option<u32>,
-    /// The first `ClifWindow::values` of the running frame's set values, in value order.
+    /// The first `ClifWindow::values` of the running frame's set values, in value order, the last of them
+    /// `returned`'s row where the first ones miss it.
     pub values: Vec<ClifValue>,
     /// How many values the running frame has set, however many `values` shows.
     pub values_len: usize,
+    /// At a `Ran` end, the value main's `return` names, its aliases followed (`return v9` with `v9 -> v8`
+    /// names 8), and `None` before the end and at any other end. `values` always holds its row, since a
+    /// values panel that cut the answer off would have nothing to mark.
+    pub returned: Option<u32>,
     /// How many frames the run holds, however many `frames` shows.
     pub depth: usize,
     /// The top `ClifWindow::frames` frames, top first, for `RxmState::frames`' reason: each frame's
@@ -92,7 +97,16 @@ impl Stepper<'_> {
     pub fn state(&self, window: ClifWindow) -> ClifState {
         let at = self.at();
         let running = self.running();
-        let shown: Vec<(Value, &DataValue, WordTag)> = self.values().take(window.values).collect();
+        let returned = self.returned();
+        let mut shown: Vec<(Value, &DataValue, WordTag)> = self.values().take(window.values).collect();
+        // `returned`'s doc says why the window holds it: where the first rows miss the returned value, its row
+        // takes the window's last, and its number is past theirs, so value order holds.
+        if let Some(returned) = returned
+            && !shown.iter().any(|&(value, ..)| value == returned)
+            && let (Some(last), Some(row)) = (shown.last_mut(), self.values().find(|&(value, ..)| value == returned))
+        {
+            *last = row;
+        }
         let named =
             |tag: WordTag| shown.iter().filter(move |(_, _, t)| *t == tag).filter_map(|(_, held, _)| bits(held));
         let heap = self.runtime().heap();
@@ -113,6 +127,7 @@ impl Stepper<'_> {
                 })
                 .collect(),
             values_len: self.values().count(),
+            returned: returned.map(Value::as_u32),
             depth: self.frames().len(),
             frames: self.frames().iter().rev().take(window.frames).map(at_of).collect(),
             heap_len: heap.cells().len(),
@@ -120,6 +135,17 @@ impl Stepper<'_> {
             box_len: heap.boxes().len(),
             boxes: heap_boxes(heap.boxes(), &heap.tags().boxes, window.boxes, named(WordTag::Box)),
         }
+    }
+
+    /// At a `Ran` end, the value main's `return` names, through its aliases: the run stands at that
+    /// `return`, main's frame kept. `None` before the end and at any other end.
+    fn returned(&self) -> Option<Value> {
+        if !matches!(self.status(), Some(ClifEnd::Ran(_))) {
+            return None;
+        }
+        let func = self.running()?;
+        let &operand = func.dfg.inst_args(Inst::from_u32(self.at().inst)).first()?;
+        Some(func.dfg.resolve_aliases(operand))
     }
 }
 

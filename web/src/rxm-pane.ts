@@ -49,6 +49,8 @@ export class RxmPane extends MachineViewChrome {
   #body: HTMLElement
   #program: RxmProgram | null = null
   #frame: RxmState | null = null
+  /** Whether `#frame` is the run's result, which the registers mark: `setResult`. */
+  #result = false
   #listing: ListingPanel
   #values: MachinePanel<ValuesView>
   #stack: MachinePanel<StackView>
@@ -152,6 +154,14 @@ export class RxmPane extends MachineViewChrome {
     this.#listing.setFocus(instrs)
   }
 
+  /**
+   * Whether the frame the next `render` draws is the run's result, which the registers mark (`draw.ts`, by
+   * `result-mark.ts`). **A PURE SETTER**, set before that `render` as `setFocus` is, so the frame is drawn once.
+   */
+  setResult(on: boolean): void {
+    this.#result = on
+  }
+
   render(frame: RxmState | null, controls: ControlState): void {
     this.#frame = frame
     this.steps.update(controls)
@@ -162,7 +172,7 @@ export class RxmPane extends MachineViewChrome {
     const frame = this.#frame
     const program = this.#program
     this.#listing.show(frame?.next ?? null, frame?.step ?? null)
-    this.#values.show(frame === null ? null : rxmValues(frame))
+    this.#values.show(frame === null ? null : rxmValues(frame, this.#result))
     this.#stack.show(frame === null || program === null ? null : rxmStack(frame, program))
     this.#heap.show(frame === null ? null : rxmHeap(frame))
   }

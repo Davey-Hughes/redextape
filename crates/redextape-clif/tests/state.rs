@@ -10,9 +10,9 @@
 mod common;
 
 use common::{TIGHT, corpus, program_of};
-use cranelift_codegen::ir::{ExternalName, Function, Inst, InstructionData};
-use redextape_clif::{ClifAt, ClifEnd, ClifState, ClifWindow, Stepper};
-use redextape_core::tm::DEFAULT_CAPS;
+use cranelift_codegen::ir::{ExternalName, Function, Inst, InstructionData, Opcode};
+use redextape_clif::{ClifAt, ClifEnd, ClifState, ClifValue, ClifWindow, Stepper};
+use redextape_core::tm::{DEFAULT_CAPS, Program};
 use redextape_core::trace::WordTag;
 use redextape_core::viewmodel::{RxmBox, RxmCell, RxmWord};
 use redextape_native::{Listing, RtFn, build_listing};
@@ -21,7 +21,12 @@ const LISTINGS: [Listing; 2] = [Listing::AsBuilt, Listing::Optimised];
 const WINDOW: ClifWindow = ClifWindow { values: 64, frames: 8, cells: 16, boxes: 16 };
 // Cuts the corpus's runs reach, so that cutting is tested.
 const NARROW: ClifWindow = ClifWindow { values: 2, frames: 2, cells: 16, boxes: 16 };
+// A window no run's values reach, so its `values` are every value the running frame has set.
+const EVERY: ClifWindow = ClifWindow { values: usize::MAX, ..WINDOW };
 const FACT: &str = include_str!("../../../web/src/examples/fact.rxt");
+const FACT_12: &str = include_str!("../../../web/src/examples/fact-12.rxt");
+const IS_EVEN: &str = include_str!("../../../web/src/examples/is-even.rxt");
+const SUM_TO: &str = include_str!("../../../web/src/examples/sum-to.rxt");
 
 /// `src`, a λ program, built as `listing`.
 fn build(src: &str, listing: Listing) -> Vec<Function> {
@@ -53,6 +58,39 @@ fn ran(src: &str, listing: Listing) -> ClifState {
     stepper.run(u64::MAX);
     assert!(matches!(stepper.status(), Some(ClifEnd::Ran(_))), "{src} {}: {:?}", listing.name(), stepper.status());
     stepper.state(WINDOW)
+}
+
+/// The value main's `return` at `at` names, read from the listing, its aliases followed, and whether
+/// the operand was an alias.
+fn return_operand(funcs: &[Function], at: ClifAt) -> (u32, bool) {
+    assert_eq!(at.function, 0, "the run ended outside main");
+    let main = &funcs[0];
+    let inst = Inst::from_u32(at.inst);
+    assert_eq!(main.dfg.insts[inst].opcode(), Opcode::Return, "{inst} is not a return");
+    let operand = main.dfg.inst_args(inst)[0];
+    let resolved = main.dfg.resolve_aliases(operand);
+    (resolved.as_u32(), resolved != operand)
+}
+
+/// Checks `state`, a `Ran` end's frame cut to `window` values, against `set`, every value the frame has
+/// set: `values` holds the returned value's row, ascends and fits the window, and where the first `window`
+/// set values miss the returned one, it is the first `window - 1` and then its row. True when they missed it.
+fn assert_the_window_holds_the_returned_value(set: &[ClifValue], state: &ClifState, window: usize, at: &str) -> bool {
+    let returned = state.returned.unwrap_or_else(|| panic!("{at}: no returned value"));
+    let row = set.iter().find(|v| v.value == returned).unwrap_or_else(|| panic!("{at}: v{returned} is not set"));
+    let numbers: Vec<u32> = state.values.iter().map(|v| v.value).collect();
+    assert!(numbers.contains(&returned), "{at}: v{returned} is not in {numbers:?}");
+    assert!(numbers.windows(2).all(|w| w[0] < w[1]), "{at}: {numbers:?}");
+    assert!(state.values.len() <= window, "{at}: {numbers:?}");
+    let first = &set[..set.len().min(window)];
+    let missed = !first.contains(row);
+    if missed {
+        assert_eq!(state.values[..window - 1], first[..window - 1], "{at}");
+        assert_eq!(state.values.last(), Some(row), "{at}");
+    } else {
+        assert_eq!(state.values[..], first[..], "{at}");
+    }
+    missed
 }
 
 /// `stepper`'s state after steps until `until` holds of it; fails if the run ends first.
@@ -187,7 +225,12 @@ fn the_state_reads_only_set_values_at_every_step() {
                 assert_eq!(state.pc, (!loc.is_default()).then(|| loc.bits()), "{at}");
                 let narrow = stepper.state(NARROW);
                 assert_eq!(narrow.values_len, state.values_len, "{at}");
-                assert_eq!(narrow.values[..], state.values[..state.values_len.min(NARROW.values)], "{at}");
+                if matches!(stepper.status(), Some(ClifEnd::Ran(_))) {
+                    let set = stepper.state(EVERY).values;
+                    assert_the_window_holds_the_returned_value(&set, &narrow, NARROW.values, &at);
+                } else {
+                    assert_eq!(narrow.values[..], state.values[..state.values_len.min(NARROW.values)], "{at}");
+                }
                 assert_eq!(narrow.frames[..], state.frames[..state.depth.min(NARROW.frames)], "{at}");
                 if !stepper.step() {
                     break;
@@ -202,4 +245,85 @@ fn the_state_reads_only_set_values_at_every_step() {
             assert_eq!(state.next, next, "{name}: {:?}", stepper.status());
         }
     }
+}
+
+/// At a `Ran` end `returned` is the value main's `return` names, through its aliases, and `values` holds
+/// it with the run's result; before the end, and at a `Fault` end, there is none.
+#[test]
+fn the_returned_value_is_main_s_return_operand_with_aliases_followed() {
+    let runs = [
+        (SUM_TO, RxmWord::of(15, WordTag::Value)),
+        (FACT_12, RxmWord::of(479_001_600, WordTag::Value)),
+        (IS_EVEN, RxmWord::of(1, WordTag::Value)),
+        ("[1, 2]", RxmWord::of(2, WordTag::List)),
+    ];
+    let mut aliased = 0;
+    for (src, word) in runs {
+        for listing in LISTINGS {
+            let name = format!("{} {}", src.lines().last().unwrap(), listing.name());
+            let funcs = build(src, listing);
+            let mut stepper = Stepper::new(&funcs, DEFAULT_CAPS);
+            while stepper.status().is_none() {
+                assert_eq!(stepper.state(WINDOW).returned, None, "{name} step {}", stepper.steps_taken());
+                stepper.step();
+            }
+            assert!(matches!(stepper.status(), Some(ClifEnd::Ran(_))), "{name}: {:?}", stepper.status());
+            let state = stepper.state(WINDOW);
+            let (operand, alias) = return_operand(&funcs, state.at);
+            aliased += usize::from(alias);
+            assert_eq!(state.returned, Some(operand), "{name}");
+            let row = state.values.iter().find(|v| v.value == operand);
+            assert_eq!(row.map(|v| &v.word), Some(&word), "{name}: {:?}", state.values);
+        }
+    }
+    // Without a run that returns an alias this case would pass without `resolve_aliases`: sum_to(5) as built
+    // returns `v9`, an alias of `v8`.
+    assert!(aliased > 0, "no run returned an alias");
+    assert_eq!(ran(SUM_TO, Listing::AsBuilt).returned, Some(8));
+
+    for listing in LISTINGS {
+        let funcs = build("head([])", listing);
+        let mut stepper = Stepper::new(&funcs, DEFAULT_CAPS);
+        stepper.run(u64::MAX);
+        let name = format!("head([]) {}", listing.name());
+        assert!(matches!(stepper.status(), Some(ClifEnd::Fault { .. })), "{name}: {:?}", stepper.status());
+        assert_eq!(stepper.state(WINDOW).returned, None, "{name}");
+    }
+}
+
+/// At a `Ran` end the values window holds the returned value however few values it shows, and the cells
+/// hold the cell a returned list points at.
+#[test]
+fn the_values_window_holds_the_returned_value() {
+    let mut programs: Vec<(String, Program)> = vec![("[1, 2]".to_string(), program_of("[1, 2]", "[1, 2]"))];
+    programs.extend(corpus().into_iter().filter(|(key, _)| !key.starts_with("measure-")));
+    let (mut missed, mut lists) = (0, 0);
+    for (key, prog) in programs {
+        for listing in LISTINGS {
+            let funcs = build_listing(&prog, listing).unwrap();
+            let mut stepper = Stepper::new(&funcs, DEFAULT_CAPS);
+            stepper.run(u64::MAX);
+            let Some(ClifEnd::Ran(outcome)) = stepper.status() else { continue };
+            let result = outcome.result;
+            let set = stepper.state(EVERY).values;
+            for window in [NARROW, WINDOW] {
+                let at = format!("{key} {} under {} values", listing.name(), window.values);
+                let state = stepper.state(window);
+                let missed_here = assert_the_window_holds_the_returned_value(&set, &state, window.values, &at);
+                missed += usize::from(missed_here && window.values == NARROW.values);
+            }
+            // With no newest cells the window's cells are only those its words point at.
+            let state = stepper.state(ClifWindow { cells: 0, ..NARROW });
+            let returned = state.values.iter().find(|v| Some(v.value) == state.returned).unwrap();
+            if returned.word.tag == WordTag::List && result != 0 {
+                let cells: Vec<u64> = state.cells.iter().map(|c| c.cell as u64).collect();
+                assert!(cells.contains(&result), "{key} {}: #{result} not in {cells:?}", listing.name());
+                lists += usize::from(!set[..set.len().min(NARROW.values)].contains(returned));
+            }
+        }
+    }
+    // Without a returned value past the first two, and a list's past them, this case would pass on a window that
+    // never moved the returned row.
+    assert!(missed > 0, "every returned value was among the first {}", NARROW.values);
+    assert!(lists > 0, "no run returned a list past the first {} values", NARROW.values);
 }

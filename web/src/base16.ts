@@ -166,8 +166,8 @@ export function detectVariant(colours: Readonly<Record<Base16Key, string>>): Sch
  * `focus-ring` are `fg`, `tok-neutral` is `fg-dim`, `accent` is `tok-keyword`, `tok-nat` is `tok-bool` — and follows
  * the styling guide's roles: base00 the default background, base01 the lighter one status bars use, base02 the
  * selection, base04 and base05 the dark and default foregrounds, base08 red, base09 orange for numbers and booleans,
- * base0A yellow, base0B green, base0C cyan, base0E magenta for keywords. base03, base06, base07, base0D and base0F
- * are not used.
+ * base0A yellow, base0B green for binders and the result mark, base0C cyan, base0E magenta for keywords. base03,
+ * base06, base07, base0D and base0F are not used.
  */
 export const BASE16_MAPPING: Readonly<Record<ColourToken, Base16Key>> = {
   bg: 'base00',
@@ -189,6 +189,8 @@ export const BASE16_MAPPING: Readonly<Record<ColourToken, Base16Key>> = {
   'tok-operator': 'base0C',
   accent: 'base0E',
   'tok-keyword': 'base0E',
+  result: 'base0B',
+  'result-word': 'base0B',
 }
 
 /** A scheme's colours as a palette variant, every token from `BASE16_MAPPING`. */

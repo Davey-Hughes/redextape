@@ -42,14 +42,14 @@ export const DAY = [
   '#b02a30',
   '#9a4a10',
   '#7a5a00',
-  '#2e6e2e',
+  '#2a602a',
   '#1a6a70',
   '#2a5aa0',
   '#8a3a90',
   '#7a4a30',
 ] as const
 
-/** Fails 17 of the 35 floors, on base00 and base01, and every one is fixed by moving four colours' lightness. Dark. */
+/** Fails 17 of the 39 floors, on base00 and base01, and every one is fixed by moving four colours' lightness. Dark. */
 export const EMBER = [
   '#1c1a22',
   '#2c2833',
@@ -165,6 +165,12 @@ export function adjustedHalf(name: string, colours: readonly string[], variant: 
   const own = keyed(colours) as Scheme['colours']
   const check = checkScheme({ name, colours: own, variant, variantFrom: 'file', base24: false })
   return { name, colours: own, tokens: check.adjustment.tokens, adjusted: true }
+}
+
+/** `half` as a store written before the result tokens holds it: its tokens without `result` and `result-word`. */
+export function beforeResult(half: CustomHalf): CustomHalf {
+  const { result: _, 'result-word': __, ...tokens } = half.tokens
+  return { ...half, tokens }
 }
 
 /** The imported palette as stored, under `CUSTOM_PALETTE_KEY`, or `null` where none is. */

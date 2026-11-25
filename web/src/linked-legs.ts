@@ -16,6 +16,12 @@ export type LinkedLeg = Exclude<Leg, 'lambda'>
 export type LinkedPane = {
   setLink(rows: number[], scrollTo: boolean): void
   setFocus(rows: number[]): void
+  /**
+   * Whether the frame the next `render` draws is the run's result, which the view marks: `result-mark.ts`'s decision,
+   * made by `draw.ts` before that `render`. `littleEndian` says the run's fields read least significant digit first
+   * (`result-mark.ts`'s `BINARY`), which the TM view says beside its mark; the rxm and clif views take `on` alone.
+   */
+  setResult(on: boolean, littleEndian: boolean): void
 }
 
 /**

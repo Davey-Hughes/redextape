@@ -1,11 +1,15 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { STORAGE_KEY } from '../../src/appearance'
+import { movedColours, movedLine } from '../../src/base16-check'
+import { createBase16Dialog } from '../../src/base16-dialog'
 import { CUSTOM_PALETTE_KEY, type CustomHalf, serializeCustomPalette } from '../../src/custom-palette'
 import { PALETTES } from '../../src/palettes'
 import { PALETTE_CSS_KEY, PALETTE_KEY } from '../../src/skin'
 import {
   adjustedHalf,
+  beforeResult,
+  CLOSING,
   currentLayout,
   DAY,
   EMBER,
@@ -361,6 +365,46 @@ describe('removing a half', () => {
       expect(storedPalette()).toBe(before)
     } finally {
       storage.restore()
+    }
+  })
+})
+
+describe('a half stored adjusted before the result tokens, in the import dialog', () => {
+  it('lists the result word the page draws moved, which the stored tokens lack', async () => {
+    const today = adjustedHalf('Closing', CLOSING, 'dark')
+    const stored = beforeResult(today)
+    expect(
+      [stored.tokens['result-word'], today.tokens['result-word'] === CLOSING[11]],
+      'precondition: the word not stored, and moved off base0B by apply adjusted',
+    ).toEqual([undefined, false])
+    // A DIALOG OF ITS OWN over that store: the page's holds the store this file seeded before the mount.
+    const settings = document.createElement('button')
+    document.body.append(settings)
+    const dialog = createBase16Dialog({
+      settings,
+      stored: () => ({ dark: stored }),
+      shown: () => 'dark',
+      apply: () => {},
+      remove: () => {},
+    })
+    document.body.append(dialog.el)
+    try {
+      dialog.open()
+      await userEvent.click(
+        dialog.el.querySelector('.panel[data-panel="base16-now-changes"] button.panel-toggle') as HTMLElement,
+      )
+      const lines = [...dialog.el.querySelectorAll('.base16-now-changes li')].map((li) => li.textContent)
+      expect(lines, 'what the half stored today lists').toEqual(
+        movedColours(today.colours, today.tokens).map(movedLine),
+      )
+      expect(
+        lines.filter((l) => l.startsWith('base0B ') && l.includes('the result word')),
+        'the word',
+      ).toHaveLength(1)
+    } finally {
+      dialog.el.close()
+      dialog.el.remove()
+      settings.remove()
     }
   })
 })

@@ -173,6 +173,7 @@ const CELLS_AND_BOX: ClifState = {
     { value: 2, word: { word: '1', tag: 'Value' }, regs: ['a1'] },
   ],
   values_len: 3,
+  returned: null,
   depth: 2,
   frames: [
     { function: 1, inst: 0 },
@@ -213,6 +214,7 @@ const DEEP: ClifState = {
     { value: 26, word: { word: '1', tag: 'Value' }, regs: [] },
   ],
   values_len: 17,
+  returned: null,
   depth: 4,
   frames: [
     { function: 1, inst: 27 },

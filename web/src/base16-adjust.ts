@@ -1,4 +1,12 @@
-import { binderClashes, CONTRAST_FLOORS, contrastRatio, linearRgb, relativeLuminance } from './contrast'
+import {
+  binderClashes,
+  CONTRAST_FLOORS,
+  contrastRatio,
+  type Floor,
+  groundOf,
+  linearRgb,
+  relativeLuminance,
+} from './contrast'
 import { COLOUR_TOKENS, type ColourToken, type Variant } from './palettes'
 
 /**
@@ -176,29 +184,31 @@ const SURFACES: readonly ColourToken[] = ['bg', 'bg-raised', 'bg-chrome', 'rule'
  * - **A token meets all its floors at once**: `ok` is their conjunction.
  * - **Tokens move independently**, even when they share a scheme colour, so `fg` and `focus-ring`, both base05, can
  *   end different.
- * - **The order**: first every foreground whose floors are against surfaces only; then `on-accent`, whose floor is
- *   against `accent`, checked against the `accent` the first pass ended with.
+ * - **The order**: first every foreground whose floors are against surfaces only; then `on-accent` and `result-word`,
+ *   read on `accent` and on `result`'s tint, against the `accent` and the `result` the first pass ended with.
  * - **`tok-binder` last**: if it clashes, the same walk runs on it with `ok` = its floors hold and it stands apart
  *   from every other token's final value.
  * - **When no lightness passes**, the token keeps the value its walk began from, every other token is still adjusted,
  *   and the result names it (spec §6.4).
  *
- * `floors` is `CONTRAST_FLOORS` for every caller but one test, which hands it a table naming a surface as a
- * foreground to show the surfaces are held by this function and not by that table's data.
+ * `floors` is `CONTRAST_FLOORS` for every caller but two tests, whose tables show that this function holds the
+ * surfaces and the order, not a table's data: one names a surface as a foreground, one reads `fg` on a tint.
  */
-export function adjustVariant(imported: Variant, floors: typeof CONTRAST_FLOORS = CONTRAST_FLOORS): Adjustment {
+export function adjustVariant(imported: Variant, floors: readonly Floor[] = CONTRAST_FLOORS): Adjustment {
   const v: Record<ColourToken, string> = { ...imported }
   const unfixed: Unfixed[] = []
   const floorsOf = (t: ColourToken) => floors.filter(([fg]) => fg === t)
   const meets = (t: ColourToken, hex: string): boolean =>
-    floorsOf(t).every(([, bg, floor]) => contrastRatio(hex, v[bg]) >= floor)
-  const onSurfaces = (t: ColourToken): boolean => floorsOf(t).every(([, bg]) => SURFACES.includes(bg))
+    floorsOf(t).every((f) => contrastRatio(hex, groundOf(v, f)) >= f[2])
+  // A TINT IS NO SURFACE: it is a token that may itself move in the first pass, so a floor on one waits for it.
+  const onSurfaces = (t: ColourToken): boolean =>
+    floorsOf(t).every(([, bg, , tint]) => tint === undefined && SURFACES.includes(bg))
   // EACH COLOUR'S FINE SCAN IS MADE ONCE: the tokens that share a scheme colour, and fail, scan the same colours. AND
   // NONE IS MADE WHERE NO LUMINANCE MEETS THE TOKEN'S FLOORS, against colours that hold still while it walks: the
-  // surfaces, and for `on-accent` the `accent` the first pass ended with.
+  // surfaces, and for `on-accent` and `result-word` the `accent` and the `result` the first pass ended with.
   const scans = new Map<string, readonly string[]>()
   const nearest = (t: ColourToken, ok: (hex: string) => boolean): string | null => {
-    if (!someLuminancePasses(floorsOf(t).map(([, bg, floor]) => [relativeLuminance(v[bg]), floor]))) return null
+    if (!someLuminancePasses(floorsOf(t).map((f) => [relativeLuminance(groundOf(v, f)), f[2]]))) return null
     const hex = v[t]
     return nearestLightness(hexToOklch(hex), ok, () => {
       const scan = scans.get(hex) ?? fineScan(hexToOklch(hex))
