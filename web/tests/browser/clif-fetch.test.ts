@@ -1,8 +1,8 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { commands } from 'vitest/browser'
 import { INTENT_MS } from '../../src/clif-intent'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
-import { CLIF_MATCH, clifRequests, sleep } from './clif-fixture'
+import { CLIF_MATCH, clifRequests, hearSessionWorkers, requestsOf, sleep } from './clif-fixture'
 import { mountAt, pageCentreOf, resetToFirstLoad, stateIdle, toggle, until } from './harness'
 
 /**
@@ -15,18 +15,27 @@ import { mountAt, pageCentreOf, resetToFirstLoad, stateIdle, toggle, until } fro
  * a later case nothing to hear. These two fetch nothing, so their order cannot matter.
  */
 
+let ear: ReturnType<typeof hearSessionWorkers>
+
 beforeAll(async () => {
   // THE DEFAULT WORKSPACE AT START, AND NOT `setup.ts`'s FOUR VIEWS: the claim is about the page a first visit opens.
   localStorage.removeItem(LAYOUT_STORAGE_KEY)
+  ear = hearSessionWorkers()
   await commands.watchRequests('start', CLIF_MATCH)
   await mountAt(1280, 896)
 }, 30_000)
+
+afterAll(() => ear.restore())
 
 describe('the CLIF package', () => {
   it('fetches nothing for the default workspace', async () => {
     await resetToFirstLoad()
     await until(stateIdle, 'the first compile')
     await sleep(1000)
+    // **A LOAD THE PAGE ASKED FOR IS AN INTENT IT HEARD**, which this case makes none of: it is the case's
+    // precondition, not its claim, so an intent from outside the case fails here by that name, and not as a fetch
+    // without intent.
+    expect(requestsOf(ear.heard, 'clif-load'), 'precondition: the page asked for no clif load').toEqual([])
     expect(await clifRequests()).toEqual([])
   })
 
@@ -35,6 +44,7 @@ describe('the CLIF package', () => {
    * first, and two of them took longer than `INTENT_MS`, so the pointer would have rested rather than passed.
    */
   it('fetches nothing for a pointer passing over it', async () => {
+    expect(await clifRequests(), 'precondition: nothing fetched before the pointer came').toEqual([])
     const [over, past] = [pageCentreOf(toggle('clif')), pageCentreOf(toggle('lambda'))]
     let entered = false
     toggle('clif').addEventListener('pointerenter', () => {

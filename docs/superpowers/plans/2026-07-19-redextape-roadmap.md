@@ -41870,3 +41870,158 @@ strips colour codes, on a worktree whose files outside `docs/superpowers/`, untr
 | `tree-sitter-redextape-*.wasm`, `web-tree-sitter-*.wasm` | the grammar .wasm files in the pass by hand's build of 5ac7e9b | `ls $L/hand/dist/assets \| grep 'tree-sitter.*\.wasm$'` |
 | one digest, `16bf8e3eb9bd`, for both lists of 54 assets; the same 5 `.wasm` files | the .wasm files build:app emits at 5ac7e9b and at H, without their hashes | `for f in 15 t18b; do print -rn -- "$f: "; noansi $L/$f-build-app.log \| grep -aoE 'dist/assets/[^ ]+' \| sed -E 's/-[A-Za-z0-9_-]{8}\././' \| sort \| paste -sd' ' \| md5sum \| cut -c1-12; noansi $L/$f-build-app.log \| grep -aoE 'dist/assets/[^ ]+\.wasm' \| sed -E 's/-[A-Za-z0-9_-]{8}\././' \| paste -sd' '; done` |
 | `:441`, `:446`, `:28` | the IR specs' lines that name CLIF copies or LLVM copies | `grep -n 'CLIF copies\\|LLVM copies' docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md docs/superpowers/specs/2026-11-18-clif-view-design.md \| cut -c1-140` |
+
+#### A CLIF TOGGLE DRAWN UNDER A POINTER THAT HAS NOT MOVED FETCHES NOTHING, AND A BROWSER FILE THAT NEEDS THE PAGE'S FIRST CLIF LOAD SAYS SO WHEN ONE CAME FIRST (2026-11-24, branch `intent-pointermove`, `e65a533..cc9cff7`, 2 commits, plus this entry)
+
+PR #198's first CI run, run 791, failed in `clif-app-failed.test.ts`, a file #198 does not touch. The lane that owns
+#198 found why, `~/temp/redextape-duet-patches-record/mc-packages/rebase/ci-flake.md` with its probe and logs beside it,
+and found the fault on `main`. The change to intent that removes it was written on the machine code panel's branch,
+`machine-code-panel`, in `93c65d2`, with its test, which `54422b8` made hold on a slow machine; this branch takes that
+change out on its own so that it can land first, and adds the test-side half. The lane's record is
+`~/temp/redextape-duet-patches-record/intent/`, `$R` below; its logs, one line per pair run in `$R/logs/summary.txt`,
+and its runners are in `$R/logs/` and `$R/scripts/`, its saved copies and probes in `$R/sabotage/`.
+
+| Commit | What |
+|---|---|
+| `21dc3fb` | intent starts at the first `pointermove`, a press fetches at once; `clif-intent.test.ts`; the design's D3, §6 and §8 |
+| `cc9cff7` | the preconditions in five browser files; `failRequests` replaces an armed abort, and `0` drops one |
+
+##### WHAT SHOWED
+
+- **For a user.** The clif toggle's intent watcher, `watchIntent`, began its 150 ms rest at `pointerenter`. A browser
+  sends `pointerenter`, and no `pointermove`, to an element a layout puts under a pointer that has not moved: a page
+  opened, or a header rebuilt, where the pointer already rests on the spot the clif toggle is drawn at. So such a page
+  fetched `pkg-clif` 150 ms later with nothing asked of it, against the clif view design's G3.
+- **In CI.** Run 791 of #198 failed `clif-app-failed.test.ts` at line 43, `timed out after 10000ms waiting for the CLIF
+  view to say the load failed`, after 10,363 ms. Here the two files in CI's order in one tab, `--no-cache` and
+  `VITEST_MAX_WORKERS=1`, failed 2 of 2 on `e65a533`'s code the same way, at the same line (`before-pair-1.log` and
+  `-2.log`).
+
+##### THE MECHANISM
+
+Playwright's mouse belongs to the tab, and no setup file moves it between files. `clif-app-failed-intent.test.ts` ends
+with the pointer resting on the clif toggle at 1280 by 1600, and with `--no-cache` vitest runs it before
+`clif-app-failed.test.ts`, the larger file first, as a fresh CI container does. The next file draws the same header
+under the pointer; Chromium sends the toggle a trusted `pointerenter`, the rest fires during `beforeAll`, and the
+session worker loads `pkg-clif` and keeps it. The file then arms one failed request, shows the view and waits for `clif
+could not be loaded.`, but the view's load fetches nothing, so the abort is never spent, the notice never comes, and the
+unspent abort stays on the tab's browser context for the next file that asks for `pkg-clif`.
+
+##### THE FIX
+
+`watchIntent` (`web/src/clif-intent.ts`) is `93c65d2`'s, byte for byte: the rest starts at the first `pointermove` over
+the toggle and lasts until `pointerleave`, a `pointerdown` fetches at once, as a focus does, and `pointerenter` starts
+nothing. `main.ts`'s comment on the watcher and the clif view design's D3, §6 *Loading* and §8 *No fetch without
+intent* say so; `web/help.html` says nothing of when the package loads, so it is unchanged. With it the pair, run as
+above, passed 5 of 5 (`after-pair-1.log` to `-5.log`).
+
+For a user nothing fetches later but the case the fault is. A mouse that moves onto the toggle sends `pointermove`
+with its `pointerenter`, so a rest starts when it did. A press starts the load at its `pointerdown`, before the click
+shows the view, in a browser that gives a pressed button no focus as in one that does. A touch or a pen's tap sends
+`pointerdown` with no move before it, and that starts the load. A focus fetches as before. Only a toggle drawn under a
+still pointer waits, until the pointer moves on it or the toggle is pressed or focused, which is what G3 asks.
+
+##### THE TESTS
+
+- **`clif-intent.test.ts`** is the machine code branch's at `f6b5761`, `93c65d2`'s file as `54422b8` left it, with 3
+  hunks changed for `main`: the file's doc names the clif view design and the clif toggle where it named the machine
+  code panel's design and its target choice, the watched element reads `clif` where it read `arm64`, and the
+  still-pointer case's doc names a header rebuilt where it named a view. Its four cases: an element drawn under a still
+  pointer fetches nothing, once the browser has been seen to enter it; a pass fetches nothing and a rest fetches, the
+  rest's timer faked; a press fetches, counted around its own `pointerdown`; a focus fetches.
+- **Preconditions.** `clif-fixture.ts`'s `clifLoads` lists every `clif-load` the ear heard, asked for or answered.
+  `clif-app-failed`, `clif-app-failed-intent` and `clif-app-threw` assert it empty before they arm their failure or
+  stub, `clif-app-failed` with an ear it did not have; `clif-fetch`'s first case asserts the page asked for no
+  `clif-load` before its claim, with a new ear, and its second that nothing was fetched before the pass;
+  `clif-fetch-stored` that the page asked for no `clif-load` before it counts the run's fetch. `clif-fetch-focus`,
+  `clif-fetch-menu` and `clif-fetch-rest` already asserted that nothing was fetched before their gesture. A file whose
+  precondition is spent now fails at once, by its name, not after a 10 s wait.
+- **The unspent abort.** `vite.config.ts`'s `failRequests` sets the plan's count where it added to it, so `0` drops an
+  abort no request came for, as `stubRequest(match, null)` drops a stub. `clif-app-failed` and
+  `clif-app-failed-intent` drop theirs after their case, and `clif-worker` after each of its.
+
+##### THE SABOTAGES
+
+Each restored from its saved copy and `cmp` equal (`$R/sabotage/`).
+
+| Sabotage | Run | What failed |
+|---|---|---|
+| `clif-intent.ts` as on `main` | `sab-intent-revert-unit-1` | 2 of 4: the still-pointer case at its claim, `expected 1 to be +0`, after its precondition held; the press case, `the press: expected +0 to be 1` |
+| the same | `sab-intent-revert-pair-1`, `-2` | 2 of 2: `clif-app-failed.test.ts:51`, its new precondition, not the 10 s wait |
+| the clif toggle focused before the precondition | `sab-preconditions-A` | `clif-app-failed-intent`, `clif-app-threw`; and, focused with its fetch awaited, `clif-fetch`'s second case |
+| the same, before `clif-fetch`'s first claim | `sab-preconditions-B` | `clif-fetch`'s first case at its precondition |
+| the pointer parked where the clif toggle is drawn, before mount, with `clif-intent.ts` as on `main` | `sab-preconditions-stored` | `clif-fetch-stored` at its precondition, `[ { kind: 'clif-load', gen: 1 } ]` |
+| the same park with the fix in place | `sab-preconditions-B` | none: `clif-fetch-stored` passes |
+| a probe file that arms 2 aborts and spends 1, then a smaller one that asks for `pkg-clif`, in one tab; no drop | `sab-leak-nodrop-1` | the second file: `a pkg-clif request in the next file` |
+| the same with the drop, `failRequests` adding again | `sab-leak-add-1` | the same |
+| the probe as written | `leak-drop-1` | none |
+
+The first park of `clif-fetch-stored`'s sabotage did not fire: it moved the pointer to the frame's coordinates, not
+the page's, so it rested off the toggle. Parked at the page's (`pageCentreOf`'s scale and offset), it fired.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **No file parks the pointer.** A file still inherits the last file's pointer; with this fix a clif toggle drawn under
+  it loads nothing, and the five preconditions name a load that came first, but a hover-sensitive check in another file
+  could still meet a pointer it did not put there.
+- **A toggle moved under a resting pointer.** `watchIntent` keeps its rest until `pointerleave`. Where the toggle
+  leaves the header for the workspace menu while the pointer rests on it, as a window narrowed past 40rem does, a
+  browser that sends the moved toggle no `pointerleave` leaves the rest standing, and a later rest on it in the menu
+  fetches nothing until the press. Clearing the rest at `pointerenter` would close it; it is left as `93c65d2` has it so
+  the machine code branch rebases cleanly, and is not measured here.
+- **`clif-fetch`'s pass case still races real time.** Its precondition holds the two moves under `INTENT_MS`;
+  `54422b8` faked the timer for `clif-intent.test.ts`'s pass, and this file's was not changed.
+- **`holdRequests`** leaves a hold no request came for on the context until `releaseRequests` in the same file; no file
+  here was checked for one left at its end.
+- **Not run here:** CI's LLVM job, `check-slow.sh` and `cargo llvm-cov`. The branch changes nothing under `crates/`.
+- **Touch and pen** are held by reading alone: `watchIntent` listens for `pointerdown` whatever the pointer's type, and
+  no browser test here taps.
+
+##### VERIFICATION
+
+**At `cc9cff7`**, each leg into its log in `$R/logs/` and its exit into `gate-exits.txt`, every one 0. The 20 `clif-*`
+browser files in Chromium, `gate-clif.log`: 105 tests passed. The whole tier as CI runs it, `pnpm run test:coverage`
+under the browser and heavy locks, `gate-coverage.log`: 299 files, 3390 tests passed and 2 expected to fail, `All
+files` 98.09, 92.29, 98.72 and 99.33, each over its floor. `clif-intent` and the 9 `clif-app` and `clif-fetch` files
+in Firefox, `REDEXTAPE_FIREFOX=1`, `gate-firefox.log`: 10 files and 18 tests passed; the still-pointer case passed
+with its precondition, so Firefox too sends `pointerenter` and no `pointermove` to an element drawn under a still
+pointer, as the fix assumes. The node tier, 81 files and 1527 tests; `biome ci --error-on-warnings`, 461 files;
+`pnpm run typecheck`; `build:app`; and `scripts/check-all.sh --no-llvm --no-browser` with the tree-sitter pin, green
+but for the LLVM and browser tiers it skips. The node tier, `typecheck` and `build:app` ran with the leak probe's two
+files in `web/tests/browser`, untracked, which nothing imports. The eight scans CI's `linear-history` job runs, each
+`--self-test` and then alone, and `check-comments.mjs`, `--self-test` and `--base e65a533`: 18 runs, each exit 0,
+`scans-exits.txt`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at
+`cc9cff7`, the last code commit, with `R=~/temp/redextape-duet-patches-record/intent`, `S=$R/logs/summary.txt` and
+`F=~/temp/redextape-duet-patches-record/mc-packages/rebase/ci-flake.md`, and `noansi`, a `sed` that strips colour
+codes, by `$R/scripts/figures.zsh`, which prints each command above its output into `$R/logs/figures.log`.
+
+| Value | What | Produced by |
+|---|---|---|
+| `cc9cff7`, 0 | the commit the rows read, and the worktree's changed or untracked files | `git rev-parse --short HEAD; git status --short \| wc -l` |
+| 2 | the code commits | `git rev-list --count e65a533..cc9cff7` |
+| 13 files, 226 insertions, 24 deletions | their diff | `git diff --shortstat e65a533 cc9cff7` |
+| 0 | lines `clif-intent.ts` differs from the machine code branch's at `f6b5761` | `git diff f6b5761 cc9cff7 -- web/src/clif-intent.ts \| wc -l` |
+| 3 | hunks `clif-intent.test.ts` differs from that branch's | `git diff -U0 f6b5761 cc9cff7 -- web/tests/browser/clif-intent.test.ts \| grep -c '^@@'` |
+| 4 | `clif-intent.test.ts`'s cases | `grep -c "^  it(" web/tests/browser/clif-intent.test.ts` |
+| 150 ms | the rest, `INTENT_MS` | `grep -n 'INTENT_MS = ' web/src/clif-intent.ts` |
+| 1280 by 1600 | `clif-app-failed-intent`'s viewport | `grep -n 'viewport' web/tests/browser/clif-app-failed-intent.test.ts` |
+| 10,363 ms, line 43 | run 791's failure, as the diagnosis read it from CI's log | `grep -n '10,363' $F \| cut -c1-80` |
+| 2 of 2, `clif-app-failed.test.ts:43:2` | the pair in one tab on `e65a533`'s code | `grep -c '^before-pair .* exit=1' $S; grep -ho 'clif-app-failed.test.ts:43:2' $R/logs/before-pair-*.log` |
+| 5 of 5 | the pair with the fix | `grep -c '^after-pair .* exit=0' $S` |
+| 5 | browser files given a precondition on a load that came first | `git grep -lE 'clifLoads\(ear\|precondition: the page asked for no clif load' cc9cff7 -- web/tests/browser \| wc -l` |
+| `clif-fetch-focus`, `clif-fetch-menu`, `clif-fetch-rest` | the files that held one already | `git grep -l 'precondition: nothing fetched before the' e65a533 -- web/tests/browser` |
+| `clif-app-failed-intent`, `clif-app-failed`, `clif-worker` | the files that drop an unspent abort | `git grep -l 'failRequests(.*, 0)' cc9cff7 -- web/tests/browser` |
+| 2 of 4, the still-pointer and press cases | `clif-intent.ts` as on `main` | `noansi $R/logs/sab-intent-revert-unit-1.log \| grep -aE 'Tests  \|^ +×' \| cut -c1-110` |
+| 2 of 2, `clif-app-failed.test.ts:51` | the pair with `clif-intent.ts` as on `main` | `grep -c '^sab-intent-revert-pair .* exit=1' $S; grep -ho 'clif-app-failed.test.ts:51' $R/logs/sab-intent-revert-pair-*.log` |
+| each row of *THE SABOTAGES* for the preconditions | the forced preconditions, case by case | `for f in A stored B; do print -- "== $f"; noansi $R/logs/sab-preconditions-$f.log \| grep -aE '^ +(✓\|×)' \| cut -c1-110; done` |
+| exit 0; exit 1; exit 1 | the leak probe: as written; with no drop; with `failRequests` adding | `grep -E '^(leak-drop\|sab-leak-nodrop\|sab-leak-add) ' $S` |
+| 20, 105 | the `clif-*` files in Chromium: files, tests | `noansi $R/logs/gate-clif.log \| grep -aE 'Test Files\|Tests  '` |
+| 10, 18 | the Firefox files: files, tests | `noansi $R/logs/gate-firefox.log \| grep -aE 'Test Files\|Tests  '` |
+| 299; 3390 and 2; 98.09, 92.29, 98.72, 99.33 | coverage: files; tests passed and expected to fail; the `All files` row | `noansi $R/logs/gate-coverage.log \| grep -aE 'Test Files\|Tests  \|^All files'` |
+| 81, 1527 | the node tier: files, tests | `noansi $R/logs/gate-node.log \| grep -aE 'Test Files\|Tests  '` |
+| 461 | biome's files | `grep -aoE 'Checked [0-9]+ files' $R/logs/gate-biome.log` |
+| the LLVM and browser tiers | what `check-all.sh` skipped | `noansi $R/logs/gate-checkall.log \| grep -a 'PARTIAL'` |
+| 8 legs, each exit 0 | the gate's legs | `cut -d' ' -f2,3 $R/logs/gate-exits.txt` |
+| 18, `cc9cff7` | the scans' runs that exited 0, and the commit they ran at | `grep -c 'exit=0' $R/logs/scans-exits.txt; head -1 $R/logs/scans-exits.txt` |

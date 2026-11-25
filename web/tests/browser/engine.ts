@@ -19,7 +19,10 @@ declare module 'vitest/browser' {
      * then on; `'read'` returns that log, `null` before a start: every project's.
      */
     watchRequests: (op: 'start' | 'read', match: string) => Promise<{ page: string[]; context: string[] } | null>
-    /** Aborts the next `times` requests whose URL contains `match`, a worker's included: every project's. */
+    /**
+     * Aborts the next `times` requests whose URL contains `match`, a worker's included, in place of any abort still
+     * armed, so `0` drops one no request came for: every project's.
+     */
     failRequests: (match: string, times: number) => Promise<void>
     /**
      * Answers the next request whose URL contains `match` with `body`, as a script, or with `null` drops a stub no

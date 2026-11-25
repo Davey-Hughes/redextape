@@ -140,6 +140,10 @@ async function recordedFact(s: Heard): Promise<void> {
   await s.flush()
 }
 
+// AN ABORT NO REQUEST SPENT IS DROPPED AFTER EACH CASE, since it would abort the next `pkg-clif` request any later case,
+// or any file in this tab, makes.
+afterEach(() => commands.failRequests(MATCH, 0))
+
 describe('the CLIF pass', () => {
   it(
     'records nothing and loads nothing for a run with no CLIF view',

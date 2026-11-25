@@ -101,8 +101,9 @@ Taken with the user on 2026-11-18:
 - D2. **No target ISA in this piece.** The optimised CLIF is the same for every target (§2), so it is produced
   without one. The target picker, each target a download of its own fetched on intent, comes with machine code
   (§9 piece 3).
-- D3. **Fetch on intent.** The CLIF package downloads when the pointer rests on the CLIF header toggle or the toggle
-  takes keyboard focus, so it is usually ready by the click; opening the view any other way fetches it then.
+- D3. **Fetch on intent.** The CLIF package downloads when a pointer that moved onto the CLIF header toggle rests
+  there, a press goes down on it, or the toggle takes keyboard focus, so it is usually ready by the click; opening the
+  view any other way fetches it then. A toggle drawn under a pointer that has not moved is no intent.
 - D4. **Approach 1** (§3.1).
 
 Carried from the groundwork: D4 there (the `Program` crosses to the optional module by serde), D5 (the new view runs
@@ -244,8 +245,11 @@ its size is measured and reported.
 - **The leg.** `'clif'` joins `Leg` and every table `tsc` names (§2). Each of the 12 hand-written sites gains its
   arm or is made table-driven where that is no harder.
 - **Loading.** The session worker imports the package with `import()` the first time the page asks: on D3's intent
-  (pointer resting on the toggle, focus on it), on showing a CLIF view, or at start when the workspace or share link
-  shows one. The import is idempotent; nothing records on a prefetch.
+  (a pointer that moved onto the toggle resting there 150 ms, a press, or focus on it, through `watchIntent`), on
+  showing a CLIF view, or at start when the workspace or share link shows one. The import is idempotent; nothing
+  records on a prefetch. **THE REST STARTS AT THE FIRST `pointermove` ON THE TOGGLE, NOT AT `pointerenter`**: a
+  browser sends `pointerenter` to a toggle drawn under a pointer that has not moved, as a page that opens or a header
+  rebuilt under it is, and that is no intent.
 - **One occupant.** The rule becomes: one session or one copy, plus, for a session, at most one CLIF stepper built
   from that session's `Program` and dropped with it. Copy workers never load the package.
 - **Recording while shown.** Unlike the other legs, the CLIF leg records only while a CLIF view is on the page. The
@@ -293,8 +297,9 @@ Two PRs, each with its own plan and roadmap entry:
   is the §5.6 export alone; the new package's gzipped size is reported.
 - **No fetch without intent.** A browser test loads the page with the default workspace, waits for the first compile
   to settle, and sees no request for the CLIF package; resting the pointer on the toggle, or focusing it, makes one;
-  a workspace showing a CLIF view makes one at start. Each assertion is checked to fail when the behaviour is
-  sabotaged.
+  a workspace showing a CLIF view makes one at start. `watchIntent`'s own test holds that an element drawn under a
+  still pointer fetches nothing, a pass fetches nothing, and a rest, a press and a focus each fetch. Each assertion
+  is checked to fail when the behaviour is sabotaged.
 - **Recording.** No CLIF frames are recorded while no CLIF view is shown; the other legs' frames are unchanged.
 - **Links.** Each direction of §4's links, in both listings, including an rxm instruction that marks no optimised row.
 - **Hot paths.** rxm recording and compile time measured with the groundwork's §7.2 harness

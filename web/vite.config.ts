@@ -260,10 +260,14 @@ function planFor(page: Page, match: string): Promise<RequestPlan> {
   return made
 }
 
-/** Abort the next `times` requests whose URL contains `match`, a worker's included: a fetch that fails on demand. */
+/**
+ * Abort the next `times` requests whose URL contains `match`, a worker's included: a fetch that fails on demand. It
+ * replaces any abort still armed, so `0` drops an abort no request came for, which would otherwise abort the context's
+ * next one, another file's included.
+ */
 const failRequests: BrowserCommand<[match: string, times: number]> = async ({ page }, match, times) => {
   const plan = await planFor(page, match)
-  plan.fail += times
+  plan.fail = times
 }
 
 /**

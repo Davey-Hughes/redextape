@@ -203,6 +203,15 @@ export const repliesOf = <K extends RunReply['kind']>(
 ): Extract<RunReply, { kind: K }>[] =>
   heard.flatMap((h) => ('reply' in h && h.reply.kind === kind ? [h.reply as Extract<RunReply, { kind: K }>] : []))
 
+/**
+ * Every `clif-load` in `heard`, asked for by the page or answered by the worker, so empty until something has asked for
+ * `pkg-clif` or the worker has started loading it, whatever started it. **A FILE WHOSE ARMED FAILURE OR STUB MUST MEET
+ * THE PAGE'S FIRST LOAD ASSERTS THIS EMPTY BEFORE ARMING IT**: the worker keeps a load that succeeds, so after one the
+ * armed request is never made, and the file would wait out its bound for a notice that cannot come.
+ */
+export const clifLoads = (heard: readonly Heard[]): Heard[] =>
+  heard.filter((h) => ('request' in h ? h.request.kind : h.reply.kind) === 'clif-load')
+
 /** The CLIF leg's chunks in `heard` recorded under `epoch`, in order. */
 export const clifChunks = (heard: readonly Heard[], epoch: number): FramesReply<'clif'>[] =>
   repliesOf(heard, 'frames').filter((c): c is FramesReply<'clif'> => c.leg === 'clif' && c.epoch === epoch)

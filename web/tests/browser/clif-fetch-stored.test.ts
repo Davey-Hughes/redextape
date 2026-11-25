@@ -39,5 +39,9 @@ it('fetches at start for a stored workspace showing CLIF', async () => {
   expect(mounted(), 'precondition: the stored workspace').toEqual(['source', 'clif-0'])
   const [first] = requestsOf(ear.heard, 'run')
   expect(first?.clif, 'the listing the first run carries').toBe('as-built')
+  expect(
+    requestsOf(ear.heard, 'clif-load'),
+    "precondition: the page asked for no clif load, so a fetch is the run's",
+  ).toEqual([])
   expect(await clifFetched()).not.toEqual([])
 })

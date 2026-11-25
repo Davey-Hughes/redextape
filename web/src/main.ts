@@ -1488,8 +1488,9 @@ async function main(): Promise<EditorView> {
   // THE `views` TOGGLES — spec §6. `pane-host.ts`'s `applied` brings them up to the tree each time one is rendered,
   // so a `✕` and an opened link move them as a press does.
   const viewsToggles = viewToggles(viewsShown, toggleView)
-  // **`pkg-clif` IS FETCHED ON INTENT** (CLIF view design §6, *Loading*): the pointer resting on the CLIF toggle, or
-  // the focus reaching it, loads the package before the press, and nothing else does until a CLIF view is shown. Only
+  // **`pkg-clif` IS FETCHED ON INTENT** (CLIF view design §6, *Loading*): a pointer that moved onto the CLIF toggle
+  // resting there, a press going down on it, or the focus reaching it, starts the load before the view is shown, and
+  // nothing else does until a CLIF view is shown; a toggle drawn under a pointer that has not moved is no intent. Only
   // from `idle` or `failed`, since a load asked for or in needs no other. `viewToggles` has thrown already where the
   // page has no CLIF toggle.
   watchIntent(viewsShown.querySelector('button.view-toggle[data-shows="clif"]') as HTMLElement, askClifLoad)

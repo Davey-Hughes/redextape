@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { commands, page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { CLIF_MATCH, hearSessionWorkers, repliesOf, requestsOf } from './clif-fixture'
+import { CLIF_MATCH, clifLoads, hearSessionWorkers, repliesOf, requestsOf } from './clif-fixture'
 import { compile, host, PREFIX, SHELL, toggle, until } from './harness'
 
 /**
@@ -37,9 +37,18 @@ beforeAll(async () => {
   await compile(view, FACT)
 }, 30_000)
 
-afterAll(() => ear.restore())
+// THE ABORT IS DROPPED IF NO REQUEST SPENT IT, since it would abort the next `pkg-clif` request any file in this tab
+// makes.
+afterAll(async () => {
+  ear.restore()
+  await commands.failRequests(CLIF_MATCH, 0)
+})
 
 it('lists the program once a load the toggle asks for follows a failed one', async () => {
+  expect(
+    clifLoads(ear.heard),
+    'precondition: no clif load was asked for or started before the failure was armed',
+  ).toEqual([])
   await commands.failRequests(CLIF_MATCH, 1)
   await userEvent.keyboard(PREFIX)
   await userEvent.keyboard('5')

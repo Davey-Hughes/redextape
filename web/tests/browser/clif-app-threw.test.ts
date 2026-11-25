@@ -1,7 +1,16 @@
 import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { commands, page, userEvent } from 'vitest/browser'
-import { CLIF_MATCH, clifStopped, hearSessionWorkers, repliesOf, requestsOf, THROWN, throwing } from './clif-fixture'
+import {
+  CLIF_MATCH,
+  clifLoads,
+  clifStopped,
+  hearSessionWorkers,
+  repliesOf,
+  requestsOf,
+  THROWN,
+  throwing,
+} from './clif-fixture'
 import { compile, host, PREFIX, resultsText, SHELL, until } from './harness'
 
 /**
@@ -40,6 +49,9 @@ afterAll(async () => {
 })
 
 it('takes the CLIF leg out of the readout when its stepper throws as a continue is asked', async () => {
+  expect(clifLoads(ear.heard), 'precondition: no clif load was asked for or started before the stub was set').toEqual(
+    [],
+  )
   // THE STATUS ANSWERS ONCE, for the `result` after the first fill, and throws as the continue asks where the run
   // stopped.
   await commands.stubRequest(CLIF_MATCH, throwing('status', 1))

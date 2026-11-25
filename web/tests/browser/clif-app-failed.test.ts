@@ -1,8 +1,8 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it } from 'vitest'
 import { commands, page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { CLIF_MATCH } from './clif-fixture'
+import { CLIF_MATCH, clifLoads, hearSessionWorkers } from './clif-fixture'
 import { compile, host, PREFIX, SHELL, until } from './harness'
 
 /**
@@ -13,6 +13,7 @@ import { compile, host, PREFIX, SHELL, until } from './harness'
 
 const FACT = EXAMPLES.find((e) => e.id === 'fact')?.text ?? ''
 
+let ear: ReturnType<typeof hearSessionWorkers>
 let view: EditorView
 
 const clif = () => host('clif-0') as HTMLElement
@@ -29,13 +30,25 @@ const drawn = (el: HTMLElement | null) => {
 }
 
 beforeAll(async () => {
+  ear = hearSessionWorkers()
   await page.viewport(1280, 1600)
   document.body.innerHTML = SHELL
   view = await (await import('../../src/main')).ready
   await compile(view, FACT)
 }, 30_000)
 
+// THE ABORT IS DROPPED IF NO REQUEST SPENT IT, since it would abort the next `pkg-clif` request any file in this tab
+// makes.
+afterAll(async () => {
+  ear.restore()
+  await commands.failRequests(CLIF_MATCH, 0)
+})
+
 it('says the load failed, and loads on Retry', async () => {
+  expect(
+    clifLoads(ear.heard),
+    'precondition: no clif load was asked for or started before the failure was armed',
+  ).toEqual([])
   await commands.failRequests(CLIF_MATCH, 1)
   await userEvent.keyboard(PREFIX)
   await userEvent.keyboard('5')
