@@ -48,7 +48,8 @@ use redextape_core::{RunError, run};
 use redextape_test_support::arb_expr_below;
 
 /// reference == λ == unary-TM == binary-TM, guided by the reference value's type. All four must run
-/// to a value that decodes equal.
+/// to a value that decodes equal. A function in the result is compared as the opaque `Value::Function`,
+/// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`).
 ///
 /// The two TM legs are DIFFERENT MACHINES compiled from the same Core, not the same machine read two
 /// ways — which is what makes this a real fourth leg rather than a restatement of the third.
@@ -64,18 +65,15 @@ fn assert_three_way(src: &str) {
     let (btm, bwidth) = run_tm_fitted(&core, &Binary::default(), TM_DEFAULT_CAPS);
     match (reference, lambda, tm, btm) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
-            assert_eq!(decode(&nf, &rv), Some(rv.clone()), "reference vs λ disagree for: {src}");
+            let want = rv.observable();
+            assert_eq!(decode(&nf, &rv), Some(want.clone()), "reference vs λ disagree for: {src}");
             assert_eq!(
                 decode_tape(&tapes, &rv, &Unary::default()),
-                Some(rv.clone()),
+                Some(want.clone()),
                 "reference vs unary-TM disagree for: {src}"
             );
             let benc = Binary::at(bwidth.expect("Binary::field_width() is always Some"));
-            assert_eq!(
-                decode_tape(&btapes, &rv, &benc),
-                Some(rv.clone()),
-                "reference vs binary-TM disagree for: {src}"
-            );
+            assert_eq!(decode_tape(&btapes, &rv, &benc), Some(want), "reference vs binary-TM disagree for: {src}");
         }
         (r, l, t, b) => panic!(
             "backend oracle mismatch for {src}:\n  reference={r:?}\n  lambda={l:?}\n  unary-tm={t:?}\n  binary-tm={b:?}"
@@ -325,6 +323,25 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
 ];
 
+/// Programs whose result is a function, bare or in a list. No backend but the reference keeps anything
+/// of a function that another could also report (λ reduces it to a term with no link to its source, the
+/// machines to a tag the compiler numbers on its own), so the oracle compares each as the opaque
+/// `Value::Function`: what it shows is that every leg halted with a function where the type says one
+/// is. A bare builtin (`head` alone) is left out, because only the reference runs one as a value.
+/// `redextape-native/tests/common/corpus.rs` copies this list; see
+/// `function_result_demos_stay_synced_with_the_native_copy`.
+const FUNCTION_RESULT_DEMOS: &[&str] = &[
+    "|x| x + 1",
+    "fn f(x) { x + 1 } f",
+    "let g = |x| x; g",
+    "[|x| x]",
+    "let xs = [1, 2]; |y| head(xs) + y",
+    "[|x| x, |y| y + 1]",
+    // A curried call returns the inner closure, its environment holding the 4.
+    "let add = |y| |z| y + z; add(4)",
+    "fn f(x) { x + 1 } fn g(x) { x * 2 } if true { g } else { f }",
+];
+
 /// Runtime-faulting programs: the reference faults, both other backends diverge — all "no value".
 const FAULT_DEMOS: &[&str] = &["head(nil)", "tail(nil)"];
 
@@ -348,6 +365,13 @@ const LAMBDA_LIMITATION_DEMOS: &[&str] = &[
 #[test]
 fn three_way_oracle_on_the_first_order_suite() {
     for src in FIRST_ORDER_DEMOS {
+        assert_three_way(src);
+    }
+}
+
+#[test]
+fn three_way_oracle_on_function_results() {
+    for src in FUNCTION_RESULT_DEMOS {
         assert_three_way(src);
     }
 }
@@ -451,6 +475,25 @@ fn first_order_demos_stay_synced_across_every_copy() {
     assert_eq!(copies.len() + 1, 4, "a copy was added to or removed from the tree without updating this count");
 }
 
+/// `redextape-native/tests/common/corpus.rs` copies `FUNCTION_RESULT_DEMOS` for the native oracle, for
+/// the reason `first_order_demos_stay_synced_across_every_copy` gives: one test crate cannot `use`
+/// another's module. Read as text, the same way.
+#[test]
+fn function_result_demos_stay_synced_with_the_native_copy() {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let own =
+        std::fs::read_to_string(format!("{manifest}/tests/three_way_oracle.rs")).expect("read this file's own source");
+    let canonical = extract_str_array(&own, "FUNCTION_RESULT_DEMOS");
+    assert_eq!(canonical.len(), FUNCTION_RESULT_DEMOS.len(), "this file's own extraction lost or gained entries");
+    let native = std::fs::read_to_string(format!("{manifest}/../redextape-native/tests/common/corpus.rs"))
+        .expect("read redextape-native/tests/common/corpus.rs");
+    assert_eq!(
+        extract_str_array(&native, "FUNCTION_RESULT_DEMOS"),
+        canonical,
+        "redextape-native/tests/common/corpus.rs's FUNCTION_RESULT_DEMOS has drifted from this file's"
+    );
+}
+
 /// The instructions the TM runs, in order, read off the states it enters. `lower_tm` builds one entry
 /// state `pc{i}` per instruction, meaning "about to execute instruction `i`", and names nothing else that
 /// way. An instruction is entered when the machine is in its `pc{i}` state on a step and was in a
@@ -497,10 +540,11 @@ fn rxm_run(src: &str) -> (redextape_core::core::Core, Ty, RxmCursor<redextape_co
 /// loop over `RxmCursor`, so checking one against the other could not fail; the TM is a second
 /// implementation of every instruction, sharing no stepping code with the cursor (both do resolve labels
 /// through `Program::label_index`), and it enters `pc{i}` exactly when it begins instruction `i`. Every
-/// corpus program the TM runs to a value is checked, which is `FIRST_ORDER_DEMOS` and the latent traps.
+/// corpus program the TM runs to a value is checked, which is `FIRST_ORDER_DEMOS`, the function results
+/// and the latent traps.
 #[test]
 fn rxm_steps_are_the_instructions_the_tm_enters() {
-    for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS) {
+    for src in FIRST_ORDER_DEMOS.iter().chain(FUNCTION_RESULT_DEMOS).chain(LAMBDA_LIMITATION_DEMOS) {
         let (core, ty, mut cursor) = rxm_run(src);
         let rxm: Vec<usize> = cursor.by_ref().map(|s| s.pc).collect();
         assert_eq!(cursor.status(), Some(&RxmStatus::Halted), "{src} must halt on the rxm cursor");
@@ -510,30 +554,32 @@ fn rxm_steps_are_the_instructions_the_tm_enters() {
     }
 }
 
-/// At `halt`, `rr` is tagged by the program's result type: a list pointer for `List<T>`, a value for
-/// everything else a program can return — `Nat` and `Bool`, which the corpus returns, and `Unit`, which
-/// no corpus program does, so `UNIT` is added here. Nothing in the cursor reads the type, so this is the
-/// tags agreeing with the typechecker from outside.
+/// At `halt`, `rr` is tagged by the program's result type: a heap pointer for `List<T>` and for a
+/// function, which lowers to a `cons(tag, env)` cell, and a value for everything else a program can
+/// return — `Nat` and `Bool`, which the corpus returns, and `Unit`, which no corpus program does, so
+/// `UNIT` is added here. Nothing in the cursor reads the type, so this is the tags agreeing with the
+/// typechecker from outside.
 #[test]
 fn the_result_register_is_tagged_by_the_result_type() {
     const UNIT: &str = "let x = 1;";
     assert_eq!(rxm_run(UNIT).1, Ty::Unit, "{UNIT} must return `Unit`");
     let mut seen = std::collections::BTreeSet::new();
-    for src in FIRST_ORDER_DEMOS.iter().chain(LAMBDA_LIMITATION_DEMOS).chain([&UNIT]) {
+    for src in FIRST_ORDER_DEMOS.iter().chain(FUNCTION_RESULT_DEMOS).chain(LAMBDA_LIMITATION_DEMOS).chain([&UNIT]) {
         let (_, ty, mut cursor) = rxm_run(src);
         cursor.by_ref().for_each(drop);
         assert_eq!(cursor.status(), Some(&RxmStatus::Halted), "{src} must halt on the rxm cursor");
-        let want = if matches!(ty, Ty::List(_)) { WordTag::List } else { WordTag::Value };
+        let want = if matches!(ty, Ty::List(_) | Ty::Fun(..)) { WordTag::List } else { WordTag::Value };
         assert_eq!(cursor.rr_tag(), want, "{src} returns {ty:?}");
         seen.insert(match ty {
             Ty::Nat => "Nat",
             Ty::Bool => "Bool",
             Ty::Unit => "Unit",
             Ty::List(_) => "List",
-            Ty::Fun(..) | Ty::Var(_) => "other",
+            Ty::Fun(..) => "Fun",
+            Ty::Var(_) => "other",
         });
     }
-    assert_eq!(seen.into_iter().collect::<Vec<_>>(), ["Bool", "List", "Nat", "Unit"], "the types the doc names");
+    assert_eq!(seen.into_iter().collect::<Vec<_>>(), ["Bool", "Fun", "List", "Nat", "Unit"], "the types the doc names");
 }
 
 #[test]

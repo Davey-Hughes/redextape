@@ -135,6 +135,20 @@ pub const FIRST_ORDER_DEMOS: &[&str] = &[
     "fn cons(a, b) { a + b } fn ap2(g, a, b) { g(a, b) } cons(1, 2) + ap2(cons, 3, 4)",
 ];
 
+/// Programs whose result is a function, bare or in a list, compared on every leg as the opaque
+/// `Value::Function`. A copy of `redextape-core`'s `three_way_oracle.rs` `FUNCTION_RESULT_DEMOS`, kept
+/// equal to it by that file's `function_result_demos_stay_synced_with_the_native_copy`.
+pub const FUNCTION_RESULT_DEMOS: &[&str] = &[
+    "|x| x + 1",
+    "fn f(x) { x + 1 } f",
+    "let g = |x| x; g",
+    "[|x| x]",
+    "let xs = [1, 2]; |y| head(xs) + y",
+    "[|x| x, |y| y + 1]",
+    "let add = |y| |z| y + z; add(4)",
+    "fn f(x) { x + 1 } fn g(x) { x * 2 } if true { g } else { f }",
+];
+
 /// Programs that only TM/native can run three-way with the reference — the λ backend v1 REJECTS them
 /// (`LowerError`) since they involve mutable-in-closure capture or a `fn` inside a mutation region.
 /// Since native shares `lower_rxm`/`defunc` with the TM, these still exercise `native == rxm-interp`

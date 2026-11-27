@@ -88,7 +88,10 @@ mod common;
 use common::core_of;
 #[path = "common/corpus.rs"]
 mod corpus;
-use corpus::{BEYOND_FIELD_WIDTH_DEMOS, FAULT_DEMOS, FIRST_ORDER_DEMOS, LAMBDA_LIMITATION_DEMOS, SATURATION_DEMOS};
+use corpus::{
+    BEYOND_FIELD_WIDTH_DEMOS, FAULT_DEMOS, FIRST_ORDER_DEMOS, FUNCTION_RESULT_DEMOS, LAMBDA_LIMITATION_DEMOS,
+    SATURATION_DEMOS,
+};
 
 /// Every encoding this file's TM leg covers. THE single place that decides — the coverage guard
 /// (`every_encoding_has_a_four_way_test`) derives its expectation from here rather than from a second
@@ -143,7 +146,8 @@ fn tm_leg(core: &Core, kind: EncodingKind) -> (TmRun, Box<dyn Encoding>) {
 }
 
 /// reference == λ == TM(`kind`) == native, guided by the reference value's type. All four must run to
-/// a value that decodes equal.
+/// a value that decodes equal. A function in the result is compared as the opaque `Value::Function`,
+/// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`).
 ///
 /// Genuinely FOUR-way, and that is not an accident of naming: each emitted test runs ONE encoding, so
 /// its name states its real arity. It is the FILE that covers five legs, not any single test — see the
@@ -156,18 +160,15 @@ fn assert_four_way(src: &str, kind: EncodingKind) {
     let native = run_native(&core, DEFAULT_CAPS);
     match (lambda, tm, native) {
         (LambdaRun::Reduced(nf), TmRun::Ran { tapes }, NativeRun::Ran(outcome)) => {
-            assert_eq!(decode(&nf, &reference), Some(reference.clone()), "reference vs λ disagree for: {src}");
+            let want = reference.observable();
+            assert_eq!(decode(&nf, &reference), Some(want.clone()), "reference vs λ disagree for: {src}");
             assert_eq!(
                 decode_tape(&tapes, &reference, &*tm_enc),
-                Some(reference.clone()),
+                Some(want.clone()),
                 "reference vs {}-TM disagree for: {src}",
                 kind.name()
             );
-            assert_eq!(
-                decode_rxm(&outcome, &reference),
-                Some(reference.clone()),
-                "reference vs native disagree for: {src}"
-            );
+            assert_eq!(decode_rxm(&outcome, &reference), Some(want), "reference vs native disagree for: {src}");
         }
         (l, t, n) => panic!(
             "four-way oracle mismatch for {src} ({}):\n  reference={reference:?}\n  lambda={l:?}\n  tm={t:?}\n  native={n:?}",
@@ -188,7 +189,7 @@ fn assert_native_matches_rxm(src: &str) {
     match (rxm, native) {
         (RxmRun::Ran(rxm_outcome), NativeRun::Ran(native_outcome)) => {
             let rxm_val = decode_rxm(&rxm_outcome, &reference);
-            assert_eq!(rxm_val, Some(reference.clone()), "rxm-interp vs reference disagree for: {src}");
+            assert_eq!(rxm_val, Some(reference.observable()), "rxm-interp vs reference disagree for: {src}");
             let native_val = decode_rxm(&native_outcome, &reference);
             assert_eq!(native_val, rxm_val, "native vs rxm-interp disagree for: {src}");
         }
@@ -272,9 +273,26 @@ fn every_encoding_has_a_four_way_test() {
     );
 }
 
+/// Both encodings in one test: the function results are few and small, so they add no long pole.
+#[test]
+fn four_way_oracle_on_function_results() {
+    for (_, kind) in encodings() {
+        for src in FUNCTION_RESULT_DEMOS {
+            assert_four_way(src, kind);
+        }
+    }
+}
+
 #[test]
 fn native_matches_rxm_interp_on_the_first_order_suite() {
     for src in FIRST_ORDER_DEMOS {
+        assert_native_matches_rxm(src);
+    }
+}
+
+#[test]
+fn native_matches_rxm_interp_on_function_results() {
+    for src in FUNCTION_RESULT_DEMOS {
         assert_native_matches_rxm(src);
     }
 }

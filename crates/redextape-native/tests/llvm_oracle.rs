@@ -51,27 +51,29 @@ fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
 }
 
 /// `reference == cranelift == llvm` for every `OptLevel`, with an explicit `cranelift == llvm`
-/// comparison at each level (not just each transitively agreeing with `reference`).
+/// comparison at each level (not just each transitively agreeing with `reference`). A function in the
+/// result is compared as the opaque `Value::Function`, the one thing every leg can report of it.
 ///
 /// BOTH backends are swept: Cranelift's `opt_level` collapses the six levels onto three
 /// (`none`/`speed`/`speed_and_size`), so sweeping it is partly redundant compile work — but it is
 /// what makes "every `(backend, OptLevel)` pair agrees" a checked claim rather than an inference from
 /// how the levels happen to map today.
 fn assert_cross_backend_agree(src: &str) {
-    let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+    let witness = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+    let reference = witness.observable();
     let core = core_of(src);
 
     let mut cl_values = Vec::new();
     for opt in OPT_LEVELS {
         let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt });
-        let cl_value = ran(&cl, &reference, &format!("cranelift {opt:?} `{src}`"));
+        let cl_value = ran(&cl, &witness, &format!("cranelift {opt:?} `{src}`"));
         assert_eq!(cl_value, reference, "cranelift {opt:?} vs reference disagree for: {src}");
         cl_values.push(cl_value);
     }
 
     for (opt, cl_value) in OPT_LEVELS.into_iter().zip(&cl_values) {
         let llvm = run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt });
-        let llvm_value = ran(&llvm, &reference, &format!("llvm {opt:?} `{src}`"));
+        let llvm_value = ran(&llvm, &witness, &format!("llvm {opt:?} `{src}`"));
         assert_eq!(llvm_value, reference, "llvm {opt:?} vs reference disagree for: {src}");
         assert_eq!(&llvm_value, cl_value, "llvm {opt:?} vs cranelift {opt:?} disagree for: {src}");
     }
@@ -100,6 +102,18 @@ const CASES: &[&str] = &[
 #[test]
 fn reference_cranelift_llvm_agree() {
     for src in CASES {
+        assert_cross_backend_agree(src);
+    }
+}
+
+/// A function result as a bare closure, in a list, and holding a captured list in its environment:
+/// each lowers to a `cons(tag, env)` heap cell, so this is the result register carrying a heap pointer
+/// that is not a list, at every `OptLevel`.
+const FUNCTION_RESULT_CASES: &[&str] = &["|x| x + 1", "[|x| x, |y| y + 1]", "let xs = [1, 2]; |y| head(xs) + y"];
+
+#[test]
+fn reference_cranelift_llvm_agree_on_function_results() {
+    for src in FUNCTION_RESULT_CASES {
         assert_cross_backend_agree(src);
     }
 }
