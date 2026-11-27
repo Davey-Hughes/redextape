@@ -3178,8 +3178,8 @@ main {
    EACH TRACK HAS THE ROOM THE WIDEST ROW HAS NEEDED (the squeezed values design): `--values-room`, which
    `machine-panels.ts` sets on the panel's body and only ever widens until the view is told of a new program, plus the
    row's padding on both sides, which the room leaves out, and a pixel, since the track and the text it holds are
-   rounded apart. So a value is cut only where the panel is narrower than its row: `min(100%, …)` makes that one track as
-   wide as the panel, rather than a track wider than the panel that the grid would carry past its edge. */
+   rounded apart. So a value is cut only where the panel is narrower than its row: `min(100%, …)` makes that one track
+   as wide as the panel, rather than a track wider than the panel that the grid would carry past its edge. */
 .rxm-register-list {
   display: grid;
   grid-template-columns: repeat(
@@ -3253,9 +3253,9 @@ main {
 .rxm-refs {
   color: var(--fg-dim);
 }
-/* A CLIF FRAME'S PC IS AS WIDE AS THE LISTING'S WIDEST, `--ret-room`, which `clif-pane.ts` sets on the call stack's box:
-   the running frame's changes at each step, and a frame that goes on below would otherwise move the stack's lines at
-   a step that neither calls nor returns. The frame's hanging indent is for its own lines, not the pc's. */
+/* A CLIF FRAME'S PC IS AS WIDE AS THE LISTING'S WIDEST, `--ret-room`, which `clif-pane.ts` sets on the call stack's
+   box: the running frame's changes at each step, and a frame that goes on below would otherwise move the stack's lines
+   at a step that neither calls nor returns. The frame's hanging indent is for its own lines, not the pc's. */
 .clif-pane .rxm-ret {
   display: inline-block;
   min-width: var(--ret-room, 0);
@@ -3264,9 +3264,9 @@ main {
 /* EVERY HEAP LINE IS PADDED, LIT OR NOT: a list result's box draws its side edges on the line's own edges, and the
    padding keeps them off the first and last glyph. Padding the lit lines alone would move their text at the step that
    lights them. The start's padding holds the indent of the lines a long one goes on to as well.
-   **A LINE KEEPS THE LINES ITS LONGEST TEXT TOOK** (`machine-panels.ts`'s `lineRoom`): that text, `--line-room`, is laid
-   out hidden in the same cell of a grid of one as the line's own, so the line is as tall as the taller of the two and
-   a step that names its cell with fewer registers moves nothing under it. */
+   **A LINE KEEPS THE LINES ITS LONGEST TEXT TOOK** (`machine-panels.ts`'s `lineRoom`): that text, `--line-room`, is
+   laid out hidden in the same cell of a grid of one as the line's own, so the line is as tall as the taller of the two
+   and a step that names its cell with fewer registers moves nothing under it. */
 .rxm-cell-line {
   display: grid;
   padding-inline: calc(0.25rem + 2ch) 0.25rem;

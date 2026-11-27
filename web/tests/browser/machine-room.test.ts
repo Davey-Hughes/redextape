@@ -27,7 +27,7 @@ hearLoops(() => {
 const NINE = '479001600'
 /** The largest word, 20 digits. */
 const LONG = '18446744073709551615'
-/** How wide a view the line cases use: narrow enough that a frame or a heap line that holds `LONG` takes more than one. */
+/** How wide a view the line cases use: narrow enough that a frame or a heap line holding `LONG` takes more than one. */
 const LINES = 90
 
 /** A frame of twelve values or locals, each a short word. */
@@ -67,7 +67,7 @@ const places = (host: HTMLElement) =>
     }),
   )
 
-/** Whether `dd` is whole with the grid's room taken away, as the grid drew it before the room: its least track alone. */
+/** Whether `dd` is whole with the grid's room taken away, its least track alone. */
 function wholeWithoutRoom(host: HTMLElement, dd: HTMLElement): boolean {
   const kept = body(host).style.getPropertyValue('--values-room')
   body(host).style.removeProperty('--values-room')
@@ -80,8 +80,8 @@ function wholeWithoutRoom(host: HTMLElement, dd: HTMLElement): boolean {
 
 /**
  * The first width from `from` px up, a step of `by`, at which the room `ONE_NINE` keeps draws fewer tracks than
- * `SHORT`'s, both drawn afresh: where value 0 moves the cells. Each width draws `SHORT` and then `ONE_NINE` again, after
- * a new program, as the cases do.
+ * `SHORT`'s, both drawn afresh: where value 0 moves the cells. Each width draws `SHORT` and then `ONE_NINE` again,
+ * after a new program, as the cases do.
  */
 async function widthWhereRoomMoves(view: View, from: number, by: number): Promise<number> {
   const { host, pane, draw } = mount(view, from)
@@ -107,7 +107,7 @@ function forget(view: View, pane: RxmPane | ClifPane): void {
 }
 
 describe.each(VIEWS)('the room of the $kind view’s values', (view) => {
-  it('draws a value whole wherever the panel is as wide as its row, and cuts it only where the panel is narrower', async () => {
+  it('draws a value whole wherever the panel fits its row, and cuts it only where the panel is narrower', async () => {
     const { host, draw } = mount(view, 100)
     draw(ONE_NINE)
     await frames()

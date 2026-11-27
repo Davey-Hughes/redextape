@@ -49,7 +49,7 @@ function rowNeeds(dd: HTMLElement): number {
 }
 
 describe.each(VIEWS)('the $kind view’s values under classic scroll bars', (view) => {
-  it('draw a value whole wherever the grid beside the bar is as wide as its row, and never scroll sideways', async () => {
+  it('draw a value whole wherever the grid beside the bar fits its row, and never scroll sideways', async () => {
     const { host, draw } = mount(view, 100, { height: 420 })
     draw(MANY)
     await frames()

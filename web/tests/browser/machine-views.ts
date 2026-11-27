@@ -70,7 +70,10 @@ export type Counts = {
   readonly result?: string
   /** The register the rxm frame's last instruction wrote. */
   readonly wrote?: string
-  /** Where the clif frame and each of its call stack's frames stand: the first function's first instruction without it. */
+  /**
+   * Where the clif frame and each of its call stack's frames stand: the first function's first instruction if not
+   * given.
+   */
   readonly at?: ClifAt
 }
 

@@ -49,8 +49,8 @@ export const NAME_CH = 4
  * The room a values row needs to read whole, in `ch`: its name's column, the 1ch gap after it, and its word with the
  * registers a CLIF value stands for after it. **IT COUNTS `style.css`'s `.rxm-register` BOX, LESS ITS PADDING**, which
  * the track adds (`.rxm-register-list`), and every character as 1ch, which the monospace font makes true:
- * `tests/node/machine-room.test.ts` holds the name's width, the gap and the padding to the stylesheet, so a change to one
- * side that the other misses fails there rather than cutting a value the room says fits.
+ * `tests/node/machine-room.test.ts` holds the name's width, the gap and the padding to the stylesheet, so a change to
+ * one side that the other misses fails there rather than cutting a value the room says fits.
  */
 export function rowRoom(r: ValueRow): number {
   const name = (r.unwritten ? 2 : 0) + r.name.length
@@ -110,10 +110,10 @@ export function lineText(l: HeapLine): string {
 /**
  * The room each heap line keeps, by its lead: the longest text it has had since the view last forgot (the squeezed
  * values design). `take` answers that text where it is longer than the line's own, and `null` where it is not; the
- * panel lays it out hidden in the line's place, so a line that wrapped onto more lines at a step keeps them at the steps
- * after, where fewer registers name its cell. A cell's head and tail never change; what names it does, and a box's
- * content can. It counts the lines the view draws, as the values' room does. **IT ONLY GROWS**, and the view forgets it
- * with the values' room, at a new program or listing.
+ * panel lays it out hidden in the line's place, so a line that wrapped onto more lines at a step keeps them at the
+ * steps after, where fewer registers name its cell. A cell's head and tail never change; what names it does, and a
+ * box's content can. It counts the lines the view draws, as the values' room does. **IT ONLY GROWS**, and the view
+ * forgets it with the values' room, at a new program or listing.
  */
 export function lineRoom(): { take(l: HeapLine): string | null; forget(): void } {
   const longest = new Map<string, string>()
@@ -145,7 +145,7 @@ export function valuesPanel(o: MachinePanelOptions): RoomPanel<ValuesView> {
   const panel = machinePanel(o, body)
   const room = valuesRoom()
   let kept = 0
-  /** The grid's room, `style.css`'s `--values-room`, written only when it grows, so a step that keeps it writes none. */
+  /** The grid's room, `--values-room`, written only when it grows, so a step that keeps it writes none. */
   const keep = (to: number) => {
     if (to === kept) return
     kept = to
