@@ -128,7 +128,7 @@ fn a_lambda_term_that_is_not_an_abstraction_does_not_decode_as_a_function() {
 /// A bare type variable names no shape to check a result against, so the opaque decoders refuse it
 /// exactly as the browser's do.
 #[test]
-fn a_bare_type_variable_still_does_not_decode() {
+fn a_bare_type_variable_does_not_decode() {
     let ty = Ty::Var(0);
     let outcome = RxmOutcome { result: 1, heap: vec![(0, 0)] };
     assert_eq!(decode_rxm_ty_opaque(&outcome, &ty), None);
@@ -137,7 +137,7 @@ fn a_bare_type_variable_still_does_not_decode() {
 
 /// A box is a mutable cell, not a function, and keeps its own refusal.
 #[test]
-fn a_box_witness_still_does_not_decode() {
+fn a_box_witness_does_not_decode() {
     let boxed = Value::Box(Rc::new(std::cell::RefCell::new(Value::Nat(1))));
     let outcome = RxmOutcome { result: 1, heap: vec![(0, 0)] };
     assert_eq!(decode_rxm(&outcome, &boxed), None);
