@@ -9,8 +9,8 @@ import { whole } from './machine-views'
  * text reads whole in its `title` after a real hover, with no test adding the watcher. Its texts are a row of fact(12)'s
  * clif listing, a rule of the TM view's rule table and an instruction of the TM view's diagram. Each case first holds
  * its text cut, so that none passes because a text happened to fit. `cut-text.test.ts` holds the watcher in views
- * built by hand. fact(12)'s result is no longer one of them: the clif view's values keep the room it needs (the
- * squeezed values design).
+ * built by hand. fact(12)'s result is not among them, as the clif view's values keep the room it needs (the squeezed
+ * values design).
  */
 
 const FACT_12 = EXAMPLES.find((e) => e.id === 'fact-12')

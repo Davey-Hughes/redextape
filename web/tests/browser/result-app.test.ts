@@ -165,7 +165,7 @@ describe('the result in the app', () => {
       await until(() => segments().some((s) => s.startsWith('rxm 479001600')), "the readout's value")
       await until(() => /^step 0 of [\d,]+$/.test(stepOf(clif())), 'the clif view to record its run')
       // ONE STEP BEFORE THE END rr is one cell of the registers grid, whose tracks keep the room the run's widest value
-      // has needed (the squeezed values design): the grid's least track alone cut it.
+      // has needed (the squeezed values design): the grid's least track alone would cut it.
       await toEnd(rxm())
       await back(rxm())
       const rr = ddOf(register(rxm(), 'rr') as HTMLElement)
@@ -183,11 +183,11 @@ describe('the result in the app', () => {
       const value = valueRangeOf(dd).getBoundingClientRect()
       const regs = (dd.querySelector('.value-regs') as HTMLElement).getBoundingClientRect()
       const word = (dd.querySelector('.result-word') as HTMLElement).getBoundingClientRect()
-      // THE VALUE, THEN rr AND THE WORD TOGETHER: on the value's line where the row has room for them, which the clif
-      // view's wider values give it at most widths (the squeezed values design), and under it where it has not, as the
-      // row breaks between the value and them first (`result-values.test.ts`).
-      const onValue = regs.top < value.bottom && regs.bottom > value.top
-      expect(onValue ? regs.left >= value.right : regs.top >= value.bottom - 0.5, 'rr, after the value').toBe(true)
+      // THE VALUE, THEN rr AND THE WORD ON ITS LINE: at this width the clif view's values panel, as wide as its call
+      // stack's and its heap's (the squeezed values design), has room for all three. `result-values.test.ts` holds the
+      // row breaking between the value and them where it has not.
+      expect(regs.top < value.bottom && regs.bottom > value.top, 'rr, on the line of the value').toBe(true)
+      expect(regs.left, 'rr, after the value').toBeGreaterThanOrEqual(value.right)
       expect(word.top < regs.bottom && word.bottom > regs.top, 'the word, on the line of rr').toBe(true)
     },
     CASE_MS,

@@ -25,10 +25,9 @@ const BEFORE: Counts = { depth: 1, cells: 1, boxes: 0, rows: { stack: 1, values:
 
 /**
  * The host widths V1, V3 and V4 draw at. At `ROOM`, each view's, the values run in more than one column and the row
- * has room for `LONG result` on one line: at the rxm view's width the clif view's values panel, a fifth of its row in
- * the wide arrangement, is one column and too narrow for it. `FITS` and `UNDER` are below either view's medium width,
- * where the values panel is the view's whole width: at `FITS` `LONG` fits the row and `LONG result` does not, and at
- * `UNDER` the row is narrower than `LONG` alone.
+ * has room for `LONG result` on one line. `FITS` and `UNDER` are below either view's medium width, where the values
+ * panel is the view's whole width: at `FITS` `LONG` fits the row and `LONG result` does not, and at `UNDER` the row is
+ * narrower than `LONG` alone.
  */
 const ROOM = { rxm: 1180, clif: 1400 } as const
 const FITS = 220

@@ -1,8 +1,9 @@
 /**
  * A CUT TEXT READS WHOLE IN THE BROWSER'S TOOLTIP, AND ONLY WHILE IT IS CUT (the cut-text tooltips design): a listing
  * row, a diagram's instruction, a machine panel's name or a value that the stylesheet cuts with an ellipsis. A frame
- * and a heap line are not cut: each goes on below where its panel is too narrow for it (the squeezed values design). A text cut where its own code gives it a title is not watched here; `tests/node/cut-text.test.ts` holds the
- * two lists to the stylesheet.
+ * and a heap line are not cut: each goes on below where its panel is too narrow for it (the squeezed values design).
+ * A text cut where its own code gives it a title is not watched here; `tests/node/cut-text.test.ts` holds the two lists
+ * to the stylesheet.
  */
 
 /** The texts the stylesheet cuts that nothing else lets a pointer read whole. */

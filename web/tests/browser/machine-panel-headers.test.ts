@@ -196,8 +196,8 @@ describe.each(VIEWS)('the $kind view', (view) => {
 
 /**
  * The counts each view's headers hold whole where the design says (§5.1): a CLIF view's at its two thresholds and in
- * the 634 px a 1280 px window gives a view beside the source, medium there since the squeezed values design widened its
- * values, and an rxm view's largest at its thresholds. Each case's `arrangement` is the one the view is in at its
+ * the 634 px a 1280 px window gives a view beside the source, where it is medium (the squeezed values design), and an
+ * rxm view's largest at its thresholds. Each case's `arrangement` is the one the view is in at its
  * `width`.
  */
 type Whole = Counts & { readonly width: number; readonly arrangement: string }
