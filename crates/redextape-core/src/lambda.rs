@@ -9,7 +9,7 @@ pub mod reduce;
 pub mod syntax;
 pub mod term;
 
-pub use decode::{decode, decode_lambda_ty};
+pub use decode::{decode, decode_lambda_ty, decode_lambda_ty_opaque};
 pub use lower::{LowerError, MAX_LAMBDA_LITERAL, lower, lower_mapped};
 pub use reduce::{MAX_REDUCTION_STEPS, Owner, Status, Step, Trace, reduce_to_normal_form, reduce_trace};
 pub use syntax::{Cut, parse_lambda, print_lambda, print_lambda_capped, print_lambda_linked, print_lambda_mapped};

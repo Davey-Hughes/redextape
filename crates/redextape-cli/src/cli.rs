@@ -59,9 +59,9 @@ pub enum Command {
         path: PathBuf,
         /// Which backend evaluates a `.rxt` program, `reference` when omitted. All three agree on any
         /// program all three can answer for; `lambda` and `tm` decode their result by type. A
-        /// function-typed result prints as `<non-value>` under `reference`, as its λ normal form under
-        /// `lambda`, and exits 2 under `tm`. Rejected with any value, `reference` included, for a `.tm`
-        /// or `.rxm` file, which is already compiled.
+        /// function-typed result prints as `<fn>` under `reference` and `tm`, and as its λ normal form
+        /// under `lambda`. Rejected with any value, `reference` included, for a `.tm` or `.rxm` file,
+        /// which is already compiled.
         // An `Option` with no `default_value_t`: a default would make a typed `--backend reference`
         // indistinguishable from an omitted flag, and `run` could not refuse it on an artifact.
         #[arg(long, value_enum)]

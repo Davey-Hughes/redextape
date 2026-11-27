@@ -8,12 +8,12 @@ Arguments:
 
 Options:
       --backend <BACKEND>
-          Which backend evaluates a `.rxt` program, `reference` when omitted. All three agree on any program all three can answer for; `lambda` and `tm` decode their result by type. A function-typed result prints as `<non-value>` under `reference`, as its λ normal form under `lambda`, and exits 2 under `tm`. Rejected with any value, `reference` included, for a `.tm` or `.rxm` file, which is already compiled
+          Which backend evaluates a `.rxt` program, `reference` when omitted. All three agree on any program all three can answer for; `lambda` and `tm` decode their result by type. A function-typed result prints as `<fn>` under `reference` and `tm`, and as its λ normal form under `lambda`. Rejected with any value, `reference` included, for a `.tm` or `.rxm` file, which is already compiled
 
           Possible values:
-          - reference: The tree-walking interpreter, and the only backend that can answer for every program that evaluates — a program whose value is a function prints as `<non-value>` rather than failing
+          - reference: The tree-walking interpreter, and the only backend that can answer for every program that evaluates — a program whose value is a function prints as `<fn>` rather than failing
           - lambda:    Lower to the λ-calculus, reduce, and decode the normal form back to a value. The decode is directed by the program's type and covers Nat, Bool, Unit and List<T>; a result that holds a function prints its normal form as λ text instead, since a function is a value there
-          - tm:        Lower to a Turing machine, simulate it, and decode the final tapes. The decode is directed by the program's type: a tape encodes Nat, Bool, Unit and List<T>, and a function-typed result exits 2 (the program is fine — use `reference`)
+          - tm:        Lower to a Turing machine, simulate it, and decode the final tapes. The decode is directed by the program's type: a tape encodes Nat, Bool, Unit and List<T>, and a function prints as `<fn>`, as it does under `reference`
 
       --config <PATH>
           Read settings from this file instead of searching for one. Naming a file that does not exist is an error, where finding no file during the search is not

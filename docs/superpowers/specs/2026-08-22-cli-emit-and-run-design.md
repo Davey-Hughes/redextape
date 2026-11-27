@@ -229,9 +229,38 @@ $ redextape run returns_a_function.rxt --backend lambda
   For a result type that holds a function the message adds two lines: the first says a body that
   recurses or loops never reaches a normal form, and a function that has one can still pass the
   limit first; the second, that `--backend reference` will evaluate it.
-- **`--backend tm` and `--backend reference` are unchanged**: `tm` still refuses at exit 2 and
-  `reference` still prints `<non-value>`, so the three backends no longer agree on a function's
-  printed result, and the oracles still compare value-typed programs only. `emit` is unchanged too.
+- **`--backend tm` and `--backend reference` are unchanged by this revision**: `tm` still refuses at
+  exit 2 and `reference` still prints `<non-value>`, so the three backends no longer agree on a
+  function's printed result, and the oracles still compare value-typed programs only. `emit` is
+  unchanged too. The revision below changes `tm`, `reference` and the oracles.
+
+**Revised 2026-11-27 for `--backend tm`, `--backend reference` and the oracles.** Every backend that
+can report a function now reports it the same way, as `<fn>`. `format_value` prints a closure or a
+builtin as `<fn>`; a box keeps `<non-value>`, though no program's result is one. `run --backend tm`
+reads a function in the result, bare or inside a list, as `<fn>` and exits 0:
+
+```
+$ redextape run returns_a_function.rxt
+<fn>
+
+$ redextape run returns_a_function.rxt --backend tm
+<fn>
+```
+
+- **`<fn>` is bare, with no location.** A λ normal form keeps no link back to the source lambda, and
+  the machine legs keep only a tag the compiler numbers on its own, so no backend but the reference
+  could say which function it returned. What `<fn>` shows is that a leg halted with a function where
+  the type says one is.
+- **The oracles compare function results on that basis.** `Value::Function` is the opaque function;
+  `Value::observable` turns the reference's closures and builtins into it, and the witness decoders
+  and the new `_opaque` type decoders answer it. The `_ty` decoders the browser app calls still refuse
+  a function, so the web is unchanged until its own change.
+- **`--backend lambda` keeps its normal form** from the revision above.
+- **A builtin named on its own, `head`, is the reference's alone.** It prints `<fn>` under
+  `reference`; `tm` has no lowering for a builtin used as a value and exits 2, and `lambda`'s encoding
+  of it never reaches a normal form under its binders, exit 1.
+- **`emit` and the `.tm`/`.rxm` headers are unchanged.** `parse_ty` reads no function type, so a
+  function-typed program is still refused there.
 
 ## §7 What this does not close
 

@@ -293,31 +293,27 @@ compiler, simulated, and decoded — and the value that comes out is the one the
 
 ## The `2`s that are not bugs
 
-**`--backend tm` cannot decode a function-typed result.** Its decoder is type-directed and refuses
-`Ty::Fun` and `Ty::Var`; a tape encodes `Nat`, `Bool`, `Unit` and `List<T>` and nothing else.
-`--backend reference` has no such limit, because it never leaves the interpreter, and
-`--backend lambda` prints the function's normal form, since a function is a value in the λ-calculus.
-A one-line program shows all three:
+**A function-typed result is a value on every backend, and only `--backend lambda` can show it.**
+`--backend reference` and `--backend tm` print `<fn>`: the interpreter holds a closure and the tape
+holds the closure's heap cell, and neither holds anything another backend could name the function by.
+`--backend lambda` prints the function's normal form, since a function is a value in the
+λ-calculus. A one-line program shows all three:
 
     $ redextape run g.rxt                    # g.rxt is `let g = |x| x; g`
-    <non-value>
+    <fn>
 
     $ redextape run g.rxt --backend lambda
     λx. x
 
     $ redextape run g.rxt --backend tm
-    error: `--backend tm` cannot decode a result of type `(t2) -> t2`
-      a tape encodes Nat, Bool, Unit and List<T>; this type has none
-      `--backend reference` will evaluate it
-    # exit 2
+    <fn>
 
-A polymorphic identity types as `(t2) -> t2`, which carries both refused shapes at once. The program
-is fine — it parses, it typechecks, and the reference backend evaluates it — so this is exit `2` and
-not exit `1`. The `<non-value>` on the reference line is a result, not a failure: the mini-language
-can produce a closure, and no value text encodes one. `--backend lambda` prints a normal form whole or
-not at all: past `MAX_NORMAL_FORM_BYTES` (65,536 bytes) it exits `2`, and a function whose body
-recurses, returned unapplied, has no normal form and stops at a reduction cap with exit `1`, usually
-`MAX_TERM_DEPTH`, since each unfolding nests the term deeper; the message names the cap that fired.
+The `2`s around a function are this tool's limits, not the program's fault. `--backend lambda`
+prints a normal form whole or not at all: past `MAX_NORMAL_FORM_BYTES` (65,536 bytes) it exits `2`,
+and a function whose body recurses, returned unapplied, has no normal form and stops at a reduction
+cap with exit `1`, usually `MAX_TERM_DEPTH`, since each unfolding nests the term deeper; the message
+names the cap that fired. A builtin named on its own, as in `head`, is a function to the reference
+backend, but `--backend tm` has no lowering for a builtin used as a value and exits `2`.
 `emit --lang tm` and `emit --lang rxm` refuse function-typed programs at exit `2` and write no file,
 because a `result` line must name a type `run` can decode; `--lang lambda` writes the term whatever
 its type.

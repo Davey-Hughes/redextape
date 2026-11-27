@@ -15,7 +15,7 @@ use redextape_core::RunError;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum Backend {
     /// The tree-walking interpreter, and the only backend that can answer for every program that
-    /// evaluates — a program whose value is a function prints as `<non-value>` rather than failing.
+    /// evaluates — a program whose value is a function prints as `<fn>` rather than failing.
     #[default]
     Reference,
     /// Lower to the λ-calculus, reduce, and decode the normal form back to a value. The decode is
@@ -23,8 +23,8 @@ pub enum Backend {
     /// function prints its normal form as λ text instead, since a function is a value there.
     Lambda,
     /// Lower to a Turing machine, simulate it, and decode the final tapes. The decode is directed by
-    /// the program's type: a tape encodes Nat, Bool, Unit and List<T>, and a function-typed result
-    /// exits 2 (the program is fine — use `reference`).
+    /// the program's type: a tape encodes Nat, Bool, Unit and List<T>, and a function prints as `<fn>`,
+    /// as it does under `reference`.
     Tm,
 }
 
@@ -649,15 +649,16 @@ fn run_tm_backend(
     let (outcome, _width) = redextape_core::tm::run_tm_fitted(&core, &enc, redextape_core::tm::TM_DEFAULT_CAPS);
     match outcome {
         redextape_core::tm::TmRun::Ran { tapes } => {
-            if let Some(v) = redextape_core::tm::decode_tape_ty(&tapes, &ty, &enc) {
+            // `_opaque`, so a function reads as `<fn>`: the tape holds its heap cell, but nothing
+            // another backend could name it by.
+            if let Some(v) = redextape_core::tm::decode_tape_ty_opaque(&tapes, &ty, &enc) {
                 print_tm_value(&v, label, out, err)
             } else {
                 // Code 2, where `run_artifact_text` answers 1 on the same expression — that asymmetry
                 // is deliberate and its reasoning is written out at that site.
                 writeln!(
                     err,
-                    "error: `--backend tm` cannot decode a result of type `{}`\n  \
-                         a tape encodes Nat, Bool, Unit and List<T>; this type has none\n  \
+                    "error: `--backend tm` cannot decode a result of type `{}` from the final tapes\n  \
                          `--backend reference` will evaluate it",
                     redextape_core::ty::show(&ty)
                 )?;
@@ -708,7 +709,7 @@ fn run_tm_backend(
 /// `run_tm_backend`'s "decoded value in hand, print or refuse" step — see `print_reference_value`'s
 /// doc for why this is its own function rather than inline code.
 ///
-/// **Unresolved, not shown safe — capped precautionarily.** `decode_tape_ty` calls the identical
+/// **Unresolved, not shown safe — capped precautionarily.** `decode_tape_ty_opaque` calls the identical
 /// memoized `decode_word_ty` the two artifact seams (`report_tm_decode`/`report_rxm_decode` above)
 /// already route through this same cap, and `TM_DEFAULT_CAPS` bounds the TAPE, not the decoded
 /// value's LOGICAL size — the same category error `MAX_PRINT_NODES` exists to correct in the first
@@ -796,13 +797,48 @@ mod tests {
         assert!(matches!(outcome, Outcome::ProgramFailed));
     }
 
-    /// `format_value` renders a closure as `<non-value>`, which is a RESULT rather than a failure:
-    /// the program evaluated, and the mini-language can produce a value no text form encodes.
+    /// `format_value` renders a closure as `<fn>`, which is a RESULT rather than a failure: the
+    /// program evaluated to a function, and `<fn>` is what every backend that can report one prints.
     #[test]
-    fn a_function_typed_program_runs_and_prints_non_value() {
+    fn a_function_typed_program_runs_and_prints_fn() {
         let (out, _err, outcome) = run_case("closure", "p.rxt", "|x| x + 1", None);
-        assert_eq!(out, "<non-value>\n");
+        assert_eq!(out, "<fn>\n");
         assert!(matches!(outcome, Outcome::Ran));
+    }
+
+    /// The handoff's function results, each printed the same by the reference and the TM. The tape
+    /// holds the function's heap cell but nothing another backend could name it by, so the TM reports
+    /// what the reference does: that the result is a function.
+    #[test]
+    fn reference_and_tm_print_every_function_result_alike() {
+        let cases = [
+            ("|x| x + 1", "<fn>"),
+            ("fn f(x) { x + 1 } f", "<fn>"),
+            ("let g = |x| x; g", "<fn>"),
+            ("[|x| x]", "[<fn>]"),
+            ("let xs = [1, 2]; |y| head(xs) + y", "<fn>"),
+        ];
+        for (i, (src, want)) in cases.into_iter().enumerate() {
+            for backend in [Backend::Reference, Backend::Tm] {
+                let (out, err, outcome) = run_case(&format!("fn-result-{i}-{backend:?}"), "p.rxt", src, Some(backend));
+                assert_eq!(out, format!("{want}\n"), "{backend:?} on {src}; stderr: {err}");
+                assert_eq!(err, "", "{backend:?} on {src}");
+                assert!(matches!(outcome, Outcome::Ran), "{backend:?} on {src}");
+            }
+        }
+    }
+
+    /// `head` alone is a builtin used as a value. The reference evaluates it to a function; the TM has
+    /// no lowering for a builtin as a value, which is this tool's limit and not the program's fault.
+    #[test]
+    fn a_bare_builtin_is_a_function_to_the_reference_and_has_no_tm_lowering() {
+        let (out, err, outcome) = run_case("builtin-ref", "p.rxt", "head", Some(Backend::Reference));
+        assert_eq!(out, "<fn>\n", "stderr: {err}");
+        assert!(matches!(outcome, Outcome::Ran));
+        let (out, err, outcome) = run_case("builtin-tm", "p.rxt", "head", Some(Backend::Tm));
+        assert_eq!(out, "");
+        assert!(err.starts_with("error: this program has no TM lowering: "), "got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed));
     }
 
     /// The oracle, as a test: three backends, one answer. This is the property the whole project is
@@ -825,15 +861,14 @@ mod tests {
         }
     }
 
-    /// Design §6. `|x| x + 1` types as `(Nat) -> Nat`; a tape has no encoding for `Ty::Fun`, while the
-    /// reference interpreter evaluates it and prints `<non-value>`. The program is fine — this tool
-    /// cannot answer that question about it — so it is `ToolFailed`, not `ProgramFailed`.
+    /// Design §6, as revised. `|x| x + 1` types as `(Nat) -> Nat`. The tape holds the closure's heap
+    /// cell, so `tm` reports a function, `<fn>`, as the reference does, and the run succeeds.
     #[test]
-    fn a_function_typed_result_is_the_tm_backends_limit_not_the_programs_fault() {
+    fn a_function_typed_result_prints_fn_under_tm() {
         let (out, err, outcome) = run_case("closure-tm", "p.rxt", "|x| x + 1", Some(Backend::Tm));
-        assert_eq!(out, "", "tm must print no value");
-        assert!(err.contains("decode"), "tm must say it cannot decode, got: {err}");
-        assert!(matches!(outcome, Outcome::ToolFailed), "tm must be ToolFailed");
+        assert_eq!(out, "<fn>\n", "stderr: {err}");
+        assert_eq!(err, "");
+        assert!(matches!(outcome, Outcome::Ran), "tm must run");
     }
 
     /// Design §6. A function is a value in the λ-calculus, so the λ backend answers with its normal
@@ -1351,7 +1386,7 @@ mod tests {
         assert!(err.contains("MAX_PRINT_NODES"), "the message must name the tool's own limit, got: {err}");
     }
 
-    /// `run_tm_backend` sibling of the test above. See `print_tm_value`'s doc: `decode_tape_ty` calls
+    /// `run_tm_backend` sibling of the test above. See `print_tm_value`'s doc: `decode_tape_ty_opaque` calls
     /// the same memoized `decode_word_ty` the `.tm` artifact seam above already caps, so this site is
     /// capped on that shared mechanism rather than on a derivation that this call site itself reaches
     /// the cap.

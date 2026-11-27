@@ -29,7 +29,9 @@ pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, OVERFLOWING_NUMBER,
     PINNED_FIELD_WIDTHS, REG, RuleSpec, SEP, STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
 };
-pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason, result_heap_runs};
+pub use decode::{
+    decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_opaque, decode_tape_ty_reason, result_heap_runs,
+};
 pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Binary, Encoding, Unary};
 pub use header::{
@@ -42,8 +44,8 @@ pub use machine::{BLANK, Machine, Move, Rule, State, StateId, Symbol};
 pub use reduced_file::{ReduceError, RunFailure, decode_reduced, is_overflow_guard, reduce, run_caps, value_of_run};
 pub use rxm::{
     Caps, DEFAULT_CAPS, DecodeFailure, Instr, Program, Reg, RxmHeader, RxmOutcome, RxmRun, decode_rxm,
-    decode_rxm_reason, decode_rxm_ty, decode_rxm_ty_reason, label_reg, print_instr, print_rxm, print_rxm_doc,
-    print_rxm_mapped, print_rxm_with, print_rxm_with_mapped, reg_label, reg_str, run_rxm,
+    decode_rxm_reason, decode_rxm_ty, decode_rxm_ty_opaque, decode_rxm_ty_reason, label_reg, print_instr, print_rxm,
+    print_rxm_doc, print_rxm_mapped, print_rxm_with, print_rxm_with_mapped, reg_label, reg_str, run_rxm,
 };
 pub use rxm_syntax::{
     MnemonicDoc, RxmDocument, instr_at, parse_rxm, parse_rxm_full, parse_rxm_nav, rxm_label_diagnostics,

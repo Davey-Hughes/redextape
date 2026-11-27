@@ -5,7 +5,7 @@
 
 use crate::lambda::term::{LambdaTerm, Node};
 use crate::ty::Ty;
-use crate::value::Value;
+use crate::value::{Functions, Value};
 use std::rc::Rc;
 
 /// Decode a normal-form term to a `Value`, guided by the type/shape of `expected`. Returns the
@@ -35,8 +35,10 @@ pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
         Value::Bool(_) => decode_bool(nf).map(Value::Bool),
         Value::Nil => decode_nil(nf),
         Value::Cons(h, t) => decode_cons(nf, h, t),
+        // Any of the three says "a function here", and all three read the same opaque one.
+        Value::Closure { .. } | Value::Builtin(_) | Value::Function => decode_function(nf),
         // No first-class encoded value to compare against.
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => None,
+        Value::Unit | Value::Box(_) => None,
     }
 }
 
@@ -52,17 +54,42 @@ pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
 ///
 /// Unlike the TM pair there is nothing to share: both take the term directly, with no analogue of
 /// `read_result`'s tape read.
+#[must_use]
 pub fn decode_lambda_ty(nf: &LambdaTerm, ty: &Ty) -> Option<Value> {
+    decode_ty(nf, ty, Functions::Refuse)
+}
+
+/// `decode_lambda_ty`, reading a function, bare or inside a list, as the opaque `Value::Function`
+/// rather than refusing it — the form every backend reports a function in, so a λ result can be
+/// compared with the machine legs' and the reference's. A separate entry point rather than a change to
+/// `decode_lambda_ty`, because that one's `None` is what the browser app shows as undecodable.
+#[must_use]
+pub fn decode_lambda_ty_opaque(nf: &LambdaTerm, ty: &Ty) -> Option<Value> {
+    decode_ty(nf, ty, Functions::Opaque)
+}
+
+/// The type-directed decode both entry points share; `fns` says whether a `Ty::Fun` reads as
+/// `Value::Function` or refuses.
+fn decode_ty(nf: &LambdaTerm, ty: &Ty, fns: Functions) -> Option<Value> {
     match ty {
         Ty::Nat => decode_church(nf).map(Value::Nat),
         Ty::Bool => decode_bool(nf).map(Value::Bool),
         // No encoding to read: `Unit` types statements (`while`, assignment), and a program of that
         // type has no value. Declaring it is legitimate, so the normal form is ignored, not rejected.
         Ty::Unit => Some(Value::Unit),
-        Ty::List(elem) => decode_list_ty(nf, elem),
-        // Well-formed but not first-class values, exactly as `ty::parse_ty` refuses them.
+        Ty::List(elem) => decode_list_ty(nf, elem, fns),
+        Ty::Fun(..) if fns == Functions::Opaque => decode_function(nf),
+        // Well-formed but not first-class values, exactly as `ty::parse_ty` refuses them. A bare type
+        // variable stays refused under `Opaque` too: it names no shape to check the term against.
         Ty::Fun(..) | Ty::Var(_) => None,
     }
+}
+
+/// A function as the opaque `Value::Function`. The type already says the term is one, so the one check
+/// left is that it is an abstraction, which every closed normal form is: a term that is not one did not
+/// come from reducing a closed program, and reading it as a function would hide that.
+fn decode_function(nf: &LambdaTerm) -> Option<Value> {
+    matches!(nf.node(), Node::Abs(..)).then_some(Value::Function)
 }
 
 /// Scott list under an element type: `nil = \n.\c. n`, `cons H T = \n.\c. c H T`.
@@ -71,7 +98,7 @@ pub fn decode_lambda_ty(nf: &LambdaTerm, ty: &Ty) -> Option<Value> {
 /// nesting instead of the list's length — the one axis here that grows with the data. No node budget is
 /// needed on top (`tm::decode_tape_ty` needs one because the TM heap is a GRAPH whose cells address each
 /// other; a λ normal form is a finite tree already in memory, so every walk terminates by construction).
-fn decode_list_ty(nf: &LambdaTerm, elem: &Ty) -> Option<Value> {
+fn decode_list_ty(nf: &LambdaTerm, elem: &Ty, fns: Functions) -> Option<Value> {
     let mut heads: Vec<Value> = Vec::new();
     let mut cur = nf;
     loop {
@@ -84,7 +111,7 @@ fn decode_list_ty(nf: &LambdaTerm, elem: &Ty) -> Option<Value> {
                 if !matches!(c.node(), Node::Var(0)) {
                     return None;
                 }
-                heads.push(decode_lambda_ty(h_term, elem)?);
+                heads.push(decode_ty(h_term, elem, fns)?);
                 cur = t_term;
             }
             _ => return None,

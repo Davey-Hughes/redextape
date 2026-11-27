@@ -9,7 +9,7 @@ use crate::tm::comments::{AnchoredComment, CommentWriter, RxmAnchor};
 use crate::tm::rxm_syntax::RxmDocument;
 use crate::trace::{RxmCursor, RxmStatus};
 use crate::ty::Ty;
-use crate::value::Value;
+use crate::value::{Functions, Value};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -676,8 +676,25 @@ fn decode_word_memo(
             memo.insert(key, out.clone());
             Ok(out)
         }
-        Value::Unit | Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => Err(DecodeFailure::Mismatch),
+        // Any of the three says "a function here", and all three read the same opaque one.
+        Value::Closure { .. } | Value::Builtin(_) | Value::Function => decode_function(word, heap, budget),
+        Value::Unit | Value::Box(_) => Err(DecodeFailure::Mismatch),
     }
+}
+
+/// A function word as the opaque `Value::Function`, the leaf both decoders share. A function lowers to
+/// a heap cell holding its tag and its captured environment, so the word must point at a cell; what is
+/// in the cell is not read, because the tag numbering is the compiler's own and no other backend could
+/// report it. One unit of `budget` for the one node it constructs, as every leaf spends.
+fn decode_function(word: u64, heap: &[(u64, u64)], budget: &mut usize) -> Result<Value, DecodeFailure> {
+    let Some(idx) = word.checked_sub(1).and_then(|i| usize::try_from(i).ok()) else {
+        return Err(DecodeFailure::Mismatch);
+    };
+    if idx >= heap.len() {
+        return Err(DecodeFailure::Mismatch);
+    }
+    spend(budget)?;
+    Ok(Value::Function)
 }
 
 /// The most `Value` nodes a single type-directed decode may construct.
@@ -738,9 +755,9 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 ///
 /// **Mismatch is a claim about the DATA, never about the budget — and vice versa.** `Ty::Nat` and
 /// `Ty::Unit` never mismatch (any word is a valid `Nat`; `Unit` ignores the word entirely), so every
-/// failure they can produce is `BudgetExhausted`. Every OTHER failure arm — an out-of-range `Bool`
-/// word, an unrepresentable or out-of-bounds heap pointer, a chain that never reaches nil (a cyclic
-/// heap), a non-value type — is `Mismatch`, and none of them touch `budget` at all before returning.
+/// failure they can produce is `BudgetExhausted`. Every OTHER failure arm — an out-of-range `Bool` word, an
+/// unrepresentable or out-of-bounds heap pointer (a function's too), a chain that never reaches nil (a cyclic heap),
+/// a `Fun` outside an `_opaque` decode, a `Var` — is `Mismatch`, and none touch `budget` at all before returning.
 ///
 /// **Tagged at the point of detection, not inferred from `budget` afterward.** Returning
 /// `Option<Value>` from `decode_word_ty` and having the caller read `budget` after a `None` —
@@ -754,7 +771,8 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeFailure {
     /// The word/heap does not have the shape `ty` claims — a header (or a `result` directive) that
-    /// lies about what the run actually produced. The FILE's fault.
+    /// lies about what the run actually produced, or a function word that points at no heap cell. The
+    /// FILE's fault.
     Mismatch,
     /// `MAX_DECODE_NODES` ran out on an otherwise well-formed decode — the declared type may be
     /// entirely truthful; the decoder simply built more `Value` nodes than the budget allows (nested
@@ -791,7 +809,17 @@ pub fn decode_rxm_ty(outcome: &RxmOutcome, ty: &Ty) -> Option<Value> {
 /// decode — this tool's limit, not the file's.
 pub fn decode_rxm_ty_reason(outcome: &RxmOutcome, ty: &Ty) -> Result<Value, DecodeFailure> {
     let mut budget = MAX_DECODE_NODES;
-    decode_word_ty(outcome.result, &outcome.heap, ty, &mut budget)
+    decode_word_ty(outcome.result, &outcome.heap, ty, Functions::Refuse, &mut budget)
+}
+
+/// `decode_rxm_ty`, reading a function, bare or inside a list, as the opaque `Value::Function` rather
+/// than refusing it — the form every backend reports a function in, so an rxm result can be compared
+/// with the λ leg's and the reference's. A separate entry point rather than a change to
+/// `decode_rxm_ty`, because that one's `None` is what the browser app shows as undecodable.
+#[must_use]
+pub fn decode_rxm_ty_opaque(outcome: &RxmOutcome, ty: &Ty) -> Option<Value> {
+    let mut budget = MAX_DECODE_NODES;
+    decode_word_ty(outcome.result, &outcome.heap, ty, Functions::Opaque, &mut budget).ok()
 }
 
 /// Memo for the type-directed decode, keyed `(heap pointer, depth)`.
@@ -877,18 +905,22 @@ pub(crate) fn decode_word_ty(
     word: u64,
     heap: &[(u64, u64)],
     ty: &Ty,
+    fns: Functions,
     budget: &mut usize,
 ) -> Result<Value, DecodeFailure> {
     let mut memo = TyMemo::new();
-    decode_word_ty_at(word, heap, ty, 0, &mut memo, budget)
+    decode_word_ty_at(word, heap, ty, fns, 0, &mut memo, budget)
 }
 
 /// `decode_word_ty`'s recursion, carrying the depth (which names the type — see `TyMemo`) and the
 /// memo. Split out so the public path seeds one memo per decode and every recursive call shares it.
+/// `fns` says whether a `Ty::Fun` reads as `Value::Function` or as a `Mismatch`; it is fixed for the
+/// whole decode, so the memo's `(pointer, depth)` key still names one answer.
 fn decode_word_ty_at(
     word: u64,
     heap: &[(u64, u64)],
     ty: &Ty,
+    fns: Functions,
     depth: usize,
     memo: &mut TyMemo,
     budget: &mut usize,
@@ -990,7 +1022,7 @@ fn decode_word_ty_at(
                 // would double-count.
                 let Some(idx) = usize::try_from(w - 1).ok() else { return Err(DecodeFailure::Mismatch) };
                 let Some(&(h, t)) = heap.get(idx) else { return Err(DecodeFailure::Mismatch) };
-                cells.push((w, decode_word_ty_at(h, heap, elem, depth + 1, memo, budget)?));
+                cells.push((w, decode_word_ty_at(h, heap, elem, fns, depth + 1, memo, budget)?));
                 w = t;
             };
 
@@ -1006,6 +1038,9 @@ fn decode_word_ty_at(
             }
             Ok(out)
         }
+        Ty::Fun(..) if fns == Functions::Opaque => decode_function(word, heap, budget),
+        // A bare type variable stays refused under `Opaque` too: it names no shape to check the word
+        // against.
         Ty::Fun(..) | Ty::Var(_) => Err(DecodeFailure::Mismatch),
     }
 }
@@ -1051,10 +1086,30 @@ mod tests {
             let ty = Ty::List(Box::new(Ty::Nat));
             let start = 1_000_usize;
             let mut budget = start;
-            decode_word_ty(1, &heap, &ty, &mut budget).expect("flat list decodes");
+            decode_word_ty(1, &heap, &ty, Functions::Refuse, &mut budget).expect("flat list decodes");
             let spent = start - budget;
             assert_eq!(spent as u64, 3 * l + 1, "L={l}");
         }
+    }
+
+    /// A function is a leaf like a `Nat`, one unit for the node it builds, so a list of `L` functions
+    /// costs the `3L + 1` a list of `L` numbers does, and one unit less is `BudgetExhausted`. The same
+    /// heap typed under `Refuse` is the `Mismatch` the browser's decoders answer.
+    #[test]
+    fn a_function_leaf_spends_one_unit_like_every_leaf() {
+        // [f, g]: two closure cells (tag, nil env) at 1 and 2, the list cells at 3 and 4.
+        let heap = vec![(0, 0), (1, 0), (2, 0), (1, 3)];
+        let ty = Ty::List(Box::new(Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat))));
+        let mut budget = 7;
+        let v = decode_word_ty(4, &heap, &ty, Functions::Opaque, &mut budget).expect("fits exactly");
+        assert_eq!(budget, 0);
+        let f = Rc::new(Value::Function);
+        assert_eq!(v, Value::Cons(f.clone(), Rc::new(Value::Cons(f, Rc::new(Value::Nil)))));
+        let mut short = 6;
+        let failure = decode_word_ty(4, &heap, &ty, Functions::Opaque, &mut short);
+        assert_eq!(failure, Err(DecodeFailure::BudgetExhausted));
+        let mut budget = 7;
+        assert_eq!(decode_word_ty(4, &heap, &ty, Functions::Refuse, &mut budget), Err(DecodeFailure::Mismatch));
     }
 
     /// §6's invariant, which is what keeps the memo from outgrowing the budget: every memo entry is paid
@@ -1071,7 +1126,7 @@ mod tests {
         let start = 100_000_usize;
         let mut budget = start;
         let mut memo = TyMemo::new();
-        decode_word_ty_at(m + 1, &heap, &ty, 0, &mut memo, &mut budget).expect("tails decodes");
+        decode_word_ty_at(m + 1, &heap, &ty, Functions::Refuse, 0, &mut memo, &mut budget).expect("tails decodes");
         let spent = start - budget;
         // Every insert accompanies exactly one `spend` in the cons-up loop, and nothing else inserts, so
         // entries can never exceed units spent. The linear-vs-quadratic claim is not asserted here,
@@ -1121,7 +1176,7 @@ mod tests {
         let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
         let start = 10_000_000_usize;
         let mut budget = start;
-        decode_word_ty(outer_base + 1, &heap, &ty, &mut budget).expect("convergent chains decode");
+        decode_word_ty(outer_base + 1, &heap, &ty, Functions::Refuse, &mut budget).expect("convergent chains decode");
         let spent = start - budget;
         // Without the PASS 1 exit this is >= k * s = 4,000 steps of re-walking alone. With it, the shared
         // tail is walked once, so total work is linear in the heap: 3 * (s + k * p + k) + change.
@@ -1139,7 +1194,7 @@ mod tests {
         let ty2 = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
         let start2 = 1_000_000_usize;
         let mut budget2 = start2;
-        decode_word_ty(n + 1, &heap2, &ty2, &mut budget2).expect("increasing-order spine decodes");
+        decode_word_ty(n + 1, &heap2, &ty2, Functions::Refuse, &mut budget2).expect("increasing-order spine decodes");
         let spent2 = start2 - budget2;
         // Without the exit this is ~Sigma(2j+1) = n^2 + 2n, quadratic in a 2n-cell heap. With it, every
         // cell is walked once, so total work is linear.
@@ -1768,7 +1823,7 @@ mod tests {
         let ty = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
         let mut budget = 3;
         assert_eq!(
-            decode_word_ty(6, &heap, &ty, &mut budget), // 6 = pointer to the cycle's first cell
+            decode_word_ty(6, &heap, &ty, Functions::Refuse, &mut budget), // 6 = pointer to the cycle's first cell
             Err(DecodeFailure::Mismatch),
             "a cycle must win a Mismatch against its own spine's cost, however expensive its own head is"
         );
@@ -1889,7 +1944,7 @@ mod tests {
 
         let before = BYTES_ALLOCATED.with(std::cell::Cell::get);
         let mut budget = 0;
-        let result = decode_word_ty(l, &heap, &ty, &mut budget);
+        let result = decode_word_ty(l, &heap, &ty, Functions::Refuse, &mut budget);
         let bytes_used = BYTES_ALLOCATED.with(std::cell::Cell::get) - before;
 
         assert_eq!(result, Err(DecodeFailure::BudgetExhausted), "budget = 0 must fail on the very first spend");

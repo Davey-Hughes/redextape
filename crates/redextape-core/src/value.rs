@@ -37,11 +37,27 @@ pub enum Value {
         env: Env,
     },
     Builtin(Builtin),
+    /// A function as a backend that cannot look inside one reports it. A machine leg holds a closure as
+    /// a tag and an environment, and the λ backend as a term, and neither names the source function in
+    /// a form the other legs share, so every backend reports the same opaque `<fn>`. The reference
+    /// interpreter never builds one: `observable` turns its `Closure` or `Builtin` into this, which is
+    /// what lets the oracles compare a function-typed result across backends.
+    Function,
     /// Internal statement result (`while`/assignment); never surfaced to the user.
     Unit,
     /// A mutable box cell. Reuses the frame-slot type; shared by Rc so a box handle
     /// captured by a closure sees later writes. Never a decoded/final result — an intermediate only.
     Box(std::rc::Rc<std::cell::RefCell<Value>>),
+}
+
+/// How a type-directed decoder reads a position typed `Ty::Fun`. `Refuse` answers no value, as the
+/// `_ty` decoders always have and the browser app shows as undecodable; `Opaque` answers
+/// `Value::Function`, the one thing every backend can report of a function. One switch shared by the λ
+/// and machine decoders, so the two families cannot read a function differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Functions {
+    Refuse,
+    Opaque,
 }
 
 /// ITERATIVE over the `Cons` spine, recursive only into HEADS — the same shape the `Drop` impl below
@@ -72,9 +88,11 @@ impl PartialEq for Value {
             match (a, b) {
                 (Value::Nat(x), Value::Nat(y)) => return x == y,
                 (Value::Bool(x), Value::Bool(y)) => return x == y,
-                // Both nullary and trivially self-equal; if either ever gains a payload this arm stops
+                // All nullary and trivially self-equal; if any ever gains a payload this arm stops
                 // compiling rather than silently comparing it away.
-                (Value::Nil, Value::Nil) | (Value::Unit, Value::Unit) => return true,
+                (Value::Nil, Value::Nil) | (Value::Unit, Value::Unit) | (Value::Function, Value::Function) => {
+                    return true;
+                }
                 (Value::Cons(h1, t1), Value::Cons(h2, t2)) => {
                     if h1 != h2 {
                         return false;
@@ -82,7 +100,9 @@ impl PartialEq for Value {
                     a = t1.as_ref();
                     b = t2.as_ref();
                 }
-                // Functions and box handles have no structural equality; any other variant mismatch.
+                // A closure, a builtin and a box handle have no structural equality, and an opaque
+                // `Function` equals no closure: compare `observable()` forms to ask whether both are
+                // functions. Any other variant mismatch.
                 _ => return false,
             }
         }
@@ -125,6 +145,7 @@ impl std::fmt::Debug for Value {
             }
             Value::Closure { params, .. } => write!(f, "Closure(|{}|)", params.join(", ")),
             Value::Builtin(b) => write!(f, "Builtin({b:?})"),
+            Value::Function => write!(f, "Function"),
             Value::Unit => write!(f, "Unit"),
             Value::Box(_) => write!(f, "<box>"),
         }
@@ -184,6 +205,33 @@ impl Value {
         }
         acc
     }
+
+    /// This value as every backend can report it: a `Closure` or a `Builtin`, at the top or inside a
+    /// list, becomes the opaque `Function`, and everything else is unchanged. The oracles compare a
+    /// decoded result with the reference's through this, because a machine leg or a λ normal form can
+    /// say that a value is a function and nothing more.
+    ///
+    /// ITERATIVE over the spine and recursive only into heads, for the reason `PartialEq` gives. It
+    /// rebuilds every cell it walks, so a value whose heads share structure costs its LOGICAL size,
+    /// the gap `PartialEq`'s doc describes; it is safe for the same reason, since only oracle and test
+    /// code calls it, on small trusted programs.
+    #[must_use]
+    pub fn observable(&self) -> Value {
+        let mut heads = Vec::new();
+        let mut cur = self;
+        while let Value::Cons(h, t) = cur {
+            heads.push(h.observable());
+            cur = t.as_ref();
+        }
+        let mut acc = match cur {
+            Value::Closure { .. } | Value::Builtin(_) => Value::Function,
+            other => other.clone(),
+        };
+        for h in heads.into_iter().rev() {
+            acc = Value::Cons(Rc::new(h), Rc::new(acc));
+        }
+        acc
+    }
 }
 
 /// The most LOGICAL value nodes `format_value_capped` will walk.
@@ -225,8 +273,9 @@ pub fn format_value_capped(v: &Value, budget: usize) -> Option<String> {
 
 /// Canonical textual form of a decoded value, shared by the AOT runtime (which prints it) and the
 /// oracle (which compares it to the binary's stdout). Lists render `[a, b, c]`; `Nat`/`Bool` render
-/// plainly; `Unit` renders `()`. Non-value variants (closures/builtins/boxes) never reach here as a
-/// top-level result, but render a stable placeholder to keep this total.
+/// plainly; `Unit` renders `()`. A function renders `<fn>`, whether the reference's closure or builtin
+/// or a decoder's opaque `Function`, so every backend prints a function-typed result the same way. A
+/// box never reaches here as a result, but renders `<non-value>` to keep this total.
 #[must_use]
 pub fn format_value(v: &Value) -> String {
     let mut out = String::new();
@@ -288,7 +337,8 @@ fn fmt_into(v: &Value, out: &mut String, budget: &mut usize) -> bool {
             }
             out.push(']');
         }
-        Value::Closure { .. } | Value::Builtin(_) | Value::Box(_) => out.push_str("<non-value>"),
+        Value::Closure { .. } | Value::Builtin(_) | Value::Function => out.push_str("<fn>"),
+        Value::Box(_) => out.push_str("<non-value>"),
     }
     true
 }
@@ -455,5 +505,70 @@ mod tests {
             assert!(format_value_capped(&v, exact).is_some(), "L={l} must fit in exactly 2L+1");
             assert_eq!(format_value_capped(&v, exact - 1), None, "L={l} must refuse at 2L");
         }
+    }
+
+    /// A closure, a builtin and the opaque `Function` all print `<fn>`, so every backend prints a
+    /// function-typed result alike; a box keeps `<non-value>`, since no program's result is one.
+    #[test]
+    fn a_function_prints_fn_and_a_box_prints_non_value() {
+        let closure = crate::run("|x| x + 1").expect("evaluates");
+        assert!(matches!(closure, Value::Closure { .. }), "{closure:?}");
+        let builtin = crate::run("head").expect("evaluates");
+        assert!(matches!(builtin, Value::Builtin(Builtin::Head)), "{builtin:?}");
+        for v in [&closure, &builtin, &Value::Function] {
+            assert_eq!(format_value(v), "<fn>", "{v:?}");
+            assert_eq!(format_value_capped(v, MAX_PRINT_NODES).as_deref(), Some("<fn>"), "{v:?}");
+        }
+        let list = Value::Cons(Rc::new(closure), Rc::new(Value::Cons(Rc::new(Value::Function), Rc::new(Value::Nil))));
+        assert_eq!(format_value(&list), "[<fn>, <fn>]");
+        let boxed = Value::Box(Rc::new(RefCell::new(Value::Nat(1))));
+        assert_eq!(format_value(&boxed), "<non-value>");
+    }
+
+    /// `observable` is what the oracles compare: a closure or builtin becomes `Function` at any depth
+    /// of a list, which then equals another leg's `Function`, while the raw closure equals nothing.
+    #[test]
+    fn observable_turns_every_function_into_the_opaque_function() {
+        let closure = crate::run("|x| x + 1").expect("evaluates");
+        assert_ne!(closure, Value::Function, "a raw closure is not the opaque function");
+        assert_eq!(closure.observable(), Value::Function);
+        assert_eq!(crate::run("cons").expect("evaluates").observable(), Value::Function);
+        let nested = crate::run("[[|x| x], [], [|y| y + 1, |z| z]]").expect("evaluates");
+        let list =
+            |items: Vec<Value>| items.into_iter().rev().fold(Value::Nil, |t, h| Value::Cons(Rc::new(h), Rc::new(t)));
+        let want = list(vec![list(vec![Value::Function]), Value::Nil, list(vec![Value::Function, Value::Function])]);
+        assert_eq!(nested.observable(), want);
+        assert_eq!(format_value(&nested.observable()), "[[<fn>], [], [<fn>, <fn>]]");
+        for plain in ["[1, 2]", "true", "7", "[]"] {
+            let v = crate::run(plain).expect("evaluates");
+            assert_eq!(v.observable(), v, "{plain} holds no function and must be unchanged");
+        }
+    }
+
+    /// Iterative over the spine, like `PartialEq` and `Debug`: a long list of closures must not need a
+    /// stack frame per cell.
+    #[test]
+    fn observable_of_a_long_list_does_not_overflow_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let closure = crate::run("|x| x").expect("evaluates");
+                let mut v = Value::Nil;
+                for _ in 0..5_000 {
+                    v = Value::Cons(Rc::new(closure.clone()), Rc::new(v));
+                }
+                let seen = v.observable();
+                let mut cur = &seen;
+                let mut n = 0;
+                while let Value::Cons(h, t) = cur {
+                    assert_eq!(**h, Value::Function);
+                    n += 1;
+                    cur = t.as_ref();
+                }
+                assert_eq!(n, 5_000);
+            })
+            .expect("spawn a small-stack thread")
+            .join()
+            .expect("`observable` on a long list must not overflow its stack");
     }
 }

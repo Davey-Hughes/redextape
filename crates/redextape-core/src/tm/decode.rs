@@ -13,7 +13,7 @@ use crate::tm::machine::BLANK;
 use crate::tm::rxm::{DecodeFailure, MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::sim::Tape;
 use crate::ty::Ty;
-use crate::value::Value;
+use crate::value::{Functions, Value};
 
 /// The half of decoding that does not depend on WHAT is being decoded: the result word out of REG
 /// slot 0 (`Rr`) and the cons cells out of HEAP, both read through `enc`. The two decoders below
@@ -115,7 +115,19 @@ pub fn decode_tape_ty(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Option<Val
 pub fn decode_tape_ty_reason(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Result<Value, DecodeFailure> {
     let Some((word, heap)) = read_result(tapes, enc) else { return Err(DecodeFailure::Mismatch) };
     let mut budget = MAX_DECODE_NODES;
-    decode_word_ty(word, &heap, ty, &mut budget)
+    decode_word_ty(word, &heap, ty, Functions::Refuse, &mut budget)
+}
+
+/// `decode_tape_ty`, reading a function, bare or inside a list, as the opaque `Value::Function` rather
+/// than refusing it — the form every backend reports a function in, so a TM result can be compared
+/// with the λ leg's and the reference's, and `run --backend tm` can print one. A separate entry point
+/// rather than a change to `decode_tape_ty`, because that one's `None` is what the browser app shows
+/// as undecodable.
+#[must_use]
+pub fn decode_tape_ty_opaque(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Option<Value> {
+    let (word, heap) = read_result(tapes, enc)?;
+    let mut budget = MAX_DECODE_NODES;
+    decode_word_ty(word, &heap, ty, Functions::Opaque, &mut budget).ok()
 }
 
 #[cfg(test)]
