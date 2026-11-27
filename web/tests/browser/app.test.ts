@@ -18,6 +18,7 @@ import {
   resultsText,
   retype,
   SHELL,
+  scrollHeldAt,
   stateIdle,
   tick,
   until,
@@ -932,7 +933,7 @@ describe('the app, end to end', () => {
       expect(chip, 'no 40 chip to open').toBeDefined()
       chip?.click()
       await frames()
-      term.scrollTop = term.scrollHeight
+      await until(() => scrollHeldAt(term, term.scrollHeight), 'the λ view scrolled to its end')
       await frames()
       expect(term.scrollTop, 'the view does not scroll, so nothing here can move it').toBeGreaterThan(0)
       expect(rowShown(term, 0), 'row 0 is on screen, so a scroll to it would not be one').toBe(false)

@@ -16,6 +16,7 @@ import {
   programRows,
   programScroll,
   SHELL,
+  scrollHeldAt,
   stateIdle,
   tmPane,
   until,
@@ -190,8 +191,7 @@ describe('a following state diagram, in arcs, under the whole app', () => {
     const reattach = diagram().querySelector('.diagram-reattach') as HTMLElement
     expect(currentRowName(), 'a row to follow').toBe('pc20')
     // Detached by a scroll of the user's, so the re-attach below writes a new position.
-    programScroll().scrollTop = 0
-    await until(() => !reattach.hidden, 'following to detach')
+    await until(() => scrollHeldAt(programScroll(), 0) && !reattach.hidden, 'following to detach')
     const echo = new Promise<void>((r) => programScroll().addEventListener('scroll', () => r(), { once: true }))
     reattach.click()
     diagramChoice('local')?.click()

@@ -44202,3 +44202,592 @@ review built at `52dcfc8`, and `git diff --stat 52dcfc8 b215342` names no file u
 | 5, 82, 1549, 577, 468 | the gate at `110df3b`: legs at exit 0; node files and tests; attribution sites; biome's files | `grep -c 'exit 0 HEAD 110df3b' $R/gate-exits.txt; noansi $R/gate-node.log \| grep -aE 'Test Files\|Tests  '; grep -ao 'checked [0-9]* attribution' $R/gate-attributions.log; grep -aoE 'Checked [0-9]+ files' $R/gate-biome.log` |
 | 5, 84, 1598, 579, 472 | the gate at `b215342`: the same | `grep -c 'exit 0 HEAD b215342' $R/gate-exits.txt; noansi $R/gate-C-node.log \| grep -aE 'Test Files\|Tests  '; grep -ao 'checked [0-9]* attribution' $R/gate-C-attributions.log; noansi $R/gate-C-biome.log \| grep -aoE 'Checked [0-9]+ files'` |
 | 5, 84, 1598, 579, 472 | the gate at `07314d7`: the same | `grep -c 'exit 0 HEAD 07314d7' $R/gate-exits.txt; noansi $R/gate-R-node.log \| grep -aE 'Test Files\|Tests  '; grep -ao 'checked [0-9]* attribution' $R/gate-R-attributions.log; noansi $R/gate-R-biome.log \| grep -aoE 'Checked [0-9]+ files'` |
+
+#### A BROWSER TEST THAT SCROLLS A BOX WHICH MAY BE FOLLOWING WRITES THE SCROLL AGAIN UNTIL IT HOLDS, OR SENDS THE SCROLL'S EVENT WITH IT, SO A DRAW BETWEEN THE WRITE AND THE EVENT NO LONGER LEAVES THE TEST WAITING (2026-11-24 and 25, branch `scroll-write-race`, `2a96b84..13931a9`, 2 commits, plus this entry's first writing, `3b5c9d2`; then `1cfd1f6` and `9f13346`, which answer the review of the whole branch, `ec876e3`, which answers its re-review, `463e52b`, a test of the helper itself, `50269c3`, which makes that test hold in Firefox, and the commit that brings this entry up to them; then, #201, #197, #202, #198, #203, #200 and #206 merged, rebased onto `main` `52fc8c6`, `mc-link.test.ts`'s scrolls given `scrollHeldAt` in `60488b6`, this entry brought up to them in `5ccda44`, corrected after a check of those two in `ace5b42`, and the commits that correct a reason `ace5b42` gave, found false on a re-read of it)
+
+PR #203's CI failed a browser case #203 does not touch. The diagnosis,
+`~/temp/redextape-duet-patches-record/intent/followup/ci-805.md` with its probes, logs and screenshots in `ci805/`
+beside it, found a race between the browser tier and the app that has been on `main` since #190. This branch fixes it in
+the tests, at each scroll of a box that can be following which a test makes and then waits on, and leaves the app as it
+is. The lane's record is `~/temp/redextape-duet-patches-record/scroll-race/`, `$R` below: its logs in `$R/logs/` and,
+for the whole-branch review's fixes, `$R/fix/logs/`; its forced-draw probes and the variants they ran in `$R/probe/` and
+`$R/fix/probe/`; the saved copies the runs restored from in `$R/saved/` and `$R/fix/saved/`; the review in
+`$R/review.md`; and the table of call sites below in `$R/sites.md`.
+
+| Commit | What |
+|---|---|
+| `6bba43b` | `scrollHeldAt` in `harness.ts`, and the call sites in 7 files that scroll a box that can be following and then wait |
+| `13931a9` | `scrollHeldAt` throws at once on a place its box cannot reach; `state-diagram`'s detach case sends its scroll's event at once; the count sweep's single write put back |
+| `1cfd1f6` | `scrollHeldAt` holds only once its write's own event has been handled; `cut-text-app`'s scroll into view sends the grid's event at once; `rxm-link`'s three scrolls held; the comments say only what was measured |
+| `9f13346` | `scrollHeldAt` fails, naming the box and the reason, when its write's event has not come in 30 frames |
+| `ec876e3` | a wait of `scrollHeldAt`'s ends when a throw reports it or when the case that wrote it ends; the 30-frame message says what the helper saw and gives the causes as possible ones; `cut-text-app` sends the grid's event only when its scroll into view moved the grid |
+| `463e52b` | `scroll-held-at.test.ts`, a test of `scrollHeldAt` itself on a plain box (the re-review's n4) |
+| `50269c3` | `scroll-held-at.test.ts` reads a written place to the pixel, since Firefox lands a write on a device pixel, and matches the 30-frame message against what the box then reads |
+| `60488b6` | `mc-link.test.ts`, which #200 brought with its own copy of `clif-link`'s old predicate, scrolls its three listings through `scrollHeldAt`; made after the rebase onto `52fc8c6` |
+
+2026-11-25, later: #201, #197, #202, #198, #203, #200 and #206 merged, and `main` is `52fc8c6`. The branch,
+`2a96b84..8f2335f`, is rebased onto it with `git rebase` (`$R/rebase-52fc8c6/`, which holds this rebase's logs, the
+gates after it and `figures.zsh`, the commands behind its counts). Git stopped twice, at this entry's two commits, each
+time on the roadmap alone, which was rebuilt each time as `main`'s file plus this entry; every other file merged by
+itself. After it the roadmap is `main`'s file with this entry as a byte suffix, the entry is byte for byte as before,
+each of the 9 commit messages is its old one byte for byte, and the lines the branch adds and removes outside the
+roadmap are the same. `git range-diff` finds 7 commits the same and this entry's 2 changed in context only. This entry
+keeps naming the SHAs from before the rebase, but for the heading, this paragraph, the commit table's last row, *THE
+FIX*'s `mc-link` clause, the rows of *THE CALL SITES* for the lines `main` brought, and the parts of *IN FIREFOX*,
+*WHAT THIS DID NOT CLOSE*, *VERIFICATION* and its table of counts marked as after the rebase; the PR's body maps the 9
+commits to theirs. #200 brought `mc-link.test.ts` with its own copy of the predicate `6bba43b` moved out of
+`clif-link.test.ts`, the same body, which holds as soon as its box reads the place, not once the write's event has
+come; its doc comment cited `clif-link.test.ts` for its `scrolled`, a function that file no longer has. Of the lines
+`main` added to `web/tests/browser` since `2a96b84`, the 46 that mention a scroll or a wheel, in 6 files, were read one
+by one (`$R/merge-52fc8c6/sites-new.md`): 8 lines in 2 files scroll a box or define or call a predicate that does, and
+none of them is exposed (*THE CALL SITES*). `mc-link`'s 4 calls of its copy are of the kind of `clif-link:152` and
+`:157`, which the table calls not exposed: the copy writes again while the box is not at the place, and each `until`
+also waits for rows at the new place. `60488b6` deletes the copy and its
+comment and makes the 4 calls `scrollHeldAt`, so that each waits on the write's event itself, as `clif-link`'s do. Its
+message overstates the change: it says a draw between a write and its event could put a listing back after the copy
+had held, the race this branch closes, as this entry said at `5ccda44` in calling the 4 calls exposed; and
+`5ccda44`'s message gives other projects' load as the cause of the capped run's failure, which no log records
+(*VERIFICATION*); and `ace5b42`'s message gives as the reason the 4 calls are not exposed that a following box draws
+rows at the new place only once the write's own event has come, which is false: a draw while a link holds the box, or
+with no row to follow, draws them at the written place before it. Commits are not rewritten. No forced-draw probe was run on `mc-link`. What ran at `60488b6` is
+*VERIFICATION*'s part after the rebase.
+
+##### WHAT SHOWED
+
+Run 805 of #203 failed `clif-app.test.ts` > *lists the program as built, its pcs in the rxm view's form* with `timed
+out after 10000ms waiting for the listing to draw rows 0 to 3`, from `rowsShowing` (`:53`) via the case (`:85`), after
+10,154 ms. The case's run on #203's previous CI run took 357 ms in all. Here, with a draw forced into the window
+described below, the same case failed 3 of 3 on `2a96b84` with CI's message, CI's `until` line and CI's two test lines
+(each one line lower in the variant, which imports the probe on its first line).
+
+##### THE MECHANISM
+
+Three pieces of the app, each correct on its own (line numbers `52fc8c6`'s; the branch changes nothing under `web/src`):
+
+- **A reply drawn at once.** `web/src/replies.ts:351-360`: a `result` reply calls `draw()` straight, not at the next
+  frame; so do `compiled`, `clif-load`, `clif-listing` and `lambda-tree`, the reply that ends a recording, and the
+  machine code panel's `mc-load` and `mc`, which #200 added.
+- **A following grid scrolls itself.** `web/src/virtual-grid.ts:400-407`: a draw of a grid that is still following
+  computes where its followed row puts the box and, if the box is anywhere else, records that position with
+  `Follow.onProgrammaticScroll` and writes it.
+- **An echo is not a user.** `web/src/state-table.ts:239-241`: `Follow.onScroll` reads a `scroll` event within
+  `ECHO_TOLERANCE` of the position last recorded as the code's own write as that write's echo, and keeps following.
+
+A test that writes `scrollTop` gets the write's `scroll` event at the next rendering update. If a reply's straight draw
+runs in between, the grid, still following, puts the box back where it follows and records that; the event then reads
+the restored position as the echo, the grid keeps following, and a test that wrote once waits for rows, or for a detach,
+that never come. In run 805 the draw was most likely the clif pass's closing `result`, which the worker posts 7-13 ms
+after the clif frames: the diagnosis infers it, as the one reply of that flow that comes after the frames and draws at
+once. A wheel does not meet the window: the review's probe found no task that read a box's new place before the wheel's
+`scroll` event, in Chromium or in Firefox. A key the grid handles (the arrows, Page Up and Down, Home and End) detaches
+the grid before its draw. Space, which the grid leaves to the browser, does meet it in Chromium, as *WHAT THIS DID NOT
+CLOSE* measures.
+
+##### THE FIX
+
+- **`scrollHeldAt(box, top)` in `harness.ts`**, the predicate `clif-link.test.ts` already used: put the box's top at
+  `top`, as near as it goes, and write again on the next poll while it is not there, so the first write whose event
+  lands detaches the box. Its name differs from the `scrolled(el)` `harness.ts` already exports, the next `scroll`
+  event. **It holds only once the write's own event has been handled**: a box back in place at the next poll does not
+  prove the event came, and a draw before the event could still put a following box back. A box already in place holds
+  at once, since a write that moves nothing sends no event. **It fails once 30 frames have passed since its write with
+  no event**: Firefox sends no `scroll` event to a box that a hidden level holds until the level is shown, and a wait on
+  one would otherwise end at the `until`'s bound under the caller's message. The message names the box, says where it
+  reads, whether it is in the document and how many client rects it has, and gives a hidden level and a box taken out of
+  the document as possible causes. It counts frames, not time, since a main thread held for a while delays the frames as
+  much as the polls. **A wait ends when a throw reports it or when the case that wrote it ends**, so a later call that
+  finds the box in place does not fail at once over an earlier write. **It throws at once on a place the box cannot
+  reach**: a write lands as it is made and only its event waits, so a box that does not read the place straight after
+  the write never will (a `top` below 0 or not a number, a box that does not scroll), where writing again would spin to
+  the wait's bound under a message about something else.
+- **Where a scroll is a test's way to a state**, the helper sits in the `until` that waited on what the scroll shows:
+  `clif-app` (the listing's rows), `app` (the λ view scrolled to its end), `follow-kept` (the rule table scrolled away
+  before a rebuild), `state-diagram-no-machine` (scrolled away before a recompile), `tm-follow-clamp` (detached before
+  the local level hides the grid) and `tm-view-narrow`'s `following(true)` (both grids detached), with `clif-link`'s two
+  and `rxm-link`'s three, and, since the rebase, `mc-link`'s four (`60488b6`: its scan, its press and its two reads of a
+  machine row's border). `rxm-link`'s write 0 to boxes already at 0, so the helper writes nothing there; they held
+  before only through fixture values the test never asserts. `state-diagram-no-machine` waited for the λ view's tree
+  before its scroll, which kept that one reply out of the window; with the scroll held, the wait goes.
+- **Where the scroll is the claim**, `state-diagram`'s *detaches following on a scroll*, writing again would let a grid
+  that ignored a user's first scroll pass. The case writes once and dispatches the `scroll` event at once, as a wheel's
+  scroll comes, its place and its event together, and as the tier's other scrolls of a following box (`app`,
+  `link-hold`, `scroll-kept`, `hidden-views`, `panel-sizes-stored`, `view-toggles`) already do. `cut-text-app`'s
+  `firstCut` does the same after its `scrollIntoView`, which finds the place itself and so cannot go through the helper,
+  and only when the call moved the grid, since a wheel that moves nothing sends no event.
+- **`tm-view-narrow`'s count sweep keeps its single write.** Its claim is a measure across each row (a count draws its
+  number whole or not at all), which no vertical scroll changes; the scroll only gets each row drawn, and the case
+  already fails aloud, `precondition: every row with a count, swept`, when one is not. A write a draw undoes leaves the
+  grid following, since its event then reads as the draw's echo, so the next write is as exposed: it is the first write
+  whose event is heard that ends the exposure. No row is lost unnoticed for all that: one undone write loses none of its
+  rows, which the windows on either side draw; a row can be lost only by an undone write to 0, an undone last write or
+  two undone writes in a row, and a lost row fails the precondition (the table's row gives each window's rows).
+
+Nothing under `web/src` changes.
+
+##### THE CALL SITES
+
+`git grep -nE 'scroll(Top|Left) *[-+]?=[^=]|scrollTo\(|scrollBy\(|scrollIntoView\(|\.scroll\(' 2a96b84 --
+web/tests/browser` gives 125 lines in 35 files that scroll a box. The branch's first search, `scroll(Top|Left) *=
+*[^=]`, found 85 of them in 30 files (`scroll(Top|Left) *=` gives 92, 7 of which only compare); the whole-branch review
+found the 40 it missed, which follow them in the table below: 9 compound writes (`+=`), 23 `scrollTo(` and
+`scrollIntoView(` calls, and the 8 lines of `clif-link`'s own `scrollTo`. No line calls `scrollBy(` or `.scroll(`.
+After the rebase, the same search at `52fc8c6` gives 126 lines in 36 files: the 125, and `mc-link.test.ts`'s one
+write, in its copy of the old predicate; sorted by content, the two lists differ by that line alone. The table's last
+rows are the lines `main` brought that scroll a box or define or call a predicate that does: that write, the copy's
+`function` line and its 4 calls, which the search does not match since they name the predicate, and
+`mc-panel-layout.test.ts`'s 2 `userEvent.wheel` calls. Each was read for four things: whether a `Follow` owns the box
+(the rule table, the rxm and clif listings, the state diagram's program grid, the λ body); whether the box can be
+following at the scroll; whether the test scrolls once and then waits or asserts on what the scroll shows, with no
+`scroll` event dispatched at once after it; and whether a reply drawn at once can arrive before the scroll's event.
+Line numbers are `2a96b84`'s, and `52fc8c6`'s in the last rows. "Forced" is a probe below: the position the scroll
+gave the box, then the one a forced draw left it at.
+
+| Site | What is scrolled | Exposed? | Changed? |
+|---|---|---|---|
+| clif-app:51 | the clif listing, following step 0's row at 593 | yes: run 805; forced, 0 back to 593 | yes |
+| tm-view-narrow:283 | the program grid and the rule table, both following | yes: one write each, then a wait for both to detach | yes |
+| tm-view-narrow:1118 | the program grid, swept a box at a time while it follows | its write, yes, but the case does not need it held: forced on the first write that moves the grid in all six layouts of the 10 sweep cases, the draw moved the grid back in 2 of the 10 (`Explorer at 320 px` in `arcs`, on each program: 120 back to 0) and all 10 passed (`$R/logs/before-forced-tm-sweep-all-1.log`). The case claims each row's count draws whole or not at all, a measure across the row that no vertical scroll changes; the scroll only gets each row drawn, and `seen.size === sweep.rows` ("every row with a count, swept") fails aloud if a lost write leaves one undrawn. The grid is 120 px, 5 rows, in every layout; at 0 it draws rows 0 to 13 (the 6 rows a 120 px box spans and `OVERSCAN` 4 twice, all below), which hold the whole lost slice, rows 5 to 9; a write a draw undoes leaves the grid following, since its event reads as the draw's echo, so each write is exposed until the first whose event is heard; but a window at `j·120` (j ≥ 1) draws rows `5j-4` to `5j+9`, so one undone write at `k·120` loses none of its rows, which the windows on either side draw; a row can be lost only by an undone write to 0, an undone last write or two undone writes in a row, and `seen.size` fails aloud on a lost row | no: changed at `6bba43b`, put back to the single write at the next commit |
+| tm-follow-clamp:193 | the program grid, following pc20 | yes: forced, 0 back to 484 | yes |
+| state-diagram-no-machine:143 | the program grid, following | yes, though it waited for the λ tree first: forced, 504 back to 0 | yes; the λ wait dropped |
+| follow-kept:211 | the rule table, following | yes: forced by a `lambda-tree` draw, 120 back to 1248 | yes |
+| app:935 | the λ body, following the next redex; the chip's tree is still coming | yes: forced by a `lambda-tree` draw, 739 back to 0 | yes |
+| clif-link:152 | the rxm and clif listings (`scan`, `scrollTo`) | no: it already wrote again until the scroll held | moved to `harness.ts` as `scrollHeldAt` |
+| state-diagram:191 | the program grid, following | yes: forced, 351 back to 0 | yes, at the second commit, by its `scroll` dispatched at once, not by `scrollHeldAt`: the case IS the rule that a user's scroll detaches, and a user's scroll brings its place and its event together. A draw forced a microtask after the write timed out the old write (351 back to 0) and left the new one held at 351, 2 of 2 passed; a `Follow` sabotaged to ignore a user's first scroll fails the new case and passes under `scrollHeldAt` (`$R/logs/v2-*-state-diagram-*.log`, `$R/logs/v2-sabotaged-follow-*.log`) |
+| rxm-link:99, :130 | the rxm listing at step 0, following pc0 | no: the write is `max(0, (minted - 2) * 24)`, 0 here, where following already holds it; forced, it stayed at 0, and an arm kept for a write that moves the listing never met one of the test's; it holds only through fixture values the test never asserts (`minted - 2 <= 0`) | yes, at `1cfd1f6`: `scrollHeldAt`, which returns at once on a box already in place and holds if the values change |
+| rxm-link:136 | the rule table at step 0 | no: it is at 0 when the test writes 0; forced, it stayed at 0, and the same kept arm never met a test write that moved it; it holds only because the table rests at 0, which the test never asserts | yes, at `1cfd1f6`: `scrollHeldAt` |
+| link-hold:355, :370, :498 | the rxm listing; the rule table | no: `scroll` dispatched at once after the write | no |
+| panel-sizes-stored:267 | the program grid | no: dispatched at once | no |
+| view-toggles:131, :142 | the rule table | no: dispatched at once (:142 is a clean-up) | no |
+| scroll-kept:70 | the rule table | no: dispatched at once | no |
+| hidden-views:26, :40 | the rule table | no: dispatched at once | no |
+| app:367, :403, :1173, :1194, :1250, :1283 | the rule table | no: dispatched at once | no |
+| lambda-tree-app:141 | the λ body at step 0 | no: the next redex is the root, so following holds it at 0, the write's value | no |
+| lambda-tree-app:156 | the λ body | no: the walk's own scrolls above it detached it | no |
+| state-diagram-local-layout:296, :299 | the local level | no: nothing waits for a `scroll` event there; the level centres each new state itself, reading its scroll when it draws | no |
+| panel-sizes-stored:337; divider-drag-focus:98, :154; scroll-kept:79, :80 | the source editor's scroller | no: nothing follows there | no |
+| scroll-kept:86, :242; focus-scroll:88; default-views-gestures:61 | a view's own box | no: nothing follows there | no |
+| tm-view-narrow:1225; view-strip-narrow:302; inspector-phone:238 | the program grid; the views' boxes; the inspector's rows | no: a clean-up that nothing waits on | no |
+| virtual-grid:156, :328 | a `VirtualGrid` the file builds | no: no worker | no |
+| rxm-pane:118, :131 | a bare `RxmPane`'s listing | no: no worker (and a test of the detach rule) | no |
+| cut-text:295, :351 | fixture panes' rule table and clif listing | no: no worker | no |
+| clif-layout:73, :85, :157 | a `ClifPane` fixture's listing | no: no worker | no |
+| lambda-body:538, :554, :668, :711, :940 | a `LambdaBody` the file builds | no: no worker; :538 draws itself right after on purpose, :554 and :940 dispatch at once, :668 and :711 are `scrollLeft`, which nothing follows | no |
+| lambda-follow:46, :72, :290, :305 | a `LambdaPane`'s λ body | no: no worker (and tests of the follow rule) | no |
+| term-map:223, :226 | a `LambdaPane`'s λ body | no: no worker | no |
+| panel-regions:220 | a `LambdaPane`'s λ body | no: no worker | no |
+| state-diagram-local-pan: 21 lines, 255 to 1013 | the local level of a `mountTmFixture` | no: nothing follows there, and no worker | no |
+| **The 40 lines the first search missed** | | | |
+| cut-text-app:48 | the first cut cell, scrolled into view (`block: 'nearest'`): a rule table cell in :83's case, a program-grid instruction in :92's, a clif value in :72's | yes: in the rule table's case the call moved the table from 0 to 24, and a draw forced a microtask after it put the still-following table back at 0; the case failed its precondition, `no drawn rule is cut where a hover reaches it`, 2 of 2 (`$R/logs/fix-before-into-cut-text-app-{1,2}.log`). In the program grid's case the call did not move the grid | yes, at `1cfd1f6`: the grid's `scroll` dispatched at once after the call, as a wheel's comes (`scrollIntoView` finds the place itself, which the helper cannot take); under the same draw 3 of 3 passed, 2 of 2 runs, the table held at 24 (`$R/logs/fix-after-into-cut-text-app-{1,2}.log`); at `ec876e3`, dispatched only when the call moved the grid, since a wheel that moves nothing sends none |
+| lambda-tree-app:150 | the λ body, walked a box at a time | no: the loop writes again from wherever the box stands until every fold is open and the box is at its end, so a write a draw undoes costs one more pass. Forced a microtask after the walk's first write that moves the body, the draw put it back from 135 to 0 and the case passed, 2 of 2 (`$R/logs/fix-later-lambda-tree-app-{1,2}.log`) | no |
+| clif-link:157 (its `scrollTo`), :168, :201, :272, :273, :435, :472, :473 | the clif and rxm listings | no: the file's `scrollTo` writes until the row is drawn (`scrolled`, now `scrollHeldAt`) | no |
+| cut-text:311 | a fixture pane's clif listing | no: no worker | no |
+| colour-slices:116 | the source editor, by CodeMirror's `scrollIntoView` effect | no: nothing follows there | no |
+| edge-spacing:406, :416 | the views' boxes and the page, bringing each panel header into view, then put back | no: no grid holds a panel header, and nothing follows a view's box or the page | no |
+| inspector-phone:632, :638, :671, :693, :701, :708; notice-float:341, :345; step-bar-narrow:66, :177, :209 | the page (`:638` brings the inspector's toggle into it) | no: nothing follows the page | no |
+| state-diagram-local-pan:286, :287, :329, :330 | the local level of a `mountTmFixture` | no: nothing waits for a `scroll` event there, and no worker | no |
+| state-diagram-local-pan:670 | the view's box, bringing the level to its foot | no: nothing follows there, and no worker | no |
+| tm-view-narrow:221, :222, :223 | each view's box, the program level sideways, the page (`home()`) | no: a clean-up; nothing follows there | no |
+| tm-view-narrow:456, :458, :460, :461; view-strip-narrow:292, :294, :303 | a view's own box and the page, bringing a control into the viewport | no: nothing follows there | no |
+| **The lines `main` brought by `52fc8c6`, after the rebase** | | | |
+| mc-link:62, :65 (`function scrolled` and its write) | the copy of the old predicate: it writes, and holds as soon as its box reads the place | no, as `clif-link:152`: it writes again while the box is not at the place, and its 4 calls are `clif-link`'s kind (the next two rows) | deleted with its doc comment, which cited a function `clif-link.test.ts` no longer has, at `60488b6` |
+| mc-link:78 (`scan`), :105 (`press`) | the rxm, clif and machine code listings, a box at a time; each follows the run | no, by reading, as `clif-link:152` and `:157`: the copy writes again while the box is not at the place, and each `until` also waits for rows at the new place | yes, at `60488b6`: `scrollHeldAt`, so that each waits on the write's event itself |
+| mc-link:239, :241 | the machine code listing, to a row whose border is then read | no, by reading, as `clif-link:152`: the copy writes again while the box is not at the place, and the border is read in the task the `until` resolves into | yes, at `60488b6`: `scrollHeldAt` |
+| mc-panel-layout:277, :401 | a fixture `ClifPane`'s machine code listing, by `userEvent.wheel` | no: a wheel's place and its event come together (*THE MECHANISM*), and no worker | no |
+
+##### THE PROOFS
+
+Two probes, each copied into `web/tests/browser/` only for a run. Imported before `main()` makes the program's worker,
+each hears that worker's replies; `forced(box)` arms a box so that its next write that moves it in the current test is
+followed by the newest heard reply that the page draws for straight away (a `result`, `clif-load` or `lambda-tree`,
+each idempotent), handed to the page again as the worker's, and prints where the write put the box and where the draw
+left it. **In the setter**, `$R/probe/zz-forced-draw.ts`, the draw runs inside the write itself, before the statement
+after it; **a microtask later**, `$R/probe/zz-forced-draw-later.ts`, it runs once the test's own synchronous code after
+the write has finished, the earliest any other task's code can run, and still before the write's event. A "before" run
+arms the old file's write at the call site; an "after" run arms the write the case now makes, the helper's through a
+copy of `harness.ts`. Every swapped file was put back from its saved copy and `cmp` equal.
+
+**In the setter, at `6bba43b`** (`$R/logs/batch1.summary`, `$R/logs/batch2.summary` and the `*-forced-clif-app-*`
+logs), each before run once unless it says otherwise:
+
+| Site | Before: the old write | After: the helper |
+|---|---|---|
+| `clif-app:51` | 3 of 3 failed with CI's message; 0, then 593 | 3 of 3 passed |
+| `tm-view-narrow:283` | its 3 cases failed, `both grids to detach`; the rule table 138960, then 0 | 3 passed |
+| `tm-follow-clamp:193` | failed, `following to detach`; 0, then 484 | 2 of 2 passed |
+| `state-diagram-no-machine:143` | failed, `following to detach`; 504, then 0 | 2 of 2 passed |
+| `follow-kept:211` | failed, `the user’s scroll to stop the table following`; 120, then 1248 by a `lambda-tree` draw | 2 of 2 passed |
+| `app:935` | its 2 cases failed, `the view does not scroll`; 739, then 0 | 2 of 2 passed |
+| `state-diagram:191` | failed, `following to detach`; 351, then 0 | not changed at `6bba43b` |
+| `rxm-link:99`, `:130`, `:136` | 8 passed; each write stayed at 0 | put back before the commit |
+
+**A microtask later, at `13931a9`'s code** (`$R/logs/batch3.summary`, `$R/logs/v2-*.log`):
+
+| Site | Before: the old write | After: as committed |
+|---|---|---|
+| `clif-app:51` | failed with CI's message; 0, then 593 | 5 passed |
+| `clif-link` | (it wrote again already) | 11 passed |
+| `tm-view-narrow:283` | its 3 cases failed; the rule table 138960, then 0 | 3 passed, one of them after the helper's first write was undone the same way |
+| `tm-follow-clamp:193` | failed; 0, then 484 | 5 passed |
+| `state-diagram-no-machine:143` | failed; 504, then 0 | 8 passed |
+| `follow-kept:211` | failed; 120, then 1248 | 14 passed |
+| `app:935` | its 2 cases failed; 739, then 0 | 2 passed |
+| `state-diagram:191` | failed, `following to detach`; 351, then 0 | 16 passed, 2 of 2; the draw left the grid at 351 |
+
+- **The in-setter draw against the new `state-diagram` case** failed it, 351 then 0: the draw runs inside the write,
+  before the dispatch on the next line, where no task of the page's can run. It is the microtask draw that models a
+  reply.
+- **A `Follow` that ignores a user's first scroll** (`web/src/state-table.ts`'s `onScroll` returning once before it
+  detaches, saved, swapped and put back `cmp` equal): the new `state-diagram` case failed, `following to detach`; the
+  same case written with `scrollHeldAt` passed, 16 of 16. A held scroll would hide the very fault that case is for.
+- **The count sweep with its single write**, the in-setter draw armed in all six layouts of its 10 cases
+  (`$R/logs/before-forced-tm-sweep-all-1.log`): 10 passed. The draw moved the grid back in 2 of the 10 (`Explorer at
+  320 px` in `arcs`, once on each program, 120 then 0) and left it at 120 in the other 8. Every layout's grid is 120 px,
+  5 rows; at 0 it draws rows 0 to 13 (the 6 rows a 120 px box spans and `OVERSCAN` 4 twice, all below), which hold the
+  lost slice, rows 5 to 9.
+- **The throw**, `$R/probe/v2/zz-helper-failfast.test.ts` (`$R/logs/failfast-*.log`): on a box 100 px high over
+  1000 px, `top` 300 and 5000 held in 20 ms; -50, `NaN`, and 300 on a box with `overflow: visible` each threw in 0 ms
+  with the message, in Chromium and in Firefox (where 300 reads 299.92, inside the 1 px the helper allows). The old
+  helper on the same three: 10 s each, then `until`'s message about the wait.
+
+**A microtask later, at `1cfd1f6`'s code** (`$R/fix/logs/batch4.summary`, with each run's log in `$R/logs/fix-*.log` or
+`$R/fix/logs/`):
+
+- **Every helper site, with the helper as it now is** and its write armed: `clif-app` 5 passed, `clif-link` 11,
+  `tm-follow-clamp` 5, `state-diagram-no-machine` 8, `follow-kept` 14, `rxm-link` 8 (the helper wrote nothing there, so
+  nothing was armed), `app` 2 and `tm-view-narrow` 3, each with the draws of the `13931a9` table above (0 then 593, 504
+  then 0, 120 then 1248, 739 then 0, 138960 then 0).
+- **`cut-text-app`**, the draw armed after `firstCut`'s `scrollIntoView` (`$R/fix/probe/zz-forced-draw-into.ts`): its
+  old text failed the rule table's case, 2 of 2, the call taking the table from 0 to 24 and the draw putting it back at
+  0 (`precondition: no drawn rule is cut where a hover reaches it`); with the event dispatched, 3 of 3 passed, 2 of 2
+  runs, the table held at 24.
+- **Held only once its event has been handled** (`$R/fix/probe/zz-helper-failfast.test.ts`, `$R/fix/logs/held-*.log`): a
+  second call in the task that wrote, before any rendering update, reads not held with the new helper in Chromium and in
+  Firefox, and held with `13931a9`'s; after the event both read held, and a box already in place holds at once. The
+  throw's five places read as before.
+- **`lambda-tree-app:150`'s walk**, the draw armed on the walk's first write that moves the λ body
+  (`$R/fix/probe/lambda-tree-app.forced.test.ts`, `-t 'marks a linked root'`): the draw put the body back from 135 to 0,
+  and the case passed, 2 of 2 runs (`$R/logs/fix-later-lambda-tree-app-{1,2}.log`), since the walk writes again from
+  wherever the body stands.
+
+**A box hidden straight after the helper's write, at `9f13346`** (`$R/fix/probe/zz-helper-hidden.test.ts`, run by
+`$R/fix/probe/hidden.sh` against the helper of `9f13346`, `1cfd1f6` and `13931a9`; `$R/fix/logs/hidden.summary` and
+`hidden-9f13346-*.log`): a plain box written to 300 and then hidden with `display: none`, the way the local level hides
+the program grid.
+
+- In Firefox no `scroll` event came. `13931a9`'s helper read held 21 ms after the write, with no event; `1cfd1f6`'s read
+  not held until the `until`'s bound, 10,020 ms, and failed under the caller's message; `9f13346`'s threw after 30
+  frames, at 503 ms, with its own message naming the box.
+- In Chromium the event came to the hidden box, and each of the three helpers held at 20 ms.
+- A box written and then put in a 0 px level, still laid out, got its event and held at 20 ms in both browsers
+  (`$R/fix/logs/hidden2-new-firefox.log`, the run in which it went first: in the other order Firefox gave the new box,
+  at the place of the removed hidden one, that box's saved 299.92 before the helper's first call, so that line reads
+  nothing).
+
+##### IN FIREFOX
+
+Firefox is not in CI (`test:coverage`, CI's `web` job, runs Chromium; `REDEXTAPE_FIREFOX` is opt-in), and it is where
+branches are tried. At `6bba43b` the 7 changed files in Firefox failed 16 of 113 cases, in 4 files. The same 4 files run
+in Firefox with `2a96b84`'s text (`$R/scripts/firefox-base.sh`, each file saved, swapped and put back `cmp` equal)
+failed 16 of 89: the same 16 cases with the same 16 messages, compared name by name and message by message. The branch
+adds no Firefox failure; the 16 are `main`'s, at `2a96b84` and, after the rebase, at `52fc8c6` (below):
+
+- **`tm-view-narrow`, 11**: geometry and the count sweep's tallies, Firefox's text and box measures against figures
+  taken in Chromium (a toggle 0.64 px wider than its figure, a runtime column whose right edge is at 356 px against
+  its level's 320, counts drawn whole 61 against 63).
+- **`tm-follow-clamp`, 2**: *comes back following when the local level hides it before its scroll is reported* waits
+  15 s, vitest's bound, and the next case fails its precondition `scrollTop > 0` on the grid the first left hidden.
+  Not the helper: a probe that prints each step (`$R/probe/ff/`) shows the helper's write reported 17 ms later and the
+  grid detached, in Firefox as in Chromium. The case then re-attaches, which writes the grid's scroll, switches to the
+  local level, which hides the grid, and waits, with no bound, for that write's `scroll` event. Chromium sends it to
+  the hidden box; Firefox sends none until the program level is shown again, which the case does only after the event.
+  `main`'s single write hangs there the same way.
+- **`follow-kept`, 2**: the rxm listing and the λ body come back from a Stage tab a fraction of a pixel from where they
+  left.
+- **`app`, 1**: *a step that loops in its own state still releases a source-originated link's hold on the table*,
+  465047.66 against 465048.375, a fractional `scrollTop`.
+
+At `13931a9` the 8 changed files in Firefox (`$R/logs/gate-firefox.log`) failed 16 of 129, the same 16 cases with the
+same messages as `main`'s; `state-diagram.test.ts`, which the second commit adds to the set, passed. At `1cfd1f6` the 10
+changed files (`$R/fix/logs/gate-firefox.log`) failed the same 16, of 140. At `9f13346` the 10 changed files
+(`$R/fix/logs/g5/gate-firefox.log`) failed 16 of 140, in the 4 files above, and the same 10 files and `harness.ts` with
+`2a96b84`'s text (`$R/scripts/firefox-base-10.sh`, `$R/fix/logs/g5/firefox-base.log`, each file saved, swapped and put
+back `cmp` equal and equal to `HEAD`) failed 16 of 140, in the same 4. `$R/scripts/ff-compare.sh`, which lists each
+failure block's case names with the block's first message line, finds the two lists identical, 50 lines over 16 cases.
+No call of the helper waits on a hidden box there: such a wait would fail a case `main`'s text passes, and no
+`scrollHeldAt:` message is in the branch's log. `rxm-link`, `cut-text-app` and `state-diagram` pass in Firefox.
+At `50269c3`, the last code commit before the rebase, the 11 changed files (`$R/fix/logs/g7/gate-firefox.log`) failed
+16 of 147, in the same 4 files, and the 10 of them `2a96b84` has, with its text (`$R/fix/logs/g7/firefox-base.log`),
+failed 16 of 140; `ff-compare.sh` finds the two lists identical, 50 lines over 16 cases, and no `scrollHeldAt:` message
+is in the branch's log. `scroll-held-at.test.ts`, which `2a96b84` does not have, passed 7 of 7. At `463e52b` it failed
+4 of its 7 in Firefox (`$R/fix/logs/g7/gate-firefox-463e52b.log`), each where it read the written place exactly:
+Firefox lands a write on a device pixel, and the box read 299.92 for 300. The helper, which allows a pixel, did what
+each case asked of it; `50269c3` reads the place to the pixel and matches the 30-frame message against what the box
+reads.
+
+**After the rebase, at `60488b6`**, the 12 changed test files, the 11 and `mc-link.test.ts`
+(`$R/rebase-52fc8c6/gate-firefox.log`), failed 16 of 158 in Firefox, in the same 4 files, and the 11 of them `52fc8c6`
+has, with its text and its `harness.ts` (`$R/scripts/firefox-base-12.sh`, each of the 11 and `harness.ts` saved,
+swapped and put back `cmp` equal and equal to `HEAD`; `$R/rebase-52fc8c6/firefox-base-run.txt` and `firefox-base.log`
+beside it), failed 16 of 151, in
+the same 4. `ff-compare.sh` finds the two lists identical, 50 lines over 16 cases, and the list at `60488b6` identical
+to the one at `50269c3`; no `scrollHeldAt:` message is in the branch's log. `mc-link.test.ts` is in neither run's 4
+failed files.
+
+##### WHAT THE WHOLE-BRANCH REVIEW FOUND
+
+An independent reviewer read `2a96b84..3b5c9d2` whole, with the tree and the record (`$R/review.md`, its probes and logs
+in `$R/review-probe/`): no Critical finding, 1 Important and 6 Minor. It re-ran the microtask proofs for `clif-app` and
+`state-diagram-no-machine`, the `Follow` sabotage with a variant of its own, and `tm-follow-clamp` in Firefox, and each
+held. Each finding was checked before it was acted on, and each held:
+
+- **I1** (`1cfd1f6` and this entry): the first search missed 40 of the 125 lines that scroll a box, so the table did not
+  cover every place. The widened search's lines are in *THE CALL SITES*. Of the 40, `cut-text-app:48` was exposed and is
+  fixed (*THE FIX*, *THE PROOFS*); `lambda-tree-app:150` is not exposed: a draw forced after its first write undid it,
+  and the case passed 2 of 2, since the walk writes again; `clif-link`'s 8 lines scroll the following clif and rxm
+  listings through the file's `scrollTo`, which writes until the row is drawn (now `scrollHeldAt`); the rest scroll the
+  page, a view's own box, the program level sideways, the editor, the local level or a fixture with no worker.
+- **M1** (`1cfd1f6`, `9f13346`): "held" meant the position was still there at the next poll, not that the write's event
+  had been handled. The helper now waits for that event, so no caller has to join a consequence of it; `app.test.ts:936`
+  was the one that joined none. Waiting for the event brought a wait the helper could not end, on a box hidden after its
+  write in Firefox, which `9f13346` bounds at 30 frames under a message that names the box (*THE PROOFS*).
+- **M2** (`1cfd1f6` and this entry): Space, a key the grid leaves to the browser, does meet the window in Chromium, in
+  its first smooth-scroll frame. No user scroll was lost to it: on the following clif listing the later frames detached
+  the grid, and with smooth scrolling off Space is one jump whose event comes with it, no task between them in 4 of 4
+  presses, so no product bug was found. A scrollbar drag and touch were not measured. The comments in `harness.ts` and
+  `state-diagram.test.ts` and *THE MECHANISM* say what was measured, and the measurements are under *WHAT THIS DID NOT
+  CLOSE*. The bodies of `6bba43b` and `13931a9` still say a key cannot: commits are not rewritten.
+- **M3** (`1cfd1f6`): `rxm-link`'s three scrolls are held.
+- **M4, M5, M6** (this entry and `sites.md`): the CPU-capped `clif-app` case is under *WHAT THIS DID NOT CLOSE*; the
+  `result` reads as the likely draw; `state-diagram-local-layout`'s reason is that nothing waits for a `scroll` event
+  there, since the local level centres each new state itself.
+
+A re-review of `2a96b84..9f13346` (`$R/re-review.md`) found each of the seven fixed, no new Important finding, 3 Minor
+and 4 nits:
+
+- **m1, m2** (`ec876e3`): a throw left its wait on the box with the frame count at its bound, so a later call that found
+  the box in place, such as the next case's scroll to 0 of a grid the local level still hides in Firefox, threw at once
+  over the earlier write; and the 30-frame message gave a hidden level in Firefox as the cause, which the helper never
+  checks. A wait a throw has reported is now spent, a wait also ends with the case that wrote it, which covers an
+  `until` that gave up before the count reached its bound, and the message says what the helper saw and gives the causes
+  as possible ones (*THE FIX*). A probe in Firefox (`$R/fix/probe/zz-helper-spent.test.ts`, run by `spent.sh`,
+  `$R/fix/logs/spent-*.log`): a second call in the case whose call threw held at 0 ms at `50269c3`, and threw the
+  30-frame message at 0 ms with `9f13346`'s helper. Its path across two cases did not run as meant: Firefox gave the
+  next case's new box, built where the hidden one had been removed, that box's 299.92 before the first call, so no
+  write was made (`$R/fix/logs/spent-diag-firefox.log`); `scroll-held-at.test.ts`'s cross-case pair holds that path.
+- **m3** (this entry and `sites.md`): the count sweep's reason said only the first write that moves the grid can be
+  undone, since its event detaches it; an undone write's event reads as the draw's echo and leaves the grid following,
+  so the next write is as exposed. The conclusion stands, for the reason *THE FIX* and the table's row now give.
+- **n1** (`ec876e3`): `cut-text-app` dispatched the grid's event even when its scroll into view had not moved the grid,
+  which detaches a grid whose follow has not written yet; it now dispatches only when the grid moved.
+- **n2, n3** (this entry): `view-toggles` joins the list of sites that dispatch at once, and the I1 bullet names
+  `clif-link`'s 8 lines and the program level's sideways scroll.
+- **n4** (`463e52b`, `50269c3`): `scroll-held-at.test.ts` holds the helper itself, on a plain box: a write holds only
+  once its own event has come, a box put back before that event is written again, a place it cannot reach throws at once
+  from a synchronous call, an event withheld by a `window` capture listener throws in 30 frames and the next call holds,
+  and a wait another case left does not hold the next one back. Each of six sabotages of `harness.ts` failed it in
+  Chromium, restored `cmp` equal after: no delete before a throw, no 30-frame throw, no cannot-reach throw, a write on a
+  box's first call only, a box in place held without its event, and no case rule (`$R/fix/logs/g7/sabotage.txt`, the
+  logs on `463e52b`'s text in `$R/fix/logs/g7/sab-463e52b/`). `50269c3` makes it hold in Firefox too (*IN FIREFOX*); the
+  six sabotages, run again on its text, each failed it in the same cases (`$R/fix/logs/g7/sab-*.log`).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The app's window is left as it is.** A straight draw between a scroll written on the main thread and its event still
+  undoes the write. `VirtualGrid.draw` could take a `scrollTop` it neither wrote nor saw as a scroll still to be
+  reported and pass it to `Follow.onScroll` first, but that changes the follow logic of every grid, rule table, rxm and
+  clif listings and state diagram, whose echo and clamp rules have had several subtle defects, while no user's gesture
+  measured loses a scroll to the window (next item).
+- **Space, which the grid's keys leave to the browser, meets the window in Chromium.** The review's probe
+  (`$R/review-probe/logs/gap-{chromium,firefox}.log`) found 3,073 to 3,818 tasks that read a plain box's new place in
+  the frame before Space's `scroll` event in Chromium, and none in Firefox. On the following clif listing a `result`
+  forced into that frame did not lose the scroll: the smooth scroll's later frames detached the grid, 2 of 2
+  (`$R/review-probe/logs/space-chromium.log`). With smooth scrolling off (`--disable-smooth-scrolling`, a launch
+  argument added for the run and put back `cmp` equal) Space is one jump with one event, and the probe found no task
+  between the jump and its event, 4 of 4 presses, 2 of them armed to force a draw (`$R/fix/logs/space-nosmooth.log`);
+  `prefers-reduced-motion: reduce` does not make it one jump (8 or 9 events a press, `$R/fix/logs/space-reduced.log`).
+  So no lost user scroll was found. A scrollbar drag and touch were not measured. A case for Space and Shift+Space in
+  `VirtualGrid#key` (`web/src/virtual-grid.ts`) and in the λ body's `#key` that detaches first would settle it for keys:
+  a product change, for a PR of its own.
+- **Under a 50% CPU cap a case of the changed files can come within 2x of its bound.** `clif-app`'s *steps to step 95
+  and shows values, call stack and heap* took 35,599 ms of its 60,000 at `13931a9` and 32,606 at `1cfd1f6`, and 27,107
+  at `50269c3`; it makes no scroll this branch changes. At `50269c3` `state-diagram`'s *keeps a runtime box's focus
+  while the run moves, and the column is one tab stop*, on vitest's 15 s, took 12,410 ms in the 11-file run, where it
+  took 6,490 at `13931a9`. It is in a `describe` the branch does not change and calls no `scrollHeldAt`, and alone
+  under the same cap it took 4,894 and 3,770 ms with the branch's text and 3,783 ms twice with `2a96b84`'s
+  (`$R/scripts/q50-state-diagram.sh`, `$R/fix/logs/g7/q50sd.summary`): the 12,410 is the run's load, not the branch.
+  After the rebase, at `60488b6` with the 12 files, the step-95 case took 36,702 ms in a first run during which the
+  machine's 1-minute load rose from 3.77 to 35.91, and 27,898 ms in the re-run with the load under 6; the first run
+  also failed `clif-app`'s *keeps recording past a full history* once, in its compile's wait (*VERIFICATION*), and it
+  passed in the re-run. There `state-diagram`'s case took
+  11,796 ms, and in the same re-run with `52fc8c6`'s text it timed out at vitest's 15 s: `main`'s own text failed it
+  under the cap.
+- **The 16 Firefox failures in *IN FIREFOX* are `main`'s and stay**, among them `tm-follow-clamp`'s unbounded wait on
+  an event Firefox does not send to a hidden box.
+- **A helper `until` that vitest abandons goes on writing.** A case that reaches vitest's 15 s bound is reported and
+  left running, and its `until` keeps polling; the helper's predicate writes, so a helper `until` that started more than
+  5 s into its case and then hung would write its box into the next case until the box held or the `until`'s 10 s ran
+  out, where `main`'s single writes had no such effect. The helper sees only the case running now, not the one a call
+  comes from. No site was timed for how far into its case its `until` starts.
+- **Why the test reached its write inside the window on CI** is the diagnosis's inference: the test resuming late from
+  a browser command. It was not reproduced with the real file; only a forced draw reproduces the failure.
+- **Not run:** `check-all.sh`, `cargo llvm-cov`, CI's LLVM job and `check-slow.sh`. Nothing under `crates/` changes.
+
+##### VERIFICATION
+
+**After the rebase, at `60488b6`**, each leg into its log in `$R/rebase-52fc8c6/` (the build and the light gates in its
+`logs/`), the exits of the Chromium, Firefox and coverage legs in `gate-exits.txt`, and each heavy leg's start, end and
+the machine's 1-minute load in `chain.txt`; `$R/scripts/gate.sh`'s files are now the 12 changed test files, the 11 and
+`mc-link.test.ts`. The wasm packages and the bindings were built from the rebased tree at `2eeb99b`, which `60488b6`
+changes in one test file: install and the six builds exit 0 (`logs/build-summary.log`). In Chromium,
+`gate-chromium.log`: 12 files, 158 tests passed, exit 0. In Firefox, `gate-firefox.log`: exit 1, 16 failed and 142
+passed, and the 11 of those files that `52fc8c6` has, with its text, `firefox-base.log`: 16 failed and 135 passed, the
+same cases with the same messages (*IN FIREFOX*). The whole Chromium tier as CI runs it, `gate-coverage.log`: 323 files,
+3603 tests passed and 2 expected to fail, `All files` 98.2, 92.54, 98.78 and 99.4, exit 0. Each light gate passed, in
+`logs/`: the node tier, 86 files and 1621 tests; `biome ci --error-on-warnings`, 490 files; `pnpm run typecheck`;
+`check-comments.mjs`, `--self-test` and `--base 52fc8c6`, 13 changed files clean; `check-attributions.sh`, 584 sites
+and 0 violations; and `check-citations.sh`, `check-doc-figures.sh` (45 figures), `check-shared-docs.sh` and
+`check-text-bytes.sh`, each with its self-test. Each heavy leg started with the load under 8.
+
+**Under a 50% CPU cap at `60488b6`**, the 12 files, the same way as at `50269c3` (`$R/scripts/q50-json-port.sh`): the
+first run, `q50-json.log` and `q50.summary`, exit 1, 157 of 158 passed. `clif-app`'s *keeps recording past a full
+history* failed at 14,899 ms, `timed out after 10000ms waiting for the compile to finish`, from `harness.ts`'s
+`compile` called at `clif-app.test.ts:152`: a line outside the branch's hunks, in a case that calls no
+`scrollHeldAt`. The machine's 1-minute load rose from 3.77 to 35.91 during that run (`chain.txt`). The re-run under
+the same cap, with the load sampled every 15 s, 26 samples, at most 5.78 (`q50-quiet/load.txt`): at `60488b6`,
+`q50-quiet/q50.summary`, exit 0, 158 of 158, that case 10,201 ms; and with `52fc8c6`'s text in the 11 files it has and
+in `harness.ts` (`$R/scripts/q50-base-12.sh`, each put back `cmp` equal and equal to `HEAD`,
+`q50-quiet/q50-base.summary`), exit 1, 150 of 151, that case 10,001 ms, and `state-diagram`'s *keeps a runtime box's
+focus while the run moves, and the column is one tab stop* timed out at vitest's 15 s (16,795 ms), where at `60488b6`
+it took 11,796 ms (*WHAT THIS DID NOT CLOSE*).
+
+**At `50269c3`**, the last code commit before the rebase, each leg into its log in `$R/fix/logs/g7/` and its exit into
+`gate-exits.txt` (`$R/scripts/gate.sh`, whose files were then the 11 changed test files). In Chromium,
+`gate-chromium.log`: 147 tests passed. In Firefox, `REDEXTAPE_FIREFOX=1`, `gate-firefox.log`: exit 1, 16 failed and
+131 passed, and the 10 of those files that `2a96b84` has, with its text, `firefox-base.log`: 16 failed and 124 passed,
+the same cases with the same messages (*IN FIREFOX*). The whole Chromium tier as CI runs it, `pnpm run test:coverage`
+under the browser and heavy locks, `gate-coverage.log`: 300 files, 3397 tests passed and 2 expected to fail,
+`All files` 98.08, 92.27, 98.72 and 99.31, each over its floor. The node tier, 81 files and 1527 tests;
+`biome ci --error-on-warnings`, 462 files; `pnpm run typecheck`; and `check-comments.mjs`, `--self-test` and
+`--base 2a96b84`, 12 changed files clean. Each exit 0 but Firefox's.
+
+**Under a 50% CPU cap at `50269c3`**, the 11 files in Chromium with vitest's JSON reporter beside its default one, the
+browser API on a port of its own (`$R/scripts/q50-json-port.sh`, `q50.json`, `q50-json.summary` in `$R/fix/logs/g7/`):
+147 cases, each with a time, all passed. 4 took 7.5 s or more: `clif-app`'s step-95 case, 27,107 ms of its 60,000
+(`CASE_MS`); `clif-link`'s *the CLIF run's focus marks its rows and meets the pin*, 14,898 ms of 60,000; `clif-app`'s
+*keeps recording past a full history*, 12,799 ms of 60,000; and `state-diagram`'s *keeps a runtime box's focus while
+the run moves*, 12,410 ms of vitest's 15,000, which took 3,770 to 4,894 ms alone under the same cap with the branch's
+text and with `2a96b84`'s (*WHAT THIS DID NOT CLOSE*).
+
+**At `13931a9`**, each leg into its log in `$R/logs/` and its exit into `gate-exits.txt` (`$R/scripts/gate.sh`). The 8
+changed browser files in Chromium, `gate-chromium.log`: 129 tests passed. The same 8 in Firefox, `REDEXTAPE_FIREFOX=1`,
+`gate-firefox.log`: exit 1, 16 failed and 113 passed, the 16 `main`'s (*IN FIREFOX*). The whole Chromium tier as CI
+runs it, `pnpm run test:coverage` under the browser and heavy locks, `gate-coverage.log`: 299 files, 3390 tests passed
+and 2 expected to fail, `All files` 98.09, 92.29, 98.72 and 99.33, each over its floor. The node tier, 81 files and
+1527 tests; `biome ci --error-on-warnings`, 461 files; `pnpm run typecheck`; and `check-comments.mjs`, `--self-test`
+and `--base 2a96b84`, 9 changed files clean. Each exit 0 but Firefox's.
+
+**Under a 50% CPU cap at `13931a9`**, `systemd-run --user --scope -p CPUQuota=50%`, the 8 files in Chromium with
+vitest's JSON reporter beside its default one (`$R/scripts/q50-json.sh`, `q50.json`, `q50-json.summary`): 129 cases,
+each with a time, all passed. One ran within 2x of its bound: `clif-app`'s *steps to step 95 and shows values, call
+stack and heap*, 35,599 ms of its 60,000 (`CASE_MS`), a case that makes no scroll this branch changes. Every case on
+vitest's 15 s default finished under 7.5 s: the 6 cases at 7.5 s or more each have a 60,000 ms bound, and the slowest
+after the one above, `clif-link`'s *the CLIF run's focus marks its rows and meets the pin*, took 19,602 ms. The report
+times cases, not hooks, so no `beforeAll` was timed under the cap.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at
+`50269c3`, the last code commit before the rebase, with `R=~/temp/redextape-duet-patches-record/scroll-race`,
+`L=$R/logs`, `F=$R/fix/logs`, `G=$F/g7`, `G5=$F/g5`, `D=~/temp/redextape-duet-patches-record/intent/followup` and
+`noansi`, a `sed` that strips colour codes, by `$R/scripts/figures.zsh`, which prints each command above its output
+into `$L/figures.log` (the version run at `13931a9` is `$R/scripts/figures-13931a9.zsh`). A row that names a loop or a
+long filter gives its start; the script has it whole. The rows under *After the rebase* are
+`$R/rebase-52fc8c6/figures.zsh`'s, into `figures.log` beside it, with `B=$R/rebase-52fc8c6`, `RM` the roadmap's path
+and `P` the search of *THE CALL SITES*; it names each commit by its SHA.
+
+| Value | What | Produced by |
+|---|---|---|
+| `50269c3`, 0 | the commit the rows read, and the worktree's changed or untracked files | `git rev-parse --short HEAD; git status --short \| wc -l` |
+| 8, 7 | the commits to `50269c3`, and those that change `web` (all but `3b5c9d2`, this entry's first writing) | `git rev-list --count 2a96b84..50269c3; git rev-list --count 2a96b84..50269c3 -- web` |
+| 12 files, 270 insertions, 42 deletions; 0 under `web/src` | their diff under `web` | `git diff --shortstat 2a96b84 50269c3 -- web; git diff --shortstat 2a96b84 50269c3 -- web/src \| wc -l` |
+| 92 | the lines that match `scroll(Top\|Left) *=` at `2a96b84` | `git grep -nE 'scroll(Top\|Left) *=' 2a96b84 -- web/tests/browser \| wc -l` |
+| 85, in 30 files | those that write | `git grep -nE 'scroll(Top\|Left) *= *[^=]' 2a96b84 -- web/tests/browser \| wc -l`, and `-l` for the files |
+| 125, in 35 files | the lines that scroll a box | `git grep -nE 'scroll(Top\|Left) *[-+]?=[^=]\|scrollTo\(\|scrollBy\(\|scrollIntoView\(\|\.scroll\(' 2a96b84 -- web/tests/browser \| wc -l`, and `-l` for the files |
+| 9; 23; 8; 0 | the 40 the first search missed: compound writes; `scrollTo(` and `scrollIntoView(` outside `clif-link`; `clif-link`'s `scrollTo(`; `scrollBy(` and `.scroll(` | `git grep -nE 'scroll(Top\|Left) *[-+]=' 2a96b84 -- web/tests/browser \| wc -l; …` |
+| 8 calls in 7 files at `13931a9`; at `50269c3`, 11 calls in 8 files, `clif-link`'s 2 and `rxm-link`'s 3 among them, and 16 in `scroll-held-at.test.ts` | `scrollHeldAt`'s call sites, beside its definition | `git grep -c 'scrollHeldAt(' 13931a9 -- web/tests/browser`, the same at `50269c3`, and `git grep -o` for `scroll-held-at.test.ts` |
+| 0 | changed lines that touch the count sweep's write | `git diff 2a96b84 50269c3 -- web/tests/browser/tm-view-narrow.test.ts \| grep -c 'grid.scrollTop = top'` |
+| 4; 30 | `OVERSCAN`; the frames the helper waits for its write's event | `grep -n 'export const OVERSCAN' web/src/virtual-grid.ts; grep -n 'const EVENT_FRAMES' web/tests/browser/harness.ts` |
+| 10 s; 15 s | `until`'s bound; vitest's bound on a browser case | `grep -n 'timeoutMs = 10_000' web/tests/browser/until.ts; grep -no 'raises .testTimeout. to 15,000' web/tests/browser/until.ts` |
+| 10,154 ms; 357 ms; 7-13 ms | run 805's failure; the case on the run before; the `result`'s lag after the clif frames | `grep -ho 'after 10,154 ms' $D/ci-805.md`, and the same for `took 357 ms` and `7-13 ms` |
+| 3 of 3, CI's message, `clif-app.test.ts:54:4` and `:86:17` | `clif-app`'s old write under the in-setter draw | `for f in $L/before-forced-clif-app-{1,2,3}.log; do noansi $f \| grep -aoE 'Error: timed out …\|clif-app.test.ts:(54\|86):[0-9]+' …` |
+| 3 of 3 | the helper under it | `for f in $L/after-forced-clif-app-{1,2,3}.log; do noansi $f \| grep -aE 'Tests  '; done` |
+| each row of the in-setter table | the other sites, at `6bba43b` | `grep -E '^(before\|after\|forced)-.*exit=' $L/batch1.summary $L/batch2.summary`, and their `FORCED` lines |
+| 10 passed; 2 of 10 moved back, 120 then 0 | the count sweep's single write under the in-setter draw | `noansi $L/before-forced-tm-sweep-all-1.log \| grep -aE 'Tests  '`, and its `FORCED` lines |
+| each row of the microtask table | the sites at `13931a9`'s code | `grep -E 'exit=' $L/batch3.summary`, and its `FORCED-LATER` lines |
+| 1 failed; 16 and 16 passed; 1 failed; 1 failed; 16 passed | `state-diagram`'s case: the old write, the new one twice, the new one under the in-setter draw; the sabotaged `Follow` against the new case and against `scrollHeldAt` | `for f in $L/v2-{before-later,after-later,after-insetter}-state-diagram-*.log $L/v2-sabotaged-follow-{dispatch,helper}-1.log; …` |
+| 0 ms; 20 ms; 299.92; 10,009 to 10,017 ms | the throw, in Chromium and Firefox; the places that hold; Firefox's 300; the old helper | `for f in $L/failfast-{new-chromium,new-firefox,old-chromium}.log; do …; grep -ahoE 'FAILFAST [a-z].*' $f …` |
+| 5, 11, 5, 8, 14, 8, 2 and 3 passed | every helper site under the microtask draw at `1cfd1f6`'s code | `grep -E 'exit=\|restored\|^held\|^HELD\|cmp clean' $F/batch4.summary` |
+| 0 to 24, then 0; 2 of 2 failed, `precondition: no drawn rule is cut where a hover reaches it`; 3 of 3 passed, 2 of 2 runs, held at 24 | `cut-text-app`'s scroll into view under the draw: its old text; with the event dispatched | `for f in $L/fix-before-into-cut-text-app-{1,2}.log; …`, and `batch4.summary`'s `fix-after-into` and `INTO` lines |
+| 135 then 0; 2 of 2 passed | `lambda-tree-app:150`'s walk under the draw | `for f in $L/fix-later-lambda-tree-app-{1,2}.log; …` |
+| not held, then held, in Chromium and Firefox; held at once with `13931a9`'s | a second call in the task that wrote, then after the event | `batch4.summary`'s `HELD` lines |
+| 21 ms; 10,020 ms; 503 ms; 20 ms each in Chromium; 20 ms in a 0 px level | the box hidden after the write, in Firefox with the helper of `13931a9`, `1cfd1f6` and `9f13346`, then in Chromium; the box in a 0 px level | `grep -E 'exit=\|HIDDEN\|cmp clean' $F/hidden.summary`, the `hidden-*` logs and `hidden2-new-firefox.log` |
+| 503 ms, "is in the document and has 0 client rects"; 20 ms | the same box with `50269c3`'s helper, in Firefox and in Chromium | the `$F/hidden-50269c3-*.log` lines of the same command |
+| 1 Important, 6 Minor; 3 Minor, 4 nits | the whole-branch review's findings; the re-review's new ones | `grep -cE '^\*\*I[0-9]+\.' $R/review.md; …`, and the same over `re-review.md`'s *New findings* |
+| 0 for a wheel, both browsers; 3,073 to 3,818 for Space in Chromium, 0 in Firefox; 2 of 2 | tasks that read a box's new place before its `scroll` event; Space with a forced draw on the clif listing, detached | `for f in $R/review-probe/logs/gap-{chromium,firefox}.log; …`, and `space-chromium.log`'s `SPACE force=true` lines |
+| 4 of 4 presses, 2 armed, 1 event each; 8 or 9 events | Space with smooth scrolling off; with `prefers-reduced-motion: reduce` | `for f in $F/space-{reduced,nosmooth}.log; …` |
+| 16 of 113, in 4 of 7 files | Firefox at `6bba43b` | `noansi $L/at-6bba43b/gate-firefox.log \| grep -aE 'Test Files\|Tests  '` |
+| 16 of 89, in 4 files; the same cases; the same messages | Firefox on the 4 files with `main`'s text | `noansi $L/firefox-base.log \| grep -aE 'Test Files\|Tests  '`, and two `diff`s of the `FAIL` and message lines |
+| 11, 2, 2, 1 | `main`'s Firefox failures by file | `noansi $L/firefox-base.log \| grep -aE '^ ❯ .*failed'` |
+| 0.64 px; 356 against 320; 61 against 63; 465047.66 against 465048.375 | the Firefox measures quoted | `grep -ahoE "its toggle’s width, …\|runtime column’s right, …" $L/firefox-base.log` |
+| 17 ms; no event in 2 s, then 484 once the program level shows; Chromium's at once | the stamped `tm-follow-clamp` case in Firefox, on the branch and on `main`, and in Chromium | `for f in $L/ff-{branch-ff,main-ff,branch-cr}.log; do …; grep -haoE 'FFP (start\|scroll\|detached\|after local\|echo).*' $f …` |
+| 16 of 140, the same as `main`'s | Firefox at `1cfd1f6`, 10 files | `noansi $F/gate-firefox.log \| grep -aE 'Test Files\|Tests  '`, and `ff-compare.sh` against `$L/firefox-base.log` |
+| 16 of 140 in 4 files, twice; IDENTICAL | Firefox at `9f13346`: the 10 files, and the same with `2a96b84`'s text | `for g in gate-firefox firefox-base; do noansi $G5/$g.log \| …; done`, and `ff-compare.sh` on the two |
+| 4 of 7; 299.92 for 300 | `scroll-held-at.test.ts` in Firefox at `463e52b` | `noansi $G/gate-firefox-463e52b.log \| grep -aE 'Test Files\|Tests  \|^ ❯ .*failed'`, and its `AssertionError` lines |
+| 16 of 147 in 4 of 11 files; 16 of 140 in 4 of 10; IDENTICAL, 50 lines over 16 cases; 0 | Firefox at `50269c3`: the 11 files; the 10 with `2a96b84`'s text; the two lists; `scrollHeldAt:` messages in the branch's log | `noansi $G/firefox-base.log \| …; bash $R/scripts/ff-compare.sh $G/gate-firefox.log $G/firefox-base.log`, and `grep -c 'scrollHeldAt:'` |
+| 7 of 7, twice | `scroll-held-at.test.ts` alone at `50269c3`'s text, in Firefox and in Chromium | `for f in $G/held-at-{ff,cr}-fixed.log; …` |
+| 6 sabotages, each exit 1, twice; the cases each failed | the helper's sabotages against `463e52b`'s test text and `50269c3`'s | `cat $G/sabotage.txt`, and `for f in $G/sab-463e52b/sab-*.log $G/sab-*.log; …` |
+| "same case, second call": held at 0 ms, and with `9f13346`'s helper the 30-frame message at 0 ms; case B: held at 0 ms with both | the spent-wait probe in Firefox; Chromium held every line | `for f in $F/spent-{50269c3,9f13346}-{firefox,browser}.log; …` |
+| 299.92 | where Firefox put the probe's new box before its first call | `grep -aoE 'DIAG case A…' $F/spent-diag-firefox.log` |
+| 7 legs; firefox exit 1, the rest exit 0 | the gate's legs at `13931a9` | `cat $L/gate-exits.txt` |
+| 8, 129 | the changed files in Chromium at `13931a9`: files, tests | `noansi $L/gate-chromium.log \| grep -aE 'Test Files\|Tests  '` |
+| 16 failed, 113 passed; 4 of 8 files; the same cases and messages as `main`'s | the changed files in Firefox at `13931a9` | `noansi $L/gate-firefox.log \| grep -aE 'Test Files\|Tests  '`, and the two `diff`s against `$L/firefox-base.log` |
+| 299; 3390 and 2; 98.09, 92.29, 98.72, 99.33 | coverage at `13931a9`: files; tests passed and expected to fail; the `All files` row | `noansi $L/gate-coverage.log \| grep -aE 'Test Files\|Tests  \|^All files'` |
+| 81, 1527 | the node tier at `13931a9`: files, tests | `noansi $L/gate-node.log \| grep -aE 'Test Files\|Tests  '` |
+| 461 | biome's files at `13931a9` | `grep -aoE 'Checked [0-9]+ files' $L/gate-biome.log` |
+| 9 | the files `check-comments.mjs` read as changed at `13931a9` | `tail -1 $L/gate-comments.log` |
+| 129 cases, 129 timed, 129 passed; 6 at 7.5 s or more; 35,599 ms; 19,602 ms | the 50% CPU cap at `13931a9` | `cat $L/q50-json.summary` |
+| 32,606 ms | the same case under the cap at `1cfd1f6` | `cat $F/q50-json.summary \| head -4` |
+| 7 legs at `50269c3`; firefox exit 1, the rest exit 0 | the gate's legs at `50269c3`, after `463e52b`'s | `cat $G/gate-exits.txt` |
+| 11, 147 | the changed files in Chromium at `50269c3`: files, tests | `for g in chromium firefox coverage node …; do print -- "== $g"; noansi $G/gate-$g.log \| grep -aE 'Test Files\|Tests  \|^All files\|^ ❯ .*failed'; done` |
+| 300; 3397 and 2; 98.08, 92.27, 98.72, 99.31 | coverage at `50269c3`: files; tests passed and expected to fail; the `All files` row | the same loop |
+| 81, 1527 | the node tier at `50269c3`: files, tests | the same loop |
+| 462; 12 | biome's files; the files `check-comments.mjs` read as changed; at `50269c3` | `grep -aoE 'Checked [0-9]+ files' $G/gate-biome.log; tail -1 $G/gate-comments.log` |
+| 147 cases, 147 timed, 147 passed; 4 at 7.5 s or more; 27,107, 14,898, 12,799 and 12,410 ms | the 50% CPU cap at `50269c3` | `cat $G/q50-json.summary` |
+| 6,490 ms | `state-diagram`'s runtime-box case under the cap at `13931a9` | `node -e … $L/q50.json` |
+| 4,894 and 3,770 ms; 3,783 and 3,783 ms | the same case alone under the cap, with the branch's text and with `2a96b84`'s | `cat $G/q50sd.summary` |
+| 60,000 ms, 2 and 10 cases; 1 case in `app` | the bounds of the cases at 7.5 s or more | `grep -n 'const CASE_MS' …; grep -c '^    CASE_MS,$' …; grep -n '}, 60_000)' web/tests/browser/app.test.ts` |
+| **After the rebase** | | |
+| 10; 1 | the commits on `52fc8c6` to `60488b6`; those that change `mc-link.test.ts` | `git rev-list --count 52fc8c6..60488b6; git rev-list --count 52fc8c6..60488b6 -- web/tests/browser/mc-link.test.ts` |
+| #201 #197 #202 #198 #203 #200 #206 | the PRs `main` merged from `2a96b84` to `52fc8c6` | `git log --first-parent --reverse --format=%s 2a96b84..52fc8c6 \| grep -oE '#[0-9]+\)$' …` |
+| 2; the roadmap; `3b5c9d2`, `8f2335f` | the rebase's stops: conflicts, their file, the commits | `grep -c '^CONFLICT' $B/rebase.log.rebase; …; grep -oE 'Could not apply [0-9a-f]{7}' $B/rebase.log.rebase` |
+| 7 `=`, 2 `!` (`3b5c9d2`, `8f2335f`); 0 | `git range-diff`: the commits the same and changed; changed lines in the full range-diff other than context | `git range-diff -s 2a96b84..8f2335f 52fc8c6..2eeb99b \| awk …; git range-diff 2a96b84..8f2335f 52fc8c6..2eeb99b \| grep -cE '^ +[-+][-+]'` |
+| 9 | the commit messages byte for byte as before | `for p in 6bba43b:b77abbf …; do cmp -s <(git log -1 --format=%B ${p%%:*}) <(git log -1 --format=%B ${p##*:}) && print same; done \| wc -l` |
+| same; same; 44204 lines | the lines the branch adds and removes outside the roadmap; this entry at `8f2335f` and `2eeb99b`; `main`'s roadmap a prefix of `2eeb99b`'s | `cmp <(git diff 2a96b84 8f2335f -- . ":!$RM" \| grep -E '^[-+]') <(git diff 52fc8c6 2eeb99b -- . ":!$RM" \| grep -E '^[-+]')`, and two more `cmp`s |
+| 126, in 36 files; 1 line, `box.scrollTop = top`, `mc-link:65` | the call sites' search at `52fc8c6`; the lines it adds to `2a96b84`'s, by content | `git grep -nE "$P" 52fc8c6 -- web/tests/browser \| wc -l`, and `-l`; `diff` of the two sorted lists |
+| 19 added, 11 changed; 46 lines in 6 files | the browser test files `main` added or changed since `2a96b84`; the lines it added that mention a scroll or a wheel | `git diff --name-status 2a96b84 52fc8c6 -- web/tests/browser \| cut -f1 \| sort \| uniq -c; git diff -U0 2a96b84 52fc8c6 -- web/tests/browser \| grep -v '^+++' \| grep '^+' \| grep -ciE 'scroll\|wheel'`, and an `awk` for the files |
+| mc-link :62, :65, :78, :105, :239, :241; mc-panel-layout :277, :401 | the 8 lines `main` brought that scroll a box or define or call a predicate that does | `git grep -nE 'function scrolled\|scrollTop = top\|scrolled\(' 52fc8c6 -- web/tests/browser/mc-link.test.ts; git grep -n 'wheel(' 52fc8c6 -- web/tests/browser/mc-panel-layout.test.ts` |
+| 15 calls in 9 files, `mc-link`'s 4 among them, and 16 in `scroll-held-at.test.ts` | `scrollHeldAt`'s call sites at `60488b6`, beside its definition | `git grep -c 'scrollHeldAt(' 60488b6 -- web/tests/browser` |
+| 351-360, and `mc-load` and `mc` at 393 and 398, each with its `draw()`; 400-407; 239-241; 0 | the lines *THE MECHANISM* cites in `replies.ts`, `virtual-grid.ts` and `state-table.ts`, at `60488b6`; the lines of `git diff --stat` under `web/src` and `crates` from `52fc8c6` to it | `git show 60488b6:web/src/replies.ts \| grep -nE "case '(result\|mc-load\|mc)'\|^        draw\(\)"`, the same for `virtual-grid.ts` and `state-table.ts`; `git diff --stat 52fc8c6 60488b6 -- web/src crates \| wc -l` |
+| 7 exit 0; built at `2eeb99b`; 43 bindings | install and the six builds | `cat $B/logs/build-summary.log \| grep -E 'exit=\|^head\|bindings files\|rc='` |
+| chromium exit 0, firefox exit 1, coverage exit 0; 2.98, 3.77, 7.75, 6.25, 4.22 | the heavy legs' exits; the load at each heavy leg's start | `cat $B/gate-exits.txt; grep -E ' (start\|end) ' $B/chain.txt \| awk …` |
+| 12, 158 | the changed files in Chromium: files, tests | `for g in chromium firefox coverage; do …; noansi $B/gate-$g.log \| grep -aE 'Test Files\|Tests  \|^All files\|^ ❯ .*failed'; done` |
+| 16 failed, 142 passed; 4 of 12 files | the changed files in Firefox | the same loop |
+| 323; 3603 and 2; 98.2, 92.54, 98.78, 99.4 | coverage: files; tests passed and expected to fail; the `All files` row | the same loop |
+| 16 failed, 135 passed; 4 of 11 files; 12 put back | Firefox on the 11 files with `52fc8c6`'s text; the files restored `cmp` equal | `noansi $B/firefox-base.log \| grep -aE 'Test Files\|Tests  \|^ ❯ .*failed'; grep -c 'cmp clean, equal to HEAD' $B/firefox-base-run.txt` |
+| IDENTICAL, 50 lines over 16 cases; 0; IDENTICAL | the two Firefox lists; `scrollHeldAt:` messages in the branch's log; the list at `60488b6` against `50269c3`'s | `tail -4 $B/ff-compare.txt; grep -c 'scrollHeldAt:' $B/gate-firefox.log; bash $R/scripts/ff-compare.sh $R/fix/logs/g7/gate-firefox.log $B/gate-firefox.log \| tail -1` |
+| 86, 1621; 490; 13; 584 and 0; 45 | the node tier: files, tests; biome's files; the files `check-comments.mjs` read as changed; attribution sites and violations; the doc figures | `noansi $B/logs/node.log \| grep -aE 'Test Files\|Tests  '; grep -aoE 'Checked [0-9]+ files' $B/logs/biome.log; …` |
+| 158 cases, 157 passed, exit 1; 14,899 ms; `clif-app.test.ts:152:6` | the 50% CPU cap's first run; the failed case; its line | `head -4 $B/q50.summary; grep -E ' failed ' $B/q50.summary; noansi $B/q50-json.log \| grep -aE 'Error: timed out\|❯ tests/browser/clif-app.test.ts:[0-9]+'` |
+| :5, :50 to :55; :994 to :1068; :1554 | the branch's hunks in `clif-app.test.ts` and in `harness.ts`; the compile's wait in `harness.ts` | `git diff -U0 52fc8c6 60488b6 -- web/tests/browser/clif-app.test.ts web/tests/browser/harness.ts \| grep '^@@'; …` |
+| 3.77 to 35.91 | the load over the first run | the `q50` lines of `chain.txt`, above |
+| 26, 5.78 | the re-run's load samples, and the highest | `wc -l < $B/q50-quiet/load.txt; awk '{print $2}' $B/q50-quiet/load.txt \| sort -g \| tail -1` |
+| 158 of 158, exit 0; 27,898, 11,796 and 10,201 ms | the re-run at `60488b6`; the step-95, runtime-box and full-history cases | `head -3 $B/q50-quiet/q50.summary; grep -E 'full history\|keeps a runtime\|step 95' $B/q50-quiet/q50.summary` |
+| 150 of 151, exit 1; 16,795 ms, `Test timed out in 15000ms`; 12 put back; 10,001 ms | the re-run with `52fc8c6`'s text; the runtime-box case; the files restored; the full-history case | `grep -E 'exit=\|^cases\|NOT PASSED' $B/q50-quiet/q50-base.summary; grep -c 'cmp clean, equal to HEAD' …` |
+| 36,702 ms | the step-95 case in the first run | `grep -h 'step 95' $B/q50.summary` |

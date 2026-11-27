@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
 import type { Listing, McTarget } from '../../src/protocol'
-import { compile, host, PREFIX, SHELL, sourceLinked, until } from './harness'
+import { compile, host, PREFIX, SHELL, scrollHeldAt, sourceLinked, until } from './harness'
 import { codePanelOf, targetChoice } from './mc-fixture'
 
 /**
@@ -55,17 +55,6 @@ const title = () => codePanelOf(clif()).querySelector('.mc-title')?.textContent 
 /** The pc column of the clif row about to run. */
 const nextPc = () => BOXES.clif().querySelector('.clif-row.is-next .rxm-pc')?.textContent ?? null
 
-/**
- * Put `box`'s top at `top`, as near as it goes, and say whether it was there already: `clif-link.test.ts`'s `scrolled`,
- * for its reason (a draw that follows the run can put a box back before its own `scroll` says the user moved it).
- */
-function scrolled(box: HTMLElement, top: number): boolean {
-  const there = Math.min(top, box.scrollHeight - box.clientHeight)
-  if (Math.abs(box.scrollTop - there) <= 1) return true
-  box.scrollTop = top
-  return false
-}
-
 /** Every row of `box`, by its index, read by scrolling it through from its top a box at a time. */
 async function scan(box: Box): Promise<Map<number, Row>> {
   const el = BOXES[box]()
@@ -75,7 +64,7 @@ async function scan(box: Box): Promise<Map<number, Row>> {
   for (let top = 0; top < count; top += step) {
     const last = Math.min(top + step - 1, count - 1)
     await until(
-      () => scrolled(el, top * ROW) && rowAt(box, top) !== null && rowAt(box, last) !== null,
+      () => scrollHeldAt(el, top * ROW) && rowAt(box, top) !== null && rowAt(box, last) !== null,
       `the ${box} listing to draw rows ${top} to ${last}`,
     )
     for (const r of el.querySelectorAll<HTMLElement>('[aria-rowindex]')) {
@@ -102,7 +91,7 @@ const where = (rows: ReadonlyMap<number, Row>, keep: (r: Row) => boolean): numbe
 /** Scroll `box` to `row`, two rows below its top, and press it as a user does. */
 async function press(box: Box, row: number): Promise<void> {
   await until(
-    () => scrolled(BOXES[box](), Math.max(0, (row - 2) * ROW)) && rowAt(box, row) !== null,
+    () => scrollHeldAt(BOXES[box](), Math.max(0, (row - 2) * ROW)) && rowAt(box, row) !== null,
     `the ${box} listing to draw row ${row}`,
   )
   await userEvent.click(rowAt(box, row) as HTMLElement)
@@ -236,9 +225,12 @@ describe('linking through the machine code panel', () => {
       // WHAT THE USER SEES OF THE MARK: the linked row's dashed left edge, where a row with no pc's is solid.
       const last = of13.at(-1) as number
       const unlinked = where(code, (r) => r.pc === '')[0] as number
-      await until(() => scrolled(BOXES.code(), last * ROW) && rowAt('code', last) !== null, 'the last row of pc 13')
+      await until(() => scrollHeldAt(BOXES.code(), last * ROW) && rowAt('code', last) !== null, 'the last row of pc 13')
       expect(getComputedStyle(rowAt('code', last) as HTMLElement).borderInlineStartStyle).toBe('dashed')
-      await until(() => scrolled(BOXES.code(), unlinked * ROW) && rowAt('code', unlinked) !== null, 'a row with no pc')
+      await until(
+        () => scrollHeldAt(BOXES.code(), unlinked * ROW) && rowAt('code', unlinked) !== null,
+        'a row with no pc',
+      )
       expect(getComputedStyle(rowAt('code', unlinked) as HTMLElement).borderInlineStartStyle).toBe('solid')
     },
     CASE_MS,

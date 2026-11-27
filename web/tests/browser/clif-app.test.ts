@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLES } from '../../src/examples'
-import { compile, host, PREFIX, SHELL, until } from './harness'
+import { compile, host, PREFIX, SHELL, scrollHeldAt, until } from './harness'
 
 /**
  * The CLIF view through the whole app (CLIF view design §4): a compile of `fact.rxt` reaches a CLIF view shown with
@@ -48,9 +48,11 @@ async function rowsShowing(pc: string): Promise<Map<number, number>> {
   const found = new Map<number, number>()
   const count = Number(listing().getAttribute('aria-rowcount'))
   for (let top = 0; top < count; top += 4) {
-    listing().scrollTop = top * 24
     const last = Math.min(top + 3, count - 1)
-    await until(() => rowAt(top) !== null && rowAt(last) !== null, `the listing to draw rows ${top} to ${last}`)
+    await until(
+      () => scrollHeldAt(listing(), top * 24) && rowAt(top) !== null && rowAt(last) !== null,
+      `the listing to draw rows ${top} to ${last}`,
+    )
     for (const row of clif().querySelectorAll<HTMLElement>('.clif-row')) {
       if (pcOf(row) === pc) found.set(Number(row.getAttribute('aria-rowindex')) - 1, pcOffset(row))
     }

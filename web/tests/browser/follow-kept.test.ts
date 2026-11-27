@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { page } from 'vitest/browser'
-import { frames, host, pressTab, pressToggle, SHELL, stageTab, stateIdle, toggle, until } from './harness'
+import { frames, host, pressTab, pressToggle, SHELL, scrollHeldAt, stageTab, stateIdle, toggle, until } from './harness'
 import { lambdaSettled } from './lambda-text'
 import { userPickWorkspace } from './user-event-fixture'
 
@@ -208,8 +208,7 @@ describe('a box that follows the run, across a rebuild of the layout', () => {
     const table = BOXES[0] as Box
     await follow(table)
     expect(box(table).scrollTop, 'precondition: following somewhere other than 120').toBeGreaterThan(240)
-    box(table).scrollTop = 120
-    await until(() => offered(table), 'the user’s scroll to stop the table following')
+    await until(() => scrollHeldAt(box(table), 120) && offered(table), 'the user’s scroll to stop the table following')
     await pressToggle('tm')
     expect(host('tm-0'), 'the view is still on the page').toBeNull()
     await frames()

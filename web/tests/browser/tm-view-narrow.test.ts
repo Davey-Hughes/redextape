@@ -15,6 +15,7 @@ import {
   rect,
   resetToFourViews,
   SHELL,
+  scrollHeldAt,
   stateIdle,
   steady,
   until,
@@ -280,8 +281,14 @@ async function pick(id: string, marks: readonly number[]): Promise<void> {
  */
 async function following(detached: boolean): Promise<void> {
   if (detached) {
-    for (const box of [programScroll(), table()]) box.scrollTop = box.scrollTop === 0 ? box.scrollHeight : 0
-    await until(() => isShown(diagramReattach()) && isShown(tableReattach()), 'both grids to detach')
+    const ends = [programScroll(), table()].map((box) => ({ box, top: box.scrollTop === 0 ? box.scrollHeight : 0 }))
+    await until(
+      () =>
+        ends.filter(({ box, top }) => !scrollHeldAt(box, top)).length === 0 &&
+        isShown(diagramReattach()) &&
+        isShown(tableReattach()),
+      'both grids to detach',
+    )
   } else {
     if (isShown(diagramReattach())) diagramReattach().click()
     if (isShown(tableReattach())) tableReattach().click()

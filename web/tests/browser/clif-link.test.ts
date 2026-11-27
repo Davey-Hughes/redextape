@@ -5,7 +5,7 @@ import init, { compile as compileInPage } from '../../../pkg/redextape_wasm.js'
 import { EXAMPLES } from '../../src/examples'
 import { LinkIndex, type LinkIndexWire } from '../../src/link'
 import type { Listing, RunReply } from '../../src/protocol'
-import { compile, host, linkAt, linkStatus, PREFIX, SHELL, sourceLinked, toggle, until } from './harness'
+import { compile, host, linkAt, linkStatus, PREFIX, SHELL, scrollHeldAt, sourceLinked, toggle, until } from './harness'
 
 /**
  * Linking through the CLIF view (CLIF view design §4, *Links*): a CLIF row with a srcloc pins its rxm instruction,
@@ -117,7 +117,7 @@ async function scan(pane: HTMLElement, kind: Kind): Promise<Map<number, Row>> {
   for (let top = 0; top < count; top += step) {
     const last = Math.min(top + step - 1, count - 1)
     await until(
-      () => scrolled(box, top * ROW) && rowAt(pane, kind, top) !== null && rowAt(pane, kind, last) !== null,
+      () => scrollHeldAt(box, top * ROW) && rowAt(pane, kind, top) !== null && rowAt(pane, kind, last) !== null,
       `the ${kind} listing to draw rows ${top} to ${last}`,
     )
     for (const el of pane.querySelectorAll<HTMLElement>(`.${kind}-row`)) {
@@ -141,23 +141,11 @@ const where = (rows: ReadonlyMap<number, Row>, keep: (r: Row) => boolean): numbe
     .map(([i]) => i)
     .sort((a, b) => a - b)
 
-/**
- * Put `box`'s top at `top`, as near as it goes, and say whether it was there already. **WRITTEN AGAIN UNTIL IT
- * HOLDS**: a draw that follows the run puts a box still following back on the run's row before the box's own `scroll`
- * tells the grid the user moved it, and that draw can come between the write and the event while the run records.
- */
-function scrolled(box: HTMLElement, top: number): boolean {
-  const there = Math.min(top, box.scrollHeight - box.clientHeight)
-  if (Math.abs(box.scrollTop - there) <= 1) return true
-  box.scrollTop = top
-  return false
-}
-
 /** Scroll `pane`'s listing to `row`, two rows below its top, and return the row once it is drawn. */
 async function scrollTo(pane: HTMLElement, kind: Kind, row: number): Promise<HTMLElement> {
   const box = listingOf(pane, kind)
   await until(
-    () => scrolled(box, Math.max(0, (row - 2) * ROW)) && rowAt(pane, kind, row) !== null,
+    () => scrollHeldAt(box, Math.max(0, (row - 2) * ROW)) && rowAt(pane, kind, row) !== null,
     `the ${kind} listing to draw row ${row}`,
   )
   return rowAt(pane, kind, row) as HTMLElement

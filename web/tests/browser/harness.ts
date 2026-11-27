@@ -991,6 +991,81 @@ export async function settledFocus(): Promise<string> {
 export const scrolled = (el: HTMLElement) =>
   new Promise<void>((r) => el.addEventListener('scroll', () => setTimeout(r), { once: true }))
 
+/**
+ * The boxes `scrollHeldAt` has written whose `scroll` event has not reached them yet, with the frames drawn since and
+ * the case that wrote.
+ */
+const unheard = new WeakMap<HTMLElement, { frames: number; by: string | undefined }>()
+
+/** The case running now, by its full name. */
+const runningCase = () => expect.getState().currentTestName
+
+/**
+ * Frames a written box may go without its `scroll` event before `scrollHeldAt` gives up on it: many times the few
+ * rendering updates a drawn box's event takes, and few enough that the helper's message, which names the box, comes
+ * before the bound of the `until` it sits in while the page draws at least three frames a second.
+ */
+const EVENT_FRAMES = 30
+
+/**
+ * Put `box`'s top at `top`, as near as it goes, and say whether it holds there: a predicate for `until`, for a box that
+ * may be following something (a run's row, the current state, the next redex). **WRITTEN AGAIN UNTIL IT HOLDS**: a
+ * draw that runs after the write and before the write's own `scroll` event finds the box still following, puts it
+ * back where it follows, and records that as its own write, so the event reads as that write's echo and the box goes
+ * on following. A reply the page draws for at once can land there whenever the worker is still answering; a wheel
+ * cannot, since its place and its event reach the page together, nor a key the grid handles, which detaches it first.
+ */
+export function scrollHeldAt(box: HTMLElement, top: number): boolean {
+  const there = Math.min(top, box.scrollHeight - box.clientHeight)
+  const name = box.classList.length > 0 ? `.${[...box.classList].join('.')}` : box.tagName.toLowerCase()
+  // A WAIT A THROW HAS REPORTED IS SPENT: left behind, it would fail the next call that finds the box in place at once,
+  // for a write that call did not make.
+  const failure = (text: string) => {
+    unheard.delete(box)
+    return new Error(`scrollHeldAt: ${text}`)
+  }
+  // HELD ONLY ONCE THE WRITE'S OWN EVENT HAS BEEN HANDLED, since until then a draw can still put a following box back.
+  // A box already in place holds at once: a write that moves nothing sends no event.
+  if (Math.abs(box.scrollTop - there) <= 1) {
+    const wait = unheard.get(box)
+    // A WAIT ENDS WITH THE CASE THAT WROTE: one left by a case whose `until` gave up before the count reached its bound
+    // would otherwise hold a later case back, and then fail it, for a write that case did not make.
+    if (wait === undefined || wait.by !== runningCase()) {
+      unheard.delete(box)
+      return true
+    }
+    // COUNTED IN FRAMES, NOT TIME: a main thread held for a while delays the frames as much as the polls, so the count
+    // grows only while the page draws and the event still does not come. Firefox sends no `scroll` event to a box that
+    // a hidden level holds until the level is shown, and a wait on one would end at `until`'s bound under the caller's
+    // message, which names neither the box nor what it waited for.
+    if (wait.frames >= EVENT_FRAMES)
+      throw failure(
+        `no scroll event has come for ${name}'s write in ${wait.frames} frames: it reads ${box.scrollTop}, is ${box.isConnected ? '' : 'not '}in the document and has ${box.getClientRects().length} client rects. Possible causes: the box was taken out of the document, or a level that holds it is hidden (Firefox sends no scroll event to such a box until the level is shown)`,
+      )
+    return false
+  }
+  box.scrollTop = top
+  // THROWN AT ONCE FOR A PLACE THE BOX CANNOT REACH: a write lands as it is made and only its event waits, so a box
+  // that does not read the place straight after the write never will (a `top` below 0 or not a number, a box that does
+  // not scroll), and writing again would only spin to the wait's bound under a message about something else.
+  const landed = box.scrollTop
+  if (!(Math.abs(landed - there) <= 1))
+    throw failure(
+      `${name} cannot reach ${top}: it reads ${landed} straight after the write, and scrolls from 0 to ${box.scrollHeight - box.clientHeight}`,
+    )
+  const wait = { frames: 0, by: runningCase() }
+  unheard.set(box, wait)
+  // Added after the box's own listeners, so it runs once they have acted on the event.
+  box.addEventListener('scroll', () => unheard.delete(box), { once: true })
+  const tick = () => {
+    if (unheard.get(box) !== wait) return
+    wait.frames += 1
+    if (wait.frames < EVENT_FRAMES) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  return false
+}
+
 /** Dispatch a bubbling `keydown` of `key` on `body`'s element. */
 export const keyOnBody = (body: LambdaBody, key: string) =>
   body.el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))

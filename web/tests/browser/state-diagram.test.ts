@@ -188,7 +188,11 @@ describe('the program level, drawn as arcs', () => {
     expect(Math.abs(to - grid.scrollTop), 'precondition: the scroll moves past the echo tolerance').toBeGreaterThan(
       ECHO_TOLERANCE,
     )
+    // ITS `scroll` AT ONCE, AS A WHEEL'S SCROLL COMES, its place and its event together: the browser's own event for
+    // a script's write waits for a rendering update, and a reply drawn before it would put the grid, still following,
+    // back on its row and read the event as that draw's echo, so the one scroll this case makes would never reach it.
     grid.scrollTop = to
+    grid.dispatchEvent(new Event('scroll'))
     await until(() => !reattach.hidden, 'following to detach')
     reattach.click()
     expect(reattach.hidden).toBe(true)

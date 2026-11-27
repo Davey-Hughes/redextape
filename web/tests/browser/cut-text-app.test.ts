@@ -47,7 +47,16 @@ function reachable(el: HTMLElement): boolean {
  */
 async function firstCut(texts: () => HTMLElement[]): Promise<HTMLElement | undefined> {
   const cut = () => texts().filter((t) => !whole(t))
-  cut()[0]?.scrollIntoView({ block: 'nearest' })
+  const first = cut()[0]
+  const grid = first?.closest<HTMLElement>('[role="grid"]')
+  const topWas = grid?.scrollTop
+  const leftWas = grid?.scrollLeft
+  first?.scrollIntoView({ block: 'nearest' })
+  // THE GRID'S `scroll` AT ONCE, as a wheel's comes: a grid still following the run would otherwise be put back on its
+  // row by a reply drawn before the browser's own event, which then reads as that draw's echo. ONLY WHEN THE GRID MOVED,
+  // as a wheel that moves nothing sends none: an event with nothing scrolled detaches a grid whose follow has not
+  // written yet, which no user's scroll does.
+  if (grid && (grid.scrollTop !== topWas || grid.scrollLeft !== leftWas)) grid.dispatchEvent(new Event('scroll'))
   await frames()
   return cut().find(reachable)
 }

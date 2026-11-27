@@ -3,7 +3,18 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import init, { compile as compileInPage } from '../../../pkg/redextape_wasm.js'
 import type { LinkIndexWire } from '../../src/link'
-import { linkAt, linkStatus, pickPreset, rxmPane, SHELL, sourceLinked, stageTab, stateIdle, until } from './harness'
+import {
+  linkAt,
+  linkStatus,
+  pickPreset,
+  rxmPane,
+  SHELL,
+  scrollHeldAt,
+  sourceLinked,
+  stageTab,
+  stateIdle,
+  until,
+} from './harness'
 
 /**
  * Linking through the rxm view (Plan 7 part 5 spec §6.6): an instruction pins the construct its lowering came from,
@@ -96,8 +107,8 @@ describe('an instruction with no owner', () => {
     session?.free()
     const minted = owners === undefined ? -1 : owners.indexOf(-1)
     expect(minted, 'the fixture has an instruction defunc minted').toBeGreaterThanOrEqual(0)
-    listing().scrollTop = Math.max(0, (minted - 2) * 24)
-    await until(() => rowOf(minted) !== undefined, `pc${minted} to be drawn`)
+    const top = Math.max(0, (minted - 2) * 24)
+    await until(() => scrollHeldAt(listing(), top) && rowOf(minted) !== undefined, `pc${minted} to be drawn`)
     await userEvent.click(rowOf(minted) as HTMLElement)
     await until(() => linkStatus() === 'this instruction has no source construct', 'the status line to say why')
     expect(sourceLinked()).toBeNull()
@@ -127,16 +138,15 @@ describe('a TM state with no owner', () => {
     session?.free()
     expect(index?.tmOwner[0], 'the rule table’s first state has no owner').toBe(-1)
     const minted = index === undefined ? -1 : index.rxmOwner.indexOf(-1)
-    listing().scrollTop = Math.max(0, (minted - 2) * 24)
-    await until(() => rowOf(minted) !== undefined, `pc${minted} to be drawn`)
+    const top = Math.max(0, (minted - 2) * 24)
+    await until(() => scrollHeldAt(listing(), top) && rowOf(minted) !== undefined, `pc${minted} to be drawn`)
     await userEvent.click(rowOf(minted) as HTMLElement)
     await until(() => linkStatus() === 'this instruction has no source construct', 'the line to say why first')
 
     const table = document.querySelector<HTMLElement>('.pane[data-leaf="tm-0"] .state-table') as HTMLElement
-    table.scrollTop = 0
     const halt = () =>
       [...table.querySelectorAll<HTMLElement>('.state-row.is-state')].find((r) => r.textContent === first)
-    await until(() => halt() !== undefined, `the ${first} row to be drawn`)
+    await until(() => scrollHeldAt(table, 0) && halt() !== undefined, `the ${first} row to be drawn`)
     await userEvent.click(halt() as HTMLElement)
     await until(() => linkStatus() === '', 'the line to go quiet')
     expect(sourceLinked(), 'nothing is pinned').toBeNull()
