@@ -12,9 +12,11 @@ import { PRESETS, type Preset, presetOf, type Switches } from './workspace'
  */
 
 /**
- * The popover wiring every header menu shares, and `share`'s popover too, which is a disclosure and not a menu (Plan 7
- * part 6a spec §6): the invoker relationship, `aria-expanded` kept true to the popover's state, and an optional
- * rebuild on open. `view-header.ts`'s `viewHeader` and `viewMenu` each keep their own copy of the pattern.
+ * The popover wiring every header menu and `share`'s popover share: the invoker relationship, `aria-expanded` kept
+ * true to the popover's state, and an optional rebuild on open. **EACH IS A DISCLOSURE, NOT AN ARIA `menu`**, as Plan 7
+ * part 6a spec §6 has `share`: its popover holds no menu items, so its button claims no `aria-haspopup`, which would
+ * have a screen reader announce a menu and its arrow keys. `view-header.ts`'s `viewHeader` and `viewMenu` each keep
+ * their own copy of the pattern.
  */
 export function wireMenu(button: HTMLButtonElement, menu: HTMLElement, onOpen?: () => void): void {
   button.popoverTargetElement = menu

@@ -125,6 +125,11 @@ describe('the CLIF view without a listing', () => {
     pane.render(null, controlState(false, ''))
     const retries = [...host.querySelectorAll<HTMLButtonElement>('button.clif-retry, button.mc-retry')]
     expect(retries.map((b) => b.textContent)).toEqual(['Retry', 'Retry'])
+    for (const b of retries) {
+      const box = b.getBoundingClientRect()
+      const drawn = box.width > 0 && box.height > 0 && getComputedStyle(b).visibility === 'visible'
+      expect(drawn, `${b.className} drawn, so both show at once`).toBe(true)
+    }
     expect(retries.map((b) => computeAccessibleName(b)).sort()).toEqual([
       'Retry loading clif',
       'Retry loading machine code',

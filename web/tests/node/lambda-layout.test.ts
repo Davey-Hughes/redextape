@@ -185,7 +185,7 @@ describe('treePlaces', () => {
     const lines = code('g (a b c d) (e f g h)', 6)
     expect(
       lines.map((l) => l.level),
-      'precondition: two pairs of level 3 rows under two level 2 rows',
+      'precondition: two triples of level 3 rows under two level 2 rows',
     ).toEqual([1, 2, 3, 3, 3, 2, 3, 3, 3])
     expect(places(lines)).toEqual({ setsize: [1, 2, 3, 3, 3, 2, 3, 3, 3], posinset: [1, 1, 1, 2, 3, 2, 1, 2, 3] })
   })
