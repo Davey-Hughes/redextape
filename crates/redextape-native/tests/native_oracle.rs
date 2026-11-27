@@ -88,10 +88,23 @@ mod common;
 use common::core_of;
 #[path = "common/corpus.rs"]
 mod corpus;
-use corpus::{
-    BEYOND_FIELD_WIDTH_DEMOS, FAULT_DEMOS, FIRST_ORDER_DEMOS, FUNCTION_RESULT_DEMOS, LAMBDA_LIMITATION_DEMOS,
-    SATURATION_DEMOS,
-};
+use corpus::{BEYOND_FIELD_WIDTH_DEMOS, FAULT_DEMOS, FIRST_ORDER_DEMOS, LAMBDA_LIMITATION_DEMOS, SATURATION_DEMOS};
+
+/// Programs whose result is a function, bare or in a list, compared on every leg as the opaque
+/// `Value::Function`. A copy of `redextape-core`'s `three_way_oracle.rs` `FUNCTION_RESULT_DEMOS`, kept
+/// equal to it by that file's `function_result_demos_stay_synced_with_the_native_copy`. Here and not
+/// in `common/corpus.rs`, because the codegen snapshots take every list there and these have none.
+const FUNCTION_RESULT_DEMOS: &[&str] = &[
+    "|x| x + 1",
+    "fn f(x) { x + 1 } f",
+    "let g = |x| x; g",
+    "[|x| x]",
+    "let xs = [1, 2]; |y| head(xs) + y",
+    "[|x| x, |y| y + 1]",
+    "let add = |y| |z| y + z; add(4)",
+    "fn f(x) { x + 1 } fn g(x) { x * 2 } if true { g } else { f }",
+    "[[|x| x], [], [|y| y + 1, |z| z]]",
+];
 
 /// Every encoding this file's TM leg covers. THE single place that decides — the coverage guard
 /// (`every_encoding_has_a_four_way_test`) derives its expectation from here rather than from a second
@@ -290,10 +303,20 @@ fn native_matches_rxm_interp_on_the_first_order_suite() {
     }
 }
 
+/// Both decode a function to the same opaque `Value::Function`, so a codegen slip in a closure's tag or
+/// environment would pass `assert_native_matches_rxm`. The raw result word and heap must match too.
 #[test]
 fn native_matches_rxm_interp_on_function_results() {
     for src in FUNCTION_RESULT_DEMOS {
         assert_native_matches_rxm(src);
+        let core = core_of(src);
+        let prog = lower_program(&core).unwrap_or_else(|e| panic!("lowering failed for `{src}`: {e:?}"));
+        match (run_rxm(&prog, DEFAULT_CAPS), run_native(&core, DEFAULT_CAPS)) {
+            (RxmRun::Ran(rxm), NativeRun::Ran(native)) => {
+                assert_eq!(native, rxm, "native vs rxm-interp result word or heap differ for: {src}");
+            }
+            (a, n) => panic!("native vs rxm-interp mismatch for {src}:\n  rxm={a:?}\n  native={n:?}"),
+        }
     }
 }
 

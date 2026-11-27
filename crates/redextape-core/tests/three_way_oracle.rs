@@ -34,11 +34,11 @@
 
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
-use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda};
+use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, decode_lambda_ty_opaque, run_lambda};
 use redextape_core::parser::parse;
 use redextape_core::tm::{
     Binary, DEFAULT_CAPS as RXM_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, TM_DEFAULT_CAPS, TmCaps, TmRun, Unary,
-    decode_tape, lower_program, run_tm, run_tm_described, run_tm_fitted,
+    decode_tape, decode_tape_ty_opaque, lower_program, run_tm, run_tm_described, run_tm_fitted,
 };
 use redextape_core::trace::{RxmCursor, RxmStatus, StepEvent, TmCursor, WordTag};
 use redextape_core::ty::Ty;
@@ -49,7 +49,8 @@ use redextape_test_support::arb_expr_below;
 
 /// reference == λ == unary-TM == binary-TM, guided by the reference value's type. All four must run
 /// to a value that decodes equal. A function in the result is compared as the opaque `Value::Function`,
-/// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`).
+/// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`). Each leg is read twice, by
+/// the witness decoder and by the `_opaque` type decoder `run` uses, and both must agree.
 ///
 /// The two TM legs are DIFFERENT MACHINES compiled from the same Core, not the same machine read two
 /// ways — which is what makes this a real fourth leg rather than a restatement of the third.
@@ -57,7 +58,9 @@ fn assert_three_way(src: &str) {
     let reference = run(src);
     let (prog, ds) = parse(src);
     assert!(ds.is_empty(), "parse errors: {ds:?}");
-    let core = desugar(&prog.unwrap());
+    let prog = prog.unwrap();
+    let ty = result_type(&prog).unwrap_or_else(|e| panic!("type errors in {src:?}: {e:?}"));
+    let core = desugar(&prog);
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let tm = run_tm(&core, &Unary::default(), TM_DEFAULT_CAPS);
     // `run_tm_fitted`, not `run_tm`: reads the tape back at the width the fit settled on, a convention
@@ -67,13 +70,17 @@ fn assert_three_way(src: &str) {
         (Ok(rv), LambdaRun::Reduced(nf), TmRun::Ran { tapes }, TmRun::Ran { tapes: btapes }) => {
             let want = rv.observable();
             assert_eq!(decode(&nf, &rv), Some(want.clone()), "reference vs λ disagree for: {src}");
+            assert_eq!(decode_lambda_ty_opaque(&nf, &ty), Some(want.clone()), "λ's type decode for: {src}");
+            let uenc = Unary::default();
             assert_eq!(
-                decode_tape(&tapes, &rv, &Unary::default()),
+                decode_tape(&tapes, &rv, &uenc),
                 Some(want.clone()),
                 "reference vs unary-TM disagree for: {src}"
             );
+            assert_eq!(decode_tape_ty_opaque(&tapes, &ty, &uenc), Some(want.clone()), "unary-TM's type decode: {src}");
             let benc = Binary::at(bwidth.expect("Binary::field_width() is always Some"));
-            assert_eq!(decode_tape(&btapes, &rv, &benc), Some(want), "reference vs binary-TM disagree for: {src}");
+            assert_eq!(decode_tape(&btapes, &rv, &benc), Some(want.clone()), "reference vs binary-TM disagree: {src}");
+            assert_eq!(decode_tape_ty_opaque(&btapes, &ty, &benc), Some(want), "binary-TM's type decode: {src}");
         }
         (r, l, t, b) => panic!(
             "backend oracle mismatch for {src}:\n  reference={r:?}\n  lambda={l:?}\n  unary-tm={t:?}\n  binary-tm={b:?}"
@@ -328,7 +335,7 @@ const FIRST_ORDER_DEMOS: &[&str] = &[
 /// machines to a tag the compiler numbers on its own), so the oracle compares each as the opaque
 /// `Value::Function`: what it shows is that every leg halted with a function where the type says one
 /// is. A bare builtin (`head` alone) is left out, because only the reference runs one as a value.
-/// `redextape-native/tests/common/corpus.rs` copies this list; see
+/// `redextape-native/tests/native_oracle.rs` copies this list; see
 /// `function_result_demos_stay_synced_with_the_native_copy`.
 const FUNCTION_RESULT_DEMOS: &[&str] = &[
     "|x| x + 1",
@@ -340,6 +347,8 @@ const FUNCTION_RESULT_DEMOS: &[&str] = &[
     // A curried call returns the inner closure, its environment holding the 4.
     "let add = |y| |z| y + z; add(4)",
     "fn f(x) { x + 1 } fn g(x) { x * 2 } if true { g } else { f }",
+    // Nested, with an empty inner list: the type decode memoizes per depth, and λ nests Scott lists.
+    "[[|x| x], [], [|y| y + 1, |z| z]]",
 ];
 
 /// Runtime-faulting programs: the reference faults, both other backends diverge — all "no value".
@@ -475,9 +484,9 @@ fn first_order_demos_stay_synced_across_every_copy() {
     assert_eq!(copies.len() + 1, 4, "a copy was added to or removed from the tree without updating this count");
 }
 
-/// `redextape-native/tests/common/corpus.rs` copies `FUNCTION_RESULT_DEMOS` for the native oracle, for
-/// the reason `first_order_demos_stay_synced_across_every_copy` gives: one test crate cannot `use`
-/// another's module. Read as text, the same way.
+/// `redextape-native/tests/native_oracle.rs` copies `FUNCTION_RESULT_DEMOS`, for the reason
+/// `first_order_demos_stay_synced_across_every_copy` gives: one test crate cannot `use` another's
+/// module. Read as text, the same way.
 #[test]
 fn function_result_demos_stay_synced_with_the_native_copy() {
     let manifest = env!("CARGO_MANIFEST_DIR");
@@ -485,12 +494,12 @@ fn function_result_demos_stay_synced_with_the_native_copy() {
         std::fs::read_to_string(format!("{manifest}/tests/three_way_oracle.rs")).expect("read this file's own source");
     let canonical = extract_str_array(&own, "FUNCTION_RESULT_DEMOS");
     assert_eq!(canonical.len(), FUNCTION_RESULT_DEMOS.len(), "this file's own extraction lost or gained entries");
-    let native = std::fs::read_to_string(format!("{manifest}/../redextape-native/tests/common/corpus.rs"))
-        .expect("read redextape-native/tests/common/corpus.rs");
+    let native = std::fs::read_to_string(format!("{manifest}/../redextape-native/tests/native_oracle.rs"))
+        .expect("read redextape-native/tests/native_oracle.rs");
     assert_eq!(
         extract_str_array(&native, "FUNCTION_RESULT_DEMOS"),
         canonical,
-        "redextape-native/tests/common/corpus.rs's FUNCTION_RESULT_DEMOS has drifted from this file's"
+        "redextape-native/tests/native_oracle.rs's FUNCTION_RESULT_DEMOS has drifted from this file's"
     );
 }
 

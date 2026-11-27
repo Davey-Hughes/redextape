@@ -107,8 +107,8 @@ fn reference_cranelift_llvm_agree() {
 }
 
 /// A function result as a bare closure, in a list, and holding a captured list in its environment:
-/// each lowers to a `cons(tag, env)` heap cell, so this is the result register carrying a heap pointer
-/// that is not a list, at every `OptLevel`.
+/// each function is a `cons(tag, env)` heap cell, so both compilers must hand back a pointer to a real
+/// cell where the type says a function is, at every `OptLevel`.
 const FUNCTION_RESULT_CASES: &[&str] = &["|x| x + 1", "[|x| x, |y| y + 1]", "let xs = [1, 2]; |y| head(xs) + y"];
 
 #[test]
