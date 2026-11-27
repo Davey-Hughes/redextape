@@ -27,6 +27,11 @@ import { boundaryKeys, codeUnder } from './machine-views'
 const CONTROLS = controlState(true, 'step 3 of 55')
 /** Each long case's own bound, past every wait in it. */
 const CASE_MS = 60_000
+/**
+ * How wide a view the cases of the panel's place build: wide enough for the clif row's wide arrangement, from
+ * 724 px, so the row is one region and its heap has none of its own to part from the code.
+ */
+const ROW_WIDE = 760
 
 let clif: ClifListing
 const code = {} as Record<McTarget, McListing>
@@ -153,7 +158,7 @@ const inside = (el: HTMLElement, box: DOMRect) => {
 
 describe('a clif view whose machine code panel is closed', () => {
   it('says nothing in the panel, and has a region and a panel of each name once', async () => {
-    const { host } = mount(634, { loading: true })
+    const { host } = mount(ROW_WIDE, { loading: true })
     await frames()
     expect(codePanel(host).dataset.open, 'precondition: closed').toBe('false')
     expect(host.querySelectorAll('.mc-notice, p.clif-notice').length, 'a notice in the view').toBe(0)
@@ -179,7 +184,7 @@ describe('a clif view whose machine code panel is closed', () => {
 
 describe('a clif view whose machine code panel is open', () => {
   it("takes two shares to the listing's two and the row's one, and keeps the row in the view", async () => {
-    const { host } = mount(634, { height: 1600, panels: { code: true } })
+    const { host } = mount(ROW_WIDE, { height: 1600, panels: { code: true } })
     await frames()
     expect(heightOf(host, 'code') / heightOf(host, 'listing'), 'the machine code to the listing').toBeCloseTo(1, 2)
     expect(heightOf(host, 'machine') / heightOf(host, 'listing'), 'the row to the listing').toBeCloseTo(0.5, 2)
@@ -195,7 +200,7 @@ describe('a clif view whose machine code panel is open', () => {
       ['code', 'machine'],
     ] as const) {
       document.body.innerHTML = ''
-      const { host, sizes } = mount(634, { panels: { code: true } })
+      const { host, sizes } = mount(ROW_WIDE, { panels: { code: true } })
       await frames()
       expect(boundaryKeys(host)).toEqual(['listing|code', 'code|machine'])
       boundary(host, above, below).focus()
@@ -214,7 +219,7 @@ describe('a clif view whose machine code panel is open', () => {
   ])(
     'keeps the current block in a box of a %i px view as the run steps (whole: %s), and scrolls neither the page nor the view',
     async (height, whole) => {
-      const { host, at } = mount(634, { height, panels: { code: true } })
+      const { host, at } = mount(ROW_WIDE, { height, panels: { code: true } })
       await frames()
       const box = listingBox(host)
       const where = () => [window.scrollY, host.scrollTop, (host.querySelector('.clif-pane') as HTMLElement).scrollTop]
@@ -262,7 +267,7 @@ describe('a clif view whose machine code panel is open', () => {
   // THE LISTING'S OWN RULE (`state-table.ts`'s `Follow`): a scroll the user makes stops following until they ask for
   // it again with the re-attach.
   it('follows no more once the user scrolls its box, until the re-attach is pressed', async () => {
-    const { host, at } = mount(634, { panels: { code: true } })
+    const { host, at } = mount(ROW_WIDE, { panels: { code: true } })
     await frames()
     const box = listingBox(host)
     const all = withCode('x86-64')
@@ -340,7 +345,7 @@ describe('a clif view whose machine code panel is open', () => {
   })
 
   it('marks a current row on the row, so its cell lets the next, link and focus marks show', async () => {
-    const { host, at, pane } = mount(634, { panels: { code: true } })
+    const { host, at, pane } = mount(ROW_WIDE, { panels: { code: true } })
     await frames()
     const { at: busy, pc } = busiest('x86-64')
     pane.setLink([pc], false)
@@ -367,7 +372,7 @@ describe('a clif view whose machine code panel is open', () => {
       ?.trim() ?? ''
 
   it('bars every current row as the state table bars its current row, a shape and not a colour alone', async () => {
-    const { host, at } = mount(634, { panels: { code: true } })
+    const { host, at } = mount(ROW_WIDE, { panels: { code: true } })
     await frames()
     at(busiest('x86-64').at)
     await frames()
@@ -394,7 +399,7 @@ describe('a clif view whose machine code panel is open', () => {
   })
 
   it('scrolls to a link pinned in another view before its rows came, once they come', async () => {
-    const { host, pane, again, store } = mount(634, { panels: { code: true }, loading: true })
+    const { host, pane, again, store } = mount(ROW_WIDE, { panels: { code: true }, loading: true })
     await frames()
     const rows = code['x86-64'].rows
     const pc = rows.findLast((r) => r.pc !== null)?.pc ?? null
