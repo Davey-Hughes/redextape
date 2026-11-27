@@ -1915,6 +1915,7 @@ async function main(): Promise<EditorView> {
       // `undefined` OUTSIDE A SECURE CONTEXT, though the DOM's types say otherwise: the clipboard is exposed only there.
       clipboard: () => navigator.clipboard as Clipboard | undefined,
       notify: (text) => notices.notify(text),
+      announce: (text) => notices.announce(text),
     }),
   )
 

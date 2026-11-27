@@ -4,8 +4,8 @@ import { encodeLink, type SharePayload } from './share-link'
 /**
  * THE SHARE POPOVER — Plan 7 part 6a spec §5.2: `share`'s popover, built again on each open as the workspace menu is,
  * so nothing keeps a link current (row 8). It holds the link in a read-only field, which takes the focus with its text
- * selected; `copy link`, where the page can write to the clipboard; and under them, describing the field, a line
- * saying how long the link is, past the length some apps cut.
+ * selected; `copy link`, where the page can write to the clipboard; and under them, describing the field and said in
+ * the live region, a line saying how long the link is, past the length some apps cut.
  */
 
 /** The length past which a link is said to be long: many chat and mail clients cut a link past it (spec row 8). */
@@ -25,6 +25,8 @@ export type ShareDeps = {
    */
   readonly clipboard: () => Pick<Clipboard, 'writeText'> | undefined
   readonly notify: (text: string) => void
+  /** Say `text` in the live region alone, for a sentence the popover already shows (`notice.ts`'s `announce`). */
+  readonly announce: (text: string) => void
 }
 
 /** The line saying a link is long, or `null` for one no longer than `LONG_LINK` (spec §5.2, row 8). */
@@ -99,6 +101,11 @@ export function createShare(deps: ShareDeps): () => void {
         const above = copy ?? label
         above.after(long)
         input.setAttribute('aria-describedby', long.id)
+        // **SAID AS WELL AS DESCRIBED, BECAUSE THE DESCRIPTION COMES AFTER THE FOCUS.** The field took the focus when
+        // the popover showed, before the link was made, and a screen reader reads a field's description as the focus
+        // lands, not when it changes later. Only while this open's field is on show: a link that arrives after the
+        // popover closed, or was opened again, says nothing about a link on screen.
+        if (input.isConnected && menu.matches(':popover-open')) deps.announce(long.textContent ?? '')
       }
       if (copy !== null) {
         copy.disabled = false

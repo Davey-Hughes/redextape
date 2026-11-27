@@ -8,6 +8,7 @@ import { decodeLink } from '../../src/share-link'
 import { PRESETS, parseWorkspace } from '../../src/workspace'
 import { chromiumOnly } from './engine'
 import {
+  hear,
   noticeText,
   SHELL,
   segments,
@@ -234,13 +235,20 @@ describe('share', () => {
     }).join('\n')
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${noise}\nlet x = 40; x + 2` } })
     await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the long program’s compile')
+    const heard = hear()
     const link = await openShare()
+    heard.stop()
     expect(link.length).toBeGreaterThan(2000)
     const line = shareMenu().querySelector('#share-length')
-    expect(line?.textContent).toBe(
-      `this link is ${link.length.toLocaleString('en-US')} characters long — some chat and mail apps cut links past 2,000`,
-    )
+    const words = `this link is ${link.length.toLocaleString('en-US')} characters long — some chat and mail apps cut links past 2,000`
+    expect(line?.textContent).toBe(words)
     expect(shareLinkField().getAttribute('aria-describedby')).toBe('share-length')
+    // SAID, NOT ONLY DESCRIBED: the field had the focus before the line was there, so a reader may not read it out.
+    expect(
+      heard.said.filter((said) => said === words),
+      'said once in the live region',
+    ).toHaveLength(1)
+    expect(heard.notices, 'not drawn as a notice: the popover shows it').not.toContain(words)
     shareMenu().hidePopover()
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
     await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
