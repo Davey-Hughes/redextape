@@ -5,8 +5,11 @@
 //! machine that computed the wrong value decodes to a different `Value` (or `None`), still failing the
 //! oracle.
 
-use crate::tm::build::{HEAP, REG};
+use std::collections::BTreeSet;
+
+use crate::tm::build::{AT, HEAP, REG};
 use crate::tm::encoding::Encoding;
+use crate::tm::machine::BLANK;
 use crate::tm::rxm::{DecodeFailure, MAX_DECODE_NODES, decode_word_ty};
 use crate::tm::sim::Tape;
 use crate::ty::Ty;
@@ -20,6 +23,41 @@ fn read_result(tapes: &[Tape], enc: &dyn Encoding) -> Option<(u64, Vec<(u64, u64
     let heap = enc.parse_heap_cells(&tapes.get(HEAP)?.snapshot().0);
     let word = enc.decode_nat(&reg, 0)?;
     Some((word, heap))
+}
+
+/// The HEAP cells a list result reaches, as `from..to` runs of the HEAP tape's `Tape::snapshot` indices,
+/// ascending, adjacent cells merged into one run: the list results design lights them. `ty` says which
+/// heads are lists, as it does for `decode_tape_ty`: a cell's tail is followed always, its head only under a
+/// list of lists. Empty for a result that is not a list, for `nil`, and for tapes `enc` cannot read.
+///
+/// Cell `k` starts at the HEAP's `k`th `@`, as both encodings' `parse_heap_cells` read it, and ends at the
+/// next `@` or blank. A set of the cells visited, so a cyclic heap from a file ends the walk.
+#[must_use]
+pub fn result_heap_runs(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Vec<(usize, usize)> {
+    let (Ty::List(_), Some((word, conses)), Some(tape)) = (ty, read_result(tapes, enc), tapes.get(HEAP)) else {
+        return Vec::new();
+    };
+    let mut reached = BTreeSet::new();
+    let mut todo = vec![(word, ty)];
+    while let Some((w, ty)) = todo.pop() {
+        let (Ty::List(elem), Some(i)) = (ty, w.checked_sub(1).and_then(|i| usize::try_from(i).ok())) else { continue };
+        let Some(&(head, tail)) = conses.get(i) else { continue };
+        if reached.insert(i) {
+            todo.push((tail, ty));
+            todo.push((head, elem));
+        }
+    }
+    let cells = tape.snapshot().0;
+    let starts: Vec<usize> = cells.iter().enumerate().filter(|&(_, &c)| c == AT).map(|(at, _)| at).collect();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for from in reached.into_iter().filter_map(|i| starts.get(i).copied()) {
+        let to = cells[from + 1..].iter().position(|&c| c == AT || c == BLANK).map_or(cells.len(), |n| from + 1 + n);
+        match runs.last_mut() {
+            Some(run) if run.1 == from => run.1 = to,
+            _ => runs.push((from, to)),
+        }
+    }
+    runs
 }
 
 /// Decode the machine's final `tapes` to a `Value`, guided by `expected`'s SHAPE (never its contents).
@@ -84,7 +122,7 @@ pub fn decode_tape_ty_reason(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Res
 mod tests {
     use super::*;
     use crate::core::BinOp;
-    use crate::tm::build::{AT, MARK, SEP, TAPES};
+    use crate::tm::build::{AT, MARK, SEP, TAPES, WORK};
     use crate::tm::encoding::Unary;
     use crate::tm::lower_tm::{SlotMap, lower_tm};
     use crate::tm::rxm::{Instr, Program, Reg};
@@ -286,5 +324,59 @@ mod tests {
         tapes[REG] = Tape::new(&[SEP, MARK, SEP]);
         tapes[HEAP] = Tape::new(&[AT, MARK, SEP, MARK]);
         assert_eq!(decode_tape_ty(&tapes, &Ty::List(Box::new(Ty::Nat)), &enc), None);
+    }
+
+    /// `result_heap_runs` lights the cells `rr`'s list reaches and no others, heads too under a list of
+    /// lists, adjacent cells as one run, in either encoding: cell 1 and cell 4 are garbage, cells 2 and 3
+    /// sit side by side, and cell 5 shares cell 2 as both its head and its tail's head. A `nil` beside a cell lights
+    /// none.
+    #[test]
+    fn result_heap_runs_light_the_cells_the_result_reaches() {
+        use crate::tm::encoding::Binary;
+        use crate::ty::Ty;
+        let (r0, r1, r2, r3, r4, r5) = (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2), Reg::Loc(3), Reg::Loc(4), Reg::Loc(5));
+        let prog = Program {
+            code: vec![
+                Instr::Nil(r0),
+                Instr::Li(r1, 9),
+                Instr::Cons(r5, r1, r0), // cell 1, garbage
+                Instr::Li(r1, 1),
+                Instr::Cons(r2, r1, r0), // cell 2: [1]
+                Instr::Cons(r3, r2, r0), // cell 3: [[1]]
+                Instr::Li(r1, 7),
+                Instr::Cons(r4, r1, r5),      // cell 4, garbage
+                Instr::Cons(Reg::Rr, r2, r3), // cell 5: [[1], [1]]
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        let nested = Ty::List(Box::new(Ty::List(Box::new(Ty::Nat))));
+        let flat = Ty::List(Box::new(Ty::Nat));
+        for enc in [Box::new(Unary::default()) as Box<dyn Encoding>, Box::new(Binary::default())] {
+            let mut init = vec![Vec::new(); TAPES];
+            init[REG] = enc.init_reg(SlotMap::of(&prog).n_slots());
+            init[WORK] = enc.init_work();
+            let tapes = simulate(&lower_tm(&prog, &*enc), &init, CAPS).0;
+            let heap = tapes[HEAP].snapshot().0;
+            let cells = |runs: &[(usize, usize)]| -> Vec<Vec<(u64, u64)>> {
+                runs.iter().map(|&(from, to)| enc.parse_heap_cells(&heap[from..to])).collect()
+            };
+            let runs = result_heap_runs(&tapes, &nested, &*enc);
+            assert_eq!(cells(&runs), [vec![(1, 0), (2, 0)], vec![(2, 3)]]);
+            // Under `List<Nat>` no head is a pointer, so cell 2 is reached by nothing.
+            assert_eq!(cells(&result_heap_runs(&tapes, &flat, &*enc)), [vec![(2, 0)], vec![(2, 3)]]);
+            assert!(result_heap_runs(&tapes, &Ty::Nat, &*enc).is_empty());
+            if enc.heap_word_len().is_none() {
+                let text: Vec<String> = runs.iter().map(|&(from, to)| heap[from..to].iter().collect()).collect();
+                assert_eq!(text, ["@1#@11#", "@11#111"]);
+            }
+        }
+        let nil = run_to_tapes(&Program {
+            code: vec![Instr::Nil(r0), Instr::Li(r1, 1), Instr::Cons(r2, r1, r0), Instr::Nil(Reg::Rr), Instr::Halt],
+            labels: vec![],
+        });
+        let heap = Unary::default().parse_heap_cells(&nil[HEAP].snapshot().0);
+        assert_eq!(heap, [(1, 0)], "the premise: the heap holds a cell");
+        assert!(result_heap_runs(&nil, &flat, &Unary::default()).is_empty());
     }
 }

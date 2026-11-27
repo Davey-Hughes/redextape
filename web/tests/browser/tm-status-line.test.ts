@@ -256,6 +256,7 @@ describe('the TM view’s status line at a phone’s width, in a view as wide as
         window: ['_', '_', '_', '_', '_'],
         source_node: null,
         rule: 0,
+        result: null,
       },
       controlState(false, 'step 0 of 1'),
     )

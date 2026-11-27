@@ -404,6 +404,37 @@ export const wordEdges = (term: Element | null): HTMLElement[] =>
     return s.outlineStyle !== 'none' || s.boxShadow !== 'none' || sides.some((side) => drawsEdge(s, side))
   })
 
+/**
+ * Where the word `result` on a λ row ends, in client px: past the row's last glyph by the word's padding and its
+ * glyphs at its own font. The word is the row's `::after`, which has no box to read, so it is measured; a `Range` over
+ * the row past its strip gives where the glyphs end.
+ */
+export function rowWordEnd(row: HTMLElement): number {
+  const range = document.createRange()
+  range.setStartAfter(row.querySelector('.term-lanes') as Element)
+  range.setEnd(row, row.childNodes.length)
+  const s = getComputedStyle(row, '::after')
+  const ctx = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D
+  ctx.font = s.font
+  const pad = Number.parseFloat(s.paddingInlineStart) + Number.parseFloat(s.paddingInlineEnd)
+  return range.getBoundingClientRect().right + pad + ctx.measureText('result').width
+}
+
+/**
+ * Hold `rects` as one column of touching boxes, `what` naming each: each as far left and as wide as the first, and
+ * each top on the bottom of the one above. **TO UNDER 0.005 PX, NOT EXACTLY** (`toBeCloseTo` to two digits):
+ * Firefox's rects carry float32 rounding, so one edge read as a box's top and as the bottom of the box above can differ
+ * by 1e-5 px, where a gap the eye could see is a pixel.
+ */
+export function expectStacked(rects: readonly DOMRect[], what: string): void {
+  const first = rects[0] as DOMRect
+  for (const [i, r] of rects.entries()) {
+    expect(r.left, `${what} ${i} under the first`).toBeCloseTo(first.left, 2)
+    expect(r.width, `${what} ${i} as wide as the first`).toBeCloseTo(first.width, 2)
+    if (i > 0) expect(r.top, `${what} ${i} touching the ${what} above`).toBeCloseTo((rects[i - 1] as DOMRect).bottom, 2)
+  }
+}
+
 /** The pieces a λ term draws of `lane`'s bar, in the order drawn. */
 export const barPieces = (term: Element | null, lane: LambdaMark): HTMLElement[] => [
   ...(term?.querySelectorAll<HTMLElement>(`.term-bar[data-lane="${lane}"]`) ?? []),

@@ -97,6 +97,7 @@ export const tmStateOf = (head: number, windowStart: number, window: string, ove
   window: [window],
   source_node: null,
   rule: null,
+  result: null,
   ...over,
 })
 
@@ -112,4 +113,5 @@ export const tmFrame = (state: number, step: number, symbol: string): TmState =>
   window: [symbol],
   source_node: null,
   rule: null,
+  result: null,
 })

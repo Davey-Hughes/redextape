@@ -41,7 +41,14 @@ export type StackView = {
 export type HeapView = {
   readonly count: string
   readonly items: readonly (
-    | { readonly kind: 'line'; readonly lead: string; readonly body: string; readonly refs: readonly string[] }
+    | {
+        readonly kind: 'line'
+        readonly lead: string
+        readonly body: string
+        readonly refs: readonly string[]
+        /** Whether the line is a cell of the run's result, which the panel lights with its tint and edge. */
+        readonly result: boolean
+      }
     | { readonly kind: 'note'; readonly text: string }
   )[]
 }
@@ -148,7 +155,8 @@ export function callStackPanel(o: MachinePanelOptions): MachinePanel<StackView> 
 
 /**
  * The heap (spec §6.5), newest first: `#57  57 → #56  ← r5` — the cell, its head and tail, and the *list* registers
- * that name it — then the boxes. Past the window, `+N older`.
+ * that name it — then the boxes. Past the window, `+N older`. A cell of the run's result is `is-result`, said in its
+ * `aria-description`, and a run of them one box: `is-result-first` and `is-result-last` mark where it starts and ends.
  */
 export function heapPanel(o: MachinePanelOptions): MachinePanel<HeapView> {
   const body = document.createElement('ul')
@@ -164,10 +172,20 @@ export function heapPanel(o: MachinePanelOptions): MachinePanel<HeapView> {
         body.replaceChildren()
         return
       }
-      const items = view.items.map((item) => {
+      const lit = (i: number) => {
+        const item = view.items[i]
+        return item?.kind === 'line' && item.result
+      }
+      const items = view.items.map((item, i) => {
         if (item.kind === 'note') return note(item.text)
         const li = document.createElement('li')
         li.className = 'rxm-cell-line'
+        if (item.result) {
+          li.classList.add('is-result')
+          li.classList.toggle('is-result-first', !lit(i - 1))
+          li.classList.toggle('is-result-last', !lit(i + 1))
+          li.setAttribute('aria-description', 'part of the result')
+        }
         const at = document.createElement('b')
         at.textContent = item.lead
         li.append(at, ` ${item.body}`)

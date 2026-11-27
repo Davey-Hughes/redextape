@@ -194,13 +194,18 @@ function rowAt(l: ClifListing, at: ClifAt): ClifRow | undefined {
 
 /**
  * The heap panel at `s`, as the rxm view's: each cell and box named by the values whose word is it, a list word for a
- * cell and a box handle for a box. A value past the frame's window is not here to name.
+ * cell and a box handle for a box, and at the run's result (`result`) the returned list's cells lit. A value past the
+ * frame's window is not here to name.
  */
-export function clifHeap(s: ClifState): HeapView {
-  return heapView(s, (at, tag) => {
-    const word = String(at)
-    return s.values.flatMap((v) => (v.word.tag === tag && v.word.word === word ? [`v${v.value}`] : []))
-  })
+export function clifHeap(s: ClifState, result: boolean): HeapView {
+  return heapView(
+    s,
+    (at, tag) => {
+      const word = String(at)
+      return s.values.flatMap((v) => (v.word.tag === tag && v.word.word === word ? [`v${v.value}`] : []))
+    },
+    result ? s.result : null,
+  )
 }
 
 /** The CLIF view's own copy: what its listing area says while it has no listing. */

@@ -1,4 +1,4 @@
-import { type Line, lineOf, type Token } from './lambda-layout'
+import { type Line, lineOf, lineText, type Token } from './lambda-layout'
 import type { Tree } from './lambda-tree'
 import { byteIndexAt, byteToIndex, decorationRanges } from './spans'
 import { Follow, ownScroll } from './state-table'
@@ -11,10 +11,10 @@ export const LINE_HEIGHT = 20
 /** Rows drawn past each edge of the viewport, so a short scroll never shows an empty band. */
 const OVERSCAN = 6
 /**
- * The wide strip at every row's start that a mark on a node of more than one row is drawn in, in CSS pixels.
- * `style.css` draws its `.term-bar` lanes in strokes of a ninth of the strip, so this and `NARROW_LANES` stay
- * multiples of 9, for whole-pixel strokes. It stays at the view's left edge when the term scrolls sideways, as a
- * bar scrolled out of view would leave its node unmarked.
+ * The wide strip at every row's start that a mark on a node of more than one row, the result's block aside, is drawn
+ * in, in CSS pixels. `style.css` draws its `.term-bar` lanes in strokes of a ninth of the strip, so this and
+ * `NARROW_LANES` stay multiples of 9, for whole-pixel strokes. It stays at the view's left edge when the term scrolls
+ * sideways, as a bar scrolled out of view would leave its node unmarked.
  *
  * **A STRIP OF ITS OWN, NOT THE ROW'S `2ch` MARGIN.** That margin is the `▸`/`▾` glyph's, and it moves with
  * the indent: at indent 0 — the root's row, the one a mark on the root starts on — the glyph fills it. Every
@@ -42,6 +42,28 @@ const room = (width: number, lanes: number, ch: number) => Math.floor((width - l
  * the columns it gave would turn the strip wide again.
  */
 const lanesFor = (width: number, ch: number) => (room(width, LANES, ch) <= FLOOR ? NARROW_LANES : LANES)
+
+/**
+ * The characters a body `width` px wide lays a line out to, for characters `ch` px wide: what `columns()` answers.
+ * Exported for a caller that holds the body's element but not the body, so it reads the layout's width rather than
+ * working it out again.
+ */
+export const columnsAt = (width: number, ch: number) => Math.max(FLOOR, room(width, lanesFor(width, ch), ch))
+
+/**
+ * The columns the word `result` takes after a row, counted as the layout counts a row's: its six letters at 0.75em and
+ * 0.5ch either side of them (`style.css`'s `.term .is-result::after`) come to five and a quarter, and the layout
+ * counts whole columns.
+ */
+const WORD_COLUMNS = 6
+
+/**
+ * Whether the word `result` has room after `line` in a body that shows `width` columns without scrolling sideways:
+ * the row's text and the word within them, so the word takes none of the room the layout leaves clear and never
+ * scrolls the term sideways. **DROPPED, NEVER WRAPPED** (the list results design), as the TM's `little-endian` is:
+ * wrapped, the word would take a row of its own and push the rows after it down, at the one step it is said.
+ */
+const wordFits = (line: Line, width: number) => line.indent + lineText(line).length + WORD_COLUMNS <= width
 
 /** What the λ view asks of its owner when a row is used. */
 export type BodyEvents = {
@@ -86,8 +108,8 @@ type MarkSpan = {
 
 /**
  * Where each mark on `tree` falls in `lines`: the next redex, the contractum, every node `linked` names, and the root
- * when `result` says it is the run's result. A mark whose node no line shows — folded away inside another node — is
- * left out, as no token of it is drawn.
+ * when `result` says it is the run's result, whatever it is. A mark whose node no line shows — folded away inside
+ * another node — is left out, as no token of it is drawn.
  *
  * **ONE PASS OVER EVERY TOKEN, NOT ONE PER ROW DRAWN.** A row outside the virtual window is not in the DOM, so a
  * mark that spans rows is drawn by each of its rows from the line indices kept here, not measured from elements.
@@ -102,8 +124,7 @@ function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[]
   add('is-next-redex', tree.wire.nextRedex)
   add('is-contractum', tree.wire.contractum)
   for (const l of linked) add('is-linked', l)
-  // THE RESULT ONLY ON A CHIP, A Nat OR A Bool: a list's root is its constructor's λ, which does not read as the value.
-  if (result && tree.chip(0) !== null) add('is-result', 0)
+  if (result) add('is-result', 0)
   if (marks.length === 0) return []
   // Each node's first token, as its row and its place in that row, and its last row; -1 where none is drawn.
   const first = new Int32Array(tree.count).fill(-1)
@@ -134,8 +155,7 @@ function markSpans(tree: Tree, lines: readonly Line[], linked: readonly number[]
   for (const [mark, node] of marks) {
     const f = first[node] as number
     const l = last[node] as number
-    // A RESULT OVER MORE THAN ONE ROW, an opened chip, IS LEFT UNMARKED: the design gives it no lane in the strip.
-    if (f >= 0 && (mark !== 'is-result' || f === l)) out.push({ mark, node, first: f, at: at[node] as number, last: l })
+    if (f >= 0) out.push({ mark, node, first: f, at: at[node] as number, last: l })
   }
   return out
 }
@@ -334,6 +354,11 @@ export class LambdaBody {
   #result = false
   /** Where the marks on `#tree` fall in `#lines`, kept until either changes. */
   #spans: readonly MarkSpan[] = []
+  /**
+   * Whether the result's word has room after the text of the root's first row (`wordFits`); where it has not, the
+   * result's marks are `is-wordless`.
+   */
+  #word = true
   #outline = false
   #active = 0
   #painted = ''
@@ -400,8 +425,17 @@ export class LambdaBody {
   columns(): number {
     const ch = this.#ch()
     if (ch === null) return 80
-    const width = this.el.clientWidth
-    return Math.max(FLOOR, room(width, lanesFor(width, ch), ch))
+    return columnsAt(this.el.clientWidth, ch)
+  }
+
+  /**
+   * Characters that fit one line at the body's current width without scrolling it sideways: `columns()` without its
+   * floor, which lays a line out wider than a narrow body.
+   */
+  #shownColumns(): number {
+    const ch = this.#ch()
+    if (ch === null) return this.columns()
+    return room(this.el.clientWidth, lanesFor(this.el.clientWidth, ch), ch)
   }
 
   /** The width of one character of the body's font, or `null` where there is none to measure. */
@@ -449,7 +483,7 @@ export class LambdaBody {
 
   /**
    * Show `lines` of `tree`. `stale` says the tree belongs to a step other than the one on display; `result`, that its
-   * root is the run's result, marked when it is a chip on one row.
+   * root is the run's result, marked round its run on one row or as a block over several.
    */
   showTree(
     tree: Tree,
@@ -474,6 +508,12 @@ export class LambdaBody {
       this.#linked = linked
       this.#result = result
       this.#spans = markSpans(tree, lines, linked, result)
+      // WEIGHED AT THE COLUMNS THE BODY SHOWS, NOT THE ONES THE LINES WERE LAID OUT TO: the pane lays them out at
+      // `columns()` in the draw that shows them, which below the layout's floor is wider than the body, and a word that
+      // fits the layout there would scroll the term sideways. A resize alone lays nothing out, so the word keeps what
+      // was weighed here until the next layout.
+      const root = this.#spans.find((s) => s.mark === 'is-result')
+      this.#word = root === undefined || wordFits(lines[root.first] as Line, this.#shownColumns())
       this.#outline = outline
       this.#active = Math.min(this.#active, Math.max(0, lines.length - 1))
       this.#painted = ''
@@ -527,6 +567,15 @@ export class LambdaBody {
   }
 
   /**
+   * Where row `i` ends in the view's scroll: at the next row's top, and the last row at the spacer's end, past the pixel
+   * `.term-spacer` keeps below the rows. Following and the keys both scroll to it, so a view either one takes to the last
+   * row reaches that pixel, which a view's clip can take in place of a result block's bottom edge on the row's foot.
+   */
+  #foot(i: number): number {
+    return i < this.#lines.length - 1 ? (i + 1) * LINE_HEIGHT : this.#spacer.offsetHeight
+  }
+
+  /**
    * Tell the view whether a re-attach has anything to do. Every change to that ends in a paint — a user's
    * scroll, `attach`, a key that scrolls, a tree shown — or in a flat render, where there is no tree to
    * follow; the TM view's rule table keeps its own re-attach in step from the one place its changes reach, the grid's
@@ -568,7 +617,9 @@ export class LambdaBody {
     const redex = tree.wire.nextRedex
     if (redex !== null) {
       const at = lineOf(tree, this.#lines, redex)
-      const top = at < 0 ? null : this.#follow.targetScrollTop(at, LINE_HEIGHT, viewport, total)
+      // CLAMPED TO THE LAST ROW'S FOOT (`#foot`), which binds for any redex within half a view of the term's end.
+      const end = this.#foot(this.#lines.length - 1)
+      const top = at < 0 ? null : this.#follow.targetScrollTop(at, LINE_HEIGHT, viewport, end)
       if (top !== null && top !== this.el.scrollTop) {
         this.#follow.onProgrammaticScroll(top)
         this.el.scrollTop = top
@@ -643,7 +694,23 @@ export class LambdaBody {
     const here = this.#spans.filter((s) => s.first <= i && i <= s.last).sort((a, b) => a.node - b.node)
     for (const mark of Object.keys(MARKS) as Mark[]) {
       const tall = here.filter((s) => s.mark === mark && s.first < s.last)
-      if (tall.length > 0) lanes.append(bar(mark, tall, i))
+      if (tall.length === 0) continue
+      // THE RESULT OVER MORE THAN ONE ROW IS A BLOCK, NOT A BAR (the list results design): each of its rows is
+      // `is-result-row`, and `style.css` tints them and draws one edge round them, the word after the first row's text
+      // where it has room.
+      if (mark !== 'is-result') lanes.append(bar(mark, tall, i))
+      else {
+        el.classList.add('is-result-row')
+        el.classList.toggle('is-wordless', !this.#word)
+        el.classList.toggle(
+          'is-result-first',
+          tall.some((s) => s.first === i),
+        )
+        el.classList.toggle(
+          'is-result-last',
+          tall.some((s) => s.last === i),
+        )
+      }
     }
     // ONE SPAN PER NODE, ITS MARKS ITS CLASSES, so two marks on one node both show (`style.css` draws each pair).
     // Nodes nest and a node's tokens are one unbroken run, so the runs on a row nest too; ascending order is
@@ -657,7 +724,8 @@ export class LambdaBody {
       for (const [node, marks] of runs) {
         if (!tree.contains(node, tok.node) || open.some((o) => o.node === node)) continue
         const run = document.createElement('span')
-        run.className = ['term-mark', ...marks].join(' ')
+        const wordless = marks.includes('is-result') && !this.#word
+        run.className = ['term-mark', ...marks, ...(wordless ? ['is-wordless'] : [])].join(' ')
         ;(open.at(-1)?.el ?? el).append(run)
         open.push({ node, el: run })
       }
@@ -760,7 +828,8 @@ export class LambdaBody {
     e.preventDefault()
     this.#active = Math.min(Math.max(next, 0), this.#lines.length - 1)
     const top = this.#active * LINE_HEIGHT
-    const to = top < this.el.scrollTop ? top : Math.max(this.el.scrollTop, top + LINE_HEIGHT - this.el.clientHeight)
+    const to =
+      top < this.el.scrollTop ? top : Math.max(this.el.scrollTop, this.#foot(this.#active) - this.el.clientHeight)
     // A KEY THAT SCROLLS IS THE USER TAKING CONTROL, and `Follow` must hear so before the paint below: its
     // `scroll` event comes a frame later, and a paint still following would put the view back on the redex.
     if (to !== this.el.scrollTop) {

@@ -57,6 +57,7 @@ const FRAME: TmState = {
   window: ['_'],
   source_node: null,
   rule: null,
+  result: null,
 }
 
 const CONTROLS = controlState(true, `${STATES - 1}`, false, false, false)

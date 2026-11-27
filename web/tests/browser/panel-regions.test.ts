@@ -84,6 +84,7 @@ describe('the TM view’s rules and diagram', () => {
     window: ['_'],
     source_node: null,
     rule: 0,
+    result: null,
   }
 
   const mount = () => {

@@ -8,7 +8,7 @@ import { createPanel, type Panel } from './panel'
 import { PanelStack, type Shares } from './panel-stack'
 import { StateDiagram } from './state-diagram'
 import { focusedRows, highlight, linkedRows, StateIndex } from './state-table'
-import { resultField, tapeLabel, tapeRows } from './tape'
+import { resultField, resultRuns, tapeLabel, tapeRows } from './tape'
 import type { TmProgram, TmState } from './types'
 import { radioGroup } from './view-header'
 import type { GridRows, VirtualGrid } from './virtual-grid'
@@ -18,17 +18,30 @@ export { ROW_HEIGHT } from './state-table'
 export { OVERSCAN } from './virtual-grid'
 
 /**
- * A tape row's cells with `field`'s in one `span.tm-result` box and the word `result` right after it, which pushes
- * the rest of the row right.
+ * A tape row's cells with each of `fields`' in a `span.tm-result` box, and when `word` is set the word `result` right
+ * after the first, which pushes the rest of the row right. `fields` are ascending and apart.
  */
-function withResult(cells: readonly HTMLElement[], field: { readonly from: number; readonly to: number }): Node[] {
-  const box = document.createElement('span')
-  box.className = 'tm-result'
-  box.append(...cells.slice(field.from, field.to))
-  const word = document.createElement('span')
-  word.className = 'result-word'
-  word.textContent = 'result'
-  return [...cells.slice(0, field.from), box, word, ...cells.slice(field.to)]
+function withResult(
+  cells: readonly HTMLElement[],
+  fields: readonly { readonly from: number; readonly to: number }[],
+  word: boolean,
+): Node[] {
+  const out: Node[] = []
+  let at = 0
+  for (const [i, field] of fields.entries()) {
+    const box = document.createElement('span')
+    box.className = 'tm-result'
+    box.append(...cells.slice(field.from, field.to))
+    out.push(...cells.slice(at, field.from), box)
+    if (word && i === 0) {
+      const said = document.createElement('span')
+      said.className = 'result-word'
+      said.textContent = 'result'
+      out.push(said)
+    }
+    at = field.to
+  }
+  return [...out, ...cells.slice(at)]
 }
 
 /** Mints each pane's grid a prefix for its cells' ids, which `aria-activedescendant` names. */
@@ -63,7 +76,7 @@ export class TmPane extends MachineViewChrome {
    * gives the step part the room of, so the line's rows do not change while a playing run's count gains digits.
    */
   #stepAtNewest = ''
-  /** Whether `#frame` is the run's result, whose REG field 0 the tapes mark: `setResult`. */
+  /** Whether `#frame` is the run's result, whose REG field 0 and HEAP cells the tapes mark: `setResult`. */
   #result = false
   /** Whether the run's fields read least significant digit first, which the status line says beside the result. */
   #littleEndian = false
@@ -390,8 +403,8 @@ export class TmPane extends MachineViewChrome {
 
   /**
    * `LinkedPane`'s word of the run's result: at it the next `render` boxes REG's field 0 with the word `result` after
-   * it, and the status line says `little-endian` where `littleEndian` says the run's fields read so. A pure setter,
-   * for `setFocus`'s reason.
+   * it and a list's cells on HEAP, and the status line says `little-endian` where `littleEndian` says the run's fields
+   * read so. A pure setter, for `setFocus`'s reason.
    */
   setResult(on: boolean, littleEndian: boolean): void {
     this.#result = on
@@ -423,6 +436,10 @@ export class TmPane extends MachineViewChrome {
     this.#drawStatus()
 
     const field = this.#result ? resultField(frame) : null
+    // A list result's cells on HEAP, found by the name the core gives the tape, lit where the window shows them; the
+    // word stays on REG's field 0.
+    const heap = this.#names.indexOf('HEAP')
+    const runs = this.#result ? resultRuns(frame, heap) : []
     this.#tapes.replaceChildren(
       ...tapeRows(frame, this.#names).map((row, tape) => {
         const el = document.createElement('div')
@@ -441,7 +458,9 @@ export class TmPane extends MachineViewChrome {
           cell.textContent = c
           return cell
         })
-        cells.append(...(tape === 0 && field !== null ? withResult(drawn, field) : drawn))
+        const lit = tape === 0 ? (field === null ? [] : [field]) : tape === heap ? runs : []
+        cells.append(...(lit.length > 0 ? withResult(drawn, lit, tape === 0) : drawn))
+        if (tape === heap && runs.length > 0) el.setAttribute('aria-description', 'the result’s cells marked')
         el.append(label, cells)
         return el
       }),

@@ -29,7 +29,7 @@ pub use build::{
     AT, BOX, Builder, HEAP, MARK, MAX_FIELD_WIDTH, MAX_MACHINE_STATES, MAX_TAPES, MIN_FIELD_WIDTH, OVERFLOWING_NUMBER,
     PINNED_FIELD_WIDTHS, REG, RuleSpec, SEP, STACK, Slot, TAPE_NAMES, TAPES, WORK, ZERO,
 };
-pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason};
+pub use decode::{decode_tape, decode_tape_reason, decode_tape_ty, decode_tape_ty_reason, result_heap_runs};
 pub use defunc::{defunc, defunc_mapped};
 pub use encoding::{Binary, Encoding, Unary};
 pub use header::{

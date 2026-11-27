@@ -20,7 +20,7 @@ use redextape_native::measure::CORPUS;
 use redextape_wire::{Decoded, RunStatus};
 
 const LISTINGS: [Listing; 2] = [Listing::AsBuilt, Listing::Optimised];
-const WINDOW: ClifWindow = ClifWindow { values: 0, frames: 0, cells: 0, boxes: 0 };
+const WINDOW: ClifWindow = ClifWindow { values: 0, frames: 0, cells: 0, boxes: 0, result: 0 };
 const FACT: &str = include_str!("../../../web/src/examples/fact.rxt");
 
 /// The leg of `src`, a λ program typed `ty`, under `caps`, built as `listing`.
@@ -241,4 +241,55 @@ fn a_stack_cap_is_final_for_the_leg() {
         "a raised step cap leaves a stack pause"
     );
     assert!(!leg.step(), "the stack pause holds");
+}
+
+/// **A RESULT NO VIEW CAN MARK CARRIES NO CELLS**: typed as the list of functions it is, the leg's last frame names no
+/// result cell and carries none, where typed as a list of numbers the same run names the cells the walk reaches, the
+/// closure's and those of the list it captures.
+#[test]
+fn a_list_of_functions_result_carries_no_result_cells() {
+    let src = "let xs = [1, 2]; [|x| xs]";
+    let funs = Ty::List(Box::new(Ty::Fun(vec![Ty::Nat], Box::new(Ty::List(Box::new(Ty::Nat))))));
+    for listing in LISTINGS {
+        let ended = |ty| {
+            let mut leg = leg(src, ty, DEFAULT_CAPS, listing);
+            step_to_stop(&mut leg);
+            leg.state(ClifWindow { result: 64, ..WINDOW })
+        };
+        let walked = ended(Ty::List(Box::new(Ty::Nat)));
+        assert!(
+            walked.result.is_some_and(|r| r.len == 5),
+            "{}: the premise, the walk reaches five cells",
+            listing.name()
+        );
+        let st = ended(funs.clone());
+        assert_eq!((st.result, st.cells.len()), (None, 0), "{}", listing.name());
+    }
+}
+
+/// **A RESULT NO VIEW CAN MARK CARRIES NO CELLS, THOUGH ITS TYPE DECODES**: `[0, 0]` paired with itself 22 times, each
+/// pair holding the one before twice, is a list of lists 23 deep that decodes and is past `MAX_PRINT_NODES` printed, so
+/// the leg's last frame names no result cell and carries none, where typed as a list of numbers, which prints, the
+/// same run names the 46 cells the walk reaches.
+#[test]
+fn a_result_too_large_to_print_carries_no_result_cells() {
+    let pairs: String = (1..=22).map(|k| format!("let a{k} = [a{}, a{}]; ", k - 1, k - 1)).collect();
+    let src = format!("let a0 = [0, 0]; {pairs}a22");
+    let nested = (0..23).fold(Ty::Nat, |elem, _| Ty::List(Box::new(elem)));
+    for listing in LISTINGS {
+        let ended = |ty| {
+            let mut leg = leg(&src, ty, DEFAULT_CAPS, listing);
+            step_to_stop(&mut leg);
+            (leg.value(), leg.state(ClifWindow { result: 64, ..WINDOW }))
+        };
+        let (value, walked) = ended(Ty::List(Box::new(Ty::Nat)));
+        assert!(
+            matches!(value, Decoded::Value { .. }) && walked.result.is_some_and(|r| r.len == 46),
+            "{}: the premise, a printed list whose walk reaches 46 cells",
+            listing.name()
+        );
+        let (value, st) = ended(nested.clone());
+        assert_eq!(value, Decoded::TooLargeToPrint, "{}: the premise", listing.name());
+        assert_eq!((st.result, st.cells.len()), (None, 0), "{}", listing.name());
+    }
 }

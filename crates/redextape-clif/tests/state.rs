@@ -18,9 +18,9 @@ use redextape_core::viewmodel::{RxmBox, RxmCell, RxmWord};
 use redextape_native::{Listing, RtFn, build_listing};
 
 const LISTINGS: [Listing; 2] = [Listing::AsBuilt, Listing::Optimised];
-const WINDOW: ClifWindow = ClifWindow { values: 64, frames: 8, cells: 16, boxes: 16 };
+const WINDOW: ClifWindow = ClifWindow { values: 64, frames: 8, cells: 16, boxes: 16, result: 64 };
 // Cuts the corpus's runs reach, so that cutting is tested.
-const NARROW: ClifWindow = ClifWindow { values: 2, frames: 2, cells: 16, boxes: 16 };
+const NARROW: ClifWindow = ClifWindow { values: 2, frames: 2, cells: 16, boxes: 16, result: 64 };
 // A window no run's values reach, so its `values` are every value the running frame has set.
 const EVERY: ClifWindow = ClifWindow { values: usize::MAX, ..WINDOW };
 const FACT: &str = include_str!("../../../web/src/examples/fact.rxt");
@@ -375,7 +375,7 @@ fn the_values_window_holds_the_returned_value() {
                 missed += usize::from(missed_here && window.values == NARROW.values);
             }
             // With no newest cells the window's cells are only those its words point at.
-            let state = stepper.state(ClifWindow { cells: 0, ..NARROW });
+            let state = stepper.state(ClifWindow { cells: 0, result: 0, ..NARROW });
             let returned = state.values.iter().find(|v| Some(v.value) == state.returned).unwrap();
             if returned.word.tag == WordTag::List && result != 0 {
                 let cells: Vec<u64> = state.cells.iter().map(|c| c.cell as u64).collect();
@@ -388,4 +388,38 @@ fn the_values_window_holds_the_returned_value() {
     // never moved the returned row.
     assert!(missed > 0, "every returned value was among the first {}", NARROW.values);
     assert!(lists > 0, "no run returned a list past the first {} values", NARROW.values);
+}
+
+/// At a `Ran` end `result` names every cell the returned list reaches, its lists' cells too, and `cells`
+/// carries the newest `ClifWindow::result` of them with no values shown: `[9]`'s cell and `cons`'s, the newest,
+/// are garbage. At the step before the end, and for a returned `nil` or number, there is none: the number 1 names the
+/// heap's one cell.
+#[test]
+fn a_ran_end_names_the_cells_its_returned_list_reaches() {
+    let none = ClifWindow { values: 0, frames: 0, cells: 0, boxes: 0, result: 0 };
+    for listing in LISTINGS {
+        let src = "tail(cons([9], [[1], [2, 3]]))";
+        let funcs = build(src, listing);
+        let mut stepper = Stepper::new(&funcs, DEFAULT_CAPS);
+        stepper.run(u64::MAX);
+        let mut before = Stepper::new(&funcs, DEFAULT_CAPS);
+        before.run(stepper.steps_taken() - 1);
+        assert!(before.status().is_none(), "{}: the premise, the step before the end", listing.name());
+        assert_eq!(before.state(WINDOW).result, None, "{}", listing.name());
+        let state = stepper.state(WINDOW);
+        let result = state.result.unwrap();
+        assert_eq!((result.len, state.heap_len), (5, 7), "{}", listing.name());
+        assert!(!result.shown.contains(&7) && result.shown.len() == 5, "{}: {:?}", listing.name(), result.shown);
+        let carried = stepper.state(ClifWindow { result: 2, ..none });
+        let cells: Vec<usize> = carried.cells.iter().map(|c| c.cell).collect();
+        assert_eq!(
+            (&cells, &carried.result.unwrap().shown),
+            (&result.shown[..2].to_vec(), &result.shown[..2].to_vec())
+        );
+
+        for src in ["tail(cons(1, nil))", "head(cons(1, nil))"] {
+            let ended = ran(src, listing);
+            assert_eq!((ended.heap_len, ended.result), (1, None), "{src} {}", listing.name());
+        }
+    }
 }

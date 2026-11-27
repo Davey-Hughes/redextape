@@ -214,10 +214,21 @@ describe('what the panels are handed', () => {
   it('counts older cells and boxes, boxes in the plural only past one', () => {
     const cells = [{ cell: 9, head: valueWord('1'), tail: listWord('8') }]
     const boxes = [{ handle: 2, content: valueWord('7') }]
-    const notes = (s: RxmState) => rxmHeap(s).items.flatMap((item) => (item.kind === 'note' ? [item.text] : []))
+    const notes = (s: RxmState) => rxmHeap(s, false).items.flatMap((item) => (item.kind === 'note' ? [item.text] : []))
     expect(notes(frameOf({ cells, heap_len: 3, boxes, box_len: 2 }))).toEqual(['+2 older', '+1 older box'])
     expect(notes(frameOf({ cells, heap_len: 1, boxes, box_len: 4 }))).toEqual(['+3 older boxes'])
     expect(notes(frameOf({ cells, heap_len: 1, boxes, box_len: 1 }))).toEqual([])
+  })
+
+  it("lights the result's cells at the run's result, and says in the older cells' note how many are the result's", () => {
+    const cells = [9, 8, 3, 2].map((cell) => ({ cell, head: valueWord('1'), tail: listWord(String(cell - 1)) }))
+    const frame = frameOf({ cells, heap_len: 70, result: { shown: [3, 2], len: 66 } })
+    const items = (on: boolean) => rxmHeap(frame, on).items.map((i) => (i.kind === 'line' ? i.result : i.text))
+    expect(items(true)).toEqual([false, false, true, true, '+66 older, 64 of them result cells'])
+    expect(items(false)).toEqual([false, false, false, false, '+66 older'])
+    const last = (len: number) => rxmHeap(frameOf({ cells, heap_len: 70, result: { shown: [3, 2], len } }), true).items
+    expect(last(3).at(-1), 'one hidden').toEqual({ kind: 'note', text: '+66 older, 1 of them a result cell' })
+    expect(last(2).at(-1), 'none hidden').toEqual({ kind: 'note', text: '+66 older' })
   })
 
   it('says a hidden argument and a hidden local in the singular', () => {

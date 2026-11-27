@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { compile, initSync as initPkg, type Session } from '../../../pkg/redextape_wasm.js'
 import { ClifSession, initSync as initClif } from '../../../pkg-clif/redextape_clif_wasm.js'
+import type { ClifState, ClifWindow } from '../../src/types'
 
 /**
  * **`pkg-clif/` RUNS WHAT `pkg/`'s `clifInput()` HANDS IT, THROUGH THE REAL EXPORTS OF BOTH BUILDS.** The Rust tests
@@ -111,12 +112,26 @@ describe('a CLIF session built from clifInput()', () => {
   it('shows a word past 2^53 in the state', () => {
     const big = '{ let mut x = 1; let x = 18446744073709551615; x + 1 }'
     const clif = new ClifSession(compiled(big).clifInput(), 'as-built')
-    const window = { values: 1000, frames: 0, cells: 0, boxes: 0 }
+    const window: ClifWindow = { values: 1000, frames: 0, cells: 0, boxes: 0, result: 0 }
     const words = (): string[] =>
       (clif.state(window) as { values: { word: { word: string } }[] }).values.map((v) => v.word.word)
     let held = words()
     while (!held.includes('18446744073709551615') && clif.step()) held = words()
     expect(held).toContain('18446744073709551615')
+  })
+
+  /** A filled `result` comes back out of `state()` at the run's end as numbers, the window's `result` crossing in. */
+  it('hands a list result’s cells out of the state at the run’s end, as numbers', () => {
+    const clif = new ClifSession(compiled('[[1], [2, 3]]').clifInput(), 'as-built')
+    for (let steps = 0; clif.step(); steps += 1) {
+      if (steps === 1_000) throw new Error(`no end after ${steps} steps`)
+    }
+    expect(clif.status().run, 'precondition: the run ended').toBe('Ended')
+    const window: ClifWindow = { values: 64, frames: 16, cells: 8, boxes: 16, result: 64 }
+    expect((clif.state(window) as ClifState).result, "the list's five cells, newest first").toEqual({
+      shown: [5, 4, 3, 2, 1],
+      len: 5,
+    })
   })
 
   it('refuses a listing it does not know by name', () => {

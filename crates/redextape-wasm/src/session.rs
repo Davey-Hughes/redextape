@@ -16,7 +16,7 @@ use redextape_core::tm::rxm::{Program, RxmOutcome};
 use redextape_core::tm::{self, EncodingKind, Symbol, Tape, TmRun};
 use redextape_core::trace::{self, LambdaCheckpoints, LambdaCursor, RxmCursor, TmCursor};
 use redextape_core::viewmodel::{
-    LambdaState, LambdaTree, LinkIndex, RxmProgram, RxmState, RxmWindow, TmProgram, TmState, TreeAnswer,
+    LambdaState, LambdaTree, LinkIndex, RxmProgram, RxmState, RxmWindow, TapeRun, TmProgram, TmState, TreeAnswer,
 };
 use redextape_core::{Diagnostic, Severity, Span, lints, parser, typeck};
 use redextape_wire::{
@@ -394,9 +394,18 @@ impl RxmLeg {
         self.cursor.next().is_some()
     }
 
-    /// The cursor's machine cut to `window`; `map` resolves `source_node`, and a copy has none.
-    fn state(&self, map: Option<&SourceMap>, window: RxmWindow) -> RxmState {
-        RxmState::window(&self.cursor, map, window)
+    /// The cursor's machine cut to `window`; `map` resolves `source_node`, and a copy has none. The result's cells
+    /// only where `ty` decodes the result to a value `value` prints, the one result a view marks: `ResultCells` says
+    /// why.
+    fn state(&self, map: Option<&SourceMap>, window: RxmWindow, ty: Option<&redextape_core::ty::Ty>) -> RxmState {
+        let state = RxmState::window(&self.cursor, map, window);
+        // Only the halt's frame names result cells, so only it pays for `value`'s decode and capped print.
+        if state.result.is_none() || (ty.is_some() && matches!(self.value(ty), Decoded::Value { .. })) {
+            return state;
+        }
+        let mut state = RxmState::window(&self.cursor, map, RxmWindow { result: 0, ..window });
+        state.result = None;
+        state
     }
 
     /// The run's answer: `rr` decoded by `ty` from the leg's own run, or from the cursor once a raised cap has
@@ -957,9 +966,30 @@ impl Session {
         Ok(c.next().is_some())
     }
 
+    /// The cursor's machine with `radius` cells of tape round each head, and once it stands in an accept state,
+    /// the HEAP cells the result reaches (`TmState::result`), where the cursor's tapes decode by `self.ty` to a value
+    /// that prints, as `tm_value` decodes and prints the answer once the cursor reports the halt: the one result a
+    /// view marks, as `ResultCells` says.
     pub fn tm_state(&self, radius: usize) -> Result<TmState, SessionError> {
         let (_, c, _, _) = self.tm.as_ref().map_err(|_| SessionError::TmAbsent)?;
-        Ok(TmState::window(c, Some(&self.map), radius))
+        let mut state = TmState::window(c, Some(&self.map), radius);
+        // The accept state rather than `TmStatus::Halted`: the cursor reports the halt only from the step call after
+        // the one that reached that state, a call that takes no step, so a recorder taking one frame per step taken
+        // records the accept state's frame last and none with the status set. The overflow guard is not an accept
+        // state, so a run halted there, whose fields are cut to its width, names no cells.
+        if c.machine().states.get(c.state() as usize).is_some_and(|s| s.accept) {
+            let enc = self.kind.at(tm::MIN_FIELD_WIDTH);
+            let runs = tm::result_heap_runs(c.tapes(), &self.ty, &*enc);
+            // `tm_value`'s decode of the cursor's own tapes, not `tm_value`, which answers `Unfinished` on this frame
+            // for a run `compile`'s cap stopped: it reads the cursor only once the cursor reports the halt.
+            let marked = || {
+                matches!(decoded_or_undecodable(tm::decode_tape_ty(c.tapes(), &self.ty, &*enc)), Decoded::Value { .. })
+            };
+            if !runs.is_empty() && marked() {
+                state.result = Some(runs.into_iter().map(|(from, to)| TapeRun { from, to }).collect());
+            }
+        }
+        Ok(state)
     }
 
     /// Cells `from..to` of tape `tape`, in the same materialized coordinates `tm_state` reports its
@@ -1052,11 +1082,12 @@ impl Session {
         Ok(leg.step())
     }
 
-    /// The cursor's machine cut to `window` — `RxmState::window` and nothing else, with the session's map, so
-    /// `source_node` resolves (`compile_at`'s doc says why this map indexes this cursor's program).
+    /// The cursor's machine cut to `window` — `RxmState::window` with the session's map, so `source_node` resolves
+    /// (`compile_at`'s doc says why this map indexes this cursor's program), and the result's cells only where the
+    /// program's type decodes the result to a value `rxm_value` prints.
     pub fn rxm_state(&self, window: RxmWindow) -> Result<RxmState, SessionError> {
         let leg = self.rxm.as_ref().map_err(|_| SessionError::RxmAbsent)?;
-        Ok(leg.state(Some(&self.map), window))
+        Ok(leg.state(Some(&self.map), window, Some(&self.ty)))
     }
 
     /// Extend the step budget, additively and saturating. It resumes a run the STEP cap stopped and nothing
@@ -1423,9 +1454,10 @@ impl RxmScratch {
         self.leg.step()
     }
 
-    /// The cursor's machine cut to `window`, with no map: `source_node` is `None` on every frame.
+    /// The cursor's machine cut to `window`, with no map: `source_node` is `None` on every frame. The result's
+    /// cells only where the header's type decodes the result to a value `rxm_value` prints.
     pub fn rxm_state(&self, window: RxmWindow) -> RxmState {
-        self.leg.state(None, window)
+        self.leg.state(None, window, self.ty.as_ref())
     }
 
     /// See `Session::raise_rxm_cap`.
@@ -2883,6 +2915,124 @@ mod tests {
         assert_eq!(s.tm_state(0).expect("TM available").step, ended);
     }
 
+    /// The last two frames a recording of the TM run holds: one per `step_tm` that returned true, as the page's
+    /// recorder takes them, so none after the call that finds the halt and returns false.
+    fn last_tm_frames(s: &mut Session) -> (TmState, TmState) {
+        let frame = |s: &Session| s.tm_state(0).expect("TM available");
+        let (mut before, mut last) = (frame(s), frame(s));
+        while s.step_tm().expect("TM available") {
+            before = std::mem::replace(&mut last, frame(s));
+        }
+        (before, last)
+    }
+
+    /// The last frame a recording holds names the HEAP cells the result reaches, a list of lists' cells too, in
+    /// either encoding: five of the heap's seven cells, `[9]`'s and `cons`'s being garbage. A frame read after the
+    /// halt is found names the same. The frame before it, and the last of a `nil` or a number, name none.
+    #[test]
+    fn a_halted_tm_frame_names_the_heap_cells_its_result_reaches() {
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            let mut s = Session::compile("tail(cons([9], [[1], [2, 3]]))", kind).session.expect("compiles");
+            let (before, last) = last_tm_frames(&mut s);
+            assert_eq!(before.result, None, "{kind:?}: not halted");
+            let runs = last.result.expect("a list");
+            assert_eq!(s.tm_state(0).expect("TM available").result.as_ref(), Some(&runs), "{kind:?}: after the halt");
+            let ats =
+                |from, to| s.tape_slice(tm::HEAP, from, to).expect("HEAP").iter().filter(|&&c| c == tm::AT).count();
+            assert_eq!(runs.iter().map(|r| ats(r.from, r.to)).sum::<usize>(), 5, "{kind:?}: {runs:?}");
+            assert_eq!(ats(0, usize::MAX), 7, "{kind:?}");
+            for src in ["tail(cons(1, nil))", "head(cons(7, nil))"] {
+                let mut s = Session::compile(src, kind).session.expect("compiles");
+                assert_eq!(last_tm_frames(&mut s).1.result, None, "{src} {kind:?}");
+            }
+        }
+    }
+
+    /// **A CELL THE RESULT DOES NOT REACH SPLITS ITS RUNS**: `g`'s cell sits between the result's two on HEAP, so
+    /// they are two runs of one cell each, apart.
+    #[test]
+    fn a_cell_the_result_does_not_reach_splits_its_heap_runs() {
+        for kind in [EncodingKind::Unary, EncodingKind::Binary] {
+            let mut s =
+                Session::compile("let xs = [1]; let g = [5]; cons(head(g), xs)", kind).session.expect("compiles");
+            let runs = last_tm_frames(&mut s).1.result.expect("a list");
+            let ats =
+                |from, to| s.tape_slice(tm::HEAP, from, to).expect("HEAP").iter().filter(|&&c| c == tm::AT).count();
+            assert_eq!(ats(0, usize::MAX), 3, "{kind:?}: the premise, three cells");
+            assert_eq!(runs.iter().map(|r| ats(r.from, r.to)).collect::<Vec<_>>(), [1, 1], "{kind:?}: {runs:?}");
+            assert!(runs[0].to < runs[1].from, "{kind:?}: apart, {runs:?}");
+        }
+    }
+
+    /// A pinned width's run that halts in its overflow guard has no result, so its HEAP names no cells, though
+    /// `rr` holds `one`'s list when the sum outgrows the width, a list the walk would light.
+    #[test]
+    fn a_halt_in_the_overflow_guard_names_no_heap_cells() {
+        let mut s = Session::compile_at(
+            "fn one(n) { [n] } let xs = one(1); let a = 9; let b = 9; cons(a + b, xs)",
+            EncodingKind::Binary,
+            Some(4),
+        )
+        .session
+        .expect("compiles");
+        let (_, last) = last_tm_frames(&mut s);
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        assert!(tm::is_overflow_guard(cursor.machine(), cursor.state()), "the premise: it halted in the guard");
+        let runs = tm::result_heap_runs(cursor.tapes(), &s.ty, &*s.kind.at(tm::MIN_FIELD_WIDTH));
+        assert!(!runs.is_empty(), "the premise: rr names a list");
+        assert_eq!((last.result, s.tm_state(0).expect("TM available").result), (None, None));
+    }
+
+    /// **A RESULT NO VIEW CAN MARK CARRIES NO CELLS**: a list of functions does not decode, so neither the rxm frame
+    /// nor the TM's last names a cell of it, and the rxm heap carries only `rr`'s cell, though the walk reaches the
+    /// closure's cell and those of the list it captures, and the TM's walk the list's own cell.
+    #[test]
+    fn a_list_of_functions_result_carries_no_result_cells() {
+        let mut s = Session::compile("let xs = [1, 2]; [|x| xs]", EncodingKind::Binary).session.expect("compiles");
+        assert!(!s.tm_result_decodable(), "the premise: the type does not decode");
+        while s.step_rxm().expect("rxm available") {}
+        let rr_only = RxmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0, result: 64 };
+        let walked = RxmState::window(&s.rxm.as_ref().expect("rxm available").cursor, None, rr_only);
+        assert!(walked.result.is_some_and(|r| r.len == 5), "the premise: the walk reaches five cells");
+        let st = s.rxm_state(rr_only).expect("rxm available");
+        assert_eq!((st.result, st.cells.len()), (None, 1), "rr's cell alone");
+
+        let last = last_tm_frames(&mut s).1;
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        let runs = tm::result_heap_runs(cursor.tapes(), &s.ty, &*s.kind.at(tm::MIN_FIELD_WIDTH));
+        assert!(!runs.is_empty(), "the premise: the TM's walk finds the list's cell");
+        assert_eq!(last.result, None);
+    }
+
+    /// `[0, 0]` paired with itself 22 times, each pair holding the one before twice: 46 cells, and past
+    /// `MAX_PRINT_NODES` printed.
+    fn shared_pairs() -> String {
+        let pairs: String = (1..=22).map(|k| format!("let a{k} = [a{}, a{}]; ", k - 1, k - 1)).collect();
+        format!("let a0 = [0, 0]; {pairs}a22")
+    }
+
+    /// **A RESULT NO VIEW CAN MARK CARRIES NO CELLS, THOUGH ITS TYPE DECODES**: the rxm and TM legs decode
+    /// `shared_pairs`'s list and refuse to print it, so neither the rxm frame nor the TM's last names a cell of it,
+    /// and the rxm heap carries only `rr`'s cell, though both walks reach the list's cells.
+    #[test]
+    fn a_result_too_large_to_print_carries_no_result_cells() {
+        let mut s = Session::compile(&shared_pairs(), EncodingKind::Binary).session.expect("compiles");
+        assert_eq!(s.rxm_value(), Ok(Decoded::TooLargeToPrint), "the premise: rxm decodes it and refuses the print");
+        while s.step_rxm().expect("rxm available") {}
+        let rr_only = RxmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0, result: 64 };
+        let walked = RxmState::window(&s.rxm.as_ref().expect("rxm available").cursor, None, rr_only);
+        assert!(walked.result.is_some_and(|r| r.len == 46), "the premise: the walk reaches 46 cells");
+        let st = s.rxm_state(rr_only).expect("rxm available");
+        assert_eq!((st.result, st.cells.len()), (None, 1), "rr's cell alone");
+
+        let last = last_tm_frames(&mut s).1;
+        assert_eq!(s.tm_value(), Ok(Decoded::TooLargeToPrint), "the premise: the TM decodes it and refuses the print");
+        let (_, cursor, _, _) = s.tm.as_ref().expect("TM available");
+        let runs = tm::result_heap_runs(cursor.tapes(), &s.ty, &*s.kind.at(tm::MIN_FIELD_WIDTH));
+        assert!(!runs.is_empty(), "the premise: the TM's walk finds the list's cells");
+        assert_eq!(last.result, None);
+    }
+
     /// The mirror of the λ case: every TM method answers `Err` when the leg is absent rather than
     /// panicking. `TooDeep` reaches the TM lowering too, so a deep-enough list literal declines both.
     #[test]
@@ -3077,7 +3227,7 @@ mod tests {
 
         // Taking the "continue" offer that `Capped` exists to make honest.
         s.raise_tm_cap(1_000_000, 0).expect("TM available");
-        while s.step_tm().expect("TM available") {}
+        let last = last_tm_frames(&mut s).1;
 
         assert_eq!(s.tm_status().run, Some(RunStatus::Ended), "the raised cap carried the cursor to a halt");
         assert_eq!(
@@ -3085,6 +3235,12 @@ mod tests {
             Ok(Decoded::Value { text: "[1, 2, 3]".to_string() }),
             "the status says this machine halted, so the value must be the halted machine's"
         );
+        // THE ACCEPT STATE'S FRAME, the last a recording takes, where `tm_value` still answers `Unfinished` for a run
+        // the cap stopped: it names the list's HEAP cells all the same, as an uncapped run's last frame does.
+        let mut uncapped = Session::compile("[1, 2, 3]", EncodingKind::Unary).session.expect("compiles");
+        let runs =
+            last_tm_frames(&mut uncapped).1.result.expect("the uncapped run's last frame names the list's cells");
+        assert_eq!(last.result, Some(runs), "the continued run's last recorded frame names the same HEAP cells");
     }
 
     /// `src` compiled under a ten-step TM cap, stepped to that cap, then continued to its halt, which must be in
@@ -3385,7 +3541,7 @@ mod tests {
 
     /// The window every rxm test reads through: larger than any program below, so a frame is the whole
     /// machine unless a test says otherwise.
-    const RXM_WHOLE: RxmWindow = RxmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 };
+    const RXM_WHOLE: RxmWindow = RxmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16, result: 64 };
 
     /// A runaway counter: it never halts, the TM declines it as overflowing every width, and the rxm leg
     /// spends its whole step cap on it at compile time.
@@ -3854,7 +4010,7 @@ mod tests {
         let cons = format!("    nil\tr0\nloop:\n{}    jmp\tloop\n", "    cons\tr0, r1, r0\n".repeat(100));
         let mut sc = rxm_scratch(&cons).scratch.expect("builds");
         run_copy_out(&mut sc);
-        let end = sc.rxm_state(RxmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0 });
+        let end = sc.rxm_state(RxmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0, result: 0 });
         assert_eq!((sc.rxm_status().cap, end.heap_len), (Some(RxmCap::Heap), 2_000_000));
 
         let saved = "f:\n    li\tr999, #1\n    call\tf\n";

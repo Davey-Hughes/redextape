@@ -33,10 +33,14 @@
           past its step cap. At the last step of a run that ends with a number, a Bool or a list, the TM, rxm and clif
           views mark the result with a tinted box and the word result: the first field of the REG tape, the register rr
           and the value main returns, which the rxm and clif views show whole in their first row. For a list, that is
-          its pointer. The λ view marks the term the same way when it is a number or a Bool on one line. A run that ends
-          with (), with a function or with a value too large to print has no mark. Under the binary encoding the TM
-          view's status line adds little-endian when it has room: a field's leftmost cell is its least significant
-          digit.
+          its pointer, and the cells the list reaches are tinted and edged too: the rxm and clif heaps light every one
+          the frame holds, as one box where they sit together, and say how many more there are; the TM view boxes them
+          on the HEAP tape where its window shows them. The λ view marks the term the same way: round it on one line,
+          with the word after it when the line has room for it, or as one tinted block when it runs over several, the
+          word after its first row, which has room for it wherever the view shows eleven columns. A run that ends with
+          (), with a function, with a list of functions or with a value too large to print has no mark. Under the
+          binary encoding the TM view's status line adds little-endian when it has room: a field's leftmost cell is its
+          least significant digit.
         </li>
         <li>
           Click a token in the source, a λ token, an rxm or clif instruction or a machine rule, and the other views

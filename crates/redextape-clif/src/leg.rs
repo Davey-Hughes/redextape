@@ -166,10 +166,19 @@ impl ClifLeg {
         })
     }
 
-    /// The cursor's frame cut to `window`.
+    /// The cursor's frame cut to `window`, with the returned list's cells only where the leg's type decodes it to a
+    /// value `value` prints, the one result a view marks: `ResultCells` says why.
     #[must_use]
     pub fn state(&self, window: ClifWindow) -> ClifState {
-        self.runs.borrow_dependent().cursor.state(window)
+        let cursor = &self.runs.borrow_dependent().cursor;
+        let state = cursor.state(window);
+        // Only a `Ran` end's frame names result cells, so only it pays for `value`'s decode and capped print.
+        if state.result.is_none() || matches!(self.value(), Decoded::Value { .. }) {
+            return state;
+        }
+        let mut state = cursor.state(ClifWindow { result: 0, ..window });
+        state.result = None;
+        state
     }
 
     /// The run's answer: from the scout's end, else from the cursor's once it has ended, else `Unfinished`.

@@ -153,6 +153,7 @@ export const VIEWS = [
           depth: c.depth,
           frames: many(c.rows?.stack ?? 0, () => at),
           heap_len: c.cells,
+          result: null,
           cells: cellsOf(c),
           box_len: c.boxes,
           boxes: [],

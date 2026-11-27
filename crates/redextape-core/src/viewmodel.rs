@@ -256,12 +256,28 @@ pub struct TmState {
     /// compiler cannot see this one. `usize` rather than `u32` to match `heads` and `window_start`
     /// beside it; on wasm32 they are the same width and cross as plain numbers.
     pub rule: Option<usize>,
+    /// On the frame of the accept state the machine halts in, where the result is a list, the HEAP cells it reaches,
+    /// as `tm::result_heap_runs` finds them; the HEAP's materialized coordinates, as `heads`. The cursor's `status()`
+    /// still reads `None` on that frame: it reports `Halted` from the next call, which takes no step, so no frame a
+    /// recorder takes per step has the status set. `None` on every other frame, for a halt in the overflow guard,
+    /// which is not an accept state, for `nil`, for a result that is not a list or that the leg does not decode and
+    /// print (`ResultCells`), and from `window`, which has no type to read the HEAP by: `Session::tm_state` sets it.
+    pub result: Option<Vec<TapeRun>>,
 }
 
-/// How much of the rxm machine one `RxmState` carries: the first `locals` locals, the first `args`
-/// arguments, the top `frames` call frames, the newest `cells` cons cells and the newest `boxes` boxes.
+/// A run of one tape's cells, `from..to`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct TapeRun {
+    pub from: usize,
+    pub to: usize,
+}
+
+/// How much of the rxm machine one `RxmState` carries: the first `locals` locals and `args` arguments, the
+/// top `frames` call frames, the newest `cells` cons cells and `boxes` boxes, and a halt's newest `result`.
 ///
-/// **FIVE BOUNDS, ALL THE RENDERER'S** — the module doc's rule that core picks no number. Each one bounds a
+/// **SIX BOUNDS, ALL THE RENDERER'S** — the module doc's rule that core picks no number. Each one bounds a
 /// list the run can grow without limit: a register bank to `MAX_REGISTERS`, the stack to `Caps::stack`
 /// frames, the heap and the boxes to `Caps::heap` each. `locals` also bounds each frame's saved locals,
 /// since a frame's saved bank is the caller's locals as they stood at the `call`, and a view that shows
@@ -269,7 +285,7 @@ pub struct TmState {
 ///
 /// **`Deserialize` IS LOAD-BEARING HERE, WHERE IT IS NOT FOR ANY OTHER TYPE IN THIS FILE.** Every other type
 /// derives it and nothing reads it back; this one travels the other way, as the argument JavaScript passes
-/// to the rxm leg's frame request, so a renderer states its window in one object rather than five
+/// to the rxm leg's frame request, so a renderer states its window in one object rather than six
 /// positional numbers it could transpose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -280,6 +296,7 @@ pub struct RxmWindow {
     pub frames: usize,
     pub cells: usize,
     pub boxes: usize,
+    pub result: usize,
 }
 
 /// One machine word and the tag saying which kind of instruction made it.
@@ -346,6 +363,24 @@ pub struct RxmCell {
 pub struct RxmBox {
     pub handle: usize,
     pub content: RxmWord,
+}
+
+/// The cons cells of a run's result, at the halt that produced it: every cell `reached` finds from its list word,
+/// following a cell's head and its tail wherever that word is tagged `List` (the list results design). A heap panel
+/// lights them. For a result whose type decodes, those are each cell's tail and, for a list of lists, its head. A
+/// closure is a list-tagged cons too, of its tag and its environment, so from a list of functions the walk would also
+/// take in each closure's cell, its environment's and the lists it captures. A view marks only a result its leg decodes
+/// to a value and prints, so not a list of functions, which does not decode, nor a list too large to print, and cells
+/// carried for a result no view marks would sit in the heap panel unlit, with nothing on screen to say why. So a leg
+/// sends `ResultCells`, and carries the cells, only for a result it decodes and prints.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub struct ResultCells {
+    /// The numbers of the result's cells the frame's `cells` holds, descending.
+    pub shown: Vec<usize>,
+    /// How many cells the result reaches, however many `shown` names.
+    pub len: usize,
 }
 
 /// The rxm program, projected ONCE per compile and never per step, as `TmProgram` is.
@@ -450,9 +485,14 @@ pub struct RxmState {
     ///
     /// **ONLY THE REGISTERS THIS FRAME SHOWS NAME CELLS.** A list word in a local past `RxmWindow::locals`, or
     /// in a saved frame, is not on screen to be a back-reference, so it pulls in nothing, and the list stays
-    /// bounded: at most `cells + locals + args + 1` entries. A value-tagged word pulls in nothing either,
-    /// even when it equals some cell's number — that is the ambiguity the tags exist to resolve.
+    /// bounded: at most `cells + locals + args + 1` entries, and a halt's `result` more. A value-tagged word
+    /// pulls in nothing either, even when it equals some cell's number: the ambiguity the tags exist to resolve.
     pub cells: Vec<RxmCell>,
+    /// The result's cells, at a halt whose `rr` is a list word that reaches one; `None` before the halt, for a
+    /// result that is not a list, for `nil`, and from a leg that does not decode and print it (`ResultCells`).
+    /// **`cells` HOLDS THE NEWEST `RxmWindow::result` OF THEM TOO**, however old, so the result a heap panel lights
+    /// is whole up to that bound.
+    pub result: Option<ResultCells>,
     /// How many boxes the machine holds.
     pub box_len: usize,
     /// The newest `RxmWindow::boxes` boxes, plus every box a box-tagged word in `rr`, `locals` or `args`
@@ -630,7 +670,7 @@ impl TmState {
         // already gives for scaffolding, rather than an invented owner. See this function's doc.
         let source_node = entry.and_then(|s| map.and_then(|m| m.tm_owner(&s.name)));
         let rule = entry.and_then(|s| s.rules.iter().position(|r| crate::tm::sim::rule_matches(&r.read, c.tapes())));
-        TmState { state, step: c.steps_taken(), heads, window_start, window, source_node, rule }
+        TmState { state, step: c.steps_taken(), heads, window_start, window, source_node, rule, result: None }
     }
 }
 
@@ -764,18 +804,43 @@ fn shown(len: usize, newest: usize, named: impl IntoIterator<Item = u64>) -> BTr
     out
 }
 
+/// The slots of the cells the list word `root` reaches through `cells`: its own, then each list-tagged head
+/// and tail's, each once. Empty for `nil` and for a word naming no cell. An explicit stack, since a list
+/// can be as long as the heap cap.
+#[must_use]
+pub fn reached(root: u64, cells: &[(u64, u64)], tags: &[(WordTag, WordTag)]) -> BTreeSet<usize> {
+    let mut out = BTreeSet::new();
+    let mut todo = vec![root];
+    while let Some(word) = todo.pop() {
+        let Some(i) = slot(word, cells.len()) else { continue };
+        if !out.insert(i) {
+            continue;
+        }
+        let (head, tail) = cells[i];
+        let (head_tag, tail_tag) = tags.get(i).copied().unwrap_or_default();
+        todo.extend(
+            [(head, head_tag), (tail, tail_tag)].into_iter().filter(|(_, t)| *t == WordTag::List).map(|(w, _)| w),
+        );
+    }
+    out
+}
+
 /// The cells a heap panel shows: the newest `newest` of `cells`, plus each cell a list word in `named`
-/// points at, each once, newest first, each word with its tag in `tags`. `RxmState::cells` says why the
-/// named cells are added. A tag `tags` lacks reads as `WordTag`'s default, as the cursor's own reads do.
+/// points at, plus the newest `carry` of `result`'s slots, each once, newest first, each word with its tag
+/// in `tags`. `RxmState::cells` says why the named cells are added, `RxmState::result` why the result's are.
+/// A tag `tags` lacks reads as `WordTag`'s default, as the cursor's own reads do.
 #[must_use]
 pub fn heap_cells(
     cells: &[(u64, u64)],
     tags: &[(WordTag, WordTag)],
     newest: usize,
     named: impl IntoIterator<Item = u64>,
+    (result, carry): (&BTreeSet<usize>, usize),
 ) -> Vec<RxmCell> {
+    let mut slots = shown(cells.len(), newest, named);
+    slots.extend(result.iter().rev().take(carry));
     // Descending, so newest first; `get` again, so a slot `shown` picked cannot index past the end.
-    shown(cells.len(), newest, named)
+    slots
         .into_iter()
         .rev()
         .filter_map(|i| {
@@ -784,6 +849,14 @@ pub fn heap_cells(
             Some(RxmCell { cell: i + 1, head: RxmWord::of(head, head_tag), tail: RxmWord::of(tail, tail_tag) })
         })
         .collect()
+}
+
+/// `result`'s slots as the frame names them, among the `cells` it carries, or `None` when the result reaches
+/// no cell.
+#[must_use]
+pub fn result_cells(cells: &[RxmCell], result: &BTreeSet<usize>) -> Option<ResultCells> {
+    let shown = cells.iter().map(|c| c.cell).filter(|cell| result.contains(&(cell - 1))).collect();
+    (!result.is_empty()).then_some(ResultCells { shown, len: result.len() })
 }
 
 /// The boxes a heap panel shows: the newest `newest` of `boxes`, plus each box a box handle in `named`
@@ -811,7 +884,7 @@ impl RxmState {
     ///
     /// **THE COST IS THE WINDOW'S, NOT THE MACHINE'S.** Each register list, each frame and each saved bank is
     /// read through `take`, and the heap and boxes are indexed only at the slots `shown` picks, so a frame of
-    /// `sum(1000)` at its deepest reads eight of its 1,001 saved banks.
+    /// `sum(1000)` at its deepest reads eight of its 1,001 saved banks. A halt alone walks the result's cells.
     pub fn window<P: Borrow<Program>>(c: &RxmCursor<P>, map: Option<&SourceMap>, window: RxmWindow) -> RxmState {
         let locals = tagged(c.locals(), c.local_tags(), window.locals);
         let args = tagged(c.args(), c.arg_tags(), window.args);
@@ -834,7 +907,12 @@ impl RxmState {
             .collect();
 
         let conses = c.heap();
-        let cells = heap_cells(conses, c.heap_tags(), window.cells, named(WordTag::List));
+        // The result's cells, at a halt only: before it `rr` holds whatever was last written there.
+        let result = match (c.status(), rr) {
+            (Some(RxmStatus::Halted), (root, WordTag::List)) => reached(root, conses, c.heap_tags()),
+            _ => BTreeSet::new(),
+        };
+        let cells = heap_cells(conses, c.heap_tags(), window.cells, named(WordTag::List), (&result, window.result));
         let held = c.boxes();
         let boxes = heap_boxes(held, c.box_tags(), window.boxes, named(WordTag::Box));
 
@@ -855,6 +933,7 @@ impl RxmState {
             depth: c.stack().len(),
             frames,
             heap_len: conses.len(),
+            result: result_cells(&cells, &result),
             cells,
             box_len: held.len(),
             boxes,

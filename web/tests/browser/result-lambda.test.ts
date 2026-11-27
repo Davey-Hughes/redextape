@@ -12,8 +12,8 @@ import { mountLambdaBody } from './lambda-body-fixture'
 /**
  * THE RESULT IN THE λ VIEW (the return-value highlight design, goals 1 and 2): at the last step of a run that finished
  * with a Nat or a Bool, the root's chip in the result's ground and edge with the word `result` after it, said as a mark
- * where the node starts, and at the step before nothing; a list's root has none. The view the app builds, then a body
- * built by hand for what the app cannot pin.
+ * where the node starts, and at the step before nothing; a list's root on one row is marked the same way (the list
+ * results design). The view the app builds, then a body built by hand for what the app cannot pin.
  */
 
 const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''
@@ -245,12 +245,19 @@ describe('the result in the λ view the app builds', () => {
   )
 
   it(
-    'marks no list root',
+    'marks a list root on one row as it marks a number',
     async () => {
       await run('[1, 2]', '[1, 2]')
       await toEnd(lam())
       expect(lambdaTerm()?.querySelectorAll('.term-line'), 'precondition: the root on one row').toHaveLength(1)
-      expect(lambdaMark('result'), 'a result mark, bar or run').toBeNull()
+      expect(lambdaMark('result')?.classList.contains('term-bar'), 'a bar').toBe(false)
+      const marks = marked(lambdaTerm())
+      expect(marks, 'the runs marked').toHaveLength(1)
+      const mark = marks[0] as HTMLElement
+      expect(mark.textContent, 'the term it holds: all of it').toBe(lambdaTerm()?.textContent)
+      expect(getComputedStyle(mark, '::after').content, 'the word after it').toContain('"result"')
+      expect(getComputedStyle(mark).outlineColor, 'the edge').toBe(token('--result'))
+      expect(getComputedStyle(mark).backgroundColor, 'the ground').toBe(token('--result-bg', 'background-color'))
     },
     CASE_MS,
   )

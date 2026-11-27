@@ -930,7 +930,7 @@ fn redex_span_is_none_before_any_step() {
 // --- the rxm leg ---------------------------------------------------------------------------------------
 
 /// A window no program below reaches, so a frame built with it carries the whole machine.
-const WHOLE: RxmWindow = RxmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 };
+const WHOLE: RxmWindow = RxmWindow { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16, result: 64 };
 
 fn rxm_label(name: &str) -> String {
     name.to_string()
@@ -989,7 +989,7 @@ fn every_rxm_list_stops_at_its_bound_and_reports_its_length() {
     c.by_ref().for_each(drop);
     assert_eq!(c.status(), Some(&RxmStatus::Halted));
 
-    let narrow = RxmState::window(&c, None, RxmWindow { locals: 5, args: 3, frames: 2, cells: 4, boxes: 1 });
+    let narrow = RxmState::window(&c, None, RxmWindow { locals: 5, args: 3, frames: 2, cells: 4, boxes: 1, result: 0 });
     assert_eq!(
         (rxm_words(&narrow.locals), narrow.written.len(), narrow.locals_len),
         (vec!["0", "1", "2", "3", "4"], 5, 13)
@@ -1140,7 +1140,7 @@ fn rxm_cells_come_newest_first_with_every_cell_a_list_register_names() {
     };
     let mut c = RxmCursor::new(&prog, redextape_core::tm::rxm::DEFAULT_CAPS);
     c.by_ref().for_each(drop);
-    let window = RxmWindow { locals: 5, args: 1, frames: 0, cells: 2, boxes: 0 };
+    let window = RxmWindow { locals: 5, args: 1, frames: 0, cells: 2, boxes: 0, result: 0 };
     let st = RxmState::window(&c, None, window);
     let cells: Vec<usize> = st.cells.iter().map(|c| c.cell).collect();
     assert_eq!((cells, st.heap_len), (vec![6, 5, 3, 1], 6));
@@ -1149,6 +1149,59 @@ fn rxm_cells_come_newest_first_with_every_cell_a_list_register_names() {
 
     let no_args = RxmState::window(&c, None, RxmWindow { args: 0, ..window });
     assert_eq!(no_args.cells.iter().map(|c| c.cell).collect::<Vec<_>>(), [6, 5, 1]);
+}
+
+/// At the halt `result` names every cell `rr`'s list reaches, a list of lists' heads too, and `cells` carries
+/// the newest `RxmWindow::result` of them however narrow its own window. Cells 2 and 6 are garbage. Before the
+/// halt there is none, nor for a `nil` result beside a cell, nor for the number 1, though 1 names a cell.
+#[test]
+fn an_rxm_halt_names_the_cells_its_result_reaches() {
+    let (r0, r1, r2, r3, r4, r5) = (Reg::Loc(0), Reg::Loc(1), Reg::Loc(2), Reg::Loc(3), Reg::Loc(4), Reg::Loc(5));
+    let prog = Program {
+        code: vec![
+            Instr::Nil(r0),
+            Instr::Li(r1, 1),
+            Instr::Cons(r2, r1, r0),
+            Instr::Cons(r5, r1, r0),
+            Instr::Cons(r3, r1, r0),
+            Instr::Cons(r4, r3, r0),
+            Instr::Cons(Reg::Rr, r2, r4),
+            Instr::Cons(r5, r1, r5),
+            Instr::Halt,
+        ],
+        labels: vec![],
+    };
+    let none = RxmWindow { locals: 0, args: 0, frames: 0, cells: 0, boxes: 0, result: 0 };
+    let mut c = RxmCursor::new(&prog, redextape_core::tm::rxm::DEFAULT_CAPS);
+    c.by_ref().take(prog.code.len() - 1).for_each(drop);
+    assert_eq!(RxmState::window(&c, None, WHOLE).result, None, "the halt has not run");
+    c.by_ref().for_each(drop);
+
+    let cells = |st: &RxmState| st.cells.iter().map(|c| c.cell).collect::<Vec<_>>();
+    let st = RxmState::window(&c, None, RxmWindow { cells: 1, ..WHOLE });
+    let result = st.result.as_ref().expect("rr is a list");
+    assert_eq!((cells(&st), &result.shown, result.len), (vec![6, 5, 4, 3, 1], &vec![5, 4, 3, 1], 4));
+    let st = RxmState::window(&c, None, RxmWindow { result: 2, ..none });
+    let result = st.result.as_ref().expect("rr is a list");
+    assert_eq!((cells(&st), &result.shown, result.len), (vec![5, 4], &vec![5, 4], 4));
+
+    let nil = Program {
+        code: vec![Instr::Nil(r0), Instr::Li(r1, 1), Instr::Cons(r2, r1, r0), Instr::Nil(Reg::Rr), Instr::Halt],
+        labels: vec![],
+    };
+    let mut c = RxmCursor::new(&nil, redextape_core::tm::rxm::DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    let st = RxmState::window(&c, None, WHOLE);
+    assert_eq!((st.heap_len, st.result), (1, None), "nil reaches no cell, though the heap holds one");
+
+    let one = Program {
+        code: vec![Instr::Nil(r0), Instr::Cons(r1, r0, r0), Instr::Li(Reg::Rr, 1), Instr::Halt],
+        labels: vec![],
+    };
+    let mut c = RxmCursor::new(&one, redextape_core::tm::rxm::DEFAULT_CAPS);
+    c.by_ref().for_each(drop);
+    let st = RxmState::window(&c, None, WHOLE);
+    assert_eq!((st.heap_len, st.result), (1, None), "a number is no list, whatever cell it names");
 }
 
 /// Boxes by the same rule: newest first, with every box a box register on screen names. `r1` keeps box 1 and
@@ -1339,6 +1392,7 @@ fn an_rxm_frame_crosses_as_json_with_words_as_strings() {
     let p = RxmProgram::of(&prog);
     let back: RxmProgram = serde_json::from_str(&serde_json::to_string(&p).expect("serialize")).expect("deserialize");
     assert_eq!(back, p);
-    let w: RxmWindow = serde_json::from_str(r#"{"locals":1,"args":2,"frames":3,"cells":4,"boxes":5}"#).expect("parse");
-    assert_eq!(w, RxmWindow { locals: 1, args: 2, frames: 3, cells: 4, boxes: 5 });
+    let w: RxmWindow =
+        serde_json::from_str(r#"{"locals":1,"args":2,"frames":3,"cells":4,"boxes":5,"result":6}"#).expect("parse");
+    assert_eq!(w, RxmWindow { locals: 1, args: 2, frames: 3, cells: 4, boxes: 5, result: 6 });
 }

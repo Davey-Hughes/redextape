@@ -46,6 +46,7 @@ const CELLS_AND_BOX_64: ClifState = {
     { function: 0, inst: 63 },
   ],
   heap_len: 4,
+  result: null,
   cells: [
     { cell: 4, head: { word: '0', tag: 'Value' }, tail: { word: '3', tag: 'List' } },
     { cell: 3, head: { word: '1', tag: 'Box' }, tail: { word: '0', tag: 'Value' } },
@@ -277,7 +278,7 @@ describe('the call stack', () => {
 
 describe('the heap', () => {
   it("lists the frame's cells then its boxes, in the frame's order", () => {
-    const view = clifHeap(CELLS_AND_BOX_64)
+    const view = clifHeap(CELLS_AND_BOX_64, false)
     expect(view.count).toBe('4 cells · 1 box')
     expect(view.items.map((item) => (item.kind === 'line' ? [item.lead, item.body] : item.text))).toEqual([
       ['#4', '0 → #3'],
@@ -289,8 +290,15 @@ describe('the heap', () => {
   })
 
   it('names the values whose list or box word is the cell or box', () => {
-    const view = clifHeap(CELLS_AND_BOX_64)
+    const view = clifHeap(CELLS_AND_BOX_64, false)
     expect(view.items.map((item) => (item.kind === 'line' ? item.refs : null))).toEqual([['v1'], [], [], [], []])
+  })
+
+  it("lights the returned list's cells at the run's result, and no box", () => {
+    const frame = { ...CELLS_AND_BOX_64, result: { shown: [4, 3], len: 2 } }
+    const lit = (on: boolean) => clifHeap(frame, on).items.map((item) => item.kind === 'line' && item.result)
+    expect(lit(true)).toEqual([true, true, false, false, false])
+    expect(lit(false)).toEqual([false, false, false, false, false])
   })
 })
 

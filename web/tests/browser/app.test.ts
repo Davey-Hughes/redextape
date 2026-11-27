@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, onTestFinished } from 'vitest'
 import { userEvent } from 'vitest/browser'
 import { STORAGE_KEY } from '../../src/appearance'
 import fact from '../../src/examples/fact.rxt?raw'
-import { LANES } from '../../src/lambda-body'
+import { columnsAt, LANES } from '../../src/lambda-body'
 import { OVERSCAN, ROW_HEIGHT } from '../../src/tm-pane'
 import {
   frames,
@@ -837,7 +837,7 @@ describe('the app, end to end', () => {
       await until(() => linkedSource() === 'fact(n - 1)', 'fact(n - 1) linked')
       await until(() => lambdaMark('linked') !== null, 'fact(n - 1) marked')
       const rows = term.querySelectorAll('.term-line')
-      expect(Math.floor((term.clientWidth - LANES) / ch) - 4, 'precondition: the inline width took').toBe(80)
+      expect(columnsAt(term.clientWidth, ch), 'precondition: the inline width took').toBe(80)
       expect(String(rows.length), 'precondition: every row drawn').toBe(rows[0]?.getAttribute('aria-setsize'))
       const starts = term.querySelectorAll('.term-bar[data-lane="linked"][data-first]')
       expect(starts, 'precondition: both copies over several rows, so both are bars').toHaveLength(2)

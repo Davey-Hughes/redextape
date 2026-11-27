@@ -91,7 +91,7 @@ fn compare(caps: Caps, keep: impl Fn(&str) -> bool) -> Tally {
 #[test]
 fn the_corpus_is_the_snapshot_corpus() {
     let corpus = corpus();
-    assert_eq!(corpus.len(), 72);
+    assert_eq!(corpus.len(), 73);
     for (key, prog) in &corpus {
         let built = listing_text(&build_listing(prog, Listing::AsBuilt).unwrap());
         assert_eq!(section(&snapshot(key), "built"), Some(built.as_str()), "{key}");
@@ -101,7 +101,7 @@ fn the_corpus_is_the_snapshot_corpus() {
 #[test]
 fn the_stepper_ends_where_the_jit_does_at_tight_caps() {
     let tally = compare(TIGHT, |_| true);
-    assert_eq!(tally.jit, [56, 2, 14], "the JIT's Ran, Fault and HitCap");
+    assert_eq!(tally.jit, [57, 2, 14], "the JIT's Ran, Fault and HitCap");
     for (i, listing) in LISTINGS.into_iter().enumerate() {
         assert_eq!(tally.capped_at(i, RxmCap::Heap), HEAP_CAPPED, "{}", listing.name());
         assert_eq!(tally.capped_at(i, RxmCap::Stack), STACK_CAPPED, "{}", listing.name());
@@ -112,7 +112,7 @@ fn the_stepper_ends_where_the_jit_does_at_tight_caps() {
 #[test]
 fn the_stepper_ends_where_the_jit_does_at_default_caps() {
     let tally = compare(DEFAULT_CAPS, |key| !key.starts_with("measure-"));
-    assert_eq!(tally.jit, [65, 2, 0], "the JIT's Ran, Fault and HitCap");
+    assert_eq!(tally.jit, [66, 2, 0], "the JIT's Ran, Fault and HitCap");
 }
 
 /// The measure programs end where the JIT's do at default caps, except those the frame-memory list names,

@@ -35,6 +35,7 @@ export const FACT_95: ClifState = {
     { function: 0, inst: 10 },
   ],
   heap_len: 0,
+  result: null,
   cells: [],
   box_len: 0,
   boxes: [],

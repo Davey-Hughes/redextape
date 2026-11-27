@@ -50,8 +50,8 @@ export const TM_RADIUS = 40
 
 /**
  * How much of the rxm machine one frame carries (Plan 7 part 5 spec §5.3): the first 64 locals and 16 arguments, the
- * top 8 call frames, and the newest 16 heap cells and 16 boxes — plus every cell or box a register the frame shows
- * points at, which `RxmState::window` adds so a back-reference always has its cell.
+ * top 8 call frames, the newest 16 heap cells and 16 boxes, and a halt's newest 64 result cells — plus every cell or
+ * box a register the frame shows points at, which `RxmState::window` adds so a back-reference always has its cell.
  *
  * **HERE, NOT IN THE CORE**: how much of the machine fits on screen is a fact about the view, and the core's view
  * model takes it as a parameter (`viewmodel.rs`'s module doc: core never picks a number).
@@ -60,14 +60,15 @@ export const TM_RADIUS = 40
  * cells), so the window only cuts a deep or a list-heavy run. The frame sizes these bounds produce are
  * `rxmFrameBytes`'s to charge.
  */
-export const RXM_WINDOW: RxmWindow = { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16 }
+export const RXM_WINDOW: RxmWindow = { locals: 64, args: 16, frames: 8, cells: 16, boxes: 16, result: 64 }
 
 /**
  * How much of a CLIF run one frame carries: the running frame's first 64 values, the top 8 call-stack entries, and the
- * newest 16 cells and 16 boxes, plus each one a value points at. **`RXM_WINDOW`'S NUMBERS**, for its reason: the CLIF
- * view shows the machine the rxm view shows, lowered, so the two windows cut a run at the same depth.
+ * newest 16 cells and 16 boxes, plus each one a value points at, and at a `Ran` end the newest 64 of the returned
+ * list's cells. **`RXM_WINDOW`'S NUMBERS**, for its reason: the CLIF view shows the machine the rxm view shows,
+ * lowered, so the two windows cut a run at the same depth.
  */
-export const CLIF_WINDOW: ClifWindow = { values: 64, frames: 8, cells: 16, boxes: 16 }
+export const CLIF_WINDOW: ClifWindow = { values: 64, frames: 8, cells: 16, boxes: 16, result: 64 }
 
 /**
  * The ring's cap, PER LEG. ~3,200 λ frames at ~10 KB, or ~58,000 TM frames at ~550 B.
@@ -330,7 +331,8 @@ export function lambdaFrameBytes(f: LambdaState): number {
 }
 
 /**
- * A TM frame's size in bytes. Cells dominate; the two index arrays are `heads` and `window_start`, one number per tape.
+ * A TM frame's size in bytes. Cells dominate; the two index arrays are `heads` and `window_start`, one number per tape,
+ * and a halt's `result` holds two numbers a run.
  *
  * **A TAPE'S WINDOW IS ONE STRING, CHARGED TWO BYTES A UTF-16 UNIT**, so a symbol outside the basic plane is charged
  * four: counted in the string's own length, rather than in cells. A charge, not what the string occupies: V8 holds a
@@ -341,7 +343,8 @@ export function lambdaFrameBytes(f: LambdaState): number {
 export function tmFrameBytes(f: TmState): number {
   let cells = 0
   for (const tape of f.window) cells += tape.length
-  return FRAME_OVERHEAD_BYTES + cells * 2 + f.heads.length * 8 + f.window_start.length * 8
+  const runs = f.result?.length ?? 0
+  return FRAME_OVERHEAD_BYTES + cells * 2 + f.heads.length * 8 + f.window_start.length * 8 + runs * 16
 }
 
 /**
@@ -427,22 +430,23 @@ export const CLIF_FRAME_BYTES = 236
 
 /**
  * An rxm frame's size in bytes. **WORDS DOMINATE** — `rr`, the windowed locals and arguments, each shown frame's
- * saved locals, both halves of each cell and each box's content — and a written bit is charged a byte.
+ * saved locals, both halves of each cell, each box's content and each cell number in a halt's `result` — and a
+ * written bit is charged a byte.
  */
 export function rxmFrameBytes(f: RxmState): number {
-  let words = 1 + f.locals.length + f.args.length + 2 * f.cells.length + f.boxes.length
+  let words = 1 + f.locals.length + f.args.length + 2 * f.cells.length + f.boxes.length + (f.result?.shown.length ?? 0)
   for (const frame of f.frames) words += frame.saved.length
   return FRAME_OVERHEAD_BYTES + words * RXM_WORD_BYTES + f.written.length
 }
 
 /**
  * A CLIF frame's size in bytes: `CLIF_WORD_BYTES` a word, for each value's word, each of its register names, each
- * call-stack entry, both halves of each cell and each box's content. **EACH REGISTER NAME AND EACH CALL-STACK ENTRY IS
- * CHARGED AS A WORD**: left out, a frame of many named values or a deep run would be undercharged, which lets the ring
- * keep more than `HISTORY_BYTES`.
+ * call-stack entry, both halves of each cell, each box's content and each cell number in a `Ran` end's `result`.
+ * **EACH REGISTER NAME AND EACH CALL-STACK ENTRY IS CHARGED AS A WORD**: left out, a frame of many named values or a
+ * deep run would be undercharged, which lets the ring keep more than `HISTORY_BYTES`.
  */
 export function clifFrameBytes(f: ClifState): number {
-  let words = f.values.length + f.frames.length + 2 * f.cells.length + f.boxes.length
+  let words = f.values.length + f.frames.length + 2 * f.cells.length + f.boxes.length + (f.result?.shown.length ?? 0)
   for (const value of f.values) words += value.regs.length
   return FRAME_OVERHEAD_BYTES + CLIF_FRAME_BYTES + words * CLIF_WORD_BYTES
 }

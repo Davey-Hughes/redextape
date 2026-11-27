@@ -60,6 +60,22 @@ export function resultField(state: TmState): { readonly from: number; readonly t
 }
 
 /**
+ * The cells of a list result on HEAP, the tape `heap` numbers: `TmState.result`'s runs as indices into HEAP's window
+ * cells, `to` exclusive, each cut to the window and those wholly off it left out, since what the window shows is what
+ * is marked. Indices into `tapeRows`' cells, so taken apart by character as those are. Empty for a frame with no
+ * result, and for a `heap` no tape has.
+ */
+export function resultRuns(state: TmState, heap: number): { readonly from: number; readonly to: number }[] {
+  const start = state.window_start[heap] ?? 0
+  const len = Array.from(state.window[heap] ?? '').length
+  return (state.result ?? []).flatMap((run) => {
+    const from = Math.max(run.from - start, 0)
+    const to = Math.min(run.to - start, len)
+    return from < to ? [{ from, to }] : []
+  })
+}
+
+/**
  * What a tape row says to a screen reader, where a sighted reader sees a bordered cell — accessibility item 4
  * (spec §9.3): `tape reg, head at cell 12, reading 1`. The blank symbol is said as `blank`, since `_` is a
  * glyph and not a word.

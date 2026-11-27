@@ -35,6 +35,7 @@ const tm = (rule: number | null): TmState => ({
   window: ['#'],
   source_node: null,
   rule,
+  result: null,
 })
 
 const tree = (nextRedex: number | null): LambdaTreeWire => ({

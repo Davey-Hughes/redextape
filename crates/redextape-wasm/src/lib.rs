@@ -657,10 +657,10 @@ impl Session {
     }
 
     /// `rxmState(window)` -> `RxmState`, where `window` is an `RxmWindow` — `{ locals, args, frames, cells,
-    /// boxes }`, each a count.
+    /// boxes, result }`, each a count.
     ///
-    /// **ONE OBJECT RATHER THAN FIVE NUMBERS**, read with `serde_wasm_bindgen::from_value`: five positional
-    /// counts are five chances to transpose two, and the names say which bound is which at the call site.
+    /// **ONE OBJECT RATHER THAN SIX NUMBERS**, read with `serde_wasm_bindgen::from_value`: six positional
+    /// counts are six chances to transpose two, and the names say which bound is which at the call site.
     /// Deserializing it is marshalling, which is why it happens here and not in `session.rs`.
     ///
     /// # Errors

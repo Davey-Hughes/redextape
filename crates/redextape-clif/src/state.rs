@@ -7,7 +7,7 @@ use cranelift_codegen::ir::{Function, Inst, Value, ValueLabelAssignments};
 use cranelift_interpreter::value::DataValueExt;
 use redextape_core::tm::{label_reg, reg_str};
 use redextape_core::trace::WordTag;
-use redextape_core::viewmodel::{RxmBox, RxmCell, RxmWord, heap_boxes, heap_cells};
+use redextape_core::viewmodel::{ResultCells, RxmBox, RxmCell, RxmWord, heap_boxes, heap_cells, reached, result_cells};
 
 use crate::stepper::{Activation, ClifEnd, Stepper, pc_of};
 
@@ -29,6 +29,8 @@ pub struct ClifWindow {
     pub frames: usize,
     pub cells: usize,
     pub boxes: usize,
+    /// At a `Ran` end, the newest this many of the returned list's cells, as `RxmWindow::result`.
+    pub result: usize,
 }
 
 /// One set value of the running frame.
@@ -75,8 +77,11 @@ pub struct ClifState {
     /// How many cons cells the heap holds.
     pub heap_len: usize,
     /// The newest `ClifWindow::cells` cells, plus each cell a list word in `values` points at, newest
-    /// first, as `RxmState::cells` is chosen from its registers.
+    /// first, as `RxmState::cells` is chosen from its registers, plus at a `Ran` end the newest
+    /// `ClifWindow::result` of the returned list's cells.
     pub cells: Vec<RxmCell>,
+    /// The returned list's cells, as `RxmState::result` names `rr`'s.
+    pub result: Option<ResultCells>,
     /// How many boxes the heap holds.
     pub box_len: usize,
     /// The newest `ClifWindow::boxes` boxes, plus each box a box handle in `values` names, newest first.
@@ -110,6 +115,13 @@ impl Stepper<'_> {
         let named =
             |tag: WordTag| shown.iter().filter(move |(_, _, t)| *t == tag).filter_map(|(_, held, _)| bits(held));
         let heap = self.runtime().heap();
+        // The returned list's cells: `returned` is `Some` at a `Ran` end only.
+        let result = returned
+            .and_then(|returned| self.values().find(|&(value, ..)| value == returned))
+            .and_then(|(_, held, tag)| bits(held).filter(|_| tag == WordTag::List))
+            .map_or_default(|root| reached(root, heap.cells(), &heap.tags().cells));
+        let cells =
+            heap_cells(heap.cells(), &heap.tags().cells, window.cells, named(WordTag::List), (&result, window.result));
         ClifState {
             step: self.steps_taken(),
             at,
@@ -131,7 +143,8 @@ impl Stepper<'_> {
             depth: self.frames().len(),
             frames: self.frames().iter().rev().take(window.frames).map(at_of).collect(),
             heap_len: heap.cells().len(),
-            cells: heap_cells(heap.cells(), &heap.tags().cells, window.cells, named(WordTag::List)),
+            result: result_cells(&cells, &result),
+            cells,
             box_len: heap.boxes().len(),
             boxes: heap_boxes(heap.boxes(), &heap.tags().boxes, window.boxes, named(WordTag::Box)),
         }

@@ -51,6 +51,7 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     const lambdaStateRedexSpan: LambdaState['redex_span'] = null
     const tmStateSourceNode: TmState['source_node'] = null
     const tmStateRule: TmState['rule'] = null
+    const tmStateResult: TmState['result'] = null
     const tmStatusWidth: TmStatus['width'] = null
     const tmStatusRun: TmStatus['run'] = null
     const tmStatusTotalSteps: TmStatus['total_steps'] = null
@@ -61,11 +62,14 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     const rxmStateNext: RxmState['next'] = null
     const rxmStateWrote: RxmState['wrote'] = null
     const rxmStateSourceNode: RxmState['source_node'] = null
+    const rxmStateResult: RxmState['result'] = null
     const rxmStatusRun: RxmStatus['run'] = null
     const rxmStatusCap: RxmStatus['cap'] = null
     const rxmStatusTotalSteps: RxmStatus['total_steps'] = null
     const clifStateNext: ClifState['next'] = null
     const clifStatePc: ClifState['pc'] = null
+    const clifStateReturned: ClifState['returned'] = null
+    const clifStateResult: ClifState['result'] = null
     const clifRowPc: ClifRow['pc'] = null
     const clifRowAt: ClifRow['at'] = null
     const clifStatusCap: ClifStatus['cap'] = null
@@ -77,6 +81,7 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     expect(lambdaStateRedexSpan).toBeNull()
     expect(tmStateSourceNode).toBeNull()
     expect(tmStateRule).toBeNull()
+    expect(tmStateResult).toBeNull()
     expect(tmStatusWidth).toBeNull()
     expect(tmStatusRun).toBeNull()
     expect(tmStatusTotalSteps).toBeNull()
@@ -87,11 +92,14 @@ describe('the generated bindings keep the nullability the wire carries', () => {
     expect(rxmStateNext).toBeNull()
     expect(rxmStateWrote).toBeNull()
     expect(rxmStateSourceNode).toBeNull()
+    expect(rxmStateResult).toBeNull()
     expect(rxmStatusRun).toBeNull()
     expect(rxmStatusCap).toBeNull()
     expect(rxmStatusTotalSteps).toBeNull()
     expect(clifStateNext).toBeNull()
     expect(clifStatePc).toBeNull()
+    expect(clifStateReturned).toBeNull()
+    expect(clifStateResult).toBeNull()
     expect(clifRowPc).toBeNull()
     expect(clifRowAt).toBeNull()
     expect(clifStatusCap).toBeNull()

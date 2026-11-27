@@ -334,7 +334,7 @@ describe('text that measures differently after the level is laid out', () => {
     host.style.position = 'fixed'
     host.style.inset = 'auto 0 0 auto'
     fixture.pane.render(
-      { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: 0 },
+      { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: 0, result: null },
       controlState(false, 'step 0 of 1'),
     )
     await userEvent.click(host.querySelector('[data-panel="diagram"] .diagram-mode[data-value="local"]') as HTMLElement)

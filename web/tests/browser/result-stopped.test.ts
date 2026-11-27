@@ -5,6 +5,7 @@ import { EXAMPLES } from '../../src/examples'
 import {
   barTitle,
   enterWidth,
+  expectStacked,
   host,
   lambdaMark,
   lambdaTerm,
@@ -12,10 +13,12 @@ import {
   PREFIX,
   picker,
   rgb,
+  rowWordEnd,
   SHELL,
   segments,
   stateIdle,
   stepBar,
+  token,
   until,
   widthShown,
 } from './harness'
@@ -512,8 +515,12 @@ describe('nothing outside a view moving', () => {
 })
 
 describe('the root chip opened', () => {
+  /**
+   * THE LIST RESULTS DESIGN'S λ RULE ASKS FOR NO CHIP: a numeral's chip opened over several rows at the run's end is
+   * marked as a list over several rows is, one block with the word after its first row's text.
+   */
   it(
-    'marks no opened root chip over several rows',
+    'marks an opened root chip over several rows as one block, the word after its first row',
     async () => {
       await run(SUM_TO)
       await toEnd('lambda-0')
@@ -522,8 +529,30 @@ describe('the root chip opened', () => {
       await userEvent.click(chip as HTMLElement)
       await until(() => (lambdaTerm()?.querySelectorAll('.term-line').length ?? 0) > 1, 'the chip to open over rows')
       expect(lambdaTerm()?.querySelector('.term-chip[data-node="0"]'), 'precondition: the root opened').toBeNull()
-      expect(lambdaMark('result'), 'a λ result mark, bar or run').toBeNull()
-      expect(marksIn('lambda-0'), 'a mark or a word in the λ view').toHaveLength(0)
+      const term = lambdaTerm() as HTMLElement
+      const rows = [...term.querySelectorAll<HTMLElement>('.term-line')]
+      expect(
+        rows.map((r) => r.classList.contains('is-result-row')),
+        'every row in the block',
+      ).toEqual(rows.map(() => true))
+      expect(lambdaMark('result'), 'a run or a bar besides the block').toBeNull()
+      expect(rows[0]?.classList.contains('is-result-first'), 'the block starts on the first row').toBe(true)
+      for (const [i, row] of rows.entries())
+        expect(getComputedStyle(row).backgroundColor, `row ${i}'s ground`).toBe(
+          token('--result-bg', 'background-color'),
+        )
+      expectStacked(
+        rows.map((r) => r.getBoundingClientRect()),
+        'row',
+      )
+      expect(getComputedStyle(rows[0] as HTMLElement, '::after').content, 'the word on the first row').toContain(
+        '"result"',
+      )
+      for (const row of rows.slice(1))
+        expect(getComputedStyle(row, '::after').content, 'a word on a later row').not.toContain('result')
+      expect(rowWordEnd(rows[0] as HTMLElement), "the word's end, inside the view's width").toBeLessThanOrEqual(
+        term.getBoundingClientRect().left + term.clientLeft + term.clientWidth,
+      )
     },
     CASE_MS,
   )

@@ -44964,3 +44964,329 @@ files and 37 tests passed; node, the whole project, 85 files and 1618 tests pass
 port 63315 was free, with `VITEST_MAX_WORKERS=2` and this entry's edit uncommitted in the tree, 2 files and 20 tests
 passed in each. The scans, the licence checks, the whole Chromium and Firefox runs and coverage did not run again at
 `41a321f`, and no sabotage did, as the Mac path's code did not change.
+
+#### AT THE LAST STEP OF A RUN THAT FINISHED WITH A LIST, THE RXM AND CLIF HEAPS LIGHT EVERY CELL THE LIST REACHES, THE TM BOXES THOSE CELLS ON HEAP WHERE ITS WINDOW SHOWS THEM, THE λ VIEW MARKS THE LIST ON ONE ROW OR AS A BLOCK OVER SEVERAL, AND countdown(4) JOINS THE EXAMPLES (2026-11-25 to 27, branch `list-results`, built on `f59ef8e`, merged with main's `58353cb` in `193f0b8`, `65392ce` in `8235e61`, `da6edae` in `bc51185`, `100f119` in `816b3b2` and `7033883` in `f685794`; against main `7033883..377d36f`, 64 commits, plus this entry)
+
+The user, on 2026-11-21, on a result that is a reference: "yes if possible if the value is a reference we should point
+to the heap values there too", and "if we don't have an example of that in the examples we should add it". This is the
+third and last of the return-value lane's pull requests: the first, #194, read cut text whole in a tooltip, and the
+second, #201, marked the result at a run's end, a list by its pointer word alone, with no λ mark. The user chose each of
+seven choices on 2026-11-25, from browser mockups made of the app's real last frames, answering "All a options"; the
+design, `docs/superpowers/specs/2026-11-25-list-results-design.md`, lists them and holds its *As built*.
+
+##### HOW IT WAS MADE
+
+**Drafted outside this repo's usual flow.** Another tool wrote the change as three patches against `f59ef8e`, in a cloud
+sandbox with no browser, LLVM 18.1 and Node 22: none of its browser cases had run, the new example's LLVM IR snapshots
+did not exist, and no one had looked at the marks on a screen. They were applied here with `git am`, re-authored, as
+`fe53400` (the frames and the views), `df13861` (the example and its browser file) and `9a6d578` (the design and the
+first writing of this entry), and were treated as an outside contributor's draft.
+
+**Then gated, reviewed and fixed.** A first gate ran at `9a6d578`, and two draft reviews read `f59ef8e..9a6d578`, one
+the Rust and the wire, one `web/`; with the gate they found 13 faults, among them that the app's TM view never boxed
+HEAP, since the result rode on a frame the page never records, and that a heap box of one line drew edges its test could
+not match. Fix wave 1 answered them, `ff04cf0..5241e25` in Rust and `60cd928..9ab984d` in `web/`. A review of the whole
+branch at `8235e61`, by two reviewers, one across the layers and one of the tests and words, and gates A and B there,
+led to wave 2, `273f0de..46eea19` in Rust and `4dc09f7..e328746` in `web/`, but for one finding the user ruled on, R2-1
+(*The decisions and the rulings*), which wave 3, `d40d8ff` and `68dafbf`, built. A second review of the whole branch at
+`bc51185`, again by two, gates A2 and B2 and a drive of the built app there led to wave 4, `e7a325f..1dba295`. Gate C
+and a second drive ran at `1dba295`; the user's ruling on the λ gutter is `257bb1c`. A third review of the whole branch,
+by one reviewer, and gate D ran at `257bb1c`, and led to `424a4a0`, `660cdff` and `9e762c7`; a review of those led to
+`3788a52`, `fc5d915` and `78289a2`; a review of those to `e244185`, `ec4a177`, `21da91d` and `20994d6`; and a review of
+those found three nits, two of them words in the design, which `377d36f` takes, and one in a commit's subject. `20994d6`
+is the last commit to change code. Main moved five times meanwhile, and five merges bring it in (*The merges with
+main*).
+
+The lane's records are `~/temp/redextape-return-value-record/pr3/` (the patches, the first gate and the draft reviews)
+and `~/.local/state/agents/redextape/list-results/`, `$R` below: `ledger.md`, the controller's every step and decision
+in order, and a folder for each dispatch, `rust-fixes`, `web-fixes`, `review`, `fix2-rust`, `fix2-web`, `fix3-web`,
+`review3`, `gate-a2`, `gate-b2`, `drive`, `fix4`, `gate-c`, `drive2`, `merge-4`, `fix5`, `gate-d`, `review4`, `fix6`,
+`review5`, `fix7`, `review6`, `fix8`, `review7` and `entry`, each with its brief, its `progress.md` and its logs. **The
+figures in this entry are not read at one commit**: each names the commit it was taken at (*Verification*).
+
+##### WHAT CHANGED
+
+As built at `20994d6`; `377d36f` changes the design's words alone.
+
+**The frames.** At a halt whose `rr` is a list, `RxmState::result` (`ResultCells`) names the cells the list reaches,
+through each tail and, for a list of lists, each head: the newest of them up to the window's `result`, 64 in the app
+(`RXM_WINDOW` in `protocol.ts`), which the frame's cells carry beside the window's own, and how many it reaches in all.
+`ClifState::result` does the same from the list main returns, at a `Ran` end, under `CLIF_WINDOW`'s 64. For the TM,
+`tm::result_heap_runs` walks the halted HEAP by the result's type, and `Session::tm_state` sets `TmState::result` to the
+runs those cells lie in, as materialized indices. Every other frame carries `None`, so only the end frame pays, and
+`protocol.ts`'s frame sizers charge what it carries.
+
+**Only where the result can be marked.** The walk follows every List-tagged word, and a closure is a List-tagged cell of
+its tag and its environment, so each leg names a result's cells only where it decodes the result to a value and prints
+it, `Decoded::Value`, the one result a view marks: a list of functions, which does not decode, and a list too large to
+print, `TooLargeToPrint`, carry no result cells, and no unlit cell of either sits among a heap's lines (`ee705cd`,
+`0f188a7`).
+
+**The TM names its runs on the accept state's frame.** The cursor reports `Halted` only from the step call after the one
+that reached the accept state, a call that takes no step, and the page's recorder takes one frame per step taken, so it
+never records a frame with that status. `tm_state` names HEAP's runs where the cursor stands in an accept state, on the
+last frame the recorder takes, whose status still reads `None`; the overflow guard's halt is no accept state and names
+none (`b6e426c`, `ac1342b`).
+
+**The views.** `resultMarked` decides, unchanged from #201. In the rxm and clif heap panels each line of a lit cell is
+`is-result`, tinted, edged down both sides and closed at a run's first and last line, and described as "part of the
+result"; a run is a run of lit lines, so two lit cells share a box though a cell the frame does not carry lies between
+them. Every heap line is padded at its sides, lit or not, so the box's edges clear the glyphs and nothing moves at the
+step that lights it. Where the list reaches cells the frame does not carry, the older cells' note says how many of them
+are the result's, as one note: `+36 older, 36 of them result cells`. The TM boxes each run on HEAP, cut to HEAP's window
+by `tape.ts`'s `resultRuns`, in one `span.tm-result` with no word, finding HEAP by the name the core gives the tape; the
+word stays on REG's field 0. The λ view marks the root whatever it is: on one row round its run, as #201 marked a chip,
+and over several as one block, each row `.term-line.is-result-row` in the result's ground, one edge round them all, the
+word after the first row's text, the block's left edge a shadow off the mark strip's right side; so an opened numeral
+chip over several rows gets the block too. `[]` keeps its pointer's mark and its λ mark on `λn c. n`, and lights no
+cell. The help page says so.
+
+**The λ word is dropped where it has no room, never wrapped** (R2-1): `wordFits` in `lambda-body.ts` weighs the root's
+first row and the word's 6 columns against the columns the view shows without scrolling sideways, the layout's width or,
+below its floor of 24 columns, the fewer the view has; a result whose word is dropped keeps its ground, its edge and
+`data-marks`'s `result:`.
+
+**Forced colours**, which drop the tints and the inset edges, outline in `Highlight` the marks no word stands beside: a
+lit heap line, a box on HEAP and a λ result whose word is dropped, the last whatever else the node is, linked and the
+contractum among them (`e0fadd5`). A wordless block's left edge is a 1px `Highlight` border on the strip's right side,
+its width given back by a negative margin (`1dba295`). A mark with its word keeps the word.
+
+**The λ rows stand where main draws them** (the gutter ruling, `257bb1c`): every `▸`/`▾` on the strip's right side, its
+text 2ch past it, marked or not, and a block's left edge takes about a pixel of its first row's `▾` box. Each row keeps
+3px at its end and the rows 1px after them, 4px in all, inside the 2ch `room()` keeps clear, so the block's right edge
+clears the widest row's last glyph and stays inside a view at a fractional place (`660cdff`).
+
+**A pixel of room past each far edge** (`3788a52`): `.term-spacer`, content-box, and `.rxm-heap` keep 1px below the last
+row or line, and `.cells` 1px after the last cell, in every view at every step, marked or not, since Chromium can clip a
+view's last pixel when it is scrolled to its end. Following and the keys, End, ↓ and PageDown, take a λ view down to the
+spacer's end through one `#foot(i)` (`78289a2`, `e244185`).
+
+**The example.** countdown(4), a `while` loop that conses 1 to 4 onto `nil`, comes after *map and fold*, its value
+`[4, 3, 2, 1]`, its four legs `ended`. Under binary its TM HEAP window holds the four cells at the halt, so the TM boxes
+them whole. It joins `WEB_EXAMPLES` (8) and the clif agreement corpus (73; the JIT's tallies `[57, 2, 14]` and
+`[66, 2, 0]`), with its `.clif`, `.ll` and `.opt.ll` snapshots, and `llvm-version.txt` names LLVM 23.1.5, the release
+that wrote every snapshot (*The decisions and the rulings*).
+
+##### THE TESTS
+
+Rust, 11 new tests in 6 files: core's `an_rxm_halt_names_the_cells_its_result_reaches` and
+`result_heap_runs_light_the_cells_the_result_reaches`; clif's `a_ran_end_names_the_cells_its_returned_list_reaches`,
+`a_list_of_functions_result_carries_no_result_cells` and `a_result_too_large_to_print_carries_no_result_cells`; the wasm
+session's `a_halted_tm_frame_names_the_heap_cells_its_result_reaches`,
+`a_cell_the_result_does_not_reach_splits_its_heap_runs`, `a_halt_in_the_overflow_guard_names_no_heap_cells`,
+`a_list_of_functions_result_carries_no_result_cells` and `a_result_too_large_to_print_carries_no_result_cells`; and the
+wasm-bindgen `a_list_result_crosses_as_numbers`, which takes `docs/development.md`'s count of those to 37. Node: 7 new
+cases in 5 files, `clif-package`, `clif-view`, `protocol`, `rxm-view` and `tape`, and `bindings-contract.test.ts` pins
+the three nullable `result` fields. Browser: `result-list.test.ts`, 19 cases: countdown(4) in the app, in rxm, clif, TM
+and λ, with nothing lit a step before and nothing outside a view moved, and again with the clif view's machine code
+panel open; `tail([1])`, whose `[]` sits beside a cell; a list whose runs a cell parts; `[1, 2]` with its word dropped;
+and λ bodies, heap lists and a TM view built by hand for the block's edges, the gutter, the dropped word in a narrow
+view and in forced colours, and the pixel past each far edge. `result-stopped`'s opened-chip case, which #201 held
+unmarked, now holds the block, and `result-lambda`'s list case finds the root marked. The other browser files the branch
+touches add `result: null` to their frames.
+
+The reviews found cases of the patches that could not fail, the overflow guard's, the nil results' and clif's no-result
+read at step 0, which `e07e2bc`, `3f7d319` and `46eea19` let fail. Each case the fix waves added or changed was seen to
+fail against a sabotage of the code it holds, the file saved, broken, restored from the copy and compared with `cmp`;
+each dispatch's `progress.md` names the sabotage, the assertion that fired and its log. One did not fire as first
+written: fix7's TM case at one placement passed against the old stylesheet, and became a grid of 8 placements, which
+fails there.
+
+##### THE MERGES WITH MAIN
+
+Main moved five times while the branch was built, and each merge took main's roadmap whole with this entry appended
+unchanged, `git diff` against main showing the entry alone: `193f0b8` merges `58353cb` (#197, #202), `8235e61` `65392ce`
+(#198), `bc51185` `da6edae` (#203), `816b3b2` `100f119` (#200) and `f685794` `7033883` (#206, #205, #204). After
+`193f0b8`, #197's `clif-fault-tags.test.ts` handed `ClifSession.state` an untyped window with no `result`, and 4 node
+tests failed until `60cd928` typed it. `816b3b2` also conflicted in `web/src/clif-pane.ts`, resolved as #200's side
+whole with its heap line given the branch's `clifHeap(frame, this.#result)`; #200's `ClifState` frames in
+`mc-pane.test.ts` and `mc-panel-layout.test.ts` had no `result`, so the merge commit adds `result: null` to the two, as
+the hook's typecheck required, and `38da6d6` runs countdown(4) to its end with the machine code panel open.
+
+##### THE DECISIONS AND THE RULINGS
+
+Taken without asking the user, for them to overturn (`ledger.md`):
+
+- **Q1** An opened numeral chip over several rows, or a number in expand-all mode, gets the block at the run's end,
+  where #201 drew nothing, so the result is always marked.
+- **Q2** Two lit heap lines share one box though a cell number between them is not shown.
+- **Q3** A forced-colours outline in this PR, for the new marks no word stands beside.
+- **Q4** One note where both apply, `+36 older, 36 of them result cells`; the wording is the user's to change.
+- **Q5** Lit heap lines below the heap panel's visible area are left, and named below.
+- **Q6** Past the 64 cap the lit cells are the newest by allocation, not by list order: left, and named below.
+- **Q7** A result's cells are carried only where the result can be marked.
+- **The LLVM stamp.** CI's `rust-llvm` job runs LLVM 23.1.6 (run 827, job 16146), neither main's stamp, 23.1.4, nor this
+  machine's 23.1.5. The two new snapshots and the stamp are committed at 23.1.5, the release that wrote every snapshot
+  (`ff04cf0`): the strict comparison runs where the running release equals the stamp, and CI on 23.1.6 prints its note
+  and passes, as it does on main.
+
+The user's rulings:
+
+- **R2-1, 2026-11-25: option B.** A list on one row that nearly filled the λ view drew the word past the view at the
+  last step alone, by 1 to 25 px. Of A, accept it as #201 accepted REG's word, B, drop the word where the row has no
+  room, as #201 drops the TM status line's `little-endian`, and C, lay the last step out to the room the word leaves,
+  the user took B, with the forced-colours outline covering a result whose word is dropped.
+- **The λ gutter, 2026-11-26: option B.** Rows exactly as main draws them, the block's left edge off the strip's right
+  side, about a pixel inside row 0's `▾` box. It replaced `4dc09f7`'s `EDGE_ROOM`, 4px after the strip on every row,
+  which moved every row's text 4px right and put a glyph of edge-spacing's 390x844 case on the pane's edge (gate B2),
+  and `d3b3cc4`'s narrower gutter, `calc(2ch - 4px)`, which kept the text where main has it and brought each `▸`/`▾` 4px
+  nearer it, an ink gap of 5 to 7 px where main's is 9 to 10 (drive2).
+- **review4's finding 2, 2026-11-27: option A.** Keep the 4px of room at each λ row's end and name the overflow it costs
+  with classic scroll bars (below), since without it the block's right edge takes the last pixel of a numeral chip's
+  overline or of a 3's stroke (fix6). review6's second nit and review7's first, the pixel past a far edge in a box
+  within a pixel of fitting, are the same class and come under it.
+
+##### WHAT THIS DID NOT CLOSE
+
+Each item was read again against `20994d6`'s code.
+
+- **The call stack's lines are not padded** as the heap's now are (`.rxm-frame` beside `.rxm-cell-line` in `style.css`),
+  so in rxm and clif the call stack's text starts 4px left of the heap's.
+- **The TM's glyphs sit about 0.3ch inside a HEAP box's edge**, as in #201's REG box: the box is drawn on the cells' own
+  edges.
+- **A lit heap line can lie below the heap panel's visible area** at the last step, and nothing scrolls it into view
+  (Q5): the drive saw countdown(4)'s heaps below the view at 1412x896.
+- **Past the 64 cap** the lit cells are the newest by allocation, not by list order (Q6), and the note counts the rest.
+- **Binary countdown(4)'s HEAP box runs past the TM view's right edge**, 166px in Chromium and 171 in Firefox at
+  1412x896 (the drive, `bc51185`), so its right edge is unseen until the row is scrolled.
+- **Up to 64 result cells are drawn unlit**, under a bare `+N older` note, from the end frame's arrival until the result
+  message lands, which the worker posts after the legs' recordings (review3's first report, item 2); nothing moves when
+  it lands.
+- **The end frame decodes and capped-prints the result twice** in each leg, once for the gate on its cells and once for
+  the result message, and again at each re-recording after a rewind (review3's first report, item 3); a list too large
+  to print spends the capped print twice. The worker pays it, never the page's thread.
+- **The λ word is dropped up to 2 columns before it would overflow**, since it is weighed against the width that keeps
+  2ch clear, and **a resize alone keeps it as weighed** until the view next lays the term out.
+- **Main's edge-spacing case at 390x844 sits exactly at its 4px threshold** (fix4): the branch draws the λ rows where
+  main does, so the case is as near its edge as on main.
+- **With classic scroll bars, a λ row exactly as wide as the layout allows overflows by 1 to 3 px** at a step where the
+  vertical scroll bar first appears, until the next layout, where main's does not (review4's finding 2, ruling A). The
+  pixel past each far edge overflows a box within a pixel of fitting by up to 1px at any step, so with classic scroll
+  bars it can draw a bar main does not; and End, ↓ or PageDown onto the last row of a λ view that holds every row with
+  no pixel to spare scrolls it by that pixel and stops following, where main's keys scroll nothing (review6's second
+  nit, review7's first).
+
+##### VERIFICATION
+
+**At `bc51185`**, the merge of `da6edae` onto wave 3's `68dafbf`. Gate A2: `scripts/check-all.sh --no-browser` with LLVM
+green but for the browser tier, its 12 nextest runs 5384 passed, 101 skipped, 0 failed, the snapshot test strict on LLVM
+23.1.5; `cargo llvm-cov` lines 95.51% against a floor of 90, regions 95.14%, functions 93.63%; `scripts/check-slow.sh`
+35 passed; and the 27 runs of its light half, each exit 0: the hygiene scans, each after its self-test,
+`scripts/ci-docs-only.sh --self-test`, the comment guard against `da6edae`, biome on 473 files, typecheck,
+`pnpm run test:node` 84 files and 1609 tests, and `build:app`. Gate B2: `check-all.sh --browser-only`, the wasm-bindgen
+tier, 37 passed; `pnpm run test:coverage` 98.17 / 92.48 / 98.74 / 99.39 against floors of 95 / 89 / 97 / 97, 3521 passed
+and 1 failed, edge-spacing's 390x844 case, bisected to `4dc09f7` and gone at `1dba295`, beside a file that failed to
+load when vite re-optimised mid-run and passed alone; `pnpm run test:firefox` 53 failed and 1838 passed, every failure
+but that edge-spacing case already in the fail set of an earlier run. The drive (`drive/`): the built app in Chromium
+156 and Firefox 157 at 1412x896, light and dark, countdown(4) under binary and unary to its end in every view and a step
+back, `tail([1])`, and `[1, 2]` at each width from 900 to 1500 px: 349 checks in Chromium and 348 in Firefox, 8 failing
+in each, all the pixel check's reading of the source editor's own step mark, not a view; the word dropped at 1080-1200
+px in Chromium and 1060-1180 in Firefox; in Chromium, forced colours' outline in `Highlight`; no console error. It saw
+the HEAP box and the heaps of *What this did not close*, and that rxm's listing after ⏭ straight from step 0 stays at
+pc0 until ◀ or ▶, which this branch's code does not touch, not checked on main.
+
+**At `1dba295`**, wave 4's end. fix4's runs: biome on 473 files, typecheck, the comment guard against `da6edae`,
+Chromium 6 files and 172 tests, Firefox's `result-list` 11 passed and 3 skipped (forced colours, Chromium only),
+`test:node` 1609, the wasm crate's nextest 150. Gate C: `check-all.sh --no-browser --no-llvm`, 43 legs, its 10 nextest
+runs 5207 passed, 101 skipped, 0 failed; the 27 runs of its light half exit 0, the comment guard against `da6edae` among
+them; `test:coverage` 3530 passed, 0 failed, 98.17 / 92.48 / 98.75 / 99.39; `test:firefox` 53 failed and 1838 passed,
+the edge-spacing case gone and one row new, clif-worker's "drops the stepper for a request with no listing", which
+passed alone in both engines and is in the `editor-tab` branch's fail set too. drive2: the drive's checks again, 349 and
+348, the same 8 failing, and the gutter's measures against `bc51185` and main (*The decisions and the rulings*).
+
+**At `38da6d6`**, the merge of `100f119` and its case: typecheck, biome on 490 files, `test:node` 86 files and 1632
+tests, Chromium 43 files and 380 tests, every `clif-*`, `mc-*` and `result-*` file among them.
+
+**At `257bb1c`**, the gutter ruling. fix5's runs: biome on 490 files, typecheck, `test:node` 1632, Chromium 18 files and
+268 tests, Firefox's `edge-spacing` and `result-list` 66 passed and 3 skipped; a probe of each row's strip, gutter,
+glyph and text against main's in 8 scenes found them equal. Gate D: `check-all.sh --no-browser --no-llvm`, 43 legs, 5207
+passed, 101 skipped, 0 failed; the 27 runs of its light half exit 0, the comment guard against `100f119` among them;
+`test:coverage` 323 files, 3624 passed, 0 failed, 98.2 / 92.6 / 98.79 / 99.4; `test:firefox` 52 failed and 1910 passed,
+every failing test in gate C's and gate B2's sets; the drive again, 349 and 348 checks, the same 8 failing. It saw
+Firefox draw no right edge on the λ block, which `660cdff` answers.
+
+**At `9e762c7`**, fix6's end, after the merge of `7033883`: biome on 494 files, typecheck, `test:node` 87 files and 1652
+tests, Chromium 38 files and 490 tests, Firefox's `edge-spacing` and `result-list` 68 passed and 3 skipped. fix6's probe
+with classic scroll bars, on its tree before `660cdff`, whose 3px and 1px keep the same 4px: a row exactly as wide as
+the layout allows overflowed by 3, 2 and 1 px where the view's width leaves 0, 1 and 2 px past its last whole column,
+and by none at 3 and 5, where a stand-in for main's rows overflowed by none at each.
+
+**At `78289a2`**, fix7's end: biome on 494 files, typecheck, `test:node` 1652, Chromium 71 files and 891 tests, the
+classic-scroll-bar project 2 files and 6 tests, Firefox's `edge-spacing`, `result-list` and `lambda-follow` 78 passed, 4
+skipped and 1 failed. fix7's probe: before `3788a52`, Chromium lost the λ block's and a heap box's bottom edge at 7 of
+32 placements each, and Firefox none.
+
+**At `20994d6`**, the last code: biome on 494 files, typecheck, `test:node` 87 files and 1652 tests, Chromium 17 files
+and 253 tests, `app`, `edge-spacing` and the λ and `result-*` files, Firefox's `result-list` and `lambda-follow` 25
+passed, 4 skipped and 1 failed. The Firefox failure here and at `78289a2` is `lambda-follow`'s "comes back following, on
+its redex, when it is taken off the page before its scroll is reported", which times out at 15 s with `9e762c7`'s code
+too and is in the fail sets of gates B2, C and D: main's.
+
+**Not run at `20994d6`.** The last whole gate is gate D's, at `257bb1c`; after it the branch's own commits changed
+`lambda-body.ts`, `style.css`, `web/help.html`, `lambda-body.test.ts`, `result-list.test.ts` and the design, and the
+merge brought `7033883`, and each fix dispatch ran the browser files those reach, in both engines, with the node
+project, biome and typecheck. From `ac1342b`, before gate C, to `377d36f`, no commit changed `crates/`. Gates C and D
+skipped the LLVM tier, whose last run here is gate A2's, and CI's `rust-llvm` runs LLVM 23.1.6 against the 23.1.5 stamp.
+`cargo-deny`, CI's `advisories.yml`, ran in no gate.
+
+**With this entry in the tree**, before its commit: `scripts/check-doc-figures.sh`, `scripts/check-citations.sh` and the
+comment guard against `7033883` (`node scripts/check-comments.mjs --base origin/main`), each exit 0, and
+`$R/entry/figures.zsh` below.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at `377d36f`,
+with `R=~/.local/state/agents/redextape/list-results` and `strip` standing for `sed 's/\x1b\[[0-9;]*m//g'`.
+`$R/entry/figures.zsh` runs them, and `$R/entry/figures.log` is its output. A figure a dispatch took is read from that
+dispatch's log or, where its probe kept no log, from its `progress.md`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 64; 5: `193f0b8`, `8235e61`, `bc51185`, `816b3b2`, `f685794`, merging main's `58353cb`, `65392ce`, `da6edae`, `100f119`, `7033883` | the commits in `7033883..377d36f`; its merges and their parents | `git rev-list --count 7033883..377d36f; git log --reverse --merges --format='%h %p' 7033883..377d36f` |
+| `fe53400`, `df13861`, `9a6d578`, on `f59ef8e` | the three applied patches | `git log --reverse --format='%h %p' f59ef8e..9a6d578` |
+| 2026-11-25; 2026-11-27 | the dates of the first patch's commit and of `377d36f`, in the heading | `git log -1 --format=%cd --date=short fe53400; git log -1 --format=%cd --date=short 377d36f` |
+| the waves' commits, in order | the commits after the patches, first parent, as *How it was made* groups them by the ledger | `git log --reverse --first-parent --no-merges --format=%h 9a6d578..377d36f \| paste -sd ' '` |
+| `ac1342b` | the last commit to change `crates/` | `git log -1 --no-merges --format=%h -- crates` |
+| the design, `web/help.html`, `lambda-body.ts`, `style.css`, `lambda-body.test.ts`, `result-list.test.ts` | what the branch's own commits changed after gate D's `257bb1c`, to `20994d6` | `git log --first-parent --no-merges --name-only --format= 257bb1c..20994d6 \| sort -u \| paste -sd ' '` |
+| 13 | the faults the first gate and the two draft reviews found, numbered in the lane's handoff | `awk '/^## Fixes owed/,/^Unsettled/' $R/handoff.md \| grep -cE '^[0-9]+\. '` |
+| 8; 73; `[57, 2, 14]` and `[66, 2, 0]` | `WEB_EXAMPLES`; the clif agreement corpus and the JIT's two tallies the branch changes | `grep -o 'WEB_EXAMPLES: \[(&str, &str); [0-9]*\]' crates/redextape-native/src/codegen_snapshots.rs; git diff 7033883 20994d6 -- crates/redextape-clif/tests/agreement.rs \| grep -oE '^\+.*(corpus.len\(\), [0-9]+\|tally.jit, \[[0-9, ]+\])' \| tr -s ' '` |
+| 23.1.5; 23.1.4 | the snapshots' LLVM stamp at `20994d6`; main's at `f59ef8e` | `cat crates/redextape-native/snapshots/llvm-version.txt; git show f59ef8e:crates/redextape-native/snapshots/llvm-version.txt` |
+| 23.1.6, run 827, job 16146 | the LLVM CI's `rust-llvm` job runs, as the ledger records it | `grep -aoE 'LLVM 23\.1\.6 \(run [0-9]+, job [0-9]+\)' $R/ledger.md` |
+| 37 | the wasm-bindgen browser tests `docs/development.md` counts | `grep -o 'has \*\*[0-9]*\*\* browser tests' docs/development.md` |
+| 64, 64; 40 | the result cells the app's rxm and clif windows carry; `TM_RADIUS` | `grep -oE '(RXM\|CLIF)_WINDOW: [A-Za-z]+ = .*result: [0-9]+' web/src/protocol.ts \| grep -oE '^[A-Z]+\|result: [0-9]+$' \| paste -sd ' '; grep -o 'TM_RADIUS = [0-9]*' web/src/protocol.ts` |
+| 6; 24 | `WORD_COLUMNS`; the layout's `FLOOR` | `grep -oE '^const (WORD_COLUMNS\|FLOOR) = [0-9]+' web/src/lambda-body.ts` |
+| 3px; 1px; 1px; 1px, beside its 0.5rem sides; 1px; 0.25rem | the room at a λ row's end; after the rows; below them; below a heap's last line; after a tape's last cell; a heap line's side padding | `for s in '.term-line' '.term-rows' '.term-spacer' '.rxm-heap' '.cells' '.rxm-cell-line'; do print -n "$s "; awk -v s="$s {" '$0==s{f=1} f&&/padding/{print $1, $2; f=0} f&&/^}/{f=0}' web/src/style.css \| paste -sd ' '; done` |
+| 11, in 6 files | the new Rust tests | `for f in $(git diff --name-only 7033883 20994d6 -- crates); do n=$(git diff -U2 7033883 20994d6 -- $f \| grep -aA2 -E '^\+\s*#\[(test\|wasm_bindgen_test)\]' \| grep -ac '^+.*fn [a-z0-9_]*('); [[ $n -gt 0 ]] && print "$f $n"; done` |
+| 19 | the cases in `result-list.test.ts` | `grep -cE '^\s*it\(' web/tests/browser/result-list.test.ts` |
+| 7, in 5 files | the new node cases | `for f in $(git diff --name-only 7033883 20994d6 -- web/tests/node); do n=$(git diff 7033883 20994d6 -- $f \| grep -cE '^\+\s*(it\|test)\('); [[ $n -gt 0 ]] && print "$f $n"; done` |
+| at `bc51185`: 12 runs, 5384 passed, 101 skipped, 0 failed; green but for the browser tier | gate A2: `scripts/check-all.sh --no-browser` with LLVM, its nextest runs | `strip $R/gate-a2/01-check-all.log \| grep -a 'Summary \[' \| awk '{for(i=1;i<NF;i++){if($(i+1)~/^passed/)p+=$i; if($(i+1)~/^skipped/)s+=$i; if($(i+1)~/^failed/)f+=$i}} END{print NR" runs, "p" passed, "s" skipped, "f+0" failed"}'; strip $R/gate-a2/01-check-all.log \| grep -a '^green'` |
+| at `bc51185`: 95.51%, 95.14%, 93.63% | gate A2: `cargo llvm-cov` lines, regions and functions, the lines floor 90 | `strip $R/gate-a2/02-llvm-cov.log \| grep -a '^TOTAL' \| awk '{print $10, $4, $7}'` |
+| at `bc51185`: 35 | gate A2: `scripts/check-slow.sh`, tests passed | `strip $R/gate-a2/02-check-slow.log \| grep -acE '^test .* \.\.\. ok$'` |
+| at `bc51185`: 84 files, 1609; 473 | gate A2: `pnpm run test:node`; `biome ci`, files | `strip $R/gate-a2/04-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/gate-a2/04-biome.log \| grep -ao 'Checked [0-9]* files'` |
+| at `bc51185`: 37 passed | gate B2: `scripts/check-all.sh --browser-only`, the wasm-bindgen tier | `strip $R/gate-b2/01-check-all-browser.log \| grep -aE 'test result: ok\. [1-9]'` |
+| at `bc51185`: 1 failed, 3521 passed; 98.17 / 92.48 / 98.74 / 99.39 | gate B2: `pnpm run test:coverage`, tests; statements, branches, functions, lines | `strip $R/gate-b2/02-test-coverage.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/gate-b2/02-test-coverage.log \| grep -a '^All files' \| tr -s ' '` |
+| at `bc51185`: 53 failed, 1838 passed | gate B2: `pnpm run test:firefox` | `strip $R/gate-b2/03-test-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| at `bc51185`: 349 and 348 checks, 8 failing in each; 1080-1200 and 1060-1180; 166 and 171 px | the drive in Chromium and Firefox: its checks and failures; the widths at which `[1, 2]` drops its word; how far HEAP's box runs past the TM view | `for e in chromium firefox; do jq -c '[length, (map(select(.pass==false))\|length)]' $R/drive/$e-checks.json; done; grep -aoE 'Chromium one row \+ word dropped at [0-9-]+\|Firefox [0-9]+-[0-9]+, shown\|runs [0-9]+px \(Chromium\) / [0-9]+px \(Firefox\)' $R/drive/progress.md` |
+| at `1dba295`: 6 files, 172; 11 passed, 3 skipped; 1609; 150 | fix4: Chromium; Firefox `result-list`; `test:node`; the wasm crate's nextest | `strip $R/fix4/final-chromium.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix4/final-firefox-result-list.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix4/final-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix4/final-nextest-wasm.log \| grep -a 'Summary \['` |
+| at `1dba295`: 43 legs; 10 runs, 5207 passed, 101 skipped, 0 failed | gate C: `scripts/check-all.sh --no-browser --no-llvm` | `wc -l < $R/gate-c/01-check-all-list.log; strip $R/gate-c/01-check-all.log \| grep -a 'Summary \[' \| awk '{for(i=1;i<NF;i++){if($(i+1)~/^passed/)p+=$i; if($(i+1)~/^skipped/)s+=$i; if($(i+1)~/^failed/)f+=$i}} END{print NR" runs, "p" passed, "s" skipped, "f+0" failed"}'` |
+| at `1dba295`: 3530 passed; 98.17 / 92.48 / 98.75 / 99.39; 53 failed, 1838 passed | gate C: `test:coverage`; its four figures; `test:firefox` | `strip $R/gate-c/03-test-coverage.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/gate-c/03-test-coverage.log \| grep -a '^All files' \| tr -s ' '; strip $R/gate-c/04-test-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| at `1dba295`: 349 and 348 checks, 8 failing in each; ink gaps main 10 / 9, `bc51185` 10-11 / 9, `1dba295` 6-7 / 5 px | drive2: its checks; the gap between a row's `▸`/`▾` and its text, rows 1 and 2 | `for e in chromium firefox; do jq -c '[length, (map(select(.pass==false))\|length)]' $R/drive2/$e-checks.json; done; grep -a 'Ink gap' $R/drive2/progress.md` |
+| at `38da6d6`: 86 files, 1632; 490; 43 files, 380 | merge-4: `test:node`; biome; Chromium | `strip $R/merge-4/test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/merge-4/biome.log \| grep -ao 'Checked [0-9]* files'; strip $R/merge-4/browser.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| at `257bb1c`: 1632; 490; 18 files, 268; 66 passed, 3 skipped | fix5: `test:node`; biome; Chromium; Firefox | `strip $R/fix5/logs/final-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix5/logs/final-biome.log \| grep -ao 'Checked [0-9]* files'; strip $R/fix5/logs/final-chromium.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix5/logs/final-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| at `257bb1c`: 43 legs; 10 runs, 5207 passed, 101 skipped, 0 failed | gate D: `scripts/check-all.sh --no-browser --no-llvm` | `wc -l < $R/gate-d/01-check-all-list.log; strip $R/gate-d/01-check-all.log \| grep -a 'Summary \[' \| awk '{for(i=1;i<NF;i++){if($(i+1)~/^passed/)p+=$i; if($(i+1)~/^skipped/)s+=$i; if($(i+1)~/^failed/)f+=$i}} END{print NR" runs, "p" passed, "s" skipped, "f+0" failed"}'` |
+| at `257bb1c`: 323 files, 3624 passed; 98.2 / 92.6 / 98.79 / 99.4; 52 failed, 1910 passed; 349 and 348 checks, 8 failing in each | gate D: `test:coverage`; its four figures; `test:firefox`; its drive | `strip $R/gate-d/03-test-coverage.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/gate-d/03-test-coverage.log \| grep -a '^All files' \| tr -s ' '; strip $R/gate-d/04-test-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; for e in chromium firefox; do jq -c '[length, (map(select(.pass==false))\|length)]' $R/gate-d/drive/$e-checks.json; done` |
+| at `9e762c7`: 87 files, 1652; 494; 38 files, 490; 68 passed, 3 skipped | fix6: `test:node`; biome; Chromium; Firefox | `strip $R/fix6/logs/final-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix6/logs/final-biome.log \| grep -ao 'Checked [0-9]* files'; strip $R/fix6/logs/final-chromium.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix6/logs/final-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| 3, 2, 1 at r 0, 1, 2; 0 at r 3 and 5; main 0 at each | fix6's classic-scroll-bar probe: px a row exactly as wide as the layout allows overflows when the vertical bar appears, at each r, the px past the view's last whole column | `strip $R/fix6/logs/f2-probe-scrollbars-chromium.log \| grep -a 'PROBE' \| sed 's/.*PROBE //' \| jq -c '[.variant, .r, .after.over]' \| paste -sd ' '` |
+| at `78289a2`: 1652; 494; 71 files, 891; 2 files, 6; 1 failed, 78 passed, 4 skipped | fix7: `test:node`; biome; Chromium; the classic-scroll-bar project; Firefox | `strip $R/fix7/logs/final-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix7/logs/final-biome.log \| grep -ao 'Checked [0-9]* files'; strip $R/fix7/logs/final-chromium.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix7/logs/final-scrollbars.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix7/logs/final-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| 7 of 32; Firefox 0 | the placements at which Chromium lost the λ block's and a heap box's bottom edge before `3788a52`, as fix7 recorded them; Firefox's | `grep -aoE 'LOST in Chromium 7/32' $R/fix7/progress.md \| sort \| uniq -c; grep -aoE 'Firefox 0/32' $R/fix7/progress.md \| sort \| uniq -c` |
+| at `20994d6`: 1652; 494; 17 files, 253; 1 failed, 25 passed, 4 skipped | fix8: `test:node`; biome; Chromium; Firefox | `strip $R/fix8/logs/final-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix8/logs/final-biome.log \| grep -ao 'Checked [0-9]* files'; strip $R/fix8/logs/final-chromium-3.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/fix8/logs/final-firefox-2.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| the lambda-follow case | the one Firefox failure at `78289a2` and `20994d6`, and the same case in gates B2, C and D's fail sets | `strip $R/fix8/logs/final-firefox-2.log \| grep -aE '^ *(×\|FAIL) ' \| head -2; grep -l 'taken off the page' $R/gate-b2/03-firefox-failset-branch-bc51185.txt $R/gate-c/04-firefox-failset-1dba295.txt $R/gate-d/04-firefox-failset-257bb1c.txt` |
+| `f818cca` (#197) and `58353cb` (#202); `65392ce` (#198); `da6edae` (#203); `100f119` (#200); `52fc8c6` (#206), `eaef129` (#205) and `7033883` (#204) | main's commits after `f59ef8e`, first parent, with their pull requests | `git log --reverse --first-parent --format='%h %s' f59ef8e..7033883 \| sed -E 's/^([0-9a-f]+) .*(\(#[0-9]+\))$/\1 \2/' \| paste -sd ' '` |
+| 1 to 25 px | R2-1: how far the word took the λ term past its view at the last step | `grep -aoE 'clientWidth = 1\.\.25 px' $R/fix2-web/progress.md` |
+| 4 | the node tests that failed after `193f0b8` until `60cd928` | `grep -aoE '4 fail in tests/node/clif-fault-tags\.test\.ts' $R/rust-fixes/progress.md` |
+| 27 each, none non-zero | the runs of gates A2's, C's and D's light halves | `for d in gate-a2 gate-c gate-d; do print "$d $(grep -c 'exit=' $R/$d/light-exits.txt) runs, $(grep -c 'exit=[1-9]' $R/$d/light-exits.txt) non-zero"; done` |
+| 2; LLVM 23.1.5 | gate A2: the snapshot test's passes, with and without the default features; the release it ran | `strip $R/gate-a2/01-check-all.log \| grep -ac 'PASS .*optimised_llvm_ir_matches_the_snapshots_on_the_recorded_llvm'; grep -ao 'llvm-config 23.1.5' $R/gate-a2/progress.md` |
+| Chromium 156, Firefox 157; 1412x896; 900 to 1500 px | the drive's engines; its window; the widths it ran `[1, 2]` at | `jq -r '.engine + " " + .version' $R/drive/chromium-summary.json $R/drive/firefox-summary.json; grep -aoE '900-1500\|1412x896' $R/drive/progress.md \| sort -u` |
+| 8 scenes | fix5's probe of the rows against main's | `grep -aoE 'in all 8 scenes' $R/fix5/progress.md \| head -1` |
+| 4.0 px, at the threshold | main's edge-spacing 390x844 case: the gap from its glyph to the pane's edge | `grep -aoE '4\.0 px: main passes AT the threshold' $R/fix4/progress.md` |
+| 2 columns; 41-42 | the room `room()` keeps clear past the gutter's 2, so the word drops that much early; the columns at which `[1, 2]`'s word fit and is now dropped | `grep -o 'Math.floor((width - lanes) / ch) - 4' web/src/lambda-body.ts; grep -aoE 'at columns..? 41-42' $R/fix3-web/progress.md` |
+| 8 placements | fix7's TM case after its first form did not fire | `grep -ao '8-placement grid' $R/fix7/progress.md` |
+| 4px; 0.3ch | the call stack's text left of the heap's; the TM glyphs inside a box's edge, as the ledger records them | `grep -aoE 'call-stack lines unpadded \(4px left of heap/registers\)\|TM glyphs ~0\.3ch inside box edge' $R/ledger.md \| sort -u` |

@@ -1,7 +1,7 @@
 import { n } from './format'
 import { type Labels, placeLabels } from './label-rows'
 import type { HeapView, StackView, ValuesView } from './machine-panels'
-import type { RxmProgram, RxmState, RxmWord, WordTag } from './types'
+import type { ResultCells, RxmProgram, RxmState, RxmWord, WordTag } from './types'
 
 /**
  * The rxm view as data (Plan 7 part 5 spec §6): the listing's rows, how a word reads, and what the registers, call
@@ -207,34 +207,49 @@ export function rxmStack(s: RxmState, program: RxmProgram): StackView {
   }
 }
 
-/** The heap panel at `s`: `heapView` with the registers that name each cell and box. */
-export function rxmHeap(s: RxmState): HeapView {
-  return heapView(s, (at, tag) => backRefs(s, at, tag))
+/**
+ * The heap panel at `s`: `heapView` with the registers that name each cell and box, and at the run's result (`result`)
+ * the cells `rr`'s list reaches lit.
+ */
+export function rxmHeap(s: RxmState, result: boolean): HeapView {
+  return heapView(s, (at, tag) => backRefs(s, at, tag), result ? s.result : null)
 }
 
 /**
  * The heap panel at `s`: the cells, how many older ones the window hides, then the same for the boxes. `refs` names
- * what holds the cell or box `at`, a word of `tag`, which each machine reads from its own frame.
+ * what holds the cell or box `at`, a word of `tag`, which each machine reads from its own frame. Each cell `result`
+ * names is lit, and the older cells' note says how many of them are the result's.
  */
-export function heapView(s: HeapWindow, refs: (at: number, tag: WordTag) => string[]): HeapView {
+export function heapView(
+  s: HeapWindow,
+  refs: (at: number, tag: WordTag) => string[],
+  result: ResultCells | null,
+): HeapView {
   const items: HeapView['items'][number][] = []
   const note = (text: string) => items.push({ kind: 'note', text })
+  const lit = new Set(result?.shown)
   for (const c of s.cells) {
     items.push({
       kind: 'line',
       lead: `#${c.cell}`,
       body: `${wordText(c.head)} → ${wordText(c.tail)}`,
       refs: refs(c.cell, 'List'),
+      result: lit.has(c.cell),
     })
   }
+  // THE RESULT'S CELLS THE FRAME DOES NOT CARRY ARE AMONG THE OLDER ONES, so one note counts both: a note of their
+  // own after the older count would count the same hidden cells twice.
   const olderCells = s.heap_len - s.cells.length
-  if (olderCells > 0) note(`+${n(olderCells)} older`)
+  const unshown = result === null ? 0 : result.len - result.shown.length
+  const theirs = unshown === 0 ? '' : `, ${n(unshown)} of them ${unshown === 1 ? 'a result cell' : 'result cells'}`
+  if (olderCells > 0) note(`+${n(olderCells)} older${theirs}`)
   for (const b of s.boxes) {
     items.push({
       kind: 'line',
       lead: `box #${b.handle}`,
       body: wordText(b.content),
       refs: refs(b.handle, 'Box'),
+      result: false,
     })
   }
   const olderBoxes = s.box_len - s.boxes.length

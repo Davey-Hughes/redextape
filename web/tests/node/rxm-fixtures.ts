@@ -40,8 +40,8 @@ export const FACT3: RxmProgram = {
 
 /**
  * A frame with nothing in it but what `over` says: step 0, `pc` 0, `rr` the value 0, no registers, no frames, an empty
- * heap. `locals_len`, `args_len`, `heap_len` and `box_len` default to what the window shows, so a fixture that windows
- * nothing need not say them.
+ * heap, no result cells. `locals_len`, `args_len`, `heap_len` and `box_len` default to what the window shows, so a
+ * fixture that windows nothing need not say them.
  */
 export function frameOf(over: Partial<RxmState> = {}): RxmState {
   const locals = over.locals ?? []
@@ -60,6 +60,7 @@ export function frameOf(over: Partial<RxmState> = {}): RxmState {
     depth: 0,
     frames: [],
     heap_len: cells.length,
+    result: null,
     box_len: boxes.length,
     source_node: null,
     ...over,

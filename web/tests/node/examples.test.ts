@@ -17,7 +17,7 @@ describe('the examples manifest', () => {
     const files = readdirSync(DIR)
       .filter((f) => f.endsWith('.rxt'))
       .map((f) => f.slice(0, -'.rxt'.length))
-    expect(files.length).toBe(7)
+    expect(files.length).toBe(8)
     expect(EXAMPLES.map((e) => e.id).sort()).toEqual(files.sort())
   })
 

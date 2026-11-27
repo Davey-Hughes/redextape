@@ -49,7 +49,7 @@ export class RxmPane extends MachineViewChrome {
   #body: HTMLElement
   #program: RxmProgram | null = null
   #frame: RxmState | null = null
-  /** Whether `#frame` is the run's result, which the registers mark: `setResult`. */
+  /** Whether `#frame` is the run's result, which the registers and the heap mark: `setResult`. */
   #result = false
   #listing: ListingPanel
   #values: MachinePanel<ValuesView>
@@ -174,7 +174,7 @@ export class RxmPane extends MachineViewChrome {
     this.#listing.show(frame?.next ?? null, frame?.step ?? null)
     this.#values.show(frame === null ? null : rxmValues(frame, this.#result))
     this.#stack.show(frame === null || program === null ? null : rxmStack(frame, program))
-    this.#heap.show(frame === null ? null : rxmHeap(frame))
+    this.#heap.show(frame === null ? null : rxmHeap(frame, this.#result))
   }
 
   /** An instruction's row in the listing, which reads `pc5  jz  r1, else2`. */

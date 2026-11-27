@@ -75,6 +75,7 @@ beforeAll(async () => {
       window: ['_', '_', '_', '_', '_'],
       source_node: null,
       rule: null,
+      result: null,
     },
     controlState(false, 'step 0 of 0', false, false, false),
   )

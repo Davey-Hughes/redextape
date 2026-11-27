@@ -68,8 +68,8 @@ impl ClifSession {
         self.0.step()
     }
 
-    /// `state(window)`, where `window` is a `ClifWindow`, `{ values, frames, cells, boxes }`, each a count, read as
-    /// `Session::rxmState` reads an `RxmWindow`.
+    /// `state(window)`, where `window` is a `ClifWindow`, `{ values, frames, cells, boxes, result }`, each a count,
+    /// read as `Session::rxmState` reads an `RxmWindow`.
     ///
     /// # Errors
     ///

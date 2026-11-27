@@ -20,8 +20,8 @@ use redextape_core::span::Span;
 use redextape_core::tm::machine::Move;
 use redextape_core::trace::{RxmCap, WordTag};
 use redextape_core::viewmodel::{
-    LambdaState, RuleView, RxmBox, RxmCallFrame, RxmCell, RxmProgram, RxmState, RxmWindow, RxmWord, StateView,
-    TmProgram, TmState,
+    LambdaState, ResultCells, RuleView, RxmBox, RxmCallFrame, RxmCell, RxmProgram, RxmState, RxmWindow, RxmWord,
+    StateView, TapeRun, TmProgram, TmState,
 };
 use redextape_test_support::ts_derive_scan::{
     assert_generated_covers_every_derive_site, assert_no_generated_type_carries_bigint,
@@ -42,6 +42,7 @@ fn generated() -> Vec<(&'static str, String)> {
         ("LambdaState", LambdaState::export_to_string(&cfg).unwrap()),
         ("Move", Move::export_to_string(&cfg).unwrap()),
         ("Owner", Owner::export_to_string(&cfg).unwrap()),
+        ("ResultCells", ResultCells::export_to_string(&cfg).unwrap()),
         ("RuleView", RuleView::export_to_string(&cfg).unwrap()),
         ("RxmBox", RxmBox::export_to_string(&cfg).unwrap()),
         ("RxmCallFrame", RxmCallFrame::export_to_string(&cfg).unwrap()),
@@ -54,6 +55,7 @@ fn generated() -> Vec<(&'static str, String)> {
         ("Severity", Severity::export_to_string(&cfg).unwrap()),
         ("Span", Span::export_to_string(&cfg).unwrap()),
         ("StateView", StateView::export_to_string(&cfg).unwrap()),
+        ("TapeRun", TapeRun::export_to_string(&cfg).unwrap()),
         ("TmProgram", TmProgram::export_to_string(&cfg).unwrap()),
         ("TmState", TmState::export_to_string(&cfg).unwrap()),
         ("TokenClass", TokenClass::export_to_string(&cfg).unwrap()),

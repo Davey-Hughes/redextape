@@ -45,6 +45,11 @@ const WIDTHS = [
 ] as const
 
 const box = (el: Element) => el.getBoundingClientRect()
+/**
+ * The right side of what `term` shows without scrolling sideways: the view's, where the rows end a pixel inside it
+ * (`.term-rows`), so a row's own side is not the view's.
+ */
+const shownRight = (term: HTMLElement) => box(term).left + term.clientLeft + term.clientWidth
 const LANE_ORDER = ['contractum', 'next-redex', 'linked'] as const
 const tokens = () => [...document.querySelectorAll<HTMLElement>('.lambda-body-fixture .term-line [data-node]')]
 const overlaps = (a: DOMRect, b: DOMRect) =>
@@ -600,17 +605,24 @@ describe('LambdaBody marks', () => {
     }
   })
 
-  it('takes the strip off the layout’s width, so the widest row it allows ends 2ch inside the view', () => {
+  it('takes the strip off the layout’s width, so the widest row it allows ends 2ch inside the view at each width from 640 to 651 px', () => {
     const { body } = mount()
-    const width = body.columns()
-    expect(width, 'precondition: wider than the floor').toBeGreaterThan(24)
-    const t = new Tree(wireOf('v'.repeat(width)))
-    body.showTree(t, codeLines(t, opts(width)), false, [], false)
-    expect(rows(), 'precondition: one row').toHaveLength(1)
-    const row = rows()[0] as HTMLElement
-    const word = box(row.querySelector('[data-node]:not(.term-gutter)') as Element)
-    const ch = word.width / width
-    expect(box(row).right - word.right, 'room left at the row’s end').toBeGreaterThanOrEqual(2 * ch - 0.5)
+    // EVERY WIDTH ACROSS MORE THAN ONE COLUMN, so one of them leaves less than a column's remainder past the layout.
+    for (let px = 640; px < 652; px += 1) {
+      ;(body.el.parentElement as HTMLElement).style.width = `${px}px`
+      const width = body.columns()
+      expect(width, 'precondition: wider than the floor').toBeGreaterThan(24)
+      const t = new Tree(wireOf('v'.repeat(width)))
+      body.showTree(t, codeLines(t, opts(width)), false, [], false)
+      expect(rows(), 'precondition: one row').toHaveLength(1)
+      const row = rows()[0] as HTMLElement
+      const word = box(row.querySelector('[data-node]:not(.term-gutter)') as Element)
+      const ch = word.width / width
+      expect(
+        shownRight(body.el) - word.right,
+        `room left in the view past the row, ${px} px wide`,
+      ).toBeGreaterThanOrEqual(2 * ch - 0.5)
+    }
   })
 
   it('takes the narrow strip off the layout’s width only where the wide one would leave the layout at its floor', () => {
@@ -630,7 +642,7 @@ describe('LambdaBody marks', () => {
     expect(stripWidth(body.el), 'the strip drawn').toBe(NARROW_LANES)
     const row = rows()[0] as HTMLElement
     const word = box(row.querySelector('[data-node]:not(.term-gutter)') as Element)
-    expect(box(row).right - word.right, 'room left at the row’s end').toBeGreaterThanOrEqual(2 * ch - 0.5)
+    expect(shownRight(body.el) - word.right, 'room left in the view past the row').toBeGreaterThanOrEqual(2 * ch - 0.5)
     // Half a column inside the widths where the wide strip leaves room for 25 columns, one past the floor.
     ;(body.el.parentElement as HTMLElement).style.width = `${Math.round(LANES + 29.5 * ch)}px`
     expect(fits(LANES), 'precondition: the wide strip leaves room past the floor').toBe(25)

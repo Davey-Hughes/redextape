@@ -1,5 +1,6 @@
 import arithmetic from './examples/arithmetic.rxt?raw'
 import closure from './examples/closure.rxt?raw'
+import countdown from './examples/countdown.rxt?raw'
 import fact from './examples/fact.rxt?raw'
 import fact12 from './examples/fact-12.rxt?raw'
 import isEven from './examples/is-even.rxt?raw'
@@ -95,6 +96,14 @@ export const EXAMPLES: readonly Example[] = [
     text: mapFold,
     value: '9',
     outcomes: { lambda: 'ended', rxm: 'ended', tm: 'history-full', clif: 'ended' },
+  },
+  {
+    id: 'countdown',
+    title: 'countdown(4)',
+    description: 'a while loop that builds a list; every leg ends, and the λ, TM, rxm and clif views mark the list',
+    text: countdown,
+    value: '[4, 3, 2, 1]',
+    outcomes: { lambda: 'ended', rxm: 'ended', tm: 'ended', clif: 'ended' },
   },
   SUM_TO,
   {

@@ -1,0 +1,11 @@
+fn countdown(n) {
+    let mut xs = nil;
+    let mut i = 1;
+    while i <= n {
+        xs = cons(i, xs);
+        i = i + 1;
+    }
+    xs
+}
+
+countdown(4)

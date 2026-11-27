@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { compile, initSync as initPkg, type Session } from '../../../pkg/redextape_wasm.js'
 import { ClifSession, initSync as initClif } from '../../../pkg-clif/redextape_clif_wasm.js'
 import { clifValues } from '../../src/clif-view'
-import type { ClifListing, ClifState } from '../../src/types'
+import type { ClifListing, ClifState, ClifWindow } from '../../src/types'
 import { FAULT_CASES, madeBy } from './clif-fault-fixture'
 
 /**
@@ -17,7 +17,7 @@ import { FAULT_CASES, madeBy } from './clif-fault-fixture'
 
 const ROOT = new URL('../../../', import.meta.url)
 const read = (path: string): Buffer => readFileSync(fileURLToPath(new URL(path, ROOT)))
-const WINDOW = { values: 1000, frames: 8, cells: 16, boxes: 16 }
+const WINDOW: ClifWindow = { values: 1000, frames: 8, cells: 16, boxes: 16, result: 0 }
 const LISTINGS = ['as-built', 'optimised']
 
 beforeAll(() => {

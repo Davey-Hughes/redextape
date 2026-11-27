@@ -104,7 +104,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   #mcTarget: ReturnType<typeof radioGroup>
   #mcSyntax: ReturnType<typeof radioGroup>
   #frame: ClifState | null = null
-  /** Whether `#frame` is the run's result, which the values mark: `setResult`. */
+  /** Whether `#frame` is the run's result, which the values and the heap mark: `setResult`. */
   #result = false
   #listing: ListingPanel
   #values: MachinePanel<ValuesView>
@@ -401,7 +401,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     this.#listing.show(next === null || shown === null ? null : shown.rows.ordinalOf(next), frame?.step ?? null)
     this.#values.show(frame === null ? null : clifValues(frame, this.#result))
     this.#stack.show(frame === null || shown === null ? null : clifStack(frame, shown.listing))
-    this.#heap.show(frame === null ? null : clifHeap(frame))
+    this.#heap.show(frame === null ? null : clifHeap(frame, this.#result))
     this.#drawMachine(
       next === null || shown === null ? null : (this.#instRow(shown.rows.ordinalOf(next) ?? -1)?.pc ?? null),
     )

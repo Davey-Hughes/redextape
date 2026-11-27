@@ -45,6 +45,7 @@ const tm = (tapes: number, cells: number): TmState => ({
   window: Array.from({ length: tapes }, () => '_'.repeat(cells)),
   source_node: null,
   rule: null,
+  result: null,
 })
 
 describe('frame sizers', () => {
@@ -78,6 +79,17 @@ describe('frame sizers', () => {
     // give the same answer for every symbol in the basic plane and under-count this one.
     const one = (tape: string): TmState => ({ ...tm(1, 0), window: [tape] })
     expect(tmFrameBytes(one('1𝟙')) - tmFrameBytes(one('1'))).toBe(4)
+  })
+
+  it('charges a halt’s result two numbers a run', () => {
+    const runs = {
+      ...tm(5, 10),
+      result: [
+        { from: 1, to: 11 },
+        { from: 21, to: 31 },
+      ],
+    }
+    expect(tmFrameBytes(runs) - tmFrameBytes(tm(5, 10))).toBe(2 * 16)
   })
 
   it('never reports a frame as free', () => {
@@ -154,6 +166,11 @@ describe('rxmFrameBytes', () => {
     // rr, three locals, one argument, two saved words, a cell's two halves and a box's content: ten words.
     expect(rxmFrameBytes(f)).toBe(FRAME_OVERHEAD_BYTES + 10 * RXM_WORD_BYTES + 3)
   })
+
+  it('charges a word for each cell a halt’s result names', () => {
+    const halt = frameOf({ result: { shown: [3, 2, 1], len: 5 } })
+    expect(rxmFrameBytes(halt) - rxmFrameBytes(frameOf())).toBe(3 * RXM_WORD_BYTES)
+  })
 })
 
 /**
@@ -180,6 +197,7 @@ const CELLS_AND_BOX: ClifState = {
     { function: 0, inst: 63 },
   ],
   heap_len: 4,
+  result: null,
   cells: [
     { cell: 4, head: { word: '0', tag: 'Value' }, tail: { word: '3', tag: 'List' } },
     { cell: 3, head: { word: '1', tag: 'Box' }, tail: { word: '0', tag: 'Value' } },
@@ -223,6 +241,7 @@ const DEEP: ClifState = {
     { function: 0, inst: 10 },
   ],
   heap_len: 0,
+  result: null,
   cells: [],
   box_len: 0,
   boxes: [],
@@ -242,6 +261,10 @@ describe('clifFrameBytes', () => {
   it('charges a deep frame’s call stack with no heap', () => {
     // 17 values, 14 register names and 4 entries: 35 words, at CLIF_WORD_BYTES 60, beside the 300 bytes above.
     expect(clifFrameBytes(DEEP)).toBe(2400)
+  })
+
+  it('charges a word, 60 bytes, for each cell a `Ran` end’s result names', () => {
+    expect(clifFrameBytes({ ...CELLS_AND_BOX, result: { shown: [4, 3], len: 2 } })).toBe(1260 + 2 * 60)
   })
 })
 

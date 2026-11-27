@@ -20,7 +20,7 @@ use redextape_native::{Listing, OptLevel, RtFn, build_listing, jit};
 const LISTINGS: [Listing; 2] = [Listing::AsBuilt, Listing::Optimised];
 /// `TIGHT` with its steps, stack and heap caps doubled.
 const DOUBLE: Caps = Caps { steps: 80, stack: 12, heap: 8, mem: DEFAULT_CAPS.mem };
-const WINDOW: ClifWindow = ClifWindow { values: 64, frames: 8, cells: 16, boxes: 16 };
+const WINDOW: ClifWindow = ClifWindow { values: 64, frames: 8, cells: 16, boxes: 16, result: 64 };
 const FACT: &str = include_str!("../../../web/src/examples/fact.rxt");
 /// Per listing, the least `caps.mem` `fact.rxt` runs under, which its five `fact` frames fill, and the
 /// steps it takes.

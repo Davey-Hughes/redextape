@@ -66,9 +66,10 @@ mod corpus;
 
 /// The site's examples, by file stem. `corpus_holds_every_web_example` keeps this list equal to the
 /// directory, so a new example fails a test until it is snapshotted.
-const WEB_EXAMPLES: [(&str, &str); 7] = [
+const WEB_EXAMPLES: [(&str, &str); 8] = [
     ("arithmetic", include_str!("../../../web/src/examples/arithmetic.rxt")),
     ("closure", include_str!("../../../web/src/examples/closure.rxt")),
+    ("countdown", include_str!("../../../web/src/examples/countdown.rxt")),
     ("fact-12", include_str!("../../../web/src/examples/fact-12.rxt")),
     ("fact", include_str!("../../../web/src/examples/fact.rxt")),
     ("is-even", include_str!("../../../web/src/examples/is-even.rxt")),

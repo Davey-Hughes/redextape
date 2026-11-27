@@ -1329,10 +1329,12 @@ mod scratch_methods_that_must_not_exist {
     const _: fn(&redextape_wasm::RxmScratch) -> (Absent, Absent, Absent, Absent) = rxm_scratch_has_none_of_them;
 }
 
-/// An `RxmWindow` as a renderer builds one: a plain JS object with five named counts.
-fn rxm_window(locals: u32, args: u32, frames: u32, cells: u32, boxes: u32) -> JsValue {
+/// An `RxmWindow` as a renderer builds one: a plain JS object with six named counts.
+fn rxm_window(locals: u32, args: u32, frames: u32, cells: u32, boxes: u32, result: u32) -> JsValue {
     let w = Object::new();
-    for (k, v) in [("locals", locals), ("args", args), ("frames", frames), ("cells", cells), ("boxes", boxes)] {
+    for (k, v) in
+        [("locals", locals), ("args", args), ("frames", frames), ("cells", cells), ("boxes", boxes), ("result", result)]
+    {
         Reflect::set(&w, &JsValue::from_str(k), &JsValue::from_f64(f64::from(v))).unwrap();
     }
     w.into()
@@ -1363,7 +1365,7 @@ fn the_rxm_leg_crosses_the_boundary() {
     assert_eq!(listing.get(0).as_string().as_deref(), Some("li\tr0, #40"), "`print_instr`'s text, tab and all");
     assert!(get(&program, "labels").is_instance_of::<Array>(), "no labels still crosses as an array");
 
-    let window = rxm_window(64, 16, 8, 16, 16);
+    let window = rxm_window(64, 16, 8, 16, 16, 64);
     let first = call(&session, "rxmState", std::slice::from_ref(&window));
     assert_eq!((num(&first, "step"), num(&first, "pc"), num(&first, "next")), (0.0, 0.0, 0.0));
     assert!(get(&first, "wrote").is_null(), "nothing written before the first step");
@@ -1393,7 +1395,7 @@ fn the_rxm_leg_crosses_the_boundary() {
     assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("42"), "got {value:?}");
     call(&session, "raiseRxmCap", &[JsValue::from_f64(1000.0)]);
 
-    let no_boxes = rxm_window(1, 1, 1, 1, 1);
+    let no_boxes = rxm_window(1, 1, 1, 1, 1, 1);
     Reflect::delete_property(no_boxes.unchecked_ref::<Object>(), &JsValue::from_str("boxes")).unwrap();
     let f: Function = get(&session, "rxmState").unchecked_into();
     for bad in [JsValue::from_str("64"), no_boxes] {
@@ -1401,6 +1403,27 @@ fn the_rxm_leg_crosses_the_boundary() {
         args.push(&bad);
         assert!(Reflect::apply(&f, &session, &args).is_err(), "rxmState must refuse {bad:?}");
     }
+}
+
+/// A filled `result` crosses as numbers. At the end of `[[1], [2, 3]]` the rxm frame's `result` names the five cells
+/// the list reaches, `shown` an array of numbers and `len` a number, and the TM frame's `result` is one run of HEAP,
+/// its `from` and `to` numbers: the values a native run of the program gives.
+#[wasm_bindgen_test]
+fn a_list_result_crosses_as_numbers() {
+    let (_, session) = compile("[[1], [2, 3]]");
+    while call(&session, "stepRxm", &[]) == JsValue::TRUE {}
+    let result = get(&call(&session, "rxmState", &[rxm_window(64, 16, 8, 16, 16, 64)]), "result");
+    let shown: Vec<f64> = get(&result, "shown")
+        .unchecked_into::<Array>()
+        .iter()
+        .map(|n| n.as_f64().expect("a cell is a number"))
+        .collect();
+    assert_eq!((shown, num(&result, "len")), (vec![5.0, 4.0, 3.0, 2.0, 1.0], 5.0));
+
+    while call(&session, "stepTm", &[]) == JsValue::TRUE {}
+    let runs: Array = get(&call(&session, "tmState", &[JsValue::from_f64(3.0)]), "result").unchecked_into();
+    assert_eq!(runs.length(), 1, "the five cells touch, so they are one run");
+    assert_eq!((num(&runs.get(0), "from"), num(&runs.get(0), "to")), (1.0, 27.0));
 }
 
 /// `x` squared seven times: 2^128, which `mul` saturates to `u64::MAX` on its seventh square.
@@ -1414,7 +1437,7 @@ const SATURATES: &str = "let mut x = 2; let mut i = 0; while i < 7 { x = x * x; 
 fn a_saturated_word_crosses_as_its_exact_decimal_text() {
     let (_, session) = compile(SATURATES);
     while call(&session, "stepRxm", &[]) == JsValue::TRUE {}
-    let st = call(&session, "rxmState", &[rxm_window(64, 16, 8, 16, 16)]);
+    let st = call(&session, "rxmState", &[rxm_window(64, 16, 8, 16, 16, 64)]);
     assert_eq!(get(&get(&st, "rr"), "word").as_string().as_deref(), Some("18446744073709551615"));
     let value = call(&session, "rxmValue", &[]);
     assert_eq!(get(&get(&value, "Value"), "text").as_string().as_deref(), Some("18446744073709551615"));
@@ -1437,7 +1460,7 @@ fn a_declined_rxm_leg_reports_why_and_its_methods_throw() {
     for (method, arg) in [
         ("rxmProgram", None),
         ("stepRxm", None),
-        ("rxmState", Some(rxm_window(64, 16, 8, 16, 16))),
+        ("rxmState", Some(rxm_window(64, 16, 8, 16, 16, 64))),
         ("raiseRxmCap", Some(JsValue::from_f64(1.0))),
         ("rxmValue", None),
         ("rewindRxm", None),
@@ -1469,7 +1492,7 @@ fn an_rxm_copy_crosses_the_boundary() {
     for method in ["rxmStatus", "rxmProgram", "rxmValue"] {
         assert_eq!(json(call(&copy, method, &[])), json(call(&session, method, &[])), "{method}");
     }
-    let window = rxm_window(64, 16, 8, 16, 16);
+    let window = rxm_window(64, 16, 8, 16, 16, 64);
     let mut steps = 0;
     loop {
         let st = call(&copy, "rxmState", std::slice::from_ref(&window));
@@ -1523,7 +1546,7 @@ fn the_rewind_bindings_cross_on_a_session_and_on_each_copy() {
     let legs = [
         (lambda, "stepLambda", "rewindLambda", "lambdaState", JsValue::from_f64(1_000_000.0)),
         (tm, "stepTm", "rewindTm", "tmState", JsValue::from_f64(3.0)),
-        (rxm, "stepRxm", "rewindRxm", "rxmState", rxm_window(64, 16, 8, 16, 16)),
+        (rxm, "stepRxm", "rewindRxm", "rxmState", rxm_window(64, 16, 8, 16, 16, 64)),
     ];
     let step_of = |on: &JsValue, state: &str, arg: &JsValue| num(&call(on, state, std::slice::from_ref(arg)), "step");
     for (copy, step, rewind, state, arg) in &legs {

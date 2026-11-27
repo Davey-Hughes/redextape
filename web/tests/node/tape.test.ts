@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resultField, tapeLabel, tapeRows } from '../../src/tape'
+import { resultField, resultRuns, tapeLabel, tapeRows } from '../../src/tape'
 import type { TmState } from '../../src/types'
 import { tmStateOf } from './tm-machines'
 
@@ -110,5 +110,47 @@ describe('resultField', () => {
     })
     expect(resultField(reg('#1111#1010#', 3)), 'a window from cell 3').toBeNull()
     expect(resultField(reg('1111#1010#')), 'a first cell that is not #').toBeNull()
+  })
+})
+
+describe('resultRuns', () => {
+  /** A five-tape frame whose HEAP window is `window` from cell `start`, with `result`'s runs. */
+  const heap = (window: string, start: number, result: TmState['result']): TmState => ({
+    ...tmStateOf(0, 0, '#'),
+    heads: [0, 0, 0, start, 0],
+    window_start: [0, 0, 0, start, 0],
+    window: ['#', '', '', window, ''],
+    result,
+  })
+
+  it('cuts each run to the window and leaves out those wholly off it', () => {
+    const window = '@1#@11#@1111111#1@11#111_'
+    expect(
+      resultRuns(
+        heap(window, 0, [
+          { from: 1, to: 8 },
+          { from: 18, to: 25 },
+        ]),
+        3,
+      ),
+    ).toEqual([
+      { from: 1, to: 8 },
+      { from: 18, to: 25 },
+    ])
+    expect(
+      resultRuns(
+        heap(window, 10, [
+          { from: 1, to: 8 },
+          { from: 18, to: 40 },
+        ]),
+        3,
+      ),
+      'from cell 10',
+    ).toEqual([{ from: 8, to: 25 }])
+    expect(resultRuns(heap('@𝟙#', 0, [{ from: 0, to: 9 }]), 3), 'cut at the third character').toEqual([
+      { from: 0, to: 3 },
+    ])
+    expect(resultRuns(heap(window, 0, null), 3), 'no result').toEqual([])
+    expect(resultRuns(heap(window, 0, [{ from: 1, to: 8 }]), -1), 'no tape named HEAP').toEqual([])
   })
 })

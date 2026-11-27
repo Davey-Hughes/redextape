@@ -950,11 +950,19 @@ button.view-title[aria-expanded="true"] {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* THE PIXEL BELOW THE LAST ROW keeps the result block's bottom edge, drawn on the last row's foot, in a view scrolled
+   to the term's end: in Chromium a view scrolled to its end whose start and length both round up can clip its
+   content's last pixel. Content-box, so the pixel lies past the height `lambda-body.ts` sets, the rows' own, which the
+   virtual window's arithmetic assumes. */
 .term-spacer {
   position: relative;
+  box-sizing: content-box;
+  padding-block-end: 1px;
 }
 /* AS WIDE AS THE WIDEST ROW DRAWN, so every row is: a row's strip is held in view only as far as its row
-   reaches, and a short row's would scroll away with it. */
+   reaches, and a short row's would scroll away with it. THE PIXEL AFTER THE ROWS keeps the result block's right edge,
+   drawn on the rows' end, off the view's edge: a view at a fractional place clips the last pixel of rows that reach
+   its edge, in Firefox where the term fits the view and in Chromium at the end of a sideways scroll. */
 .term-rows {
   /* A default only so the sheet declares every property it reads, as `palettes.test.ts` checks: `lambda-body.ts`
      sets the strip's width here before it draws any row. */
@@ -964,12 +972,18 @@ button.view-title[aria-expanded="true"] {
   top: 0;
   min-width: 100%;
   width: max-content;
+  padding-inline-end: 1px;
 }
-/* `LINE_HEIGHT` in `lambda-body.ts` is this height; the virtual window's arithmetic assumes it. */
+/* `LINE_HEIGHT` in `lambda-body.ts` is this height; the virtual window's arithmetic assumes it. THE PADDING IS ROOM AT
+   EVERY ROW'S END, MARKED OR NOT, for the result block's right edge, which is drawn on the row's end: where the term is
+   wider than the view that is the widest row's end, and the padding keeps the edge off its last glyph, a numeral
+   chip's overline among them. With `.term-rows`' pixel after it, it lies inside the 2ch `room()` keeps clear, so it
+   widens no term the layout fits; on the block's rows alone it would widen the term at the step that marks them. */
 .term-line {
   height: 20px;
   line-height: 20px;
   white-space: pre;
+  padding-inline-end: 3px;
 }
 /* THE STRIP THE MARK BARS ARE DRAWN IN (its width `--lanes`, set on `.term-rows` in `lambda-body.ts`), held
    at the view's left edge when the term scrolls sideways. Opaque and over the words, so a word scrolled under it
@@ -999,8 +1013,40 @@ button.view-title[aria-expanded="true"] {
 .term-gutter[data-open="false"]::before {
   content: "▸";
 }
+/* THE RUN'S RESULT OVER MORE THAN ONE ROW (the list results design), a list laid out down the view: each row in the
+   result's ground, one edge round them all, and the word after the first row's text. THE LEFT EDGE IS THE STRIP'S, a
+   shadow off its right side, since the strip is opaque and held at the view's edge: so the edge stays with it when
+   the term scrolls sideways. The word is generated content, for `.term .is-result::after`'s reason. */
+.term-line.is-result-row {
+  background: var(--result-bg);
+  box-shadow: inset -1px 0 0 var(--result);
+}
+.term-line.is-result-first {
+  box-shadow:
+    inset -1px 0 0 var(--result),
+    inset 0 1px 0 var(--result);
+}
+.term-line.is-result-last {
+  box-shadow:
+    inset -1px 0 0 var(--result),
+    inset 0 -1px 0 var(--result);
+}
+.term-line.is-result-row > .term-lanes {
+  box-shadow: 1px 0 0 var(--result);
+}
 .term:focus-visible .term-line.is-active > .term-lanes {
   box-shadow: inset 2px 0 0 var(--focus-ring);
+}
+.term:focus-visible .term-line.is-active.is-result-row > .term-lanes {
+  box-shadow:
+    inset 2px 0 0 var(--focus-ring),
+    1px 0 0 var(--result);
+}
+.term-line.is-result-first::after {
+  content: "result" / "";
+  padding-inline: 0.5ch;
+  font-size: 0.75em;
+  color: var(--result-word);
 }
 .term-chip,
 .term-fold {
@@ -1141,10 +1187,14 @@ button.view-title[aria-expanded="true"] {
   color: var(--fg-dim);
   text-align: right;
 }
+/* THE PIXEL AFTER THE LAST CELL keeps a box's right edge, drawn on its last cell's end, where HEAP's result runs to the
+   row's end and the row is scrolled to it, for `.term-spacer`'s reason. Every row has it, so no cell moves at the step
+   that boxes one. */
 .cells {
   display: flex;
   overflow-x: auto;
   font-family: var(--font-mono);
+  padding-inline-end: 1px;
 }
 .cell {
   flex: 0 0 auto;
@@ -1166,6 +1216,14 @@ button.view-title[aria-expanded="true"] {
   flex: 0 0 auto;
   background: var(--result-bg);
   box-shadow: inset 0 0 0 1px var(--result);
+}
+/* **IN FORCED COLOURS A BOX WITH NO WORD AFTER IT, A LIST'S CELLS ON HEAP, IS OUTLINED IN `Highlight`**, for a lit heap
+   line's reason. REG's box keeps the word after it, which forced colours leave. */
+@media (forced-colors: active) {
+  .tm-result:not(:has(+ .result-word)) {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
 }
 
 .controls {
@@ -1867,7 +1925,7 @@ button.view-title[aria-expanded="true"] {
 .term .is-next-redex:has(.is-linked) {
   outline-offset: 1px;
 }
-/* THE RUN'S RESULT (the return-value highlight design): the root, a chip on one row, in the result's ground and edge
+/* THE RUN'S RESULT (the return-value highlight design): the root, on one row, in the result's ground and edge
    with the word after it. The edge is an `outline`, as the next redex's is, which never marks a node at a normal form,
    so it composes with the contractum's and the link's box-shadows. ITS GROUND REPLACES THEIRS, never lies over them:
    the word's floor is met on the result's tint over the surface alone. The triple is named because the link and
@@ -1883,6 +1941,32 @@ button.view-title[aria-expanded="true"] {
 .term .is-result::after {
   content: "result" / "";
   padding-inline: 0.5ch;
+}
+/* THE WORD DROPPED WHERE THE ROOT'S FIRST ROW HAS NO ROOM FOR IT (`wordFits` in `lambda-body.ts`), on one row or
+   over several; never wrapped. The ground, the edge and `data-marks`'s `result:` stay. */
+.term .is-result.is-wordless::after,
+.term-line.is-result-first.is-wordless::after {
+  content: none;
+}
+/* **IN FORCED COLOURS A λ RESULT WITH ITS WORD DROPPED IS OUTLINED IN `Highlight`**, for a lit heap line's reason:
+   forced colours drop the ground and the block's edges, and no word stands beside it. **WHATEVER ELSE THE NODE IS**:
+   the result's edge rule above names a result that is also linked and the contractum, which outranks a wordless
+   result alone, so that result is named here too. */
+@media (forced-colors: active) {
+  .term .is-result.is-wordless,
+  .term .is-result.is-wordless.is-linked.is-contractum,
+  .term-line.is-result-row.is-wordless {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+  /* **A BLOCK'S LEFT EDGE IS ON THE STRIP'S RIGHT SIDE**, where the shadow outside forced colours draws it: a row's
+     outline runs under the opaque strip there, and forced colours drop shadows. A border past the strip's lanes, its
+     width given back by the margin, so no text moves. */
+  .term-line.is-result-row.is-wordless > .term-lanes {
+    box-sizing: content-box;
+    border-inline-end: 1px solid Highlight;
+    margin-inline-end: -1px;
+  }
 }
 
 /* A MARK ON A NODE OF MORE THAN ONE ROW is a bar in the strip at the rows' start (`LANES` or `NARROW_LANES` in
@@ -3158,6 +3242,54 @@ main {
 .rxm-ret,
 .rxm-refs {
   color: var(--fg-dim);
+}
+/* EVERY HEAP LINE IS PADDED, LIT OR NOT: a list result's box draws its side edges on the line's own edges, and the
+   padding keeps them off the first and last glyph. Padding the lit lines alone would move their text at the step that
+   lights them. */
+.rxm-cell-line {
+  padding-inline: 0.25rem;
+}
+/* THE PIXEL BELOW THE LAST LINE keeps a list result's bottom edge, drawn on its last line's foot, in a heap scrolled to
+   its end, for `.term-spacer`'s reason. Every heap has it, lit or not, so no line moves at the step that lights one. */
+.rxm-heap {
+  padding-block-end: 1px;
+}
+/* A LIST RESULT'S CELLS, ONE BOX TO A RUN OF THEM (the list results design): the tint on each line and the edge drawn
+   down both sides, closed at the run's first and last lines. Inset shadows, so a lit line takes no more room than an
+   unlit one. The word `result` stays on the register that holds the list. */
+.rxm-cell-line.is-result {
+  background: var(--result-bg);
+  box-shadow:
+    inset 1px 0 0 var(--result),
+    inset -1px 0 0 var(--result);
+}
+.rxm-cell-line.is-result-first {
+  box-shadow:
+    inset 1px 0 0 var(--result),
+    inset -1px 0 0 var(--result),
+    inset 0 1px 0 var(--result);
+}
+.rxm-cell-line.is-result-last {
+  box-shadow:
+    inset 1px 0 0 var(--result),
+    inset -1px 0 0 var(--result),
+    inset 0 -1px 0 var(--result);
+}
+.rxm-cell-line.is-result-first.is-result-last {
+  box-shadow:
+    inset 1px 0 0 var(--result),
+    inset -1px 0 0 var(--result),
+    inset 0 1px 0 var(--result),
+    inset 0 -1px 0 var(--result);
+}
+/* **IN FORCED COLOURS A LIT LINE IS OUTLINED IN `Highlight`.** Forced colours drop the tint and the inset edges, and
+   no word stands beside a lit line, so it would read as an unlit one. An outline is kept in a system colour the page
+   names, and drawn inside the line it takes no room. */
+@media (forced-colors: active) {
+  .rxm-cell-line.is-result {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
 }
 
 /* THE BOUNDARY TAKES THE PLACE OF THE GAP THE REGION UNDER IT KEEPS ABOVE ITSELF, and does across what draws nothing

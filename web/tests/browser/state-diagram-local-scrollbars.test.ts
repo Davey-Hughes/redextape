@@ -84,7 +84,7 @@ beforeAll(async () => {
   host.dataset.leaf = 'tm-0'
   // ON ITS START, `s`, READING A BLANK, WHICH NO RULE OF `s` READS.
   pane.render(
-    { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: null },
+    { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: null, result: null },
     controlState(false, 'step 0 of 0', false, false, false),
   )
   await userEvent.click(diagramChoice('local') as HTMLButtonElement)

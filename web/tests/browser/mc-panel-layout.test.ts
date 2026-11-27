@@ -126,6 +126,7 @@ function mount(
       depth: 1,
       frames: [],
       heap_len: 0,
+      result: null,
       cells: [],
       box_len: 0,
       boxes: [],

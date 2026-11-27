@@ -64,7 +64,10 @@ function bothLegs(id: SessionId, label: string, text: string): SessionEntry {
   const lambdaHist = new History<LambdaState>(1_000_000)
   lambdaHist.push({ text, spans: new Uint8Array(), cut: null, step: 0, redex_span: null, owner: 'None' }, 1)
   const tmHist = new History<TmState>(1_000_000)
-  tmHist.push({ state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: null }, 1)
+  tmHist.push(
+    { state: 0, step: 0, heads: [0], window_start: [0], window: ['_'], source_node: null, rule: null, result: null },
+    1,
+  )
   const ok = { available: true, reason: '' }
   return {
     id,

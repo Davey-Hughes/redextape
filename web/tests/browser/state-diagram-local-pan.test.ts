@@ -63,6 +63,7 @@ function show(program: TmProgram, step: number): void {
       window: ['_'.repeat(step + 1)],
       source_node: null,
       rule: program.states[step]?.accept === true ? null : 0,
+      result: null,
     },
     controlState(step > 0, `step ${step} of ${program.states.findIndex((s) => s.accept)}`),
   )
