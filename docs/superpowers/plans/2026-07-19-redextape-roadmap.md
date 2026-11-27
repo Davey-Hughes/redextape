@@ -45855,3 +45855,112 @@ with `CARGO_TARGET_DIR` naming the lane's own directory.
 | 9 | `redextape-llvm`'s tests | `cargo nextest run -p redextape-llvm --features ts`, its `Summary` line |
 | 0.25.10 | the tree-sitter `check-all.sh` pins | `$TREE_SITTER --version` |
 | 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
+
+#### A SCREEN READER HEARS EACH λ ROW'S PLACE AMONG ITS SIBLINGS, HEARS share's LINE SAYING A LINK IS LONG, TELLS THE clif VIEW'S TWO RETRY BUTTONS APART, AND HEARS THE HEADER'S AND EACH VIEW'S POPOVER BUTTONS AS BUTTONS THAT OPEN SOMETHING, NOT AS MENUS (2026-11-27, branch `a11y-leftovers` on `main` at #207, 6 commits, this entry among them)
+
+Four small items left open by earlier entries' *What this did not close*, gathered in a handoff with no request in the
+user's words, and built in a cloud sandbox with no browser. The user chose, on 2026-11-27, answering "1a, 2a, 3a": the
+five buttons that claimed `aria-haspopup="menu"` become disclosures, as `share` and `about ▾` already were, which
+settles the question #121's fix task 4b left open; the two Retry buttons are named "Retry loading clif" and "Retry
+loading machine code"; and the sandbox may install the lockfile's packages and the tools to build the wasm packages.
+The third item needed no ruling: a probe found that neither λ layout ever writes a row more than one level past the row
+above it (*Verification*).
+
+##### THE CHANGE
+
+- **The λ rows' sibling counts.** `lambda-layout.ts`'s new `treePlaces` gives each row its `aria-setsize` and
+  `aria-posinset` among its siblings, the rows at its level under the same parent, the parent being the nearest
+  shallower row above it. It keeps a stack of the sets still open and counts the whole list in one pass. `LambdaBody`
+  counts it each time its lines change, empties it with them for flat text, and `#row` reads it, since the view draws a
+  window of rows and a set runs on past its edges. Before, every row's set was the whole list: in `g (a b c d) (e f g h)` each row was one
+  of 3, where `g` stands alone and its two arguments are a pair.
+- **share's long-link line.** The link's field takes the focus when the popover shows, before the link is made, and the
+  line saying the link is past 2,000 characters comes with the link. It still describes the field, and is now said
+  once through the live region as well, with `notices.announce`, since the popover already shows it. It is said only
+  while that open's field is on show, so a link that arrives after the popover closed, or opened again, says nothing.
+- **The two Retries.** A clif view with both packages failed shows the listing's notice and the machine code panel's,
+  each with a button reading Retry. `CLIF_COPY.retryName` and `MC_COPY.retryName` name them, as their `aria-label` and
+  their `title`: a name that starts with the word the button shows still answers a spoken "click Retry", and the
+  controls gate holds a control's name to its text or its tooltip.
+- **The disclosures.** `#workspace`, `#examples` and `#settings` in `index.html` and in the browser harness's `SHELL`,
+  and a view's title and `⋯` in `view-header.ts`, lose `aria-haspopup` and keep `aria-controls` and `aria-expanded`.
+  None of their popovers holds a menu item, and none has arrow keys between its items but a radio group's own.
+  `wireMenu`'s doc now names every header popover a disclosure.
+
+##### THE TESTS
+
+- **`tests/node/lambda-layout.test.ts`**, 7 cases for `treePlaces`: a spine at two widths, a broken λ head, an outline's
+  eleven arguments, levels that skip, no rows, and a sweep of 7 terms through both layouts, both ways of writing
+  variables, every width from 1 to 60 and three fold patterns, which holds every row to at most one level past the row
+  above it and to the siblings counted out by hand.
+- **`tests/node/mc-view.test.ts`**: the two names differ and each starts with Retry.
+- **`tests/node/app-header.test.ts`**, reading `index.html`: none of the header's five popover buttons has
+  `aria-haspopup`, and each has `aria-controls` naming its popover and `aria-expanded="false"`.
+- **Browser, written and NOT RUN**: `lambda-body.test.ts`, the counts on known terms and on a 400-argument term drawn in
+  a window; `lambda-tree-app.test.ts` and `app.test.ts`, the number of rows laid out read from the spacer's height,
+  where they read the first row's `aria-setsize`; `share-popover.test.ts`, the line said once in the live region and
+  not drawn as a notice; `clif-pane.test.ts`, both Retries drawn with their names and tooltips, and `mc-pane.test.ts`,
+  the machine code panel's; `about-menu.test.ts`, the five header buttons; `view-title.test.ts`, `view-menu.test.ts`
+  and `view-header.test.ts`, no `aria-haspopup` where they expected `menu`.
+
+##### THE SABOTAGES
+
+Seven, each of a node test, run at the last code commit: the file copied, broken, the test run, the file restored from
+the copy and `cmp` found equal. Every one fired.
+
+| Sabotage | What failed |
+|---|---|
+| `treePlaces` giving every row the whole list, as before | 6 of the 7 `treePlaces` cases |
+| `treePlaces` setting rows by level alone, whatever their parent | 3: a new set under each parent, the nearest shallower parent, and the sweep |
+| the outline's arguments two levels down | 3: two `outlineLines` cases and the sweep's check that no level is skipped |
+| the machine code Retry named Retry | the `mc-view` case |
+| the clif Retry named so it does not start with Retry | the `mc-view` case |
+| `aria-haspopup="menu"` back on `#settings` | the `app-header` case and the harness's `SHELL` case |
+| `aria-controls` off `#examples` | the `app-header` case |
+
+No browser case could be sabotaged here.
+
+##### THE REVIEW
+
+A fresh reviewer read the whole branch's diff and every commit, ran the touched node files, the comment guard, biome
+and three sabotages of its own, each of which fired, and found no defect. It found two things to fix: no roadmap entry
+yet, which this is, and `wireMenu`'s doc setting `share` apart as the one disclosure, now fixed. Of its four nits, a
+test's precondition message and the both-failed clif case not holding its Retries drawn are fixed; two commit subjects
+named the attributes rather than what a reader hears, and one body put the reason for the parent rule backwards, and
+those were reworded before the patches left the sandbox, with no change to the code; and the fourth is under *What
+this did not close*.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Not run: any browser case, in Chromium or Firefox, or a screen reader.** What a reader says for the λ rows, for
+  share's line in the live region and its description, and for a button whose `title` repeats its name was not heard.
+- **In the code layout a broken λ head's body and its application's arguments are siblings**, as their `aria-level`s
+  make them: in `(\x. x x x x) y`, the body is 1 of 2 and `y` 2 of 2. The counts follow the levels; whether the levels
+  should differ there is a question for the accessibility close-out.
+- **The header's popovers are still called menus** in the app's words and class names (the workspace menu,
+  `.header-menu`): only the ARIA claim changed.
+- **The handoff's other leftovers stay open**: a λ mark said on its first row only, a count hidden when it has no room,
+  Chromium's empty width box, the term map's clickable `role="img"`, a clamp notice said three times, and Plan 7 part 7.
+- **Branches in flight touch the same files**: hidden-recording-b changes the harness, `view-title.test.ts`,
+  `app.test.ts`, `lambda-tree-app.test.ts`, `share-popover.test.ts` and `main.ts`; move-a-view changes `view-header.ts`
+  and `view-menu.test.ts`; listing-follows-end will change `clif-pane.ts`.
+
+##### VERIFICATION
+
+In the sandbox, on Node 22.23.5 and Rust 1.100.0, after `pnpm install --frozen-lockfile` and the five wasm packages
+built with `wasm-pack build --release --no-opt`, at the last code commit; the commands run from the repository's root.
+
+| Leg | Result |
+|---|---|
+| `pnpm run typecheck`, from `web/` | exit 0 |
+| `vitest run --project node`, from `web/` | 87 files, 1 failed; 1657 passed, 3 failed, 1 skipped: the 3 are `share-link.test.ts`'s, which fail the same way on `main` at #207 on Node 22, not checked on Node 26 |
+| the four touched node files, `lambda-layout`, `mc-view`, `app-header` and `harness` | 62 passed; the sweep laid out 7,854 rows |
+| `pnpm run build:app`, from `web/` | exit 0 |
+| `biome ci --error-on-warnings`, from `web/` | 494 files, no fixes applied |
+| `node scripts/check-comments.mjs --self-test`, then `--base` main at #207 | 224 cases pass; 20 areas within their budget, no history and no grown block |
+| the scans text-bytes, citations, attributions, doc-figures, shared-docs, colours and grammar-wasm, each `--self-test` then the scan | exit 0, each |
+| `check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check, from `web/` | exit 0, each |
+| the level probe, a script kept outside the repository: every `wireOf` source in `web/tests/node` and 400 seeded random terms, each through both layouts, both ways of writing variables, widths 1 to 80 and three fold patterns | 37 sources, 419,520 layouts, 826,645 rows, 0 rows more than one level past the row above, 0 first rows off level 1 |
+
+**Not run**: the browser tier, `test:coverage` and `test:firefox`, which need a browser; the lua scan, as `lua5.4` is
+not installed; the Rust, LLVM and `cargo-deny` legs, as no file under `crates/` changed.
