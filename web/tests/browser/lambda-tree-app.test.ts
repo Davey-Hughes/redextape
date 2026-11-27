@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view'
 import { beforeAll, describe, expect, it, onTestFinished } from 'vitest'
 import { page } from 'vitest/browser'
 import sumTo from '../../src/examples/sum-to.rxt?raw'
-import { LANES, NARROW_LANES } from '../../src/lambda-body'
+import { LANES, LINE_HEIGHT, NARROW_LANES } from '../../src/lambda-body'
 import { LAYOUT_STORAGE_KEY } from '../../src/layout'
 import {
   barPieces,
@@ -151,7 +151,8 @@ describe('the λ view draws the tree for the step it shows', () => {
         await frames()
       }
     }
-    const lines = Number(rows()[0]?.getAttribute('aria-setsize'))
+    // THE SPACER HOLDS EVERY LAID-OUT ROW'S HEIGHT; a row's `aria-setsize` counts only its siblings.
+    const lines = Number.parseFloat((term.querySelector('.term-spacer') as HTMLElement).style.height) / LINE_HEIGHT
     for (const end of [0, term.scrollHeight]) {
       term.scrollTop = end
       await frames()

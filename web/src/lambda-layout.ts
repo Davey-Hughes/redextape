@@ -333,6 +333,40 @@ function outline(
   if (!headInline) work.push({ i: head, level: level + 1 })
 }
 
+/** Each row's place among its siblings, by row: `aria-setsize` and `aria-posinset`. */
+export type TreePlaces = { readonly setsize: Uint32Array; readonly posinset: Uint32Array }
+
+/**
+ * Where each row stands among its siblings: the rows at its level under the same parent, the nearest shallower row
+ * above it, which in both layouts is the row one level up, since neither skips a level.
+ *
+ * **STATED, BECAUSE THE ROWS ARE FLAT**: the view's `treeitem`s have no `group` around a row's children, so a reader
+ * learns a row's siblings only from `aria-setsize` and `aria-posinset`. **COUNTED OVER THE WHOLE LIST**, once, when the
+ * lines change, since the view draws only a window of rows and a set runs on past its edges.
+ */
+export function treePlaces(lines: readonly Pick<Line, 'level'>[]): TreePlaces {
+  const setsize = new Uint32Array(lines.length)
+  const posinset = new Uint32Array(lines.length)
+  /** Each set still open, from the shallowest down: its level, and the rows counted into it so far. */
+  const open: { readonly level: number; readonly rows: number[] }[] = []
+  const close = (set: { readonly rows: number[] }): void => {
+    for (const row of set.rows) setsize[row] = set.rows.length
+  }
+  for (const [i, line] of lines.entries()) {
+    for (let top = open.at(-1); top !== undefined && top.level > line.level; top = open.at(-1)) {
+      close(top)
+      open.pop()
+    }
+    const top = open.at(-1)
+    const set = top !== undefined && top.level === line.level ? top : { level: line.level, rows: [] }
+    if (set !== top) open.push(set)
+    set.rows.push(i)
+    posinset[i] = set.rows.length
+  }
+  for (const set of open) close(set)
+  return { setsize, posinset }
+}
+
 /** A line's text, as a reader sees it. */
 export function lineText(line: Line): string {
   return line.tokens.map((x) => x.text).join('')

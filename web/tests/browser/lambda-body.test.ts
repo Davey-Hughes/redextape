@@ -94,10 +94,12 @@ describe('LambdaBody', () => {
     expect(body.el.dataset.layout).toBe('code')
     expect(rows().map((r) => r.getAttribute('aria-level'))).toEqual(['1', '2', '2'])
     expect(rows().map((r) => r.getAttribute('aria-expanded'))).toEqual(['true', null, null])
+    // A ROW'S SET IS ITS SIBLINGS: the head stands alone at its level, and its two arguments are a pair.
+    expect(rows().map((r) => r.getAttribute('aria-setsize'))).toEqual(['1', '2', '2'])
+    expect(rows().map((r) => r.getAttribute('aria-posinset'))).toEqual(['1', '1', '2'])
     for (const r of rows()) {
       expect(r.getBoundingClientRect().height).toBe(LINE_HEIGHT)
       expect(r.getAttribute('role')).toBe('treeitem')
-      expect(r.getAttribute('aria-setsize')).toBe('3')
     }
   })
 
@@ -108,7 +110,33 @@ describe('LambdaBody', () => {
     expect(body.el.getAttribute('role')).toBe('tree')
     expect(body.el.dataset.layout).toBe('outline')
     expect(rows().map((r) => r.getAttribute('aria-level'))).toEqual(['1', ...Array(11).fill('2')])
+    expect(rows().map((r) => r.getAttribute('aria-setsize'))).toEqual(['1', ...Array(11).fill('11')])
+    expect(rows().map((r) => r.getAttribute('aria-posinset'))).toEqual(
+      Array.from({ length: 12 }, (_, i) => String(Math.max(1, i))),
+    )
     expect(rows()[0]?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  /**
+   * **A SET IS COUNTED OVER THE WHOLE TERM, NOT OVER THE ROWS DRAWN.** The first draw of a tall term follows its redex
+   * to the end, so the window holds the last of the spine's 401 arguments and not the first, and each drawn argument
+   * still says it is one of 401, at its place in all of them.
+   */
+  it('counts a row among all its siblings, drawn or not', () => {
+    const { body } = mount()
+    const t = new Tree(wireOf(long(400)))
+    body.showTree(t, codeLines(t, opts(20)), false, [], false)
+    const drawn = rows()
+    expect(drawn.length, 'precondition: a window of the 402 rows').toBeLessThan(402)
+    expect(
+      drawn.some((r) => r.dataset.line === '1'),
+      'precondition: the first argument is not drawn',
+    ).toBe(false)
+    for (const r of drawn) {
+      expect(r.getAttribute('aria-level'), `row ${r.dataset.line}`).toBe('2')
+      expect(r.getAttribute('aria-setsize'), `row ${r.dataset.line}`).toBe('401')
+      expect(r.getAttribute('aria-posinset'), `row ${r.dataset.line}`).toBe(r.dataset.line)
+    }
   })
 
   it('marks the next redex and the contractum each with its own shape, and says so to a screen reader', () => {

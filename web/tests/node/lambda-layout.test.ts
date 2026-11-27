@@ -6,6 +6,7 @@ import {
   lineOf,
   lineText,
   outlineLines,
+  treePlaces,
   widths,
 } from '../../src/lambda-layout'
 import { KIND_ABS, KIND_APP, KIND_VAR, NO_LINK, Tree } from '../../src/lambda-tree'
@@ -164,6 +165,103 @@ function chain(n: number): LambdaTreeWire {
     contractum: null,
   }
 }
+
+/**
+ * **A ROW'S PLACE IS AMONG ITS SIBLINGS, NOT AMONG THE ROWS.** The tree's rows are flat, with no `group` around a
+ * row's children, so each row says how many rows share its parent and which of them it is.
+ */
+describe('treePlaces', () => {
+  const places = (lines: readonly Pick<Line, 'level'>[]) => {
+    const p = treePlaces(lines)
+    return { setsize: [...p.setsize], posinset: [...p.posinset] }
+  }
+  const code = (src: string, width: number) => codeLines(new Tree(wireOf(src)), opts(width))
+
+  it('counts a spine’s head alone and its arguments as a pair', () => {
+    expect(places(code('g (a b c d) (e f g h)', 12))).toEqual({ setsize: [1, 2, 2], posinset: [1, 1, 2] })
+  })
+
+  it('starts a new set under each parent, though the level is the same', () => {
+    const lines = code('g (a b c d) (e f g h)', 6)
+    expect(
+      lines.map((l) => l.level),
+      'precondition: two pairs of level 3 rows under two level 2 rows',
+    ).toEqual([1, 2, 3, 3, 3, 2, 3, 3, 3])
+    expect(places(lines)).toEqual({ setsize: [1, 2, 3, 3, 3, 2, 3, 3, 3], posinset: [1, 1, 1, 2, 3, 2, 1, 2, 3] })
+  })
+
+  it('counts a broken head’s body and its application’s argument as siblings, as their levels say', () => {
+    expect(places(code('(\\x. x x x x) y', 8))).toEqual({ setsize: [1, 2, 3, 3, 3, 2], posinset: [1, 1, 1, 2, 3, 2] })
+  })
+
+  it('counts an outline’s argument rows under their apply row', () => {
+    const lines = outlineLines(new Tree(wireOf('f aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk')), opts(80))
+    expect(places(lines)).toEqual({
+      setsize: [1, ...Array(11).fill(11)],
+      posinset: [1, ...Array.from({ length: 11 }, (_, i) => i + 1)],
+    })
+  })
+
+  it('names as a row’s parent the nearest row above it that is shallower, at whatever level', () => {
+    expect(places([{ level: 1 }, { level: 3 }, { level: 3 }, { level: 2 }, { level: 3 }])).toEqual({
+      setsize: [1, 2, 2, 1, 1],
+      posinset: [1, 1, 2, 1, 1],
+    })
+  })
+
+  it('has nothing to say of no rows', () => {
+    expect(places([])).toEqual({ setsize: [], posinset: [] })
+  })
+
+  /**
+   * **NO LAYOUT WRITES A ROW MORE THAN ONE LEVEL PAST THE ROW ABOVE IT**, so a row's parent is always the nearest row
+   * one level up, and `aria-level` never skips a level a reader would hear as missing. Held over every width a term
+   * can break at, both ways of writing variables, and three fold patterns; and the places are checked against
+   * counting the siblings out by hand.
+   */
+  it('agrees with the siblings counted out by hand, over layouts that never skip a level', () => {
+    const sources = [
+      'g (a b c d) (e f g h)',
+      '\\x. f x x x x',
+      '(\\x. x x x x) y',
+      '(\\f. f f) (\\g. g)',
+      'a (b (c d)) e',
+      '\\f. \\x. f (f (f (f (f x))))',
+      '(\\x. \\y. x (y y y) (x x)) (\\z. z z) (\\w. w)',
+    ]
+    const byHand = (lines: readonly Line[], i: number) => {
+      const level = (lines[i] as Line).level
+      let start = i
+      while (start > 0 && (lines[start - 1] as Line).level >= level) start -= 1
+      let end = i
+      while (end < lines.length - 1 && (lines[end + 1] as Line).level >= level) end += 1
+      const set = lines.slice(start, end + 1).flatMap((l, k) => (l.level === level ? [start + k] : []))
+      return { setsize: set.length, posinset: set.indexOf(i) + 1 }
+    }
+    let rows = 0
+    for (const src of sources) {
+      const t = new Tree(wireOf(src))
+      for (const lay of [codeLines, outlineLines]) {
+        for (const vars of ['names', 'debruijn'] as const) {
+          for (let width = 1; width <= 60; width += 1) {
+            for (const open of [() => true, () => false, (n: number) => n % 2 === 1]) {
+              const lines = lay(t, opts(width, { vars, open }))
+              const p = treePlaces(lines)
+              for (const [i, line] of lines.entries()) {
+                const id = `${src} ${lay.name} ${vars} width ${width} row ${i}`
+                if (i === 0) expect(line.level, id).toBe(1)
+                else expect(line.level, id).toBeLessThanOrEqual((lines[i - 1] as Line).level + 1)
+                expect({ setsize: p.setsize[i], posinset: p.posinset[i] }, id).toEqual(byHand(lines, i))
+                rows += 1
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(rows, 'precondition: the sweep laid rows out').toBeGreaterThan(5_000)
+  })
+})
 
 /**
  * BOTH LAYOUTS WALK AN EXPLICIT STACK, NOT THE CALL STACK. The automatic policy keeps the whole path to the

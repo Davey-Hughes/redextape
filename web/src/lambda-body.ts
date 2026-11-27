@@ -1,4 +1,4 @@
-import { type Line, lineOf, lineText, type Token } from './lambda-layout'
+import { type Line, lineOf, lineText, type Token, type TreePlaces, treePlaces } from './lambda-layout'
 import type { Tree } from './lambda-tree'
 import { byteIndexAt, byteToIndex, decorationRanges } from './spans'
 import { Follow, ownScroll } from './state-table'
@@ -350,6 +350,8 @@ export class LambdaBody {
   #id = seq++
   #tree: Tree | null = null
   #lines: readonly Line[] = []
+  /** Each of `#lines`' places among its siblings, counted with them (`treePlaces`). */
+  #places: TreePlaces = treePlaces([])
   #linked: readonly number[] = []
   #result = false
   /** Where the marks on `#tree` fall in `#lines`, kept until either changes. */
@@ -505,6 +507,7 @@ export class LambdaBody {
       this.#flat.replaceChildren()
       this.#tree = tree
       this.#lines = lines
+      this.#places = treePlaces(lines)
       this.#linked = linked
       this.#result = result
       this.#spans = markSpans(tree, lines, linked, result)
@@ -541,6 +544,7 @@ export class LambdaBody {
     const mine = this.el.scrollTop
     this.#tree = null
     this.#lines = []
+    this.#places = treePlaces([])
     this.#painted = ''
     this.#rows.replaceChildren()
     this.#spacer.style.height = '0px'
@@ -666,8 +670,8 @@ export class LambdaBody {
     el.id = this.#rowId(i)
     el.dataset.line = String(i)
     el.setAttribute('role', 'treeitem')
-    el.setAttribute('aria-setsize', String(this.#lines.length))
-    el.setAttribute('aria-posinset', String(i + 1))
+    el.setAttribute('aria-setsize', String(this.#places.setsize[i]))
+    el.setAttribute('aria-posinset', String(this.#places.posinset[i]))
     el.setAttribute('aria-level', String(line.level))
     const lanes = document.createElement('span')
     lanes.className = 'term-lanes'
