@@ -112,7 +112,8 @@ export function lineText(l: HeapLine): string {
  * values design). `take` answers that text where it is longer than the line's own, and `null` where it is not; the
  * panel lays it out hidden in the line's place, so a line that wrapped onto more lines at a step keeps them at the steps
  * after, where fewer registers name its cell. A cell's head and tail never change; what names it does, and a box's
- * content can. **IT ONLY GROWS**, and the view forgets it with the values' room, at a new program or listing.
+ * content can. It counts the lines the view draws, as the values' room does. **IT ONLY GROWS**, and the view forgets it
+ * with the values' room, at a new program or listing.
  */
 export function lineRoom(): { take(l: HeapLine): string | null; forget(): void } {
   const longest = new Map<string, string>()

@@ -69,9 +69,9 @@ describe('the help page', () => {
         " and clif listings, the machine code panel and the state diagram's program level show the row the run" +
         ' stopped on. In the TM, rxm and clif views, a value, an instruction or a line cut short reads whole in a' +
         " tooltip while the pointer rests on it. The rxm and clif views give their values the room the run's widest" +
-        ' value has needed, so a value is cut only where its panel is narrower than the value and its name, and a' +
-        ' call stack or heap line too long for its panel goes on below, indented. Each combination of views keeps' +
-        ' its own arrangement,',
+        ' value has needed, so a value is cut only where its panel is narrower than the value with its name and any' +
+        ' registers after it, and a call stack or heap line too long for its panel goes on below, indented. Each' +
+        ' combination of views keeps its own arrangement,',
     )
   })
 

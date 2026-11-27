@@ -14,8 +14,7 @@ import { type Counts, factClif, loadViews, mount, resize, VIEWS, type View, whol
  * gives it, only where the panel is narrower. A frame or a heap line too long for its panel goes on below, indented,
  * and a heap line keeps the lines its longest text took, as a clif frame keeps its pc as wide as the listing's widest.
  * The room only grows: a step back to shorter texts or a frame of none moves nothing, and only a new program or listing
- * forgets it. `result-app.test.ts` holds fact(12)'s `rr` in
- * the app.
+ * forgets it. `result-app.test.ts` holds fact(12)'s `rr` in the app.
  */
 
 loadViews()
@@ -189,17 +188,25 @@ describe.each(VIEWS)('the room of the $kind view’s values', (view) => {
   })
 })
 
-/** A Range over `el`'s text. */
-function textOf(el: HTMLElement): Range {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  return range
+/**
+ * The boxes of `el`'s text, each text node's alone: a Range over an element would give its child elements' boxes too,
+ * and an inline block's, a clif frame's pc, stands on its line from another top than the text's.
+ */
+function textBoxes(el: HTMLElement): DOMRect[] {
+  const boxes: DOMRect[] = []
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    boxes.push(...range.getClientRects())
+  }
+  return boxes
 }
 
 /** The left edge of each line `el`'s text is drawn on, top first. */
 function lineStarts(el: HTMLElement): number[] {
   const starts = new Map<number, number>()
-  for (const r of textOf(el).getClientRects()) {
+  for (const r of textBoxes(el)) {
     if (r.width === 0) continue
     const top = Math.round(r.top)
     starts.set(top, Math.min(starts.get(top) ?? r.left, r.left))
@@ -319,22 +326,27 @@ function twoLabels(): readonly [ClifAt, string, ClifAt, string] {
 describe("the clif view's call stack", () => {
   it('moves no line at a step that moves its frames to a pc label of another width', async () => {
     const [short, shortLabel, long, longLabel] = twoLabels()
-    const { host, draw } = mount(VIEWS[1], LINES)
-    const stack = () => host.querySelector('.rxm-stack') as HTMLElement
-    const frame = () => host.querySelector('.rxm-frame') as HTMLElement
-    const pc = () => frame().querySelector('.rxm-ret') as HTMLElement
+    const view = VIEWS[1]
+    const { host, draw } = mount(view, LINES)
+    const stackFrames = () => [...host.querySelectorAll<HTMLElement>('.rxm-frame')]
+    const pc = () => stackFrames()[0]?.querySelector('.rxm-ret') as HTMLElement
+    /** Each frame's top and height, to the pixel. */
+    const boxes = () =>
+      stackFrames().map((f) => {
+        const b = f.getBoundingClientRect()
+        return `${Math.round(b.top)}+${Math.round(b.height)}`
+      })
     const at = (where: ClifAt): Counts => ({ depth: 2, cells: 0, boxes: 0, rows: { stack: 2, values: 0 }, at: where })
     let wrapped = false
-    for (let w = 60; w <= 400; w += 2) {
+    for (const w of [...Array.from({ length: 86 }, (_, i) => 60 + 4 * i), view.medium + 20, view.wide + 40]) {
       await resize(host, w)
       draw(at(short))
       expect(pc().textContent, 'precondition: the shorter label').toBe(shortLabel)
-      const was = { stack: stack().getBoundingClientRect().height, pc: pc().getBoundingClientRect().width }
-      if (lineStarts(frame()).length > 1) wrapped = true
+      const was = boxes()
+      if (lineStarts(stackFrames()[0] as HTMLElement).length > 1) wrapped = true
       draw(at(long))
       expect(pc().textContent, 'precondition: the longer label').toBe(longLabel)
-      expect(stack().getBoundingClientRect().height, `at ${w} px, the call stack`).toBeCloseTo(was.stack, 0)
-      expect(pc().getBoundingClientRect().width, `at ${w} px, the pc`).toBeCloseTo(was.pc, 0)
+      expect(boxes(), `at ${w} px, each frame's top and height`).toEqual(was)
     }
     expect(wrapped, 'precondition: some width at which the frame goes on below').toBe(true)
   })
