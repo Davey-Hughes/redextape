@@ -134,3 +134,21 @@ describe('the window too narrow for the views toggles', () => {
     )
   })
 })
+
+/**
+ * **THE HEADER'S POPOVER BUTTONS ARE DISCLOSURES, NOT MENU BUTTONS.** Their popovers hold buttons, selects and links,
+ * with no `menuitem` and no arrow keys between them, so none claims `aria-haspopup`, which a screen reader announces as
+ * a menu; each still names the popover it opens and says whether it is open. The page's own markup, since the browser
+ * tier mounts a copy of it.
+ */
+describe('the header’s popover buttons', () => {
+  it('claim no menu, and each names its popover and says whether it is open', () => {
+    const page = readRelative('../../index.html')
+    expect(page).not.toContain('aria-haspopup')
+    for (const id of ['workspace', 'examples', 'share', 'about', 'settings']) {
+      const button = new RegExp(`<button[^>]*\\bid="${id}"[^>]*>`).exec(page)?.[0] ?? ''
+      expect(button, `#${id}`).toContain(`aria-controls="${id}-menu"`)
+      expect(button, `#${id}`).toContain('aria-expanded="false"')
+    }
+  })
+})

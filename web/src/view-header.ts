@@ -90,7 +90,8 @@ export function viewHeader(onPick: (choice: Binding<Leg>) => void): ViewHeader {
   button.type = 'button'
   button.className = 'view-title'
   button.title = 'choose what this view shows'
-  button.setAttribute('aria-haspopup', 'menu')
+  // A DISCLOSURE, NOT A MENU BUTTON: its popover's choices are plain buttons with no arrow keys between them, and
+  // `aria-haspopup` would have a screen reader announce a menu and its arrow keys.
   button.setAttribute('aria-controls', menu.id)
   // STATED FROM CONSTRUCTION, NOT FROM THE FIRST TOGGLE: a disclosure with no `aria-expanded` announces as a
   // plain button to the reader who most needs to know it opens something.
@@ -438,7 +439,7 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
   more.append(icon('more'))
   more.title = 'view actions'
   more.setAttribute('aria-label', 'view actions')
-  more.setAttribute('aria-haspopup', 'menu')
+  // A DISCLOSURE, as the title is: the popover is not a `menu` (`DisplayMenu`'s doc).
   more.setAttribute('aria-controls', menu.id)
   more.setAttribute('aria-expanded', 'false')
   more.popoverTargetElement = menu

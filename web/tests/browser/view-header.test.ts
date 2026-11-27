@@ -24,7 +24,7 @@ describe('the title-selector', () => {
     const title = h.el.querySelector<HTMLButtonElement>('h2 > button.view-title')
     expect(title?.textContent).toBe('λ · program')
     expect(title?.dataset.binding).toBe(bindingKey('lambda', 'source'))
-    expect(title?.getAttribute('aria-haspopup')).toBe('menu')
+    expect(title?.hasAttribute('aria-haspopup')).toBe(false)
     expect(title?.getAttribute('aria-expanded')).toBe('false')
   })
 

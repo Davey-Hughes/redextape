@@ -40,6 +40,17 @@ describe('the about menu', () => {
     expect(computeAccessibleName(button())).toBe('about')
   })
 
+  /** None of the header's popovers is a menu, so each of their buttons is a disclosure as `about` is. */
+  it('is a disclosure as every popover button in the header is', () => {
+    for (const id of ['workspace', 'examples', 'share', 'about', 'settings']) {
+      const b = document.getElementById(id) as HTMLButtonElement
+      expect(b.hasAttribute('aria-haspopup'), `#${id}`).toBe(false)
+      expect(b.getAttribute('aria-controls'), `#${id}`).toBe(`${id}-menu`)
+      expect(document.getElementById(`${id}-menu`)?.hasAttribute('popover'), `#${id}-menu`).toBe(true)
+      expect(b.getAttribute('aria-expanded'), `#${id}`).toBe('false')
+    }
+  })
+
   it('links the four pages and the source, each in a new tab with no opener', () => {
     expect(links().map((a) => a.textContent?.trim())).toEqual(['about', 'help', 'licences', 'privacy', 'source ↗'])
     expect(

@@ -216,8 +216,9 @@ describe('the title-selector', () => {
     // these strings unset.
     expect(offered(el).map(([, text]) => text)).toEqual(['λ · program', 'λ · second'])
     expect(viewTitleOf(el)?.dataset.binding).toBe(bindingKey('lambda', SOURCE))
-    // THE TITLE SAYS IT OPENS A MENU: a button that opens something states it with `aria-haspopup`.
-    expect(viewTitleOf(el)?.getAttribute('aria-haspopup')).toBe('menu')
+    // A DISCLOSURE, NOT A MENU BUTTON: it names the popover it opens and claims no menu, whose arrow keys it has not.
+    expect(viewTitleOf(el)?.hasAttribute('aria-haspopup')).toBe(false)
+    expect(viewTitleOf(el)?.getAttribute('aria-controls')).toMatch(/^view-title-menu-/)
   })
 
   /**

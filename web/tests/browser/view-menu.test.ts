@@ -60,11 +60,12 @@ describe('the view menu', () => {
     expect(items(actions)).toEqual(['format'])
   })
 
-  it('names ⋯ and ✕ in words, and states ⋯ opens a menu', () => {
+  it('names ⋯ and ✕ in words, and makes ⋯ a disclosure of its popover, not a menu button', () => {
     const { actions, menu } = build()
     menu.setLayout(true, true)
     expect(moreOf(actions)?.getAttribute('aria-label')).toBe('view actions')
-    expect(moreOf(actions)?.getAttribute('aria-haspopup')).toBe('menu')
+    expect(moreOf(actions)?.hasAttribute('aria-haspopup')).toBe(false)
+    expect(moreOf(actions)?.getAttribute('aria-controls')).toMatch(/^view-menu-/)
     expect(moreOf(actions)?.getAttribute('aria-expanded')).toBe('false')
   })
 

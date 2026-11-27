@@ -39,14 +39,14 @@ import { until } from './until'
 export const SHELL = `
   <header class="bar">
     <span class="wordmark">redextape</span>
-    <button type="button" id="workspace" aria-haspopup="menu" aria-controls="workspace-menu" aria-expanded="false">Explorer <span aria-hidden="true">▾</span></button>
+    <button type="button" id="workspace" aria-controls="workspace-menu" aria-expanded="false">Explorer <span aria-hidden="true">▾</span></button>
     <div id="workspace-menu" class="header-menu" popover>
       <button type="button" id="reset-preset">reset preset — restores the default views</button>
     </div>
     <div id="views-shown" class="views-shown" role="group" aria-label="show">
       ${viewToggleButtons()}
     </div>
-    <button type="button" id="examples" aria-haspopup="menu" aria-controls="examples-menu" aria-expanded="false">examples <span aria-hidden="true">▾</span></button>
+    <button type="button" id="examples" aria-controls="examples-menu" aria-expanded="false">examples <span aria-hidden="true">▾</span></button>
     <div id="examples-menu" class="header-menu" popover></div>
     <label class="encoding">
       encoding
@@ -67,7 +67,7 @@ export const SHELL = `
       <p id="about-build" class="about-build"></p>
       <span id="about-new-tab" class="visually-hidden">opens in a new tab</span>
     </div>
-    <button type="button" id="settings" aria-haspopup="menu" aria-controls="settings-menu" aria-expanded="false">settings</button>
+    <button type="button" id="settings" aria-controls="settings-menu" aria-expanded="false">settings</button>
     <div id="settings-menu" class="header-menu settings" popover>
       <label class="skin">style <select id="style"></select></label>
       <label class="skin">palette <select id="palette"></select></label>
