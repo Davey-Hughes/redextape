@@ -5,6 +5,7 @@ import {
   type HeapView,
   heapPanel,
   type MachinePanel,
+  type RoomPanel,
   type StackView,
   type ValuesView,
   valuesPanel,
@@ -52,9 +53,9 @@ export class RxmPane extends MachineViewChrome {
   /** Whether `#frame` is the run's result, which the registers and the heap mark: `setResult`. */
   #result = false
   #listing: ListingPanel
-  #values: MachinePanel<ValuesView>
+  #values: RoomPanel<ValuesView>
   #stack: MachinePanel<StackView>
-  #heap: MachinePanel<HeapView>
+  #heap: RoomPanel<HeapView>
 
   /**
    * `panels` is the view's stored panel state, read once here; each panel reports every later toggle through
@@ -135,11 +136,14 @@ export class RxmPane extends MachineViewChrome {
 
   /**
    * Set once per compile: the listing and its labels, which do not change as the run moves. `null` for a session with
-   * no rxm leg, which clears the view.
+   * no rxm leg, which clears the view. The registers and the heap forget the room their texts needed, which was another
+   * run's.
    */
   setProgram(p: RxmProgram | null): void {
     this.#program = p
     this.#listing.setSource(p)
+    this.#values.forget()
+    this.#heap.forget()
     this.#frame = null
     this.#draw()
   }

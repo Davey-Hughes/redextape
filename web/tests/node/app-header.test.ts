@@ -68,7 +68,9 @@ describe('the help page', () => {
         " counts loop iterations, as the compiled program's does, not instructions. At the end of a run, the rxm and" +
         " clif listings, the machine code panel and the state diagram's program level show the row the run stopped" +
         ' on. In the TM, rxm and clif views, a value, an instruction or a line cut short reads whole in a tooltip' +
-        ' while the pointer rests on it. Each combination of views keeps its own arrangement,',
+        " while the pointer rests on it. The rxm and clif views give their values the room the run's widest value" +
+        ' has needed, so a value is cut only where its panel is narrower than it, and a call stack or heap line too' +
+        ' long for its panel goes on below, indented. Each combination of views keeps its own arrangement,',
     )
   })
 

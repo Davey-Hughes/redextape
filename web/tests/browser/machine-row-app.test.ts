@@ -25,14 +25,15 @@ import { arrangement, drawnAs, row } from './machine-views'
 
 /**
  * Each machine view: its toggle's kind, its leaf, the name of its first panel, and the arrangement it has beside the
- * source in a window and as the Stage's one view in a window, by the window's width.
+ * source in a window and as the Stage's one view in a window, by the window's width. The CLIF view's are as its wider
+ * values (the squeezed values design) give them: medium beside the source at 1280 px, where §5.1 had it wide.
  */
 const MACHINES = [
   {
     kind: 'clif',
     leaf: 'clif-0',
     values: 'values',
-    beside: { 1280: 'wide', 1024: 'medium' },
+    beside: { 1280: 'medium', 1024: 'medium' },
     stage: { 1280: 'wide', 1024: 'wide', 800: 'medium' },
   },
   {

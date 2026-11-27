@@ -99,6 +99,7 @@ export const CAPTURE_FILES = [
  * `Emulation.setScrollbarsHidden` brings one back in a page. Paths are relative to `web/`.
  */
 export const SCROLLBAR_FILES = [
+  'tests/browser/machine-room-scrollbars.test.ts',
   'tests/browser/machine-row-scrollbars.test.ts',
   'tests/browser/state-diagram-local-scrollbars.test.ts',
 ]

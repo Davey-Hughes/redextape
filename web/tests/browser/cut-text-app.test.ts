@@ -1,22 +1,23 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import { EXAMPLE_ENCODING, EXAMPLES } from '../../src/examples'
-import { compile, diagram, diagramChoice, frames, host, PREFIX, SHELL, stateTable, until } from './harness'
+import { compile, diagram, diagramChoice, frames, host, PREFIX, panelOf, SHELL, stateTable, until } from './harness'
 import { whole } from './machine-views'
 
 /**
  * THE APP ADDS THE CUT-TEXT WATCHER ITSELF (the cut-text tooltips design, `cut-text.ts`): in views the app builds, a cut
- * text reads whole in its `title` after a real hover, with no test adding the watcher. Its texts are fact(12)'s result
- * in the clif view, a rule of the TM view's rule table and an instruction of the TM view's diagram. Each case first holds
+ * text reads whole in its `title` after a real hover, with no test adding the watcher. Its texts are a row of fact(12)'s
+ * clif listing, a rule of the TM view's rule table and an instruction of the TM view's diagram. Each case first holds
  * its text cut, so that none passes because a text happened to fit. `cut-text.test.ts` holds the watcher in views
- * built by hand.
+ * built by hand. fact(12)'s result is no longer one of them: the clif view's values keep the room it needs (the
+ * squeezed values design).
  */
 
 const FACT_12 = EXAMPLES.find((e) => e.id === 'fact-12')
 
 /**
  * How wide the page is: narrow enough that the TM view cuts some of fact(12)'s rules, and wide enough that a cut
- * instruction keeps part of its text drawn to hover. The clif view cuts the result at this width too.
+ * instruction keeps part of its text drawn to hover. The clif view cuts some rows of its listing at this width too.
  */
 const WIDTH = 760
 
@@ -26,8 +27,6 @@ const HOVER_X = 4
 const picker = () => document.querySelector('#encoding') as HTMLSelectElement
 const clif = () => host('clif-0') as HTMLElement
 const stepOf = (pane: HTMLElement) => pane.querySelector('.step')?.textContent ?? ''
-const control = (pane: HTMLElement, label: string) =>
-  [...pane.querySelectorAll<HTMLButtonElement>('.controls button')].find((b) => b.textContent === label)
 
 /** A real hover at `HOVER_X`, at `el`'s middle height: a new `position`, as the call scales it in place. */
 async function hover(el: Element): Promise<void> {
@@ -77,22 +76,13 @@ beforeAll(async () => {
 }, 60_000)
 
 describe('the cut-text watcher in the app', () => {
-  it("gives fact(12)'s result its whole text in the clif view", async () => {
-    // ONE STEP BEFORE THE END, the latest at which the value is cut: at the end the result's row spans the panel and
-    // wraps rather than cut it (`result-values.test.ts`).
-    const [, last = ''] = /^step [\d,]+ of ([\d,]+)$/.exec(stepOf(clif())) ?? []
-    const before = (Number(last.replaceAll(',', '')) - 1).toLocaleString('en')
-    await userEvent.click(control(clif(), '◀') as HTMLButtonElement)
-    await until(() => stepOf(clif()) === `step ${before} of ${last}`, 'the clif view to step back from its end')
-    const result = FACT_12?.value ?? ''
-    const values = () =>
-      [...clif().querySelectorAll<HTMLElement>('.rxm-register dd')].filter((d) => d.firstChild?.textContent === result)
-    if (values().length === 0) throw new Error(`no value reads ${result} at the step before the run's end`)
-    const dd = await firstCut(values)
-    if (dd === undefined) throw new Error('precondition: the result is not cut where a hover reaches it')
-    await hover(dd)
-    expect(dd.title, 'the result').toBe(dd.textContent)
-    expect(dd.title.startsWith(result), 'the title starts with the result').toBe(true)
+  it("gives a cut row of fact(12)'s clif listing its text", async () => {
+    const row = await firstCut(() => [...panelOf(clif(), 'listing').querySelectorAll<HTMLElement>('.clif-cell')])
+    if (row === undefined) throw new Error('precondition: no drawn row of the listing is cut where a hover reaches it')
+    await hover(row)
+    // THE TITLE SETS THE ROW'S COLUMNS A SPACE APART, which its text runs together (`cut-text.ts`'s `reads`).
+    expect(row.title.replaceAll(' ', ''), 'the row').toBe((row.textContent ?? '').replaceAll(' ', ''))
+    expect(row.title.length, 'the row, all of it').toBeGreaterThanOrEqual(row.textContent?.length ?? 0)
   })
 
   it("gives a cut rule of the TM view's rule table its text", async () => {

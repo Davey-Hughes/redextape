@@ -8,8 +8,9 @@ import { compile, host, hosts, outside, PREFIX, panelOf, SHELL, segments, until 
  * THE RESULT'S ROW IN THE VIEWS THE APP BUILDS (the return-value highlight design, goals 1-3): at the last step of
  * sum_to(5) the rxm view marks `rr` and the clif view the value `main` returns, first in their values panels, and
  * neither at the step before, with nothing outside the view moved; after a listing switch the clif view marks the new
- * listing's own value; fact(12)'s result reads whole in both; and a view split from the rxm view after its run has ended
- * marks the result too. `result-values.test.ts` holds the row in views built by hand.
+ * listing's own value; fact(12)'s result reads whole in both, and in the rxm view at the step before (the squeezed
+ * values design); and a view split from the rxm view after its run has ended marks the result too.
+ * `result-values.test.ts` holds the row in views built by hand.
  */
 
 const SUM_TO = EXAMPLES.find((e) => e.id === 'sum-to')?.text ?? ''
@@ -157,18 +158,19 @@ describe('the result in the app', () => {
   )
 
   it(
-    "shows fact(12)'s result whole",
+    "shows fact(12)'s result whole, and at the step before",
     async () => {
       await page.viewport(1400, 896)
       await compile(view, FACT_12)
       await until(() => segments().some((s) => s.startsWith('rxm 479001600')), "the readout's value")
       await until(() => /^step 0 of [\d,]+$/.test(stepOf(clif())), 'the clif view to record its run')
-      // ONE STEP BEFORE THE END rr is one cell of the registers grid, which cuts the value.
+      // ONE STEP BEFORE THE END rr is one cell of the registers grid, whose tracks keep the room the run's widest value
+      // has needed (the squeezed values design): the grid's least track alone cut it.
       await toEnd(rxm())
       await back(rxm())
       const rr = ddOf(register(rxm(), 'rr') as HTMLElement)
       expect(rr.firstChild?.textContent, 'precondition: rr reads the value at the step before').toBe('479001600')
-      expect(valueWhole(rr), 'precondition: the value cut at the step before').toBe(false)
+      expect(valueWhole(rr), 'the value at the step before').toBe(true)
       for (const pane of [rxm(), clif()]) {
         await toEnd(pane)
         const row = marked(pane)[0]
@@ -177,14 +179,15 @@ describe('the result in the app', () => {
         expect(valueRangeOf(ddOf(row)).getClientRects(), 'the value, on one line').toHaveLength(1)
         expect(valueWhole(ddOf(row)), 'the value, whole').toBe(true)
       }
-      const list = clif().querySelector('.rxm-register-list') as HTMLElement
-      expect(getComputedStyle(list).gridTemplateColumns.split(' '), 'the clif values, in one column').toHaveLength(1)
       const dd = ddOf(marked(clif())[0] as HTMLElement)
       const value = valueRangeOf(dd).getBoundingClientRect()
       const regs = (dd.querySelector('.value-regs') as HTMLElement).getBoundingClientRect()
       const word = (dd.querySelector('.result-word') as HTMLElement).getBoundingClientRect()
-      // THE VALUE ON ITS LINE, THEN rr AND THE WORD TOGETHER UNDER IT: the row breaks between the value and them first.
-      expect(regs.top, 'rr, on the next line').toBeGreaterThanOrEqual(value.bottom - 0.5)
+      // THE VALUE, THEN rr AND THE WORD TOGETHER: on the value's line where the row has room for them, which the clif
+      // view's wider values give it at most widths (the squeezed values design), and under it where it has not, as the
+      // row breaks between the value and them first (`result-values.test.ts`).
+      const onValue = regs.top < value.bottom && regs.bottom > value.top
+      expect(onValue ? regs.left >= value.right : regs.top >= value.bottom - 0.5, 'rr, after the value').toBe(true)
       expect(word.top < regs.bottom && word.bottom > regs.top, 'the word, on the line of rr').toBe(true)
     },
     CASE_MS,

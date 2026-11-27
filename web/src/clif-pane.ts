@@ -20,6 +20,7 @@ import {
   type HeapView,
   heapPanel,
   type MachinePanel,
+  type RoomPanel,
   type StackView,
   type ValuesView,
   valuesPanel,
@@ -107,9 +108,9 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   /** Whether `#frame` is the run's result, which the values and the heap mark: `setResult`. */
   #result = false
   #listing: ListingPanel
-  #values: MachinePanel<ValuesView>
+  #values: RoomPanel<ValuesView>
   #stack: MachinePanel<StackView>
-  #heap: MachinePanel<HeapView>
+  #heap: RoomPanel<HeapView>
   /**
    * What the listing says instead of the listing: on the page while `clifNotice` gives one, and a `status` region, so
    * a change of what it says is read out. **ONE ELEMENT, FILLED AGAIN ONLY WHEN THE WORDS CHANGE** (`#said`), since
@@ -264,13 +265,14 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     })
 
     // THE VALUES, THE CALL STACK AND THE HEAP, laid out by the view's width as the rxm view's are (`machine-row.ts`).
-    // THE VALUES ONE PART, THE CALL STACK AND THE HEAP TWO EACH (the machine panels row design §5.1): a value is short
-    // and a header's count is not, so the two headers that carry a count have the room to hold it whole.
+    // THE THREE AS WIDE AS EACH OTHER (the squeezed values design): the call stack's and the heap's least width holds a
+    // header's count whole (the machine panels row design §5.1), and the values' holds a value of 20 digits and the
+    // register after it, which most runs show.
     const row = new MachineRow({
       values: this.#values.panel,
       stack: this.#stack.panel,
       heap: this.#heap.panel,
-      columns: [7.375, 14.75, 14.75],
+      columns: [14.75, 14.75, 14.75],
     })
 
     const body = document.createElement('div')
@@ -314,7 +316,8 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
 
   /**
    * The program's CLIF: its listing, or why it has none; `null` while none has come, which the view says is loading.
-   * Its rows do not change as the run moves.
+   * Its rows do not change as the run moves. The values and the heap forget the room their texts needed, which was
+   * another listing's run.
    */
   setProgram(p: ClifCompiled | null): void {
     this.#program = p
@@ -328,6 +331,8 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
           }
         : null
     this.#listing.setSource(this.#shown?.rows.source ?? null)
+    this.#values.forget()
+    this.#heap.forget()
     this.#frame = null
     this.#draw()
   }

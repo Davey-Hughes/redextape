@@ -22,10 +22,11 @@ import {
 
 /**
  * A CUT TEXT READS WHOLE IN THE BROWSER'S TOOLTIP WHILE THE POINTER RESTS ON IT, AND ONLY WHILE IT IS CUT (the cut-text
- * tooltips design, `cut-text.ts`): a value, a panel's name, a frame, a heap line and a listing row in an rxm view and a
- * clif view built by hand, and an accept state in a TM view's rule table. A tooltip cannot be seen from here, so each
- * case reads the `title` a real hover leaves, and first holds the text cut or whole, so that no case passes because a
- * text happened to fit. A view built by hand has no app to add the watcher, so this file adds it.
+ * tooltips design, `cut-text.ts`): a value, a panel's name and a listing row in an rxm view and a clif view built by
+ * hand, and an accept state in a TM view's rule table. A frame and a heap line go on below rather than cut
+ * (`machine-room.test.ts`). A tooltip cannot be seen from here, so each case reads the `title` a real hover leaves, and
+ * first holds the text cut or whole, so that no case passes because a text happened to fit. A view built by hand has
+ * no app to add the watcher, so this file adds it.
  */
 
 loadViews()
@@ -38,6 +39,11 @@ hearLoops(() => {
 
 /** The largest word, 20 digits: long enough that the views these cases draw cut it, which each case checks first. */
 const LONG = '18446744073709551615'
+/**
+ * How wide a view the value cases use: narrower than a row of `LONG`, where its values panel cuts it whatever room its
+ * grid keeps (the squeezed values design), and wide enough for a row of a short word whole.
+ */
+const VALUE_CUT = 170
 /** Another word as long, for a step that changes a cut value. */
 const OTHER = '12345678901234567890'
 
@@ -141,12 +147,6 @@ async function hover(el: Element, x: number): Promise<void> {
   await userEvent.hover(el, { position: { x, y: el.getBoundingClientRect().height / 2 } })
 }
 
-/**
- * How wide a view the frame case uses: narrow enough to cut a clif frame, which reads its function's name and label and
- * holds no word a case can make long.
- */
-const FRAME_CUT = 90
-
 /** A frame whose value 0 is `LONG`, cut, and whose value 1 is `1`, whole, each clif value naming two registers. */
 const ONE_LONG: Counts = {
   depth: 1,
@@ -162,7 +162,7 @@ describe.each(VIEWS)('in the $kind view', (view) => {
   const longText = view.kind === 'rxm' ? '18446744073709551615' : '18446744073709551615 rr, a0'
 
   it('gives a cut value its whole text as its tooltip when the pointer arrives on it', async () => {
-    const { host, draw } = mount(view, view.wide + 300)
+    const { host, draw } = mount(view, VALUE_CUT)
     draw(ONE_LONG)
     await frames()
     const v = value(host, view, 0)
@@ -174,7 +174,7 @@ describe.each(VIEWS)('in the $kind view', (view) => {
   })
 
   it('gives a value that fits no tooltip', async () => {
-    const { host, draw } = mount(view, view.wide + 300)
+    const { host, draw } = mount(view, VALUE_CUT)
     draw(ONE_LONG)
     await frames()
     const v = value(host, view, 1)
@@ -185,7 +185,7 @@ describe.each(VIEWS)('in the $kind view', (view) => {
   })
 
   it('keeps one tooltip, the one under the pointer', async () => {
-    const { host, draw } = mount(view, view.wide + 300)
+    const { host, draw } = mount(view, VALUE_CUT)
     draw({ ...ONE_LONG, words: (i) => (i < 2 ? LONG : String(i)) })
     await frames()
     const [first, second] = [value(host, view, 0), value(host, view, 1)]
@@ -199,7 +199,7 @@ describe.each(VIEWS)('in the $kind view', (view) => {
   })
 
   it('shows no value from a step before when a step changes the value under a still pointer', async () => {
-    const { host, draw } = mount(view, view.wide + 300)
+    const { host, draw } = mount(view, VALUE_CUT)
     draw(ONE_LONG)
     await frames()
     await hover(value(host, view, 0), 4)
@@ -253,34 +253,6 @@ describe.each(VIEWS)('in the $kind view', (view) => {
     expect(t.scrollWidth, 'precondition: its scroll width reads it whole').toBe(t.clientWidth)
     await hover(t, 2)
     expect(t.title, 'the title cut by less than a pixel').toBe('call stack')
-  })
-
-  it('gives a cut frame and a cut heap line their whole line, from any part of it', async () => {
-    const { host, draw } = mount(view, FRAME_CUT)
-    draw({
-      depth: 2,
-      cells: 1,
-      boxes: 0,
-      rows: { stack: 2, values: 0 },
-      lines: 1,
-      words: () => LONG,
-      saved: LONG,
-    })
-    await frames()
-    const frame = host.querySelector('.rxm-frame') as HTMLElement
-    const line = host.querySelector('.rxm-cell-line') as HTMLElement
-    expect(whole(frame), 'precondition: the frame is cut').toBe(false)
-    expect(whole(line), 'precondition: the heap line is cut').toBe(false)
-    const callee = frame.querySelector('.rxm-callee') as HTMLElement
-    await hover(callee, 2)
-    expect(frame.title, 'the frame, the pointer on its callee').toBe(frame.textContent)
-    expect(frame.title.length, "the frame's title is longer than its callee").toBeGreaterThan(
-      callee.textContent?.length ?? 0,
-    )
-    if (view.kind === 'rxm') expect(frame.title.endsWith(LONG), 'the frame ends with its saved word').toBe(true)
-    await hover(line.querySelector('b') as HTMLElement, 2)
-    expect(line.title, 'the heap line, the pointer on its address').toBe(line.textContent)
-    expect(line.title, 'the heap line holds its head').toContain(LONG)
   })
 
   it('gives a cut listing row its text, and no row an old one when the listing scrolls under a still pointer', async () => {
@@ -370,7 +342,7 @@ describe.each(VIEWS)('in the $kind view', (view) => {
   })
 
   it('measures nothing while the run steps', async () => {
-    const { host, draw } = mount(view, view.wide + 300)
+    const { host, draw } = mount(view, VALUE_CUT)
     draw(ONE_LONG)
     await frames()
     expect(whole(value(host, view, 0)), 'precondition: value 0 is cut').toBe(false)

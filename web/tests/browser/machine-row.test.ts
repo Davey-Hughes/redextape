@@ -123,7 +123,7 @@ describe('moveInto', () => {
  * Each view's wide threshold under a 20 px root, in px: its three least widths and two gaps, in rem, by 20, up to the
  * next whole pixel.
  */
-const WIDE_AT_20 = { rxm: 1100, clif: 758 } as const
+const WIDE_AT_20 = { rxm: 1100, clif: 905 } as const
 
 describe.each(VIEWS)('the $kind view', (view) => {
   const widths = { narrow: view.medium - 40, medium: Math.round((view.medium + view.wide) / 2), wide: view.wide + 40 }

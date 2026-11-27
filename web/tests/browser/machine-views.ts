@@ -57,6 +57,8 @@ export type Counts = {
   readonly words?: (i: number) => string
   /** The rxm registers every CLIF value names. */
   readonly regs?: readonly string[]
+  /** How many values or locals, from the first, hold the first heap cell's list in place of their word. */
+  readonly refs?: number
   /** How many heap cells the window draws as lines, each with `nil` for its tail. */
   readonly lines?: number
   /** The word every rxm frame saved, as its one saved register. */
@@ -76,6 +78,9 @@ const many = <T>(n: number, one: (i: number) => T): T[] => Array.from({ length: 
 /** The word `c` gives value, local or heap head `i`. */
 const wordOf = (c: Counts, i: number) => valueWord(c.words?.(i) ?? String(i))
 
+/** The word `c` gives value or local `i`: the first heap cell's list for the first `refs`, so its line names them. */
+const heldBy = (c: Counts, i: number) => (i < (c.refs ?? 0) ? listWord('1') : wordOf(c, i))
+
 /** The heap cells `c` draws as lines. */
 const cellsOf = (c: Counts) => many(c.lines ?? 0, (i) => ({ cell: i + 1, head: wordOf(c, i), tail: listWord('0') }))
 
@@ -90,9 +95,9 @@ export type Mounted = {
 }
 
 /**
- * Each view, with the thresholds its least widths (the design's §5.1) and the row's gap of 8px (the after-the-try
- * design's G2) give it, wide from `wide` px and medium from `medium`, the name of its first panel, and the parts of the
- * row its values, call stack and heap take, in that order.
+ * Each view, with the thresholds its least widths (the design's §5.1, CLIF's values as the squeezed values design
+ * widens them) and the row's gap of 8px (the after-the-try design's G2) give it, wide from `wide` px and medium from
+ * `medium`, the name of its first panel, and the parts of the row its values, call stack and heap take, in that order.
  */
 export const VIEWS = [
   {
@@ -119,7 +124,7 @@ export const VIEWS = [
               const saved = c.saved === undefined ? [] : [valueWord(c.saved)]
               return { ret_pc: 3, saved, saved_len: saved.length }
             }),
-            locals: many(c.rows?.values ?? 0, (i) => wordOf(c, i)),
+            locals: many(c.rows?.values ?? 0, (i) => heldBy(c, i)),
             cells: cellsOf(c),
           }),
           CONTROLS,
@@ -132,16 +137,16 @@ export const VIEWS = [
   {
     kind: 'clif',
     values: 'values',
-    wide: 606,
-    medium: 362,
-    parts: [1, 2, 2],
+    wide: 724,
+    medium: 480,
+    parts: [1, 1, 1],
     build(host: HTMLElement, panels: StoredPanels, sizes: Shares, onSizes: (s: Shares) => void): Mounted {
       const pane = new ClifPane(host, inertEvents({ panelSizes: onSizes }), panels, sizes)
       pane.setProgram({ listing: clifListing, level: 'as-built' })
       const at = { function: 0, inst: 0 }
       const draw = (c: Counts) => {
         const count = c.rows?.values ?? 0
-        const word = (i: number) => (c.result !== undefined && i === count - 1 ? valueWord(c.result) : wordOf(c, i))
+        const word = (i: number) => (c.result !== undefined && i === count - 1 ? valueWord(c.result) : heldBy(c, i))
         const s: ClifState = {
           step: 1,
           at,

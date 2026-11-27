@@ -3174,10 +3174,18 @@ main {
 }
 
 /* THE REGISTERS (spec §6.3): name and word in a wrapping grid. The register the last instruction wrote is outlined —
-   a shape, not a colour — and a local the current call has not written is dimmed behind its `·`. */
+   a shape, not a colour — and a local the current call has not written is dimmed behind its `·`.
+   EACH TRACK HAS THE ROOM THE WIDEST ROW HAS NEEDED (the squeezed values design): `--values-room`, which
+   `machine-panels.ts` sets on the panel's body and only ever widens until the view is told of a new program, plus the
+   row's padding on both sides, which the room leaves out, and a pixel, since the track and the text it holds are
+   rounded apart. So a value is cut only where the panel is narrower than its row: `min(100%, …)` makes that one track as
+   wide as the panel, rather than a track wider than the panel that the grid would carry past its edge. */
 .rxm-register-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(14ch, 1fr));
+  grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, max(14ch, calc(var(--values-room, 0ch) + 0.5rem + 1px))), 1fr)
+    );
   gap: 0 1ch;
   margin: 0;
 }
@@ -3232,12 +3240,14 @@ main {
   color: var(--fg-dim);
 }
 
-/* THE CALL STACK AND THE HEAP (spec §6.4, §6.5): a line each, newest or top first. */
+/* THE CALL STACK AND THE HEAP (spec §6.4, §6.5): a line each, newest or top first. **A LINE TOO LONG FOR ITS PANEL GOES
+   ON BELOW, INDENTED** (the squeezed values design), so none is cut: it breaks at a space where it can, and anywhere in
+   a word too long for a line of its own. */
 .rxm-frame,
 .rxm-cell-line {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  padding-inline-start: 2ch;
+  text-indent: -2ch;
 }
 .rxm-ret,
 .rxm-refs {
@@ -3245,9 +3255,21 @@ main {
 }
 /* EVERY HEAP LINE IS PADDED, LIT OR NOT: a list result's box draws its side edges on the line's own edges, and the
    padding keeps them off the first and last glyph. Padding the lit lines alone would move their text at the step that
-   lights them. */
+   lights them. The start's padding holds the indent of the lines a long one goes on to as well.
+   **A LINE KEEPS THE LINES ITS LONGEST TEXT TOOK** (`machine-panels.ts`'s `lineRoom`): that text, `--line-room`, is laid
+   out hidden in the same cell of a grid of one as the line's own, so the line is as tall as the taller of the two and
+   a step that names its cell with fewer registers moves nothing under it. */
 .rxm-cell-line {
-  padding-inline: 0.25rem;
+  display: grid;
+  padding-inline: calc(0.25rem + 2ch) 0.25rem;
+}
+.rxm-cell-line > .rxm-line,
+.rxm-cell-line::after {
+  grid-area: 1 / 1;
+}
+.rxm-cell-line::after {
+  content: var(--line-room, none);
+  visibility: hidden;
 }
 /* THE PIXEL BELOW THE LAST LINE keeps a list result's bottom edge, drawn on its last line's foot, in a heap scrolled to
    its end, for `.term-spacer`'s reason. Every heap has it, lit or not, so no line moves at the step that lights one. */
