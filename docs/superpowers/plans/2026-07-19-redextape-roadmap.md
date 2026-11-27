@@ -46343,7 +46343,7 @@ tree-sitter is 0.28.
 | 238 files; 2,000 and 2 | the Chromium tier; tests passed and expected to fail | `(cd web && VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars) 2>&1 \| grep -E 'Test Files\|Tests  '` |
 | 26 | `worker.test.ts` in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox tests/browser/worker.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
 
-#### A FUNCTION RESULT DECODES ON EVERY BACKEND AS ONE OPAQUE `<fn>`, AND `RUN` PRINTS IT SO UNDER `REFERENCE` AND `TM` (2026-11-27, branch `function-results-everywhere` on #208's `function-results`, 6 commits, this entry the last)
+#### A FUNCTION RESULT DECODES ON EVERY BACKEND AS ONE OPAQUE `<fn>`, AND `RUN` PRINTS IT SO UNDER `REFERENCE` AND `TM` (2026-11-27, branch `function-results-everywhere` on #208's `function-results`, 7 commits, the last two this entry and its correction)
 
 The entry before this one left *Idea 2, one opaque `<fn>` on every backend* open, so the oracles could compare backends
 on a function result. This branch is its Rust half, written in duet, a cloud sandbox, from a handoff, and handed back as
@@ -46361,6 +46361,7 @@ nextest 0.9.140 installed in the sandbox.
 | 4 | the decoder docs and the two decoders-disagree tests name the function case; a test of the range check before the budget; the spec's §5 and the CLI README |
 | 5 | two test names say what they check |
 | 6 | this entry |
+| 7 | this entry's file count and the scans it names, corrected |
 
 ##### WHAT IT DOES
 
@@ -46465,20 +46466,21 @@ file (the third commit).
 - **The function demos have no codegen snapshot**, which needs LLVM 23 to write.
 - **Not run in duet:** `llvm_oracle.rs`, which needs LLVM 23 (the sandbox has 18; its new case was checked to compile
   and pass clippy under the `cranelift` feature alone); the grammar leg, with no tree-sitter CLI; `check-licences.sh`,
-  which needs `web/node_modules`; `cargo llvm-cov`; the web job; and the browser tier.
+  which needs `web/node_modules`; `check-lua.sh`, with no Lua interpreter; `cargo llvm-cov`; the web job; and the
+  browser tier.
 
 ##### VERIFICATION
 
 At the fifth commit, in duet, a copy of `scripts/check-all.sh --no-llvm --no-browser` that skips only the grammar leg:
 green, the workspace's nextest 2,089 passed and 35 skipped, fmt, clippy, the doctests, the feature legs and the wasm32
-checks passed. `node scripts/check-comments.mjs`, against `origin/main` and with `--base` at #208's tip: 20 areas
-within budget, no history and no grown block. The scans the pre-commit hook runs, but `check-licences.sh`, passed by
-hand.
+checks passed; at the sixth, `cargo nextest run --workspace` gave the same counts. `node scripts/check-comments.mjs`,
+against `origin/main` and with `--base` at #208's tip, at the sixth: 20 areas within budget, no history and no grown
+block. The scans the pre-commit hook runs, but `check-licences.sh` and `check-lua.sh`, passed by hand at the sixth.
 
 | Value | What | Produced by |
 |---|---|---|
-| 6 | the commits on #208's tip, this entry among them | `git rev-list --count function-results..function-results-everywhere` |
-| 9, 9, 2, 1 | the files changed under `crates/redextape-cli`, `crates/redextape-core`, `crates/redextape-native` and `docs/superpowers` | `git diff --name-only function-results function-results-everywhere \| cut -d/ -f1-2 \| sort \| uniq -c` |
+| 7 | the commits on #208's tip, this entry's two among them | `git rev-list --count function-results..function-results-everywhere` |
+| 9, 9, 2, 2 | the files changed under `crates/redextape-cli`, `crates/redextape-core`, `crates/redextape-native` and `docs/superpowers` | `git diff --name-only function-results function-results-everywhere \| cut -d/ -f1-2 \| sort \| uniq -c` |
 | 21 | the tests the branch adds, the LLVM one among them | `git diff function-results function-results-everywhere \| grep -c '^+\s*#\[test\]'` |
 | 9, 9 | the programs in core's and native's `FUNCTION_RESULT_DEMOS` | the two lists |
 | 25 | the sabotages, each failing at least one test | the sabotage script's log |
