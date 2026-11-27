@@ -46655,3 +46655,130 @@ read from that dispatch's log or, where it kept none, from its report or `progre
 | 1 and 1; `mc-panel-layout.test.ts`'s header case, `clif-worker.test.ts`'s; each in main's set, 1 and 1 | the Firefox rows the gate fails against the gate's before the rebase, new and gone; which; the new one in main's set at `a8033d9`, the gone one in main's at `adb5d5e` | `wc -l < $R/gate-rebased/07-vs-prerebase-new-rows.txt; wc -l < $R/gate-rebased/07-vs-prerebase-gone-rows.txt; cut -d'>' -f1,2 $R/gate-rebased/07-vs-prerebase-new-rows.txt $R/gate-rebased/07-vs-prerebase-gone-rows.txt; grep -cxFf $R/gate-rebased/07-vs-prerebase-new-rows.txt $R/gate-rebased/08-firefox-failset-main-a8033d9.txt; grep -cxFf $R/gate-rebased/07-vs-prerebase-gone-rows.txt $R/gate/08-firefox-failset-main-adb5d5e.txt` |
 | green at `b96f1a8`, on `adb5d5e` | the gate before the rebase | `grep -o "Every leg ran at b96f1a8; nothing red that is the branch's" $S/gate/progress.md; git merge-base b96f1a8 origin/main \| cut -c1-7` |
 | 16G | the memory cap of `run-all.sh`'s unit | `grep -o 'MemoryMax=16G, no swap' $S/gate-rebased/run-all.sh` |
+
+#### THE RXM AND CLIF VALUES KEEP THE ROOM THE RUN'S WIDEST VALUE HAS NEEDED, SO A VALUE IS CUT ONLY WHERE ITS PANEL IS TOO NARROW FOR ITS ROW; A CALL STACK OR HEAP LINE TOO LONG FOR ITS PANEL GOES ON BELOW, INDENTED; AND CLIF'S VALUES COLUMN IS AS WIDE AS ITS CALL STACK'S AND ITS HEAP'S (2026-11-27, branch `squeezed-values` on main at #207, 6 commits, plus this entry)
+
+The user, on 2026-11-23, after trying #194's tooltips: "the tooltip is fine, but ideally we should avoid squeezing
+numbers when there's actually space". Their screenshot was an rxm registers panel about 350 px wide that cut fact(12)'s
+`rr` to `4790016…` with room beside and below it. Their rule of 2026-11-17 held over every choice: "I don't want
+anything like this that shifts the page unexpectedly". They chose on 2026-11-27, "1a 2a 3b 4a 5b 6a" and then "7a 8a":
+a ratchet; forgotten at a new program, a recompile or a new clif listing and kept across a rewind and a step back; the
+call stack and the heap too; the ellipsis and the tooltip kept where a panel is narrower than one value; a wider clif
+values column in this change; yes to the downloads the counts needed; frames and heap lines that wrap, indented, frames
+moving only at calls and returns and a heap line growing once per crossing; and clif's values column 14.75rem. The
+design, `docs/superpowers/specs/2026-11-27-squeezed-values-design.md`, lists them, what was counted before choosing, and
+its *As built*.
+
+##### HOW IT WAS MADE
+
+**Drafted outside this repo's usual flow**, in a cloud sandbox with Node 22 and no browser, as patches against #207:
+none of its browser cases has run, and no one has looked at the panels on a screen.
+The counts before the choices came from a probe over each example's rxm and clif runs, laid out by the stylesheet's
+rules with Hack's advance assumed rather than read. The tests came first; each new node test was broken on purpose and
+seen to fail (*The sabotages*). A review of the whole change led to four commits after it, and a review of the first two
+of those to the fifth.
+
+##### WHAT CHANGED
+
+- **The values' room** (`machine-panels.ts`'s `rowRoom` and `valuesRoom`): a row needs its name's column, at least 4ch,
+  the 1ch gap, its word and, in clif, the rxm registers after it, counted from the text alone, so no step measures
+  anything. The panel keeps the most any row has needed since the view last forgot and writes it as `--values-room` on
+  its body only when it grows; each track of `.rxm-register-list` is `min(100%, max(14ch, room + padding + 1px))`, so a
+  panel narrower than one row has one track as wide as itself, where the ellipsis and the tooltip stay. The result's
+  row, which spans every track and wraps, is left out.
+- **When it forgets:** `RxmPane` and `ClifPane`'s `setProgram`, which a new program, a recompile and a new clif listing
+  reach, and nothing else; a rewind draws an empty frame, which the room outlives.
+- **The call stack and the heap** break a line at a space where they can and anywhere in a word too long for a line,
+  every line after the first 2ch in, and nothing in them is cut, so `cut-text.ts` no longer watches them.
+- **A heap line keeps its longest text** (`lineRoom`), by its lead, laid out hidden in the same cell of a one-cell grid
+  as its own text (`--line-room`), so a step that names its cell with fewer registers moves nothing under it.
+- **A clif frame's pc is as wide as the listing's widest label** (`clif-view.ts`'s `widestPc`, written as `--ret-room`
+  at `setProgram`): the running frame's pc changes at each step, and a frame that wraps would otherwise move the stack's
+  lines between calls.
+- **clif's values column is 14.75rem**, as its call stack's and heap's are, the three in equal parts: the row is wide
+  from 724 px and medium from 480 px under a 16 px root, 905 px wide under a 20 px one, so a clif view beside the source
+  in a 1280 px window is medium.
+- **Help:** `web/help.html` says so, in the paragraph on the TM, rxm and clif views' tooltips.
+
+##### THE TESTS
+
+- **Node:** `machine-room.test.ts`, new, holds the room's arithmetic, the ratchet, the result's row left out, the
+  forgetting, the heap lines' room, and the stylesheet's name width, gap, padding, hidden copy and pc box against what
+  the code counts; `clif-view.test.ts` holds `widestPc`; `machine-row.test.ts` holds the new thresholds;
+  `app-header.test.ts` the help's words.
+- **Browser, NOT RUN:** `machine-room.test.ts`, new, sweeps each view's width and holds a value whole wherever the
+  panel fits its row and cut only where it does not, no cell moving at a step back, an empty frame or the same longer
+  value again, the room forgotten at a new program, lines that wrap indented with nothing cut, a heap line's height
+  kept until a new program, and a clif stack whose frames keep their places when the pc label changes width.
+  `machine-room-scrollbars.test.ts`, new, in the `browser-scrollbars` project, does the sweep with classic scroll bars.
+- **Browser cases changed, NOT RUN:** `cut-text.test.ts` cuts its values at 170 px and no longer holds frames or heap
+  lines; `cut-text-app.test.ts` reads a cut clif listing row where it read fact(12)'s result; `result-app.test.ts` holds
+  rxm's `rr` whole at the step before the end and clif's `rr` on its result's line; `machine-row.test.ts`,
+  `machine-row-app.test.ts`, `machine-panel-headers.test.ts` and `machine-views.ts` take the new clif thresholds; and
+  `mc-panel-layout.test.ts` builds the cases of the machine code panel's place 760 px wide, where the clif row is wide.
+
+##### THE SABOTAGES
+
+Each was made in the tree, its test file run alone with the node project, and the file restored and compared with
+`cmp`. All failed as meant, but one:
+
+| Sabotage | Failed in its file |
+|---|---|
+| a row's name counted without its 4ch least width | 5 of 15 |
+| an unwritten local's mark left out of its name | 1 of 15 |
+| a clif value's registers left out of its room | 1 of 15 |
+| the room taken from each frame alone, not kept | 1 of 15 |
+| the result's row counted | 1 of 15 |
+| `forget` keeping the room | 1 of 15 |
+| a heap line's text without its registers | 3 of 15 |
+| `lineRoom` answering nothing where a longer text was kept | 2 of 15 |
+| `lineRoom`'s `forget` keeping its texts | 1 of 15 |
+| the name's least width 3ch in the stylesheet | 1 of 15 |
+| the track without the row's padding | 1 of 15 |
+| the hidden copy of a heap line made visible | 1 of 15 |
+| the pc box without its least width; without `text-indent: 0` | 1 of 15 each |
+| `widestPc` reading one row fewer and a column short; starting at 4 | 3 of 31; 1 of 31 |
+| the help's sentence as it was before the last fix | 1 of 11 |
+| `ClifPane`'s values column back to 7.375rem | **none**: the node file holds the columns it names itself, and only the browser cases hold the pane's |
+
+##### THE REVIEWS
+
+A review of the whole change, given the code and the user's choices, found one defect: clif's running frame names the
+instruction the run is at, so once frames wrap its pc label of another width moved the stack's lines at ordinary steps
+and step backs. `widestPc` and `--ret-room` answer it. It found that the room counts only the frames the view draws
+(*What this did not close*), which the docs now say; that `result-app.test.ts`'s clif case accepted either layout, now
+pinned; history in test comments, a comment past the line width and a loose sentence in the help, all taken; and that a
+heap line's kept text is chosen by length, left. A review of the first two fix commits found no defect in the code; its
+two findings were in the new browser case, whose call stack's height could not fail and whose line count read the pc's
+box as a line, both taken.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Not run: every browser case, and the panels on a screen.** The layout is reasoned from the stylesheet with Hack's
+  advance assumed; the cases that would show it are written and have not run in either engine.
+- **The room counts the frames the view draws.** A value at a step that a jump to the end or a play faster than the
+  screen passed over widens the tracks at the step back that first draws it, as it would have at the step it was first
+  done; a heap line likewise. Counting every recorded frame would have the panes read the recording.
+- **A heap line keeps its longest text by length**, and a later text with fewer characters but other break points can
+  take one line more; that line grows at that step and shrinks at the step back. Its room holds every lead the view has
+  drawn since it last forgot.
+- **`cut-text-app.test.ts` assumes a clif listing row is cut** in the app's view at 760 px; no browser has shown it.
+- **The Stage's one clif view in a 1024 px window** stays wide in `machine-row-app.test.ts`, by a few pixels over 724
+  by the stylesheet's arithmetic, unchecked in a browser.
+
+##### VERIFICATION
+
+**At this entry's commit**, in the sandbox, Node 22: `pnpm exec vitest run --project node`, 88 files, 1664 passed, 3
+failed, 1 skipped, the 3 in `share-link.test.ts`, which fail at #207 too, on Node 22, not checked on 26; `pnpm exec
+biome ci src tests` on 491 files; `pnpm exec tsc --noEmit -p .`; the comment guard against #207, `node
+scripts/check-comments.mjs --base <#207>`; and `scripts/check-text-bytes.sh`, `check-citations.sh`,
+`check-attributions.sh`, `check-doc-figures.sh`, `check-shared-docs.sh` and `check-colours.sh`, each exit 0. No crate
+changed, and no Rust, LLVM, browser or coverage leg ran on this change.
+
+| Figure | What it is | Command, from `web/` but the last |
+|---|---|---|
+| 88 files, 1664 passed, 3 failed, 1 skipped | the node project | `pnpm exec vitest run --project node \| grep -E 'Test Files\|Tests '` |
+| 491 files | biome | `pnpm exec biome ci src tests \| grep -o 'Checked [0-9]* files'` |
+| 15; 31; 11 | the tests in `machine-room.test.ts`, `clif-view.test.ts` and `app-header.test.ts` | `pnpm exec vitest run --project node tests/node/machine-room.test.ts \| grep 'Tests '`, and the same for each |
+| 724, 480; 905 | the clif row's wide and medium thresholds under a 16 px root; wide under 20 px | `grep -nE "CLIF, width: (724\|480)," tests/node/machine-row.test.ts; grep -n 'clif: 905' tests/browser/machine-row.test.ts` |
+| 6 commits | this change before this entry | `git rev-list --count <#207>..HEAD~1`, from the repository's root |
