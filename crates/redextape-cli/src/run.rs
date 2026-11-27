@@ -654,8 +654,10 @@ fn run_tm_backend(
             if let Some(v) = redextape_core::tm::decode_tape_ty_opaque(&tapes, &ty, &enc) {
                 print_tm_value(&v, label, out, err)
             } else {
-                // Code 2, where `run_artifact_text` answers 1 on the same expression — that asymmetry
-                // is deliberate and its reasoning is written out at that site.
+                // Left for a bare type variable, or tapes that do not match their own type, which is a
+                // lowering defect: a function reads as `<fn>` above. Code 2, where `run_artifact_text`
+                // answers 1 on the same expression — that asymmetry is deliberate and its reasoning is
+                // written out at that site.
                 writeln!(
                     err,
                     "error: `--backend tm` cannot decode a result of type `{}` from the final tapes\n  \
@@ -806,7 +808,7 @@ mod tests {
         assert!(matches!(outcome, Outcome::Ran));
     }
 
-    /// The handoff's function results, each printed the same by the reference and the TM. The tape
+    /// Function results, bare and in lists, each printed the same by the reference and the TM. The tape
     /// holds the function's heap cell but nothing another backend could name it by, so the TM reports
     /// what the reference does: that the result is a function.
     #[test]

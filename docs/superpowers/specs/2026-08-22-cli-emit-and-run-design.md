@@ -154,13 +154,13 @@ tool could not answer.**
 | `TmRun::Overflow` after fitting | 1 |
 | `TmRun::TooLarge` — the lowering ceiling (§9) | 2 |
 | `LambdaRun::LowerError`, `TmRun::LowerError` | 2 |
-| decode refused — a function-typed result under `tm` (§6) | 2 |
+| decode refused under `tm` — the final tapes hold no value of the result type (§6) | 2 |
 | a λ normal form past `MAX_NORMAL_FORM_BYTES` (§6) | 2 |
 | unreadable input, unwritable `-o`, bad flag combination | 2 |
 
 **The last four rows are why the rule is worth stating.** In each, the program is fine and the tool
-cannot answer *that question about it* — a stateful closure has no λ lowering, a function-typed result
-has no tape encoding, a λ normal form can be too large to print, and none is a defect in the source.
+cannot answer *that question about it* — a stateful closure has no λ lowering, a builtin used as a value
+has no TM lowering, a λ normal form can be too large to print, and none is a defect in the source.
 Reporting those as 1 would tell a script the program failed when it did not.
 
 **A cap is the program's fault and a ceiling is the tool's.** `HitCap` means the program ran and did

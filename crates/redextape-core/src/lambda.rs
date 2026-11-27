@@ -20,8 +20,8 @@ use crate::core::Core;
 /// The outcome of lowering + reducing a program through the lambda backend. Decoding to a `Value` is a
 /// separate, type-directed step, because bare normal forms are ambiguous — and there are two sibling
 /// decoders for it: `decode` is guided by an expected `Value` (what the oracle holds after a reference
-/// run) and `decode_lambda_ty` by a `Ty` alone (all a reader of printed text has). They disagree on two
-/// cases on purpose; see `decode.rs`.
+/// run) and `decode_lambda_ty` by a `Ty` alone (all a reader of printed text has). They disagree on
+/// three cases on purpose; see `decode.rs`. `decode_lambda_ty_opaque` reads a function as `decode` does.
 #[derive(Clone, Debug)]
 pub enum LambdaRun {
     /// Reduced to a normal form. Decode it with `decode` (against an expected value's shape) or with

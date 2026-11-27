@@ -137,7 +137,7 @@ pub fn is_decodable_ground(ty: &Ty) -> bool {
 }
 
 /// Whether `ty` names a type a header's `result` line can carry: grounded, shown, and read back
-/// through `parse_ty`. `Fun` never round-trips — a function value has no decoding — nor does a list
+/// through `parse_ty`. `Fun` never round-trips — `parse_ty` reads no function type — nor does a list
 /// nested past `MAX_TY_DEPTH`; a free variable always does, once `ground` writes it as `Nat`.
 ///
 /// **THE ONE PREDICATE A HEADER WRITER ASKS BEFORE NAMING A `result` LINE — THROUGH `is_decodable_ground`

@@ -8,9 +8,9 @@ use crate::ty::Ty;
 use crate::value::{Functions, Value};
 use std::rc::Rc;
 
-/// Decode a normal-form term to a `Value`, guided by the type/shape of `expected`. Returns the
-/// actual decoded value (equal to `expected` iff the lambda computed the right answer), or `None`
-/// if `nf` doesn't match the expected shape.
+/// Decode a normal-form term to a `Value`, guided by the type/shape of `expected`. Returns the decoded
+/// value (equal to `expected.observable()` iff the lambda computed the right answer, a function read as
+/// the opaque `Value::Function`), or `None` if `nf` doesn't match the expected shape.
 ///
 /// DEPTH. `decode_cons` destructures `nf` before it consults `expected`, and descends only where BOTH
 /// `nf` is cons-shaped and `expected` is `Value::Cons`. So the depth is
@@ -46,11 +46,11 @@ pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
 /// only printed λ text has, since a bare normal form is ambiguous (`church(0)` and `false` are the
 /// same term) and there is no reference run to disambiguate it.
 ///
-/// A SIBLING of `decode`, not a replacement for it. They disagree on two cases on purpose: nil under a
-/// `Cons` witness, and `Unit`. `decode`'s strictness there is what makes the oracle catch a backend
-/// that returned a SHORTER list than the reference, so it cannot be expressed over this one — and the
-/// reverse needs a `Value -> Ty` function that is partial, since `Value::Nil` carries no recoverable
-/// element type. `tm::decode` and `rxm` keep their two decoders side by side for the same reason.
+/// A SIBLING of `decode`, not a replacement for it. They disagree on purpose on nil under a `Cons`
+/// witness, on `Unit`, and on a function, which only `decode_lambda_ty_opaque` reads. `decode`'s nil
+/// strictness is what makes the oracle catch a backend that returned a SHORTER list, so it cannot be
+/// expressed over this one — and the reverse needs a `Value -> Ty` function that is partial, since
+/// `Value::Nil` carries no element type. `tm::decode` and `rxm` keep their decoders side by side too.
 ///
 /// Unlike the TM pair there is nothing to share: both take the term directly, with no analogue of
 /// `read_result`'s tape read.
@@ -261,11 +261,11 @@ mod tests {
         assert_eq!(decode_lambda_ty(&nf, &ty), Some(Value::list_of_nats(&[1, 2])));
     }
 
-    /// …and DISAGREE on exactly two cases, on purpose (spec A1, mirroring `tm::decode`'s D6). Pinning the
+    /// …and DISAGREE on three cases, on purpose (spec A1, mirroring `tm::decode`'s D6). Pinning the
     /// disagreements is the point: without this test, re-expressing either decoder over the other later
     /// would pass every other test in the tree while quietly loosening the oracle's list-LENGTH check.
     #[test]
-    fn the_two_decoders_disagree_on_nil_and_unit_by_design() {
+    fn the_decoders_disagree_on_nil_unit_and_functions_by_design() {
         // A nil normal form under a one-element witness is a WRONG ANSWER the Value-directed decoder must
         // reject — that rejection is how the oracle catches a backend that returned a SHORTER list.
         assert_eq!(decode(&nil(), &Value::list_of_nats(&[1])), None);
@@ -278,6 +278,14 @@ mod tests {
         // …but a caller holding `typeck::result_type`'s answer may legitimately have `Ty::Unit` (a
         // `while`-tailed program), and the normal form is then simply ignored.
         assert_eq!(decode_lambda_ty(&church(0), &Ty::Unit), Some(Value::Unit));
+
+        // A function: the witness decoder reads it as the opaque function, the plain type decoder
+        // refuses it, and the `_opaque` one reads it as the witness decoder does.
+        let id = abs("x", var(0));
+        let fun = Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat));
+        assert_eq!(decode(&id, &Value::Function), Some(Value::Function));
+        assert_eq!(decode_lambda_ty(&id, &fun), None);
+        assert_eq!(decode_lambda_ty_opaque(&id, &fun), Some(Value::Function));
     }
 
     /// Types that are well-formed but not first-class values decode to `None` — the same call that

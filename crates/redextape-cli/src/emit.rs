@@ -319,7 +319,7 @@ fn emit_tm(
 ) -> std::io::Result<Option<String>> {
     // REFUSED BEFORE ANY LOWERING OR SIMULATION — a fact about `ty` alone, knowable before `core` is
     // even touched. A `.tm` file's `result` line names the type `run` will decode the final tapes
-    // against, and a function has no decoding (`ty::is_decodable`'s own doc). A TM header is never
+    // against, and that line names no function type (`ty::is_decodable`'s own doc). A TM header is never
     // optional (it also carries the initial tapes, `TmHeader`'s own doc), so the whole file is refused,
     // the same answer the rxm leg gives through `RxmHeader::for_type`.
     //

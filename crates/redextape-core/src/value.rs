@@ -51,7 +51,7 @@ pub enum Value {
 }
 
 /// How a type-directed decoder reads a position typed `Ty::Fun`. `Refuse` answers no value, as the
-/// `_ty` decoders always have and the browser app shows as undecodable; `Opaque` answers
+/// `_ty` decoders do and the browser app shows as undecodable; `Opaque` answers
 /// `Value::Function`, the one thing every backend can report of a function. One switch shared by the λ
 /// and machine decoders, so the two families cannot read a function differently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

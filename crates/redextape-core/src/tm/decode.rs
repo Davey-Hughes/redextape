@@ -1,9 +1,10 @@
 //! Final tapes -> `Value`, type-directed like the rxm/lambda decoders: the reference value supplies
 //! the type witness (a bare tape is ambiguous). Nat/Bool are decoded directly from the result word;
 //! Nil/Cons are decoded by parsing the HEAP tape into cons cells and following the pointer chain from
-//! the result word, by calling `rxm.rs`'s `decode_word`. `expected` is used ONLY for its shape, so a
-//! machine that computed the wrong value decodes to a different `Value` (or `None`), still failing the
-//! oracle.
+//! the result word, by calling `rxm.rs`'s `decode_word`. A function's word must point at a heap cell,
+//! which is not followed, so every function decodes to the same opaque `Value::Function`. Otherwise
+//! `expected` is used ONLY for its shape, so a machine that computed the wrong value decodes to a
+//! different `Value` (or `None`), still failing the oracle.
 
 use std::collections::BTreeSet;
 
@@ -61,7 +62,7 @@ pub fn result_heap_runs(tapes: &[Tape], ty: &Ty, enc: &dyn Encoding) -> Vec<(usi
 }
 
 /// Decode the machine's final `tapes` to a `Value`, guided by `expected`'s SHAPE (never its contents).
-/// The result word is REG slot 0 (`Rr`): a Nat/Bool value, or a list pointer into the HEAP.
+/// The result word is REG slot 0 (`Rr`): a Nat/Bool value, or a list or function pointer into the HEAP.
 ///
 /// `decode_tape_reason`'s `.ok()`, for the callers that only need to know THAT it failed.
 #[must_use]
@@ -86,11 +87,11 @@ pub fn decode_tape_reason(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) 
 /// only a `.tm` file has, since a file records its `result` type but has no reference run.
 ///
 /// A SIBLING of `decode_tape`, not a replacement for it (spec D6). They share the tape read above and
-/// nothing else, because they disagree on two cases on purpose: a nil result under a `Cons` witness,
-/// and `Unit`. `decode_tape`'s strictness there is what makes the oracle catch a machine that returned
-/// a SHORTER list than the reference, so it cannot be expressed over this one — and the reverse needs a
-/// `Value -> Ty` function that is partial, since `Value::Nil` carries no recoverable element type.
-/// `rxm.rs` keeps `decode_rxm` and `decode_rxm_ty` side by side for the same reason.
+/// nothing else, because they disagree on purpose on a nil result under a `Cons` witness, on `Unit`,
+/// and on a function, which only `decode_tape_ty_opaque` reads. `decode_tape`'s nil strictness is what
+/// makes the oracle catch a machine that returned a SHORTER list, so it cannot be expressed over this
+/// one — and the reverse needs a `Value -> Ty` function that is partial, since `Value::Nil` carries no
+/// element type. `rxm.rs` keeps `decode_rxm` and `decode_rxm_ty` side by side for the same reason.
 ///
 /// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_rxm_ty` — `tapes` and `ty`
 /// both come from a `.tm` FILE here, so both the heap's acyclicity (the spine loop's job) and its
@@ -305,11 +306,11 @@ mod tests {
         assert_eq!(decode_tape_ty(&t, &ty, &enc), Some(Value::list_of_nats(&[1, 2])));
     }
 
-    /// …and DISAGREE on exactly two cases, on purpose. Pinning the disagreements is the point: without
+    /// …and DISAGREE on three cases, on purpose. Pinning the disagreements is the point: without
     /// this test, re-expressing either decoder over the other later would pass every other test in the
     /// tree while quietly loosening the oracle's list-LENGTH check.
     #[test]
-    fn the_two_decoders_disagree_on_nil_and_unit_by_design() {
+    fn the_decoders_disagree_on_nil_unit_and_functions_by_design() {
         use crate::ty::Ty;
         let enc = Unary::default();
         let t = run_to_tapes(&Program { code: vec![Instr::Nil(Reg::Rr), Instr::Halt], labels: vec![] });
@@ -324,6 +325,23 @@ mod tests {
         assert_eq!(decode_tape(&t, &Value::Unit, &enc), None);
         // …but a FILE may legitimately declare `result Unit`, and the word is then simply ignored.
         assert_eq!(decode_tape_ty(&t, &Ty::Unit, &enc), Some(Value::Unit));
+
+        // A function, here a closure cell `cons(tag 3, nil)`: the witness decoder reads it as the
+        // opaque function, the plain type decoder refuses it, and the `_opaque` one reads it.
+        let closure = Program {
+            code: vec![
+                Instr::Li(Reg::Loc(0), 3),
+                Instr::Nil(Reg::Loc(1)),
+                Instr::Cons(Reg::Rr, Reg::Loc(0), Reg::Loc(1)),
+                Instr::Halt,
+            ],
+            labels: vec![],
+        };
+        let t = run_to_tapes(&closure);
+        let fun = Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat));
+        assert_eq!(decode_tape(&t, &Value::Function, &enc), Some(Value::Function));
+        assert_eq!(decode_tape_ty(&t, &fun, &enc), None);
+        assert_eq!(decode_tape_ty_opaque(&t, &fun, &enc), Some(Value::Function));
     }
 
     /// A `.tm` file's initial HEAP is untrusted. A cyclic one must decode to `None`, not overflow.

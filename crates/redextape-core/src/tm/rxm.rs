@@ -616,7 +616,7 @@ pub(crate) fn decode_word(
 /// measured depth).
 ///
 /// **Accounting matches `decode_word_ty_at`'s `3L + 1` exactly: one unit per constructed node, one per
-/// `Cons` descent.** A `Nat`/`Bool`/`Nil` leaf spends one unit for the node it constructs; a `Cons`
+/// `Cons` descent.** A `Nat`/`Bool`/`Nil`/function leaf spends one unit for the node it builds; a `Cons`
 /// spends one unit for the descent (the value-directed twin of a spine step) plus one more for the
 /// node it builds from the decoded head/tail — see `MAX_DECODE_NODES`'s doc. A memo hit spends
 /// nothing, exactly as `decode_word_ty_at`'s does, for the same reason: it constructs nothing.
@@ -764,15 +764,16 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 /// `budget == 0` meaning exhaustion, anything else a mismatch — would be UNSOUND. `budget` can
 /// legitimately reach exactly `0` from prior, correctly-decremented nodes elsewhere in the same decode
 /// — a sibling `Nat` leaf, an earlier list's `Nil`/`Cons` nodes — and every mismatch arm (`Ty::Bool`'s
-/// `_ => ...`, both pointer-validity checks in `Ty::List`, the cyclic-heap fallback) checks its
-/// condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact state would
+/// `_ => ...`, both pointer-validity checks in `Ty::List`, a function word's range check, the
+/// cyclic-heap fallback) checks its condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact state would
 /// leave `budget == 0` behind it, identical to what real exhaustion leaves — a real counterexample,
 /// not a hypothetical one, which is why every arm below tags its own reason instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeFailure {
     /// The word/heap does not have the shape `ty` claims — a header (or a `result` directive) that
-    /// lies about what the run actually produced, or a function word that points at no heap cell. The
-    /// FILE's fault.
+    /// lies about what the run actually produced. The FILE's fault. A function word that points at no
+    /// heap cell is one too, but only an `_opaque` decode reads a function, and those read the tool's
+    /// own runs, where it would be a lowering defect.
     Mismatch,
     /// `MAX_DECODE_NODES` ran out on an otherwise well-formed decode — the declared type may be
     /// entirely truthful; the decoder simply built more `Value` nodes than the budget allows (nested
@@ -878,8 +879,8 @@ type TyMemo = HashMap<(u64, usize), Value>;
 ///   including exactly `0`, still wins its `Mismatch`. A cycle is guaranteed to win against its own
 ///   cost always; the only way to see `BudgetExhausted` instead is for an earlier sibling to exhaust
 ///   `budget` completely first (driving it negative via `?`), so this arm never runs at all.
-/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every
-///   `Nat`/`Bool`/`Unit` leaf and every `Cons`), via `spend`; a memo hit (see `TyMemo`) returns a clone
+/// - `budget` bounds SIZE. It is decremented once per constructed `Value` node (every `Nat`/`Bool`/
+///   `Unit`/function leaf and every `Cons`), via `spend`; a memo hit (see `TyMemo`) returns a clone
 ///   of a node already paid for and spends nothing. Decode fails with `BudgetExhausted` once `budget`
 ///   would go negative.
 ///
@@ -1110,6 +1111,21 @@ mod tests {
         assert_eq!(failure, Err(DecodeFailure::BudgetExhausted));
         let mut budget = 7;
         assert_eq!(decode_word_ty(4, &heap, &ty, Functions::Refuse, &mut budget), Err(DecodeFailure::Mismatch));
+    }
+
+    /// A function word's range check runs before `spend`, as every mismatch arm's does, so a bad word
+    /// is `Mismatch` even with no budget left and only a good one reaches `BudgetExhausted`. The type
+    /// decoder and the witness decoder agree on both.
+    #[test]
+    fn a_function_word_is_checked_before_the_budget_is_spent() {
+        let heap = [(0, 0)];
+        let fun = Ty::Fun(vec![Ty::Nat], Box::new(Ty::Nat));
+        for (word, want) in
+            [(0, DecodeFailure::Mismatch), (2, DecodeFailure::Mismatch), (1, DecodeFailure::BudgetExhausted)]
+        {
+            assert_eq!(decode_word_ty(word, &heap, &fun, Functions::Opaque, &mut 0), Err(want), "type, word {word}");
+            assert_eq!(decode_word(word, &heap, &Value::Function, &mut 0), Err(want), "witness, word {word}");
+        }
     }
 
     /// §6's invariant, which is what keeps the memo from outgrowing the budget: every memo entry is paid

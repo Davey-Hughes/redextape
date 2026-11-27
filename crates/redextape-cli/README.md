@@ -315,7 +315,7 @@ cap with exit `1`, usually `MAX_TERM_DEPTH`, since each unfolding nests the term
 names the cap that fired. A builtin named on its own, as in `head`, is a function to the reference
 backend, but `--backend tm` has no lowering for a builtin used as a value and exits `2`.
 `emit --lang tm` and `emit --lang rxm` refuse function-typed programs at exit `2` and write no file,
-because a `result` line must name a type `run` can decode; `--lang lambda` writes the term whatever
+because the header's type reader reads no function type; `--lang lambda` writes the term whatever
 its type.
 
 **`--lang lambda` refuses a program that has no λ lowering**, at exit `2` and with no file, as

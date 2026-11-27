@@ -4,8 +4,8 @@
 //! the machines to a tag the compiler numbers on its own. So each decoder is asked one thing of a
 //! function: that the leg halted with a function where the type says one is.
 //!
-//! The `_ty` decoders the browser app calls still refuse a function; the `_opaque` ones are the new
-//! entry points, and both are pinned here so that neither drifts into the other.
+//! The `_ty` decoders the browser app calls refuse a function and the `_opaque` ones read it; both are
+//! pinned here so that neither drifts into the other.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::pedantic)]
 
@@ -25,7 +25,7 @@ use redextape_core::typeck::result_type;
 use redextape_core::value::{Value, format_value};
 use std::rc::Rc;
 
-/// The handoff's five programs, and what each one's result is once its functions are opaque.
+/// A function bare, named, bound, in a list and capturing a list, and what each result prints as.
 const PROGRAMS: &[(&str, &str)] = &[
     ("|x| x + 1", "<fn>"),
     ("fn f(x) { x + 1 } f", "<fn>"),
@@ -62,7 +62,7 @@ fn lambda_decodes_a_function_as_the_opaque_function() {
         };
         assert_eq!(decode(&nf, &rv), Some(rv.observable()), "witness decode of {src}");
         assert_eq!(decode_lambda_ty_opaque(&nf, &ty), Some(rv.observable()), "opaque type decode of {src}");
-        assert_eq!(decode_lambda_ty(&nf, &ty), None, "the browser's decoder still refuses {src}");
+        assert_eq!(decode_lambda_ty(&nf, &ty), None, "the browser's decoder refuses {src}");
     }
 }
 
@@ -75,7 +75,7 @@ fn rxm_decodes_a_function_as_the_opaque_function() {
         let RxmRun::Ran(outcome) = run_rxm(&program, RXM_CAPS) else { panic!("{src} did not halt on rxm") };
         assert_eq!(decode_rxm(&outcome, &rv), Some(rv.observable()), "witness decode of {src}");
         assert_eq!(decode_rxm_ty_opaque(&outcome, &ty), Some(rv.observable()), "opaque type decode of {src}");
-        assert_eq!(decode_rxm_ty(&outcome, &ty), None, "the browser's decoder still refuses {src}");
+        assert_eq!(decode_rxm_ty(&outcome, &ty), None, "the browser's decoder refuses {src}");
     }
 }
 
@@ -92,7 +92,7 @@ fn both_tm_encodings_decode_a_function_as_the_opaque_function() {
             let enc = enc.as_ref();
             assert_eq!(decode_tape(&tapes, &rv, enc), Some(rv.observable()), "witness decode of {src}");
             assert_eq!(decode_tape_ty_opaque(&tapes, &ty, enc), Some(rv.observable()), "opaque type decode of {src}");
-            assert_eq!(decode_tape_ty(&tapes, &ty, enc), None, "the browser's decoder still refuses {src}");
+            assert_eq!(decode_tape_ty(&tapes, &ty, enc), None, "the browser's decoder refuses {src}");
         }
     }
 }
