@@ -11,6 +11,7 @@ import {
   clifStack,
   clifValues,
   pcColumn,
+  widestPc,
 } from './clif-view'
 import type { ControlState } from './controls'
 import { ListingPanel } from './listing-panel'
@@ -331,6 +332,13 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
           }
         : null
     this.#listing.setSource(this.#shown?.rows.source ?? null)
+    // EVERY FRAME'S PC AS WIDE AS THE LISTING'S WIDEST LABEL: the running frame's names the instruction the run is at,
+    // which changes at each step, and a frame too long for its panel goes on below, so a label of another width would
+    // move the stack's lines at a step that neither calls nor returns.
+    this.#stack.panel.body.style.setProperty(
+      '--ret-room',
+      `${this.#shown === null ? 0 : widestPc(this.#shown.listing)}ch`,
+    )
     this.#values.forget()
     this.#heap.forget()
     this.#frame = null

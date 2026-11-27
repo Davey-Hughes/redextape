@@ -6,7 +6,7 @@ import { ClifPane, type ClifPanels } from '../../src/clif-pane'
 import { EXAMPLE_ENCODING, EXAMPLES } from '../../src/examples'
 import type { Shares } from '../../src/panel-stack'
 import { RxmPane, type RxmPanels } from '../../src/rxm-pane'
-import type { ClifListing, ClifState } from '../../src/types'
+import type { ClifAt, ClifListing, ClifState } from '../../src/types'
 import { FACT3, frameOf, listWord, valueWord } from '../node/rxm-fixtures'
 import { boundary, controlState, frames, inertEvents, panelOf, panelToggle, region } from './harness'
 
@@ -70,6 +70,8 @@ export type Counts = {
   readonly result?: string
   /** The register the rxm frame's last instruction wrote. */
   readonly wrote?: string
+  /** Where the clif frame and each of its call stack's frames stand: the first function's first instruction without it. */
+  readonly at?: ClifAt
 }
 
 /** `n` of what `one` makes, its index given. */
@@ -143,8 +145,8 @@ export const VIEWS = [
     build(host: HTMLElement, panels: StoredPanels, sizes: Shares, onSizes: (s: Shares) => void): Mounted {
       const pane = new ClifPane(host, inertEvents({ panelSizes: onSizes }), panels, sizes)
       pane.setProgram({ listing: clifListing, level: 'as-built' })
-      const at = { function: 0, inst: 0 }
       const draw = (c: Counts) => {
+        const at = c.at ?? { function: 0, inst: 0 }
         const count = c.rows?.values ?? 0
         const word = (i: number) => (c.result !== undefined && i === count - 1 ? valueWord(c.result) : heldBy(c, i))
         const s: ClifState = {

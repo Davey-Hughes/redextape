@@ -3253,6 +3253,14 @@ main {
 .rxm-refs {
   color: var(--fg-dim);
 }
+/* A CLIF FRAME'S PC IS AS WIDE AS THE LISTING'S WIDEST, `--ret-room`, which `clif-pane.ts` sets on the call stack's box:
+   the running frame's changes at each step, and a frame that goes on below would otherwise move the stack's lines at
+   a step that neither calls nor returns. The frame's hanging indent is for its own lines, not the pc's. */
+.clif-pane .rxm-ret {
+  display: inline-block;
+  min-width: var(--ret-room, 0);
+  text-indent: 0;
+}
 /* EVERY HEAP LINE IS PADDED, LIT OR NOT: a list result's box draws its side edges on the line's own edges, and the
    padding keeps them off the first and last glyph. Padding the lit lines alone would move their text at the step that
    lights them. The start's padding holds the indent of the lines a long one goes on to as well.

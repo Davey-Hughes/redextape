@@ -62,8 +62,9 @@ export function rowRoom(r: ValueRow): number {
  * The room the values grid keeps for each of its tracks, in `ch`: the most any row has needed since the view last
  * forgot (the squeezed values design). **IT ONLY GROWS**, so a value that outgrows its track widens the tracks once, at
  * the step it first does, and nothing moves at a step back to a shorter value or at a rewind of the same run, which
- * draws an empty frame between the old recording and the new one's first. The view forgets it when it is told of a new
- * program or a new listing, a run the room it kept says nothing about.
+ * draws an empty frame between the old recording and the new one's first. It counts the frames the view draws, so a
+ * value at a step a jump or a fast play passed over widens the tracks at the step back that first draws it. The view
+ * forgets it when it is told of a new program or a new listing, a run the room it kept says nothing about.
  *
  * **THE RESULT'S ROW IS LEFT OUT**: it spans every track and wraps (`style.css`'s `.is-result`), so it needs none.
  */
@@ -209,8 +210,9 @@ export function valuesPanel(o: MachinePanelOptions): RoomPanel<ValuesView> {
 /**
  * The call stack (spec §6.4), top first: each frame the function it called, `→ pc14` where `ret` resumes, and the
  * caller's locals as they were at the call. Past the window, `+N more`. A frame too long for the panel goes on below,
- * indented. Unlike a heap line it keeps no room: a frame's text is fixed while it is on the stack, so the stack's lines
- * move only at a call or a return.
+ * indented. Unlike a heap line it keeps no room: a frame's text is fixed while it is on the stack, but for a clif
+ * frame's pc, which the stylesheet keeps as wide as the listing's widest, so the stack's lines move only at a call or a
+ * return.
  */
 export function callStackPanel(o: MachinePanelOptions): MachinePanel<StackView> {
   const body = document.createElement('ol')

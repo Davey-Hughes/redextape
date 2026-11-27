@@ -67,6 +67,16 @@ export function pcColumn(pc: number | null): string {
   return pc === null ? '' : `pc${pc}`
 }
 
+/**
+ * The columns `l`'s widest pc label takes, `0` where no row has one: the room the call stack keeps for a frame's pc
+ * (`clif-pane.ts`'s `--ret-room`), and the compact layout's gutter where it is wider than `PC_COLUMNS`.
+ */
+export function widestPc(l: ClifListing): number {
+  let widest = 0
+  for (const r of l.rows) widest = Math.max(widest, pcColumn(r.pc).length)
+  return widest
+}
+
 /** Whether the view draws `r` with a pc column: an Inst row, which the panel takes as an instruction. */
 function hasPcColumn(r: ClifRow): r is ClifRow & { readonly at: ClifAt } {
   return r.kind === 'Inst' && r.at !== null
@@ -116,9 +126,7 @@ export type ClifLayout = ClifDisplay['layout']
  */
 export function clifLeads(l: ClifListing, layout: ClifLayout): number[] {
   if (layout === 'exact') return l.rows.map((r) => (hasPcColumn(r) ? Math.max(0, r.indent - pcWidth(r)) : r.indent))
-  let widest = PC_COLUMNS
-  for (const r of l.rows) widest = Math.max(widest, pcColumn(r.pc).length)
-  const gutter = widest + 1
+  const gutter = Math.max(PC_COLUMNS, widestPc(l)) + 1
   const left = new Array<number>(l.rows.length).fill(0)
   for (const [k, f] of l.functions.entries()) {
     const end = l.functions[k + 1]?.first_row ?? l.rows.length

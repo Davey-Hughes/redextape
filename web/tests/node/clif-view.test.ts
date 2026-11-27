@@ -13,6 +13,7 @@ import {
   clifValues,
   PC_COLUMNS,
   pcColumn,
+  widestPc,
 } from '../../src/clif-view'
 import { CLIF_WINDOW } from '../../src/protocol'
 import { frames } from '../../src/rxm-view'
@@ -267,6 +268,14 @@ describe('the call stack', () => {
     expect(view.frames.map((f) => f.ret)).toEqual([pcColumn(FACT_95.pc), 'pc13', 'pc13', 'pc19'])
     expect(view.frames.map((f) => f.saved)).toEqual(['', '', '', ''])
     expect(view.notes).toEqual([])
+  })
+
+  it("keeps room for the listing's widest pc label, which every frame's pc fits", () => {
+    const l = listingOf(FACT, 'as-built')
+    expect(widestPc(l)).toBe('pc13'.length)
+    for (const f of clifStack(FACT_95, l).frames) expect(f.ret.length, f.ret).toBeLessThanOrEqual(widestPc(l))
+    expect(widestPc(listingOf(LONG, 'as-built')), 'pc 1,000 and more').toBe('pc1000'.length)
+    expect(widestPc({ ...l, rows: l.rows.map((r) => ({ ...r, pc: null })) }), 'no pc').toBe(0)
   })
 
   it('says how many frames the window hides', () => {

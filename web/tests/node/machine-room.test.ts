@@ -114,7 +114,7 @@ describe("a heap line's room", () => {
   })
 })
 
-describe("the stylesheet's values row and heap line", () => {
+describe("the stylesheet's values row, frame and heap line", () => {
   const css = readFileSync(fileURLToPath(new URL('../../src/style.css', import.meta.url)), 'utf8')
   /** The declarations of the rule whose selectors are exactly `selector`: not one of a list that ends with it. */
   const rule = (selector: string): string => {
@@ -131,6 +131,12 @@ describe("the stylesheet's values row and heap line", () => {
   it("adds the row's padding on both sides to the room, which the room leaves out", () => {
     expect(rule('.rxm-register'), "the row's padding").toContain('padding-inline: 0.25rem;')
     expect(rule('.rxm-register-list'), 'the track').toMatch(/var\(--values-room, 0ch\) \+ 0\.5rem/)
+  })
+
+  it("keeps a clif frame's pc as wide as the listing's widest, with none of the frame's indent", () => {
+    expect(rule('.clif-pane .rxm-ret'), 'a box of its own').toContain('display: inline-block;')
+    expect(rule('.clif-pane .rxm-ret'), 'the room').toContain('min-width: var(--ret-room, 0);')
+    expect(rule('.clif-pane .rxm-ret'), 'no indent').toContain('text-indent: 0;')
   })
 
   it("lays a heap line's room out hidden in the cell of its text", () => {

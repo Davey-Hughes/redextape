@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ClifPane } from '../../src/clif-pane'
+import { pcColumn } from '../../src/clif-view'
 import type { RxmPane } from '../../src/rxm-pane'
+import type { ClifAt } from '../../src/types'
 import { FACT3 } from '../node/rxm-fixtures'
 import { controlState, frames, hearLoops } from './harness'
 import { type Counts, factClif, loadViews, mount, resize, VIEWS, type View, whole } from './machine-views'
@@ -10,8 +12,9 @@ import { type Counts, factClif, loadViews, mount, resize, VIEWS, type View, whol
  * track of the values grid is at least as wide as the widest row the run has drawn since the view was told of its
  * program, so a value reads whole wherever the panel is as wide as its row, and is cut, with the tooltip `cut-text.ts`
  * gives it, only where the panel is narrower. A frame or a heap line too long for its panel goes on below, indented,
- * and a heap line keeps the lines its longest text took. The room only grows: a step back to shorter texts or a frame
- * of none moves nothing, and only a new program or listing forgets it. `result-app.test.ts` holds fact(12)'s `rr` in
+ * and a heap line keeps the lines its longest text took, as a clif frame keeps its pc as wide as the listing's widest.
+ * The room only grows: a step back to shorter texts or a frame of none moves nothing, and only a new program or listing
+ * forgets it. `result-app.test.ts` holds fact(12)'s `rr` in
  * the app.
  */
 
@@ -25,7 +28,7 @@ hearLoops(() => {
 const NINE = '479001600'
 /** The largest word, 20 digits. */
 const LONG = '18446744073709551615'
-/** How wide a view the line cases use: narrow enough that a frame or a heap line that holds `LONG` takes three lines. */
+/** How wide a view the line cases use: narrow enough that a frame or a heap line that holds `LONG` takes more than one. */
 const LINES = 90
 
 /** A frame of twelve values or locals, each a short word. */
@@ -129,7 +132,7 @@ describe.each(VIEWS)('the room of the $kind view’s values', (view) => {
     }
     expect(
       cutBefore.length,
-      'precondition: widths at which the least track alone cut a row with room for it',
+      'precondition: widths at which the least track alone would cut a row with room for it',
     ).toBeGreaterThan(0)
     expect(narrower.length, 'precondition: widths at which the panel is narrower than the row').toBeGreaterThan(0)
   })
@@ -291,5 +294,48 @@ describe.each(VIEWS)('the lines of the $kind view’s call stack and heap', (vie
     draw(named(0))
     await frames()
     expect(heapLine(host).getBoundingClientRect().height, 'the line, a new program').toBeCloseTo(one, 0)
+  })
+})
+
+/**
+ * Two instructions of one function of `fact.rxt`'s listing whose pc labels differ in length, the shorter first, each
+ * with its label.
+ */
+function twoLabels(): readonly [ClifAt, string, ClifAt, string] {
+  const l = factClif()
+  for (const [k, f] of l.functions.entries()) {
+    const end = l.functions[k + 1]?.first_row ?? l.rows.length
+    const insts = l.rows
+      .slice(f.first_row, end)
+      .flatMap((r) => (r.kind === 'Inst' && r.at !== null ? [{ at: r.at, label: pcColumn(r.pc) }] : []))
+      .sort((a, b) => a.label.length - b.label.length)
+    const [first, last] = [insts[0], insts[insts.length - 1]]
+    if (first !== undefined && last !== undefined && first.label.length < last.label.length)
+      return [first.at, first.label, last.at, last.label]
+  }
+  throw new Error('precondition: no function whose pc labels differ in length')
+}
+
+describe("the clif view's call stack", () => {
+  it('moves no line at a step that moves its frames to a pc label of another width', async () => {
+    const [short, shortLabel, long, longLabel] = twoLabels()
+    const { host, draw } = mount(VIEWS[1], LINES)
+    const stack = () => host.querySelector('.rxm-stack') as HTMLElement
+    const frame = () => host.querySelector('.rxm-frame') as HTMLElement
+    const pc = () => frame().querySelector('.rxm-ret') as HTMLElement
+    const at = (where: ClifAt): Counts => ({ depth: 2, cells: 0, boxes: 0, rows: { stack: 2, values: 0 }, at: where })
+    let wrapped = false
+    for (let w = 60; w <= 400; w += 2) {
+      await resize(host, w)
+      draw(at(short))
+      expect(pc().textContent, 'precondition: the shorter label').toBe(shortLabel)
+      const was = { stack: stack().getBoundingClientRect().height, pc: pc().getBoundingClientRect().width }
+      if (lineStarts(frame()).length > 1) wrapped = true
+      draw(at(long))
+      expect(pc().textContent, 'precondition: the longer label').toBe(longLabel)
+      expect(stack().getBoundingClientRect().height, `at ${w} px, the call stack`).toBeCloseTo(was.stack, 0)
+      expect(pc().getBoundingClientRect().width, `at ${w} px, the pc`).toBeCloseTo(was.pc, 0)
+    }
+    expect(wrapped, 'precondition: some width at which the frame goes on below').toBe(true)
   })
 })
