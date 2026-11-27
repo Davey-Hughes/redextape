@@ -60,7 +60,10 @@ describe('a pick, with format on blur', () => {
     expect(view.hasFocus).toBe(true)
     const before = unchangedPasses
 
-    // BACK ALONG THE TAB ORDER TO THE NOTICE LINE, a key at a time, as a keyboard user reaches the undo.
+    // BACK ALONG THE TAB ORDER TO THE NOTICE LINE, a key at a time, as a keyboard user reaches the undo: Escape
+    // first, since in the editor Shift+Tab takes an indent off an indented line (`editor-tab.ts`), an edit that would
+    // withdraw the undo.
+    await userEvent.keyboard('{Escape}')
     for (let i = 0; i < 40 && document.activeElement !== undoButton(); i += 1) {
       await userEvent.keyboard('{Shift>}{Tab}{/Shift}')
     }

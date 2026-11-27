@@ -1,7 +1,7 @@
-import type { Extension } from '@codemirror/state'
+import type { EditorState, Extension } from '@codemirror/state'
 import { Compartment } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
-import { vim } from '@replit/codemirror-vim'
+import { getCM, vim } from '@replit/codemirror-vim'
 import { type KeymapMode, readKeymap, writeKeymap } from './editor-prefs'
 
 /**
@@ -80,6 +80,18 @@ export const keymapExtension = (mode: KeymapMode): Extension => (mode === 'vim' 
  * not assume "it has a modifier" is enough.
  */
 export const keymapSlot = (mode: KeymapMode): Extension => keymapCompartment.of(keymapExtension(mode))
+
+/** Whether `state`'s keymap slot holds vim: what the source editor says of Tab depends on it (`editor-tab.ts`). */
+export const vimIn = (state: EditorState): boolean => {
+  const slot = keymapCompartment.get(state)
+  return slot !== undefined && !(Array.isArray(slot) && slot.length === 0)
+}
+
+/** Whether `view` answers to vim and is in its normal or visual mode, where Tab leaves the editor (`editor-tab.ts`). */
+export const vimOutsideInsert = (view: EditorView): boolean => {
+  const state = getCM(view)?.state.vim
+  return state != null && !state.insertMode
+}
 
 /** Swap `view`'s keymap for `mode`'s, in place, keeping the document, history, selection and focus. */
 export const setKeymap = (view: EditorView, mode: KeymapMode): void => {

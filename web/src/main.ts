@@ -54,6 +54,7 @@ import { lspLintRanges } from './diagnostics'
 import { createDraw } from './draw'
 import { KeymapSetting, keymapSlot } from './editor-keymap'
 import { KEYMAP_LABEL, KEYMAP_MODES, parseKeymapMode, readFormatOnBlur, writeFormatOnBlur } from './editor-prefs'
+import { editorTab } from './editor-tab'
 import { EXAMPLE_ENCODING, EXAMPLES, type Example, FIRST_LOAD } from './examples'
 import { focusHolder, handOff } from './focus-handoff'
 import { declineMark, focusMark, linkMark } from './highlight'
@@ -2188,6 +2189,9 @@ async function main(): Promise<EditorView> {
             notify: (text) => notices.notify(text),
           }),
         ),
+        // ANNOUNCED, NOT A NOTICE: a notice would end the one up now, and a pick's undo, which a keyboard user may be
+        // leaving the editor to reach, goes with it.
+        editorTab({ say: (text) => notices.announce(text) }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         // `colourFor`, NOT A SECOND `treeSitterColour` CALL SPELLING THE SAME FIELDS OUT: see `colourFor`'s doc.
         colourFor('redextape'),

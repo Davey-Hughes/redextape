@@ -11,7 +11,8 @@
  * line's resting state (`rest`), which every notice shows over and which comes back when each one ends.
  *
  * **`announce` IS THE LIVE REGION ALONE**, for a sentence already on screen elsewhere: the readout's link
- * sentence, said when a link gesture changes it.
+ * sentence, said when a link gesture changes it. And for one whose notice would end a notice still in use: the source
+ * editor's Ctrl+M, pressed on the way out to a pick's undo.
  */
 
 /** How long a notice stays, in milliseconds (spec §10's "8 s"). */

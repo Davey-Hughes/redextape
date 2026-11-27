@@ -1,8 +1,10 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { KeyBinding } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { CYCLE } from '../../src/arrangements'
+import { switchKey, tabKeymap } from '../../src/editor-tab'
 import { KIND_WORD } from '../../src/layout'
 import { LINK_KEY } from '../../src/link-wiring'
 import { navKeymap } from '../../src/lsp-nav'
@@ -51,19 +53,21 @@ describe('the pages beside the app', () => {
 
 describe('the help page', () => {
   /**
-   * **THE EDITOR TABLE IS THE SOURCE EDITOR'S OWN BINDINGS, NO MORE AND NO FEWER**: every key `navKeymap` binds, and
-   * `LINK_KEY`. A key added to either without a row, or a row left behind by a removed key, fails here.
+   * **THE EDITOR TABLE IS THE SOURCE EDITOR'S OWN BINDINGS, NO MORE AND NO FEWER**: every key `navKeymap` and
+   * `tabKeymap` bind, with Shift where a binding has a `shift` command, and `LINK_KEY`. A key added to any of them
+   * without a row, or a row left behind by a removed key, fails here.
    */
   it("lists exactly the app's own editor keys", () => {
     const nav = navKeymap({ uri: () => undefined, client: () => undefined, reveal: () => {}, notify: () => {} })
-    const bound = [...nav.map((b) => b.key ?? ''), LINK_KEY]
+    const keys = (b: KeyBinding) => [b.key, ...(b.shift === undefined ? [] : [`Shift-${b.key}`])]
+    const bound = [...nav.flatMap(keys), LINK_KEY, ...tabKeymap({ say: () => {} }).flatMap(keys)]
     expect(tableKeys('help', 'editor-keys').sort()).toEqual(bound.sort())
   })
 
   /**
    * **EACH ROW SHOWS THE KEY IT IS FILED UNDER.** The test above reads only `data-key`; this reads the keys a reader
    * sees — the row's first cell, before any parenthesised alternative — and spells them as CodeMirror does, with
-   * `Mod` shown as `Ctrl`.
+   * `Mod` shown as `Ctrl` and a letter in capitals, as a keyboard prints it.
    */
   it('shows each row the key it is filed under', () => {
     const table = /<table id="editor-keys">([\s\S]*?)<\/table>/.exec(html('help'))?.[1] ?? ''
@@ -72,8 +76,28 @@ describe('the help page', () => {
     for (const [, key, cell] of rows) {
       const before = (cell ?? '').split(' (')[0] ?? ''
       const shown = [...before.matchAll(/<kbd>([^<]+)<\/kbd>/g)].map((m) => m[1]).join('-')
-      expect(shown, key).toBe((key ?? '').replace(/^Mod-/, 'Ctrl-'))
+      expect(shown, key).toBe(
+        (key ?? '').replace(/^Mod-/, 'Ctrl-').replace(/-([a-z])$/, (_, letter: string) => `-${letter.toUpperCase()}`),
+      )
     }
+  })
+
+  /**
+   * **THE PAGE NAMES THE SWITCH THE EDITOR SAYS**, on either platform, so a reader and a listener press the same
+   * keys.
+   */
+  it('names the way out of the editor as the editor says it', () => {
+    const kbd = (keys: string) =>
+      keys
+        .split('+')
+        .map((k) => `<kbd>${k}</kbd>`)
+        .join('+')
+    const row = /<tr data-key="Ctrl-m"><td>([\s\S]*?)<\/td>/.exec(html('help'))?.[1] ?? ''
+    expect(row).toBe(`${kbd(switchKey(false))} (${kbd(switchKey(true))} on a Mac)`)
+    const leave = /<p id="editor-leave">([\s\S]*?)<\/p>/.exec(html('help'))?.[1] ?? ''
+    expect(leave.replace(/\s+/g, ' ')).toContain(
+      `press <kbd>Escape</kbd> and then <kbd>Tab</kbd>, or ${kbd(switchKey(false))} (${kbd(switchKey(true))} on a Mac)`,
+    )
   })
 
   /**

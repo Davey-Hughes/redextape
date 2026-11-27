@@ -44791,3 +44791,176 @@ and `P` the search of *THE CALL SITES*; it names each commit by its SHA.
 | 158 of 158, exit 0; 27,898, 11,796 and 10,201 ms | the re-run at `60488b6`; the step-95, runtime-box and full-history cases | `head -3 $B/q50-quiet/q50.summary; grep -E 'full history\|keeps a runtime\|step 95' $B/q50-quiet/q50.summary` |
 | 150 of 151, exit 1; 16,795 ms, `Test timed out in 15000ms`; 12 put back; 10,001 ms | the re-run with `52fc8c6`'s text; the runtime-box case; the files restored; the full-history case | `grep -E 'exit=\|^cases\|NOT PASSED' $B/q50-quiet/q50-base.summary; grep -c 'cmp clean, equal to HEAD' …` |
 | 36,702 ms | the step-95 case in the first run | `grep -h 'step 95' $B/q50.summary` |
+
+#### TAB AND SHIFT+TAB INDENT IN THE SOURCE EDITOR, AND THE KEYBOARD LEAVES IT BY ESCAPE AND THEN TAB, OR BY CTRL+M (SHIFT+OPTION+M ON A MAC), WHICH THE EDITOR SAYS TO A SCREEN READER AND SHOWS UNDER ITSELF TO A KEYBOARD USER WHO TABBED IN (2026-11-25, branch `editor-tab` on `65392ce`, `65392ce..57550ef`, 4 commits, this entry among them, and this entry brought up to `57550ef` and to the runs below in the commit after; then `41a321f`, the final review's fixes, and this entry brought up to it in the commit after that)
+
+Before this, Tab in the source editor moved the focus out of it, as CodeMirror leaves Tab to the browser unless an app
+binds it, and an editor whose Tab never indents reads as broken to anyone who writes code in it. The user asked for Tab
+to indent, chose each behaviour below, and asked that it be done as well as it can be for keyboard and screen reader
+users. Their choices: Tab with no selection adds spaces at the caret up to the next stop four columns apart; Tab with a
+selection indents every line it touches by four spaces and keeps the selection; Shift+Tab takes up to four spaces off
+the caret's line or each selected line; the way out is CodeMirror's own, Escape and then Tab, or Ctrl+M (Shift+Alt+M on
+a Mac, which the app names by a Mac's own word, Option); under vim, Tab and Shift+Tab move the focus in normal and
+visual mode and indent only in insert mode, since vim indents with `>>` and `<<`.
+
+This lane's logs are in `~/temp/redextape-editor-tab-record/logs/`, `$L` below, its scripts in
+`~/temp/redextape-editor-tab-record/scripts/`, and its reports in `~/.local/state/agents/redextape/editor-tab/`, `$S`
+below.
+
+##### THE CHANGE
+
+- **The keys.** The new `web/src/editor-tab.ts`'s `tabKeymap` binds Tab and Shift+Tab, Escape and Ctrl+M, above
+  CodeMirror's default keymap and below the vim slot. Tab at a caret is `indentAtCaret`, which counts columns with
+  `countColumn` and a tab character as the state's `tabSize`, and counts a second caret on a line after the spaces
+  the first one added; with any range selected it is CodeMirror's `indentMore`, and Shift+Tab is `indentLess`. The
+  indent unit is four spaces, the formatter's `INDENT` in `crates/redextape-core/src/printer.rs`, so Tab and a format
+  agree; it was CodeMirror's default of two, so vim's `>>` and `<<` now move four columns too.
+- **The way out.** CodeMirror's tab-focus mode, in which the editor hands Tab and Shift+Tab to the browser before any
+  handler, vim's included. CodeMirror opens it for two seconds at an Escape no handler takes, and closes it at the next
+  key that is not Tab, Escape or a modifier, so a second Escape keeps it open, for two seconds from that one. The app's
+  Escape clears a selection and opens it in one press, where CodeMirror's own `simplifySelection` would take the first
+  Escape and leave the way out to a second. Ctrl+M sets the mode outright, on or off, rather than toggling CodeMirror's,
+  so the sentence it says is always the mode it leaves.
+- **A Mac's key.** CodeMirror binds Shift+Alt+M on a Mac, and its keymap never fires it there: Option types a
+  character, `Â` on a US layout, and since 6.38.1 CodeMirror does not fall back to the key code for an Option
+  combination on macOS. So the app matches the key by `event.code`, `KeyM` with Shift and Option and neither Ctrl nor
+  Command, where `MAC` is true, that is where `navigator.platform` names a Mac, an iPhone, an iPod or an iPad. It
+  matches it in `macSwitchKey`, a keydown handler at the highest precedence, which runs before vim's: vim sits above
+  every keymap, and on a Mac it takes an Option key it does not map in normal and visual mode, so a keymap binding
+  would not see the key there. Ctrl+M stays in the keymap, since vim maps no `<C-m>` and lets it through in every mode.
+- **What a screen reader hears.** The editor's content element has `aria-describedby` on a hidden paragraph,
+  `editorNote`: "Tab indents and Shift+Tab takes an indent off. To leave the editor, press Escape and then Tab, or
+  Ctrl+M to make Tab move the focus until you press it again." Under vim it says that Tab indents in insert mode and
+  moves the focus in normal and visual mode, and while Ctrl+M has Tab moving the focus it says that. The paragraph is
+  `hidden`, which `aria-describedby` reads all the same, so a screen reader browsing the page does not meet it again
+  after the editor. A description rather than words in the label, so it is said after the editor's name, `source program
+  editor`, and a user can turn descriptions off. Each Ctrl+M is said through the live region with `notices.announce`,
+  not `notices.notify`, since a notice would end the one up now, and a pick's undo, which a keyboard user may be
+  leaving the editor to reach, would go with it.
+- **What a sighted keyboard user sees.** A line under the editor, CodeMirror's bottom panel, with the same words as the
+  description: shown while Ctrl+M has Tab moving the focus, and while a Tab or Shift+Tab brought the focus in, which the
+  editor knows by a Tab keyup that lands in it with no keydown there before it, and with no Ctrl, Command or Alt held,
+  since Ctrl+Tab brings the focus back from another browser tab. A click in shows nothing, so a pointer user's editor
+  keeps its height; the line a Tab in showed goes when the editor is left. It is `aria-hidden`, as the description
+  already says it. `style.css` gives CodeMirror's panels the palette's panel colours, text on `--bg-raised` as the hover
+  tooltip has, a pair `contrast.ts` already holds to 4.5:1. The rule is CodeMirror's panels', so vim's command line, a
+  panel too, takes the palette's colours where it had CodeMirror's fixed light ones.
+- **The help page.** `#editor-keys` gains rows for Tab, Shift+Tab, Escape and Ctrl+M, and `#editor-leave` says how to
+  leave the editor by keyboard, with and without vim, and that the line under the editor says it too.
+
+##### THE TESTS
+
+- **`tests/node/editor-tab.test.ts`**, on editor states with no DOM: Tab at columns 0, 3, 4, 5 and 7 adds 4, 1, 4, 3 and
+  1 spaces with the caret after them; a tab character counts as the tab size; a second caret on a line counts after
+  the first one's spaces; each of several carets on several lines gets its own;
+  a selection's lines are indented and the selection holds the same text, and Shift+Tab takes it off; Shift+Tab takes
+  no more than a line has; under vim, Tab and Shift+Tab decline in normal and visual mode and take the key in insert
+  mode, where Tab adds four spaces; Escape over a selection clears it and opens the way out, and over a caret leaves
+  both to CodeMirror; Ctrl+M, pressed twice, turns the mode on and off and says each, on either platform; a Mac's
+  Shift+Option+M taken by its key whatever character it types, not with Ctrl as well, and not off a Mac; the
+  sentences, the vim description among them, word for word.
+- **`tests/node/pages.test.ts`**: the help page's editor table is still exactly the editor's own bindings, now with
+  Shift where a binding has a `shift` command, and its Ctrl+M row and `#editor-leave` name the keys `switchKey` does,
+  a Mac's among them.
+- **`tests/browser/editor-tab.test.ts`**, through the app with keys from `userEvent`: Tab at a caret and over a
+  selection, Shift+Tab; Escape and then Tab or Shift+Tab leaving for the next or the previous control, with
+  `:focus-visible` on it and the text as it was; one Escape over a selection; a key between Escape and Tab closing the
+  way out; Ctrl+M leaving and coming back, said in `#live`, shown and described, then Ctrl+M again; the accessible name
+  and description; the line under the editor after a Shift+Tab or a Tab in and not after a click; vim's normal, insert
+  and visual modes, and the description under vim and after it; Ctrl+M under vim, and a Mac's Shift+Option+M with vim
+  told it is on a Mac, each pressed in normal mode, making Tab move the focus in insert mode and then indent again; and
+  *format on blur* asking for a format when the editor is left by Escape and then Tab, or by Ctrl+M and then Tab.
+- **`tests/browser/examples-undo-format.test.ts`** presses Escape before it walks back along the tab order to a pick's
+  undo, since Shift+Tab in the editor now takes an indent off.
+
+##### THE SABOTAGES
+
+Seven, each of `tests/browser/editor-tab.test.ts`, run alone in Chromium; none of the node files' cases was sabotaged in
+these runs. Each saved a copy of the file it broke, restored the file from the copy, and `cmp` found the two equal
+(`$L/sabotage-summary.txt`, `$L/d-sabotage-summary.txt`). The first three ran at `ce9c545`, on `f818cca`, where the
+browser file had 12 tests; the last four, S1 to S4, in the tree that became `b5bc6cd`, on `58353cb`, before a last edit
+to comments, where it had 18. A case stops at its first failed check, so the checks after it are not shown by that
+sabotage.
+
+| Sabotage | What failed | Log in `$L/` |
+|---|---|---|
+| the Tab binding taken out of `tabKeymap` | 6 of 12, each at a check of the text: Tab at a caret, Tab over a selection, Shift+Tab on the caret's line, a key closing the way out, the Ctrl+M case and vim's insert mode | `sabotage-a.log` |
+| `main.ts`'s editor blur handler skipping the format while CodeMirror's tab-focus mode is on | 1 of 12: *formats the text it leaves*, "leaving by the way out asked for no format: expected +0 to be 1" | `sabotage-b.log` |
+| `view.setTabFocusMode(moves)` taken out of `switchMode` | 1 of 12: the Ctrl+M case, at its first check that Tab left the editor, "expected false to be true" | `sabotage-c.log` |
+| S1: `macSwitchKey`'s handler at the default precedence, below vim's | 2 of 18: both Mac cases under vim, one at Tab leaving the editor in insert mode, "expected false to be true", the other at Tab indenting there | `d-sabotage-s1.log` |
+| S2: the Ctrl-m binding declining outside vim's insert mode | 2 of 18: both Ctrl+M cases under vim, at the description. CodeMirror's default keymap then takes Ctrl-m and toggles its own mode, so Tab still moves the focus and those cases' checks of it pass; S1 is what shows the same checks failing, on the Mac cases | `d-sabotage-s2.log` |
+| S3: the blur handler skipping the format while Ctrl+M's mode is on, CodeMirror's `tabFocusMode` 0 | 1 of 18: *formats the text it leaves by Ctrl+M and then Tab*, "expected 1 to be 2" | `d-sabotage-s3.log` |
+| S4: the Tab keyup watch ignoring a Tab without Shift | 1 of 18: *shows it under the editor after a Tab in from the control before it*, at its wait for the line under the editor | `d-sabotage-s4.log` |
+
+##### THE REVIEW
+
+A review of the whole branch at `ce9c545`, on `f818cca`, read the code and the CodeMirror and vim sources in
+`web/node_modules` and ran no test (`$S/c-review.md`). It found 1 important defect and 12 nits. The defect: under vim on
+a Mac, Shift+Option+M did nothing in normal and visual mode, as vim took the key before the keymap binding that matched
+it could run. `macSwitchKey` (*A Mac's key*) answers it, and S1 shows the browser cases hold it.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Not run: a Mac, a screen reader, or the app driven by hand with a keyboard.** The Mac path ran only on Linux with
+  the Mac setting forced: the browser cases set `macKeys` and `CodeMirror.isMac`, and there Playwright's Shift+Option+M
+  arrives as `m` with `KeyM` (`$L/d-probe.log`), where a US Mac types `Â`; only the node case sends `Â`.
+- **A Mac's Shift+Option+M no longer types its character in the editor**, `Â` on a US layout, as `macSwitchKey` takes
+  the key. It takes it by its place, `event.code` `KeyM`, so on a layout that puts another letter there the key that
+  switches is the one in a US M's place, not the one labelled M; AZERTY, for one, puts M elsewhere. Neither was tried
+  on a Mac or on another layout.
+- **Ctrl+Tab back into the page** is held by reading alone; no test switches browser tabs.
+- **Shift+Tab on the way back to a pick's undo** now takes an indent off an indented line, which withdraws the undo,
+  so the way back from the editor is Escape and then Shift+Tab.
+- **Firefox binds Ctrl+M to muting the tab.** The editor's binding prevents the default. In Firefox the Ctrl+M case
+  passed (`editor-tab.test.ts`, 18 of 18 alone at `57550ef`, `$L/ff-alone/e-branch-editor-tab.log`), which shows the
+  page got the key. It cannot show whether Firefox muted the tab as well, and that was not checked: only a hand check in
+  Firefox can tell.
+- **Tab over a selection with bare carets beside it** indents each caret's whole line too, since `indentMore` indents
+  every range's line. The review reported it, and it was left.
+- **Tab held down while tabbing in** may indent and keep the line under the editor from showing, as the repeats land in
+  the editor. The review read this from the code, and no test tried it.
+- **The two seconds after Escape** are CodeMirror's, not the app's. WCAG 2.2.1 asks for a way past a time limit;
+  Ctrl+M is the way out with none.
+- **Character key shortcuts (WCAG 2.1.4).** None of the keys here is a character key. Vim's single-letter commands are
+  active only while the editor has the focus, and only where a user chose vim, which 2.1.4 allows.
+
+##### VERIFICATION
+
+**The gate at `57550ef`**, on `65392ce`, after `pnpm install --frozen-lockfile` and `pnpm run build`
+(`$L/e-install.log`, `$L/e-build.log`). The node legs ran by `e-node-gate.sh`, each into `$L/e-<leg>.log` with its exit
+in `$L/e-gate-summary.txt`, and each exited 0. The browser legs ran by `e-run-browser.sh` under the browser lock, each
+after port 63315 was free, with `VITEST_MAX_WORKERS=6`, and their exits are in `$L/e-browser-summary.txt`; coverage ran
+in a systemd scope with `MemoryMax=16G`.
+
+| Leg | Result | Log in `$L/` |
+|---|---|---|
+| `pnpm exec vitest run --project node` | 85 files, 1618 tests passed | `e-node-tests.log` |
+| `pnpm run typecheck` | exit 0 | `e-typecheck.log` |
+| `pnpm exec biome ci --error-on-warnings` | 475 files, no fixes applied | `e-biome.log` |
+| `check-comments.mjs --self-test`, then `--base origin/main`, `65392cec26` | 224 cases pass; 20 areas, each within its budget, and no history and no grown block in 10 changed files | `e-comments-selftest.log`, `e-comments.log` |
+| the eight scans, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and lua, each `--self-test` then the scan | exit 0, each | `e-scan-*.log` |
+| `check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check | exit 0, each | `e-licence*.log` |
+| `pnpm run test:browser`, Chromium | exit 0; 225 files; 1922 tests passed and 2 failed as expected | `e-chromium-full.log` |
+| `pnpm run test:firefox` | exit 1; 18 files of 225 failed; 53 tests failed, 1842 passed, 2 failed as expected, 25 skipped | `e-firefox.log` |
+| `pnpm run test:coverage`, node and Chromium | exit 0; 310 files; 3540 tests passed and 2 failed as expected; statements 98.17%, branches 92.53%, functions 98.71%, lines 99.38%, against floors of 95, 89, 97 and 97; `editor-tab.ts` 99.02%, 100%, 97.14% and 98.86%, its one uncovered line 230, `tabWatch`'s `destroy` | `e-coverage.log` |
+
+**Firefox's 18 failed files.** Each ran again alone at `57550ef` (`$L/ff-alone/summary-e-branch.txt`). `clif-worker`
+passed, 21 of 21. The other 17 failed again, and at `65392ce`, in a scratch worktree since removed, each failed the same
+tests by name (`$L/ff-alone/summary-e-main.txt`, the `e-branch-*` and `e-main-*` logs beside it): `share-open-deep`,
+whose 2 tests were skipped as Firefox threw `InternalError: too much recursion`; and, by tests failed, `tm-view-narrow`
+11, `inspector-phone` 9, `virtual-grid` 8, `scroll-kept` 5, `panel-boundaries` 3, `term-map` 3, `follow-kept` 2,
+`panel-sizes-stored` 2, `tm-follow-clamp` 2, and 1 each in `app`, `divider-drag-focus`, `extend-focus-probe`,
+`header-menus-narrow`, `lambda-body`, `lambda-follow` and `view-keys`. `editor-tab.test.ts` is not among the 18.
+
+**At `41a321f`**, the final review's fixes (`$S/g-review.md`, its findings 2 to 5): `git diff 57550ef 41a321f` changes,
+in `web/`, `src/editor-tab.ts` (`tabKeymap`'s doc comment), `tests/node/editor-tab.test.ts` (a check's message),
+`tests/node/pages.test.ts` (a doc comment wrapped, and a binding with no key no longer skipped) and
+`tests/browser/editor-tab.test.ts` (`switchThenInsert`'s doc comment), and outside `web/` only this entry. What ran at
+`41a321f` (`$L/h-summary.txt`, `$L/h-<leg>.log`), each with exit 0: node, `editor-tab.test.ts` and `pages.test.ts`, 2
+files and 37 tests passed; node, the whole project, 85 files and 1618 tests passed; `pnpm run typecheck`;
+`biome ci --error-on-warnings`, 475 files, no fixes applied; `check-comments.mjs --self-test`, 224 cases pass, and
+`--base origin/main`, `65392cec26`, 20 areas within budget and no history and no grown block in 10 changed files; and
+`editor-tab.test.ts` with `examples-undo-format.test.ts` in Chromium and in Firefox, each under the browser lock after
+port 63315 was free, with `VITEST_MAX_WORKERS=2` and this entry's edit uncommitted in the tree, 2 files and 20 tests
+passed in each. The scans, the licence checks, the whole Chromium and Firefox runs and coverage did not run again at
+`41a321f`, and no sabotage did, as the Mac path's code did not change.

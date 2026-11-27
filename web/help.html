@@ -78,8 +78,21 @@
           <tr data-key="Shift-F12"><td><kbd>Shift</kbd>+<kbd>F12</kbd></td><td>go to the next reference to it</td><td>the source editor</td></tr>
           <tr data-key="F2"><td><kbd>F2</kbd></td><td>show what the editor knows about the name at the caret</td><td>the source editor</td></tr>
           <tr data-key="Mod-'"><td><kbd>Ctrl</kbd>+<kbd>'</kbd> (<kbd>⌘</kbd>+<kbd>'</kbd> on a Mac)</td><td>link the caret's position to the other views</td><td>the source editor</td></tr>
+          <tr data-key="Tab"><td><kbd>Tab</kbd></td><td>add spaces at the caret up to the next indent, four columns apart, or indent each selected line by four spaces</td><td>the source editor</td></tr>
+          <tr data-key="Shift-Tab"><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>take up to four spaces off the start of the caret's line, or of each selected line</td><td>the source editor</td></tr>
+          <tr data-key="Escape"><td><kbd>Escape</kbd></td><td>clear the selection, or keep only the main one of several, and let the next key, if it is <kbd>Tab</kbd> or <kbd>Shift</kbd>+<kbd>Tab</kbd> and comes within two seconds, move the focus out of the editor</td><td>the source editor</td></tr>
+          <tr data-key="Ctrl-m"><td><kbd>Ctrl</kbd>+<kbd>M</kbd> (<kbd>Shift</kbd>+<kbd>Option</kbd>+<kbd>M</kbd> on a Mac)</td><td>switch <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> between indenting and moving the focus, until it is pressed again</td><td>the source editor</td></tr>
         </tbody>
       </table>
+      <p id="editor-leave">
+        To leave the editor by keyboard, press <kbd>Escape</kbd> and then <kbd>Tab</kbd>, or <kbd>Ctrl</kbd>+<kbd>M</kbd>
+        (<kbd>Shift</kbd>+<kbd>Option</kbd>+<kbd>M</kbd> on a Mac) and then <kbd>Tab</kbd>. With the vim keymap,
+        <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> move the focus in normal and visual mode and indent only in
+        insert mode, so <kbd>Escape</kbd> and then <kbd>Tab</kbd> leaves from any mode; in normal mode
+        <kbd>&gt;&gt;</kbd> indents and <kbd>&lt;&lt;</kbd> takes an indent off. A line under the editor says what
+        <kbd>Tab</kbd> does when you tab into it, and for as long as <kbd>Ctrl</kbd>+<kbd>M</kbd> has it moving the
+        focus.
+      </p>
       <p>
         Every other key does what the editor's default keymap does, or vim's when <strong>settings</strong> sets the
         keymap to vim.

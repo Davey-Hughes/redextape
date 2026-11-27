@@ -782,6 +782,19 @@ select option {
   background: var(--bg-raised);
 }
 
+/* THE LINE UNDER THE EDITOR THAT SAYS WHAT TAB DOES (`editor-tab.ts`'s `hintPanel`), in CodeMirror's bottom panel.
+   The panel's base theme has the same hardcoded light colours as the tooltip's, on the same two-class selector, so
+   the classes are tripled here on the tooltip rule's reasoning. Text on panels, a pair the palette checks already. */
+.cm-panels.cm-panels.cm-panels {
+  background: var(--bg-raised);
+  color: var(--fg);
+  border-color: var(--rule);
+}
+.cm-tab-hint {
+  font-size: var(--step--1);
+  padding: var(--space-1) var(--space-2);
+}
+
 /* No grid lays out the panes: the layout tree supplies its own nested flex boxes and sizes every pane with
    `flex-grow`, and a second bare `main` rule here would merge with the one below (that rule's doc has what
    the merge would do). `.pane h2` applies to every pane's title regardless of how it is laid out. */
