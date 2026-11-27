@@ -46342,3 +46342,145 @@ tree-sitter is 0.28.
 | 224; 20; 16 | `check-comments.mjs`'s self-test cases; its areas; the files it read as changed | `node scripts/check-comments.mjs --self-test 2>&1 \| tail -1; node scripts/check-comments.mjs --base main 2>&1 \| tail -2` |
 | 238 files; 2,000 and 2 | the Chromium tier; tests passed and expected to fail | `(cd web && VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars) 2>&1 \| grep -E 'Test Files\|Tests  '` |
 | 26 | `worker.test.ts` in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox tests/browser/worker.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+
+#### A FUNCTION RESULT DECODES ON EVERY BACKEND AS ONE OPAQUE `<fn>`, AND `RUN` PRINTS IT SO UNDER `REFERENCE` AND `TM` (2026-11-27, branch `function-results-everywhere` on #208's `function-results`, 6 commits, this entry the last)
+
+The entry before this one left *Idea 2, one opaque `<fn>` on every backend* open, so the oracles could compare backends
+on a function result. This branch is its Rust half, written in duet, a cloud sandbox, from a handoff, and handed back as
+patches on #208's tip; the web half waits for hidden-recording-b. Before the code, the user chose: a bare `<fn>` on
+every backend, carrying no location; new decode entry points, so the `_ty` decoders the web calls do not change;
+`--backend lambda` keeps #208's normal form, and only the oracles read λ as `<fn>`; a closure and a builtin print
+`<fn>`, a box keeps `<non-value>`; headers, `emit` and AOT left out; and the newest stable Rust, the wasm32 target and
+nextest 0.9.140 installed in the sandbox.
+
+| Commit | What |
+|---|---|
+| 1 | `Value::Function`, `Value::observable`, `format_value`'s `<fn>`, the witness decoders reading a function, the three `_opaque` type decoders, and `run --backend tm` printing `<fn>`; `function_results.rs`, the value and CLI tests, the transcripts, the CLI README and the spec's §6 |
+| 2 | the three-way and native four-way oracles, `native == rxm-interp` and the LLVM check compare `observable()`, over `FUNCTION_RESULT_DEMOS` |
+| 3 | the native demo list moves out of `tests/common/corpus.rs`; the three-way oracle reads each leg with the `_opaque` decoder too; `native == rxm-interp` compares the raw result word and heap; a nested demo |
+| 4 | the decoder docs and the two decoders-disagree tests name the function case; a test of the range check before the budget; the spec's §5 and the CLI README |
+| 5 | two test names say what they check |
+| 6 | this entry |
+
+##### WHAT IT DOES
+
+- **One form for a function.** No backend but the reference keeps anything of a function that another could also
+  report: a λ normal form has no link back to its source lambda, and the machines keep a tag the compiler numbers on
+  its own. So a function is `Value::Function` on every leg, and all it says is that the leg halted with a function
+  where the type says one is. `format_value` prints it, a closure and a builtin as `<fn>`.
+- **`Value::observable`** turns the reference's closures and builtins into `Value::Function` at any depth of a list,
+  and leaves a value with no function in it unchanged. The oracles compare against it.
+- **The witness decoders** (`lambda::decode`, `decode_rxm`, `decode_tape`) read a function witness as
+  `Value::Function`. **The `_opaque` type decoders** (`decode_lambda_ty_opaque`, `decode_rxm_ty_opaque`,
+  `decode_tape_ty_opaque`) read a `Ty::Fun` position as it. A machine's function word must point at a heap cell, and a
+  λ term must be an abstraction, or the decode fails. The check runs before the decode budget is spent, as every
+  mismatch arm's does. The `_ty` decoders are unchanged and refuse a function.
+- **`run`.** `--backend reference` and `--backend tm` print `<fn>` for a function result, exit 0. `head` alone, a
+  builtin used as a value, prints `<fn>` under `reference` and exits 2 under `tm`, which has no lowering for it; the
+  tool-error transcript runs that. `--backend lambda` is #208's.
+- **The web, with no web commit.** `Session::evaluate` and `evaluateWithBudget` print through `format_value`, so the
+  reference's answer for a function result reads `<fn>` where it read `<non-value>`. The λ, rxm and TM legs call the
+  `_ty` decoders and are unchanged.
+
+##### WHAT SHOWED
+
+The debug CLI, each program on standard input:
+
+- `|x| x + 1`, `fn f(x) { x + 1 } f`, `let g = |x| x; g` and `let xs = [1, 2]; |y| head(xs) + y` print `<fn>` under
+  `reference` and `tm`, exit 0; under `lambda`, `|x| x + 1` prints `λx. λf. λx0. x f (f x0)`.
+- `[|x| x]` prints `[<fn>]` under `reference` and `tm`. `[[|x| x], [], [|y| y + 1, |z| z]]` prints
+  `[[<fn>], [], [<fn>, <fn>]]` under both. `tail([|x| x + 1])` prints `[]` under all three.
+- `head` prints `<fn>` under `reference`, exits 2 under `tm` with *this program has no TM lowering*, and exits 1 under
+  `lambda`, stopped by `MAX_REDUCTION_STEPS`.
+
+##### THE TESTS
+
+- **`crates/redextape-core/tests/function_results.rs`, new.** Five programs through the reference, λ, rxm and both TM
+  encodings, by the witness, `_ty` and `_opaque` decoders; a function word pointing at no heap cell; a λ term that is
+  not an abstraction; a bare type variable; a box witness; and `head` alone, a function to the reference only.
+- **In `value.rs`.** `<fn>` and `<non-value>`; `observable` at depth; and `observable` of a long list on a small stack.
+- **In `tm/rxm.rs`.** A function leaf spends one unit of budget, and a function word's range check runs before the
+  spend, by the type and the witness decoder.
+- **The decoders-disagree tests** in `lambda/decode.rs` and `tm/decode.rs` pin the function case: the witness decoder
+  reads it, the `_ty` decoder refuses it, the `_opaque` decoder reads it.
+- **The oracles.** `three_way_oracle_on_function_results` and `four_way_oracle_on_function_results`, each over nine
+  programs, the four-way under both encodings; `native_matches_rxm_interp_on_function_results`, which also compares
+  the raw word and heap; a sync test of the two lists; and the result-register and rxm-steps tests over them.
+  `reference_cranelift_llvm_agree_on_function_results` needs LLVM 23.
+- **In the CLI.** `a_function_typed_program_runs_and_prints_fn`, `reference_and_tm_print_every_function_result_alike`,
+  `a_bare_builtin_is_a_function_to_the_reference_and_has_no_tm_lowering` and
+  `a_function_typed_result_prints_fn_under_tm`, and the `run_tool_error` and `run_help` transcripts.
+
+##### THE SABOTAGES
+
+Run in duet by a script that applied one edit, ran the filtered tests of `redextape-core`, `redextape-cli` and
+`redextape-native` with `--no-fail-fast`, restored the file with `git checkout` and found the tree equal to the commit
+by `git diff --quiet`. 25 edits, each failed at least one test, at the fourth commit, and the four that fail the
+renamed tests again at the fifth.
+
+| Sabotage | What failed |
+|---|---|
+| a closure or builtin printed as `<non-value>` | the `<fn>` value test, three CLI tests, the reference test in `function_results.rs` |
+| `observable` leaving a builtin | the `observable` test, the bare-builtin test |
+| λ reading any term as a function | the not-an-abstraction test |
+| λ's `_opaque` or witness decode refusing a function | the λ decode, not-an-abstraction and λ disagree tests, the three-way oracle, and for the witness the native four-way |
+| λ's `_opaque` decode refusing a function inside a list | the λ decode test, the three-way oracle |
+| the machine's range check skipped; the spend moved before it; a function leaf spending nothing | the range-before-budget test each time, with the no-heap-cell test for the first and the leaf test for the last |
+| the machine's `_opaque` or witness decode refusing a function | the rxm and TM decode tests, the TM disagree and range-before-budget tests, the three-way oracle; for `_opaque`, two CLI tests and the leaf and no-heap-cell tests; for the witness, both native oracles |
+| `decode_rxm_ty_opaque` decoding in `Refuse` mode | the rxm decode and no-heap-cell tests |
+| `decode_tape_ty_opaque` decoding in `Refuse` mode | the TM decode and TM disagree tests, two CLI tests, the three-way oracle |
+| a bare type variable, in λ or the machine, read as a function | the type-variable test |
+| a box witness, in λ or the machine, read as a function | the box test |
+| `run --backend tm` decoding with `decode_tape_ty` | two CLI tests |
+| the browser's `decode_lambda_ty` reading a function | `function_and_variable_types_decode_to_none`, the λ disagree test, two λ CLI tests, `cli_transcripts`, the λ decode test |
+| either copy of the demo list changed by one program | the sync test |
+| the three-way or native oracle comparing the raw closure | the matching oracle |
+| the result-register test without the function demos | that test |
+| the rxm interpreter leaving a stray heap cell no decode reads | `native_matches_rxm_interp_on_function_results` |
+
+##### THE REVIEW
+
+A fresh review of the whole diff, at the second commit, found no decoder bug. Its findings, and what became of each:
+the docs of the witness decoders and the two disagree tests left out the function case (the fourth commit); the
+oracles did not exercise the `_opaque` type decoders, and `native == rxm-interp` could not see a wrong closure (the
+third); the spec's §5 and the CLI README still gave a function-typed result as a reason for exit 2 under `tm` and the
+wrong reason `emit` refuses one; the `Mismatch` doc blamed the file for a bad function word, which only the tool's own
+run can produce; no test pinned the range check before the budget; the tm refusal arm in `run` did not say what still
+reaches it; the leaf lists in the decoder docs left out the function leaf; some wording said what changed rather than
+what is; and the LLVM case's doc called a list of functions not a list (all the fourth, the third for the LLVM doc).
+The second commit's message said every oracle compares the opaque form, and was reworded before the hand-back to name
+the four that do. `head` exiting 1 under `--backend lambda` is under *WHAT THIS DID NOT CLOSE*. The gate then failed
+clippy: the native demo list, in `tests/common/corpus.rs`, was dead code in the codegen snapshots that include that
+file (the third commit).
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The web half.** The λ, rxm and TM panes call the `_ty` decoders, so a function result still reads as having no
+  encoding there; only the reference's text changes. It waits for hidden-recording-b.
+- **`head` alone under `--backend lambda`** exits 1, a cap, where `reference` prints `<fn>` and `tm` exits 2. A
+  builtin used as a value lowers to a λ term with no normal form.
+- **Headers, `emit` and AOT.** A `.tm` or `.rxm` `result` line names no function type, so `emit` refuses a
+  function-typed program and `run` on such a file cannot see one.
+- **The per-backend oracles and property tests** compare raw values; none of their programs returns a function.
+- **The function demos have no codegen snapshot**, which needs LLVM 23 to write.
+- **Not run in duet:** `llvm_oracle.rs`, which needs LLVM 23 (the sandbox has 18; its new case was checked to compile
+  and pass clippy under the `cranelift` feature alone); the grammar leg, with no tree-sitter CLI; `check-licences.sh`,
+  which needs `web/node_modules`; `cargo llvm-cov`; the web job; and the browser tier.
+
+##### VERIFICATION
+
+At the fifth commit, in duet, a copy of `scripts/check-all.sh --no-llvm --no-browser` that skips only the grammar leg:
+green, the workspace's nextest 2,089 passed and 35 skipped, fmt, clippy, the doctests, the feature legs and the wasm32
+checks passed. `node scripts/check-comments.mjs`, against `origin/main` and with `--base` at #208's tip: 20 areas
+within budget, no history and no grown block. The scans the pre-commit hook runs, but `check-licences.sh`, passed by
+hand.
+
+| Value | What | Produced by |
+|---|---|---|
+| 6 | the commits on #208's tip, this entry among them | `git rev-list --count function-results..function-results-everywhere` |
+| 9, 9, 2, 1 | the files changed under `crates/redextape-cli`, `crates/redextape-core`, `crates/redextape-native` and `docs/superpowers` | `git diff --name-only function-results function-results-everywhere \| cut -d/ -f1-2 \| sort \| uniq -c` |
+| 21 | the tests the branch adds, the LLVM one among them | `git diff function-results function-results-everywhere \| grep -c '^+\s*#\[test\]'` |
+| 9, 9 | the programs in core's and native's `FUNCTION_RESULT_DEMOS` | the two lists |
+| 25 | the sabotages, each failing at least one test | the sabotage script's log |
+| 2,089, 35 | the workspace's nextest: passed, skipped | `cargo nextest run --workspace`, its `Summary` line |
+| 20 | `check-comments.mjs`'s areas | `node scripts/check-comments.mjs --base function-results \| tail -2` |
