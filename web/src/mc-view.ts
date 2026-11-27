@@ -94,6 +94,8 @@ export const MC_COPY = {
   building: 'Building machine code…',
   failed: 'machine code could not be loaded.',
   retry: 'Retry',
+  /** The Retry's name and tooltip, apart from the clif notice's Retry beside it (`CLIF_COPY.retryName`'s reasons). */
+  retryName: 'Retry loading machine code',
   declined: (why: string): string => `No machine code for this program: ${why}`,
   trapped: 'machine code could not be built: the package stopped with an error.',
 } as const

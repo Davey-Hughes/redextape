@@ -626,6 +626,9 @@ function noticeContent(n: ClifNotice, retry: () => void): (string | HTMLElement)
       button.type = 'button'
       button.className = 'clif-retry'
       button.textContent = CLIF_COPY.retry
+      // THE TOOLTIP IS THE NAME, so the name a reader hears is one a sighted user can find on the button too.
+      button.setAttribute('aria-label', CLIF_COPY.retryName)
+      button.title = CLIF_COPY.retryName
       button.addEventListener('click', retry)
       return [CLIF_COPY.failed, ' ', button]
     }
@@ -649,6 +652,8 @@ function mcNoticeContent(n: McNotice, retry: () => void): (string | HTMLElement)
       button.type = 'button'
       button.className = 'mc-retry'
       button.textContent = MC_COPY.retry
+      button.setAttribute('aria-label', MC_COPY.retryName)
+      button.title = MC_COPY.retryName
       button.addEventListener('click', retry)
       return [MC_COPY.failed, ' ', button]
     }

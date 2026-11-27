@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CLIF_COPY } from '../../src/clif-view'
 import { MC_COPY, mcFunctionLine, mcLine, mcNotice, mcOffset, mcRows, mcTitle } from '../../src/mc-view'
 import type { ClifCompiled } from '../../src/protocol'
 import type { McListing, McRow } from '../../src/types'
@@ -105,6 +106,17 @@ describe('the machine code rows', () => {
   it('reads a trap as no decline of the program', () => {
     expect(MC_COPY.trapped).not.toContain('No machine code for this program')
     expect(MC_COPY.trapped).not.toContain('unreachable')
+  })
+
+  /**
+   * **TWO RETRIES CAN SHARE A CLIF VIEW**, its own and its machine code panel's, when both packages failed to load, so
+   * each is named for what it loads; and each name starts with the word the button shows, so a spoken "click Retry"
+   * still finds them.
+   */
+  it('names its Retry apart from the clif notice’s, starting with the word both show', () => {
+    expect(MC_COPY.retryName).toBe('Retry loading machine code')
+    expect(CLIF_COPY.retryName).toBe('Retry loading clif')
+    for (const copy of [MC_COPY, CLIF_COPY]) expect(copy.retryName.startsWith(`${copy.retry} `)).toBe(true)
   })
 })
 

@@ -213,6 +213,11 @@ export const CLIF_COPY = {
   loading: 'Loading clif…',
   failed: 'clif could not be loaded.',
   retry: 'Retry',
+  /**
+   * The Retry's name and tooltip. **NAMED FOR WHAT IT LOADS** because the machine code panel's Retry can show in the
+   * same view, when both packages failed; **STARTING WITH THE WORD IT SHOWS**, so a spoken "click Retry" still finds it.
+   */
+  retryName: 'Retry loading clif',
   declined: (why: string): string => `No clif for this program: ${why}`,
 } as const
 

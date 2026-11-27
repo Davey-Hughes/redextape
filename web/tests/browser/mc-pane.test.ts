@@ -1,3 +1,4 @@
+import { computeAccessibleName } from 'dom-accessibility-api'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
@@ -235,6 +236,11 @@ describe("the machine code panel's notices", () => {
     const { host, machineCode, at } = mount(store)
     await frames()
     expect(seen(host, retry(host)), 'precondition: Retry seen').toBe(true)
+    expect(retry(host)?.textContent).toBe('Retry')
+    expect(computeAccessibleName(retry(host) as HTMLButtonElement), 'named for what it loads').toBe(
+      'Retry loading machine code',
+    )
+    expect(retry(host)?.title).toBe('Retry loading machine code')
     await userEvent.click(retry(host) as HTMLButtonElement)
     expect(machineCode.retry, 'the store asked to load x86-64 again').toHaveBeenCalledWith('x86-64')
     await frames()

@@ -1,3 +1,4 @@
+import { computeAccessibleName } from 'dom-accessibility-api'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
 import init, { compile } from '../../../pkg/redextape_wasm.js'
@@ -89,6 +90,8 @@ describe('the CLIF view without a listing', () => {
     expect(drawnInListing(host, notice(host))).toBe(true)
     const button = host.querySelector<HTMLButtonElement>('button.clif-retry')
     expect(button?.textContent).toBe('Retry')
+    expect(computeAccessibleName(button as HTMLButtonElement)).toBe('Retry loading clif')
+    expect(button?.title).toBe('Retry loading clif')
     expect(drawnInListing(host, button)).toBe(true)
     await userEvent.click(button as HTMLButtonElement)
     expect(retry).toHaveBeenCalledTimes(1)
@@ -99,6 +102,34 @@ describe('the CLIF view without a listing', () => {
     expect(sentence(host)).toBe('Loading clif…')
     expect(host.querySelector('button.clif-retry')).toBeNull()
     expect(document.activeElement).toBe(listingPanel(host).querySelector('.panel-toggle'))
+  })
+
+  /**
+   * **TWO RETRIES, TWO NAMES**: with both packages failed, the notice's Retry and the machine code panel's show in the
+   * one view, each reading Retry, and a reader hears what each would load.
+   */
+  it('names its Retry apart from the machine code panel’s when both failed to load', () => {
+    const host = fixtureHost('clif-pane-fixture')
+    host.dataset.kind = 'clif'
+    host.style.height = '800px'
+    const machineCode = {
+      load: () => 'failed' as const,
+      intent: vi.fn(),
+      code: () => null,
+      want: vi.fn(),
+      retry: vi.fn(),
+    }
+    const clifLoad = { state: () => 'failed' as const, retry: vi.fn() }
+    const pane = new ClifPane(host, { ...paneEvents(), clifLoad, machineCode }, { code: true }, {})
+    pane.setProgram(null)
+    pane.render(null, controlState(false, ''))
+    const retries = [...host.querySelectorAll<HTMLButtonElement>('button.clif-retry, button.mc-retry')]
+    expect(retries.map((b) => b.textContent)).toEqual(['Retry', 'Retry'])
+    expect(retries.map((b) => computeAccessibleName(b)).sort()).toEqual([
+      'Retry loading clif',
+      'Retry loading machine code',
+    ])
+    for (const b of retries) expect(b.title, 'the tooltip is the name').toBe(computeAccessibleName(b))
   })
 
   it('says why a program has no CLIF', () => {
