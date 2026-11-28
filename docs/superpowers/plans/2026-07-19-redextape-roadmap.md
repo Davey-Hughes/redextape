@@ -45661,3 +45661,197 @@ code, with `CARGO_TARGET_DIR` naming the lane's own directory and `cap` standing
 | 123; 55-58 | `x86.rs`'s uncovered line the branch adds; `decode`'s, from `main` | `cap cargo llvm-cov report --show-missing-lines \| grep 'redextape-mc/src'`, then `git blame -s -L N,N 7033883..a692cc6 -- crates/redextape-mc/src/F` for each line N it lists in each file F: a line from `main` starts with `^` |
 | 4, 71 | the node test files of the machine code package and panel, and their tests | `cd web && cap pnpm exec vitest run --project node tests/node/mc-package.test.ts tests/node/machine-code.test.ts tests/node/machine-row.test.ts tests/node/mc-view.test.ts` |
 | 20; 9 | `check-comments.mjs`'s areas, and the files it read as changed | `node scripts/check-comments.mjs --base 7033883 \| tail -2` |
+
+#### LLVM IR VIEW PR 1: THE WRITER AND ITS PACKAGE, NO UI. `redextape-native` WRITES THE LLVM BACKEND'S MODULE AS BUILT, AS LLVM PRINTS IT, WITHOUT LLVM, AND `pkg-llvm/` HANDS IT TO A PAGE LINE BY LINE WITH EACH LINE'S RXM PC (2026-11-26 and 27, branch `llvm-ir-text`, `7033883..9326c84`, 16 commits, plus this entry)
+
+**IR views design §9, piece 4** (`docs/superpowers/specs/2026-10-27-ir-views-groundwork-design.md`): the LLVM IR view's
+first pull request, the writer, the check that holds it to LLVM, and its wasm package. No page imports the package; the
+pane, which lists this text and follows the run by pc, is PR 2. The first five commits, the fifth a roadmap entry, were
+written in a cloud sandbox, duet, which had no LLVM 23 and no browser, from a handoff, and applied onto `main` at
+`7033883` (#204); the other eleven answer the reviews below, run on this machine.
+
+| Commit | What |
+|---|---|
+| `9d6634f` | the writer, `ll_text.rs`, under a new `ll` feature; `decline_reason` moved to `shared.rs`; `check-all.sh`'s `ll` and `llvm,ll` rows |
+| `7c7f4d1` | `redextape-llvm` and `redextape-llvm-wasm`, `pkg-llvm/`, the node test, and the package's wiring |
+| `f006aa1` | a subroutine's name cut at its first NUL, and one with nothing before it refused |
+| `b4ef56f` | the Docker image, the fresh-clone steps, `.pre-commit-config.yaml`, `docs/architecture.md` and the licence scan include `pkg-llvm` |
+| `c2f6843` | duet's roadmap entry for the four commits before it |
+| `fda2511` | the exact check: the writer's text must be LLVM's print of inkwell's module, comments included (the writer's review's Important finding; the package review's Minor 4) |
+| `c7bbd79` | the edge program *an argument never set*, the one arm no snapshot and no edge program reached (the writer's review's Minor 2) |
+| `d9873ac` | the refusal of a name empty before its NUL held for a name read from rxm text (its Minor 1) |
+| `f26f584` | `RtFn::value_name`, one table of the name each runtime call gives its result, which both sinks read (its Minor 3) |
+| `c975097` | the node test holds every line's pc, and `null`, never `undefined`, for a line with none (the package review's Important finding) |
+| `fc0048f` | `docs/development.md` names every crate the Docker image's first stage builds, its fresh-clone paragraph reflowed, the workspace members in order (its Minors 1 to 3) |
+| `0b6025d` | the edge program `call "a-b"`, which holds that a `-` leaves a name bare (the whole-branch review's Minor 1) |
+| `13bcb83` | the module doc no longer counts among the print rules the order a conditional branch adds its targets' predecessors in (its Minor 2) |
+| `9d1c130` | `check-all.sh`'s comment over the `llvm,ll` rows says what holds the writer (its Minor 3) |
+| `124ce2f` | `decline_reason`'s doc no longer speaks of a build from `llvm_text` (its Minor 4) |
+| `9326c84` | the docs of a line's pc name every line that has none (its Minor 5) |
+
+##### WHAT THE WRITER IS
+
+**The sink.** `crates/redextape-native/src/ll_text.rs` is the lowering walk's third `LowerSink`, beside `ClifSink` and
+`LlvmSink`, under a new `ll` feature that turns on the walk, `rt_imports` and `shared` and nothing of inkwell or
+Cranelift, so it builds for wasm32. `llvm_text(prog)` answers an `LlModule`: its lines, each with the pc of the
+instruction whose lowering wrote it, in its `i<pc>` block and the `cont` blocks its guards open, and `None` for every
+other line; and each function's printed name, rxm label and first line. Nothing compiles the text: `llvm.rs` still
+builds its module with inkwell's builder, and the writer exists so that a page with no LLVM can show that module.
+
+**What it copies from LLVM.** The text is the module `llvm::build_module` builds before any pass, the same at `O0`-`O3`,
+for x86-64 Linux, since the module names its target and data layout. A name already taken in its symbol table, one per
+function for blocks and values and one per module for functions, gets the table's next number, as
+`ValueSymbolTable::makeUniqueName` gives it: `%cons1`, `cont4`, `@rt_cons.1`. Blocks print in creation order:
+`prologue`, one `i<pc>` per body instruction, `exit`, then each guard's `cont`. A block's `; preds =` comment lists its
+branches newest first, LLVM's use-list order, padded to column 50. Constants print signed. A name is bare when its bytes
+are letters, digits, `-`, `.` and `_` and it does not start with a digit; any other is quoted, a backslash doubled and a
+quote or a byte outside printable ASCII written `\XX`. A subroutine's name ends at its first NUL, as inkwell's C string
+ends it, and one with nothing before its NUL is refused. The intrinsics' attribute group is spelled as the LLVM that
+printed the snapshots spells it.
+
+**A subroutine named with LLVM's `llvm.` prefix is refused.** LLVM takes any function so named for an intrinsic and
+refuses a body for it, so the module inkwell builds for such a program fails, and the writer refuses the program before
+writing a line. `decline_reason` moves from `module_free.rs` to `shared.rs`, exported under `clif` or `ll`, so the
+refusal reads as the clif packages' do.
+
+##### THE PACKAGE
+
+`crates/redextape-llvm` turns the module into an `LlvmListing` of `LlvmLine`s and `LlvmFunction`s, serde types with
+ts-rs bindings under `ts`, and reads a `clifInput()` for its program alone. `crates/redextape-llvm-wasm` exports
+`llvmIr(input)`, built into `pkg-llvm/` by `pnpm run build:llvm-wasm`; it exports that, `init`, `memory` and
+wasm-bindgen's glue, and no `rt_*` function. Its `.wasm` is 149,919 bytes, 59,596 gzipped at level 9, built here with
+rustc 1.100.0, wasm-pack 0.15.0 and binaryen's `wasm-opt` 130; the bytes depend on the toolchain. It is wired as
+`pkg-mc-*` is: the workspace, `pnpm run build`, the `web` CI job, a leg of `build-web-bindings.sh` with its empty and
+collision checks, `licences.ts` and the licence scan's list of builds, `.gitignore`, `check-all.sh` and the comment
+budget, the Docker image and `docs/development.md`'s account of it, the fresh-clone build line there and in
+`.pre-commit-config.yaml`, and `docs/architecture.md`'s crate list, which counts 16.
+
+##### THE TESTS
+
+- **`every_snapshot_is_the_writers_text`** holds the writer to the built section of each of the 72 `.ll` snapshots, byte
+  for byte, and names the first line that parts.
+- **`edge_programs_quote_and_rename_as_llvm_does`**, under `ll` alone, reads the text of the edge programs, written for
+  what the snapshots need not hold: `rt_cons` and `$main` renamed, `1st` quoted, `a-b` bare, a quote and a backslash
+  escaped, `naïve` written in `\XX`, a name cut at its NUL, a name empty before its NUL refused, built by hand and read
+  back from rxm text, `u64::MAX` and 2^63 printed signed, and an argument the caller never set passed as `0`.
+  **`lines_carry_the_pc_that_wrote_them`** holds which lines carry which pc, a `cont` block's among them.
+- **`a_subroutine_with_llvms_prefix_is_refused`**, with a hand-built program and `fn llvm(n)`, whose label is `llvm.0`.
+- **With both `llvm` and `ll`, `parsed_by_llvm`** is the CI check §9 asks for. For the 72 snapshots, the 15 edge
+  programs and 64 random first-order programs, the writer's text must equal LLVM's print of the module inkwell builds,
+  comments included, and LLVM must parse the text, verify it and print it back the same. Its
+  `inkwell_refuses_a_subroutine_with_llvms_prefix_too` fails if LLVM ever accepts such a body, so the writer's refusal
+  goes when the backend's does. `check-all.sh` runs it in its LLVM tier's `llvm,ll` rows, and CI's `rust-llvm` job runs
+  that tier, `check-all.sh --llvm-only`.
+- **`redextape-llvm`'s `listing.rs`**: each listing is its snapshot's built module, each function starts at its `define`
+  and marks only pcs of its own subroutine, and an input is read for its program alone; `ts_bindings.rs` is
+  `redextape-mc`'s gate.
+- **`web/tests/node/llvm-package.test.ts`**, through the built packages: for each of the 7 examples, `llvmIr` of
+  `pkg/`'s `clifInput()` is the snapshot's built module, and each line's pc is the one its text gives, the number of its
+  `i<N>` block, or of the block whose guard branches to its `cont` block, and `null` elsewhere; a word of 2^53 or more
+  is written whole; `fn llvm` gets the refusal's sentence; and an input `clifInput()` did not write is refused. 10
+  cases.
+
+##### THE SABOTAGES
+
+Run on this machine by the reviews and the fix rounds. Each saved a copy of the file it broke, ran the tests with
+`--no-fail-fast`, restored the file from the copy and found it equal by `cmp`. A case stops at its first failed check,
+so the checks after it are not shown by that sabotage.
+
+| Sabotage | By, at | What failed |
+|---|---|---|
+| `; preds` printed oldest first | the writer's review, `c2f6843`; the fix round, `fc0048f`'s tree | before the exact check, the snapshot test alone; with it, the snapshot test and every `parsed_by_llvm` program test, at the exact check |
+| constants printed unsigned | the same | before, the edge and snapshot tests, `parsed_by_llvm` passing, as LLVM reads the unsigned spelling back as the signed value; with it, those and `parsed_by_llvm`'s edge and snapshot tests |
+| `$` left bare | the same | before, the pc, edge and snapshot tests; with it, those and every `parsed_by_llvm` program test |
+| a block one branch names twice listed once in its `; preds` | the same | before, nothing; with it, `parsed_by_llvm`'s edge test, on *every operator* |
+| `>=` written `ugt` | the writer's review, `c2f6843` | `parsed_by_llvm`'s edge test alone, as no snapshot uses `>=` |
+| the refusal of a name empty before its NUL taken out | the fix round, `fc0048f`'s tree | the edge test, at the name read back from rxm text |
+| a symbol table's counter restarted at each clash, where LLVM keeps one per table | the whole-branch review, `fc0048f` | the snapshot test and every `parsed_by_llvm` program test |
+| `-` taken out of the bare set | the whole-branch review, `fc0048f`; the last fixes, `0b6025d`'s tree | before `0b6025d`, nothing; after it, the edge test at `a-b` under `ll` alone and with `llvm` and `ll`, and `parsed_by_llvm`'s edge test at the exact check on `call "a-b"`, the writer's `@"a-b"` against LLVM's `@a-b` |
+| a conditional branch's two `; preds` pushes swapped | the whole-branch review, `fc0048f`; the last fixes, `9326c84` | nothing, as the order cannot show in the text: `13bcb83` takes it off the module doc's rules |
+| a listing's pc one too high, in `redextape-llvm` | the package review, `c2f6843`; the fix round, `c975097` | before, `listing.rs` alone, the node test passing; after `c975097`, the node test's example cases at their comparison of every pc |
+| the wasm crate serializing with `Serializer::new()`, so a line with no pc crosses as `undefined` | the same | before, nothing in the node test; after `c975097`, its example cases at `lines[0].pc` being `null` |
+| the package's text, its `first_line`, or every pc broken; `LlvmLine` taken out of the ts gate | the package review, `c2f6843` | the node test's cases at their text, and its example cases at their `define` line and at their pcs; `listing.rs` for the `first_line`; `the_gate_covers_every_exported_type` |
+| duet's own: a load's `align 3`, a backslash not doubled, a `cont` block given no pc, the `llvm.` refusal taken out, the NUL cut taken out | the writer's review, `c2f6843` | each as duet's notes say, and on LLVM 23 `align 3` fails the snapshot test too |
+
+##### THE REVIEWS
+
+- **The writer's review, at `c2f6843`**, read `ll_text.rs` against `llvm.rs` arm by arm, ran `check-all.sh --llvm-only`,
+  the writer under `ll` alone for wasm32, and the sabotages above that name it, and found the writer correct on LLVM
+  23.1.5 for every program the branch tests. Its Important finding: the check compared LLVM's reprint of the text with
+  inkwell's module, comments stripped on a premise LLVM 23.1.5 does not bear out, and a reprint holds what the text
+  means, not how the writer spells it, so the print rules were held only by the snapshot test and the edge test's
+  assertions, for the programs those cover, and one rule by nothing. `fda2511` answers it, and `d9873ac`, `c7bbd79` and
+  `f26f584` its three Minors.
+- **The package's review, at `c2f6843`**, built every wasm package and the Docker image, ran the node tier,
+  `check-all.sh --no-llvm --no-browser`, the licence check, biome and typecheck, and checked every new dependency
+  against crates.io. Its Important finding: the node test never checked a line's pc, so a pc off by one, or pcs crossing
+  as `undefined`, passed it. `c975097` answers it, and `fc0048f` and `fda2511` its four Minors.
+- **The whole-branch review, at `fc0048f`**, of `7033883..fc0048f`, built `main`'s and the branch's clif and machine
+  code packages and found each refusal and listing the same, ran `check-all.sh --no-browser`, the scans and the
+  sabotages above that name it, and built and tested the merge with `native-rt-hygiene` in a scratch tree. It found the
+  branch *ready after Minors*, with no Critical or Important finding; its Minors 1 to 5 are `0b6025d`, `13bcb83`,
+  `9d1c130`, `124ce2f` and `9326c84`.
+
+Duet's own review, in its sandbox, is what `f006aa1` and `b4ef56f` answer.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The LLVM backend refuses `fn llvm(n) { n + 1 } llvm(41)`**, which `pkg/` compiles: its label `llvm.0` takes LLVM's
+  intrinsic prefix, and the writer refuses it too (duet's first open question). Both reviews' answer: keep the refusal
+  here, and in a pull request of its own rename such a subroutine in `llvm.rs` and drop the writer's refusal. No `.ll`
+  snapshot defines a function with the prefix, so no snapshot changes, where duet expected names to. The node test's
+  refusal case uses `fn llvm`, and will need another program the backend refuses.
+- **A subroutine whose name is empty before its NUL is refused** (duet's second), where inkwell leaves the function
+  unnamed and LLVM numbers it. rxm text makes such a name: `parse_rxm` reads a label that starts with a NUL, and the
+  edge test holds the refusal for one. Both reviews' answer: keep the refusal.
+- **The random programs are first-order** (the writer's review's Minor 2): `arb_expr_below` writes `+`, `-`, `>`, `==`
+  and `if` alone, and in the writer's review's instrumented count they reached no arm of the writer the snapshots do
+  not; the generator is unchanged. The edge programs reach the rest: the fix round's instrumented copy of the writer
+  found no arm the snapshots reach that no edge program does, and the exact check runs every edge program. A write to a
+  register with no slot cannot happen, so nothing tests it.
+- **LLVM's patch release.** The snapshots come from 23.1.4, this machine runs 23.1.5, and CI's `rust-llvm` job takes any
+  23.1 release. The exact check compares with the running LLVM's print, as the built-IR snapshot test already does byte
+  for byte, so a release that prints otherwise trips both.
+- **The countdown snapshot.** `list-results` adds `example-countdown.ll` and moves `llvm-version.txt` to 23.1.5, and the
+  snapshot test and `listing.rs` read every `.ll` snapshot. On a scratch merge of the two branches, which holds 73, the
+  `ll` tests, the writer's tests with `llvm` and `ll`, and `redextape-llvm`'s tests pass.
+- **The pane, the stepper and the technical page** are PR 2 and later. No browser test ran, and none is affected: no
+  file under `web/src` changes, and none imports `pkg-llvm`. When PR 2 re-exports the Llvm binding types from
+  `web/src/types.ts`, the comment there that lists the shapes crossing another package's boundary gains the LLVM IR
+  ones.
+- **Not run on this branch:** `cargo llvm-cov` and its 90% floor, `check-slow.sh` and the browser tier; and since
+  `c2f6843`, the Docker image and the whole node tier, which the package review ran there.
+
+##### VERIFICATION
+
+At `9326c84`, under the heavy lock and a 16G memory cap, on LLVM 23.1.5: `scripts/check-all.sh --no-browser`, with
+`TREE_SITTER` naming tree-sitter 0.25.10, exit 0: fmt, clippy `-D warnings`, the grammar checks, the doctests and the
+wasm32 checks passed; the workspace's nextest ran 2,069 tests, all passed, 35 skipped; `redextape-native`'s nextest with
+`ll` alone 15, with `--features llvm` 126, with `llvm` alone 51, and with `llvm,ll` 60, all passed. `cargo nextest run
+-p redextape-llvm --features ts`: 9 passed. `pnpm run build:llvm-wasm`, then the node test: 10 passed. `node
+scripts/check-comments.mjs --self-test` and `--base main`: exit 0. The pre-commit hook, which runs the scans,
+`check-licences.sh` and `check-comments.mjs`, and fmt and clippy where a `.rs` file is staged, passed at `0b6025d`,
+`13bcb83`, `9d1c130`, `124ce2f` and `9326c84`. Biome and typecheck last ran at `fc0048f`, and nothing under `web/` has
+changed since.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at `9326c84`,
+with `CARGO_TARGET_DIR` naming the lane's own directory.
+
+| Value | What | Produced by |
+|---|---|---|
+| 16; 5; 11 | the commits in `7033883..9326c84`; duet's, up to `c2f6843`; the rest | `git rev-list --count 7033883..9326c84`; `git rev-list --count 7033883..c2f6843`; `git rev-list --count c2f6843..9326c84` |
+| 72 | the `.ll` snapshots, `.opt.ll` aside | `ls crates/redextape-native/snapshots \| grep '\.ll$' \| grep -vc '\.opt\.ll$'` |
+| 15 | the edge programs: 12 `call` programs and 3 others | `awk '/fn edge_programs\(\)/,/^    }$/' crates/redextape-native/src/ll_text.rs \| awk '/let mut out: Vec/,/\.iter\(\)/{ if ($0 ~ /^            "/) n++ } /out\.push\(\(/{ p++ } END { print n, p, n + p }'` |
+| 64 | the random programs | `rg -n 'cases: 64' crates/redextape-native/src/ll_text.rs` |
+| 50 | the column `; preds` starts at | `rg -n 'const PREDS_COLUMN' crates/redextape-native/src/ll_text.rs` |
+| 7; 10 | the examples; the node test's cases | `ls web/src/examples/*.rxt \| wc -l`; `pnpm exec vitest run --project node tests/node/llvm-package.test.ts` in `web/`, its `Tests` line |
+| 149,919; 59,596 | `pkg-llvm`'s `.wasm`, and gzipped at level 9 | `pnpm run build:llvm-wasm` in `web/`, then `wc -c < pkg-llvm/redextape_llvm_wasm_bg.wasm`; `gzip -9c pkg-llvm/redextape_llvm_wasm_bg.wasm \| wc -c` |
+| 1.100.0; 0.15.0; 130 | rustc, wasm-pack, `wasm-opt` | `rustc --version; wasm-pack --version; wasm-opt --version` |
+| 23.1.5; 23.1.4 | this machine's LLVM; the snapshots' | `llvm-config --version`; `cat crates/redextape-native/snapshots/llvm-version.txt` |
+| 16 | the crates | `ls crates \| wc -l` |
+| 0 | the `.ll` snapshots that define a function with LLVM's `llvm.` prefix | `rg -l '^define .*@"?llvm\.' crates/redextape-native/snapshots \| wc -l` |
+| 73 | the `.ll` snapshots once `list-results` merges | `git ls-tree -r --name-only $(git merge-tree --write-tree llvm-ir-text list-results \| head -1) crates/redextape-native/snapshots \| grep '\.ll$' \| grep -vc '\.opt\.ll$'` |
+| 2,069, 35; 15; 126; 51; 60 | `check-all.sh`'s nextest: the workspace, passed and skipped; `redextape-native` with `ll` alone, `--features llvm`, `llvm` alone and `llvm,ll` | `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 -- scripts/check-all.sh --no-browser`, with `TREE_SITTER` set, its `Summary` lines and its exit |
+| 9 | `redextape-llvm`'s tests | `cargo nextest run -p redextape-llvm --features ts`, its `Summary` line |
+| 0.25.10 | the tree-sitter `check-all.sh` pins | `$TREE_SITTER --version` |
+| 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |

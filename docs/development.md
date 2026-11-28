@@ -20,8 +20,8 @@
   tag's `sha-` and version tags.
 - **Docker** — multi-stage `Dockerfile` (Rust→WASM → Vite bundle → nginx static image),
   `docker-compose.yml`, and `deploy/nginx.conf`. Buildable:
-  stage 1 builds `crates/redextape-wasm`, `crates/redextape-lsp-wasm`, `crates/redextape-clif-wasm` and
-  `crates/redextape-mc-wasm`, the last twice, once per target; stage 2 builds `web/`.
+  stage 1 builds `crates/redextape-wasm`, `crates/redextape-lsp-wasm`, `crates/redextape-clif-wasm`,
+  `crates/redextape-mc-wasm`, twice, once per target, and `crates/redextape-llvm-wasm`; stage 2 builds `web/`.
 - **Advisories** (`.forgejo/workflows/advisories.yml`) — `cargo deny check advisories` against
   `Cargo.lock`, configured by `deny.toml`, on pushes to `main`, a dispatch, Mondays 15:00 UTC, and PRs
   that touch `Cargo.lock`, a manifest or its config. A workflow of its own, outside `gate`, so a newly
@@ -33,16 +33,16 @@
   and the git config the [conventions](conventions.md) depend on.
 - **Web toolchain** — `web/` is a pnpm project (`packageManager: pnpm@11.20.0` in
   `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root
-  `pkg/`, `pkg-lsp/`, `pkg-clif/`, `pkg-mc-x86-64/` and `pkg-mc-arm64/` directories it writes to (gitignored,
-  imported from `web/src/` as `../../pkg/redextape_wasm.js` and, by the LSP worker,
+  `pkg/`, `pkg-lsp/`, `pkg-clif/`, `pkg-mc-x86-64/`, `pkg-mc-arm64/` and `pkg-llvm/` directories it writes to
+  (gitignored, imported from `web/src/` as `../../pkg/redextape_wasm.js` and, by the LSP worker,
   `../../pkg-lsp/redextape_lsp_wasm.js`, by `web/tests/node/clif-package.test.ts` and
-  `web/tests/node/clif-exports.test.ts` from `pkg-clif/`, and by
-  `web/tests/node/mc-package.test.ts` from the two `pkg-mc-*/`) do not exist — and `tsc` resolves those
-  imports against `.d.ts` files `wasm-pack` has not produced yet either. Run once, in order, before
+  `web/tests/node/clif-exports.test.ts` from `pkg-clif/`, by `web/tests/node/mc-package.test.ts` from the two
+  `pkg-mc-*/`, and by `web/tests/node/llvm-package.test.ts` from `pkg-llvm/`) do not exist — and `tsc` resolves
+  those imports against `.d.ts` files `wasm-pack` has not produced yet either. Run once, in order, before
   anything else in `web/` works:
 
       cd web && pnpm install && pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm run build:clif-wasm \
-        && pnpm run build:mc-x86-wasm && pnpm run build:mc-arm64-wasm
+        && pnpm run build:mc-x86-wasm && pnpm run build:mc-arm64-wasm && pnpm run build:llvm-wasm
 
   Only after that will `pnpm run dev`, `pnpm run typecheck`, or `pnpm test` succeed.
 

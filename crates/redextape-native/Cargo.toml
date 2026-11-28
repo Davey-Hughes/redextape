@@ -11,11 +11,14 @@ default = ["cranelift"]
 clif = ["dep:cranelift-codegen", "dep:cranelift-frontend", "dep:target-lexicon"]
 # The runtime belongs to the two features that run code, whose JITs call its functions in this process and size
 # their run thread's stack by it; the AOT links the staticlib `aot.rs` builds with a `cargo` run of its own. `clif`
-# only builds CLIF, so a `clif` build that listed it would carry a dependency it never uses.
+# only builds CLIF and `ll` only writes LLVM IR text, so a `clif` or `ll` build that listed it would carry a
+# dependency it never uses.
 cranelift = ["clif", "cranelift-codegen/host-arch", "cranelift-codegen/std", "cranelift-codegen/unwind",
              "cranelift-codegen/timing", "dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-object",
              "dep:cranelift-native", "dep:redextape-native-rt"]
 llvm = ["dep:inkwell", "dep:redextape-native-rt"]
+# Our own LLVM IR text writer (`ll_text`), which builds for wasm32: the walk and nothing of Cranelift or LLVM.
+ll = []
 
 [dependencies]
 redextape-core = { path = "../redextape-core" }

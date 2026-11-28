@@ -4,6 +4,8 @@
   "crates/redextape-clif-wasm": 0.3495,
   "crates/redextape-core": 0.3078,
   "crates/redextape-grammar-check": 0.4312,
+  "crates/redextape-llvm": 0.1618,
+  "crates/redextape-llvm-wasm": 0.2727,
   "crates/redextape-lsp": 0.3079,
   "crates/redextape-lsp-wasm": 0.2556,
   "crates/redextape-mc": 0.1454,

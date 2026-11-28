@@ -2,6 +2,7 @@
 //! backends declare every import from this table and bind it to the same address, so a name, an
 //! arity or a return kind cannot differ between the Cranelift and the LLVM code.
 
+#[cfg(any(feature = "clif", feature = "llvm"))]
 use std::ops::Index;
 
 /// Declares `RtFn`, `RtFn::ALL`, `RtFn::symbol` and `RtFn::address` from one list of
@@ -71,6 +72,24 @@ impl RtFn {
     pub fn returns_word(self) -> bool {
         !matches!(self, Self::BoxSet | Self::Leave)
     }
+
+    /// The name a call to it gives its result in the LLVM IR, one table for `llvm.rs`, which builds the
+    /// call, and `ll_text.rs`, which writes it, since the two texts must name every value alike. A guard's is
+    /// `guard` whichever guard it is; LLVM names no value of a call that returns nothing.
+    #[cfg(any(feature = "llvm", feature = "ll"))]
+    pub(crate) fn value_name(self) -> &'static str {
+        match self {
+            Self::Cons => "cons",
+            Self::Head => "head",
+            Self::Tail => "tail",
+            Self::IsEmpty => "isempty",
+            Self::Box => "box",
+            Self::BoxGet => "boxget",
+            Self::BoxSet => "boxset",
+            Self::Leave => "leave",
+            Self::Tick | Self::Enter | Self::Faulted => "guard",
+        }
+    }
 }
 
 // `PerRtFn` indexes by discriminant, so `ALL` must list the variants in declaration order.
@@ -83,8 +102,10 @@ const _: () = {
 };
 
 /// One value per runtime import, indexed by `RtFn`.
+#[cfg(any(feature = "clif", feature = "llvm"))]
 pub(crate) struct PerRtFn<T>([T; RtFn::ALL.len()]);
 
+#[cfg(any(feature = "clif", feature = "llvm"))]
 impl<T> PerRtFn<T> {
     /// Calls `f` once per import, in `RtFn::ALL`'s order, which is the declaration order.
     pub(crate) fn from_fn(f: impl FnMut(RtFn) -> T) -> Self {
@@ -92,6 +113,7 @@ impl<T> PerRtFn<T> {
     }
 }
 
+#[cfg(any(feature = "clif", feature = "llvm"))]
 impl<T> Index<RtFn> for PerRtFn<T> {
     type Output = T;
 

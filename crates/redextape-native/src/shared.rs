@@ -4,6 +4,8 @@
 
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 use redextape_core::tm::Caps;
+#[cfg(any(feature = "clif", feature = "ll"))]
+use redextape_core::tm::LowerError;
 use redextape_core::tm::{Program, Reg};
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 use redextape_native_rt::RUN_STACK_SIZE;
@@ -164,4 +166,16 @@ pub(crate) fn native_depth_cap(prog: &Program, subs: &[Subroutine], caps: Caps) 
     let budget = (RUN_STACK_SIZE - STACK_MARGIN) as u64;
     let safe_depth = budget / frame_bytes;
     caps.stack.min(safe_depth)
+}
+
+/// Why `build_clif`, a build from it, or `llvm_text` refused a program, as a sentence a page can show:
+/// `Unsupported`'s own words, and for `TooDeep` the guard it passed, since its node means nothing to a reader of the
+/// CLIF or the LLVM IR.
+#[cfg(any(feature = "clif", feature = "ll"))]
+#[must_use]
+pub fn decline_reason(e: &LowerError) -> String {
+    match e {
+        LowerError::Unsupported { what, .. } => what.clone(),
+        LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
+    }
 }

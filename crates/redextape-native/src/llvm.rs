@@ -452,21 +452,6 @@ fn emit_bin<'ctx>(
     }
 }
 
-/// The name a call to `f` gives its result in the IR. A guard's is `guard` whichever guard it is.
-fn rt_value_name(f: RtFn) -> &'static str {
-    match f {
-        RtFn::Cons => "cons",
-        RtFn::Head => "head",
-        RtFn::Tail => "tail",
-        RtFn::IsEmpty => "isempty",
-        RtFn::Box => "box",
-        RtFn::BoxGet => "boxget",
-        RtFn::BoxSet => "boxset",
-        RtFn::Leave => "leave",
-        RtFn::Tick | RtFn::Enter | RtFn::Faulted => "guard",
-    }
-}
-
 impl From<LowerFault> for IrError {
     fn from(f: LowerFault) -> Self {
         f.0
@@ -607,16 +592,16 @@ impl<'ctx> LowerSink for LlvmSink<'_, 'ctx> {
     }
 
     fn call_rt(&mut self, f: RtFn, words: &[IntValue<'ctx>]) -> Result<IntValue<'ctx>, IrError> {
-        call_i64(self.b, self.decls.rt[f], &self.with_rt_ptr(words), rt_value_name(f))
+        call_i64(self.b, self.decls.rt[f], &self.with_rt_ptr(words), f.value_name())
     }
 
     fn call_rt_void(&mut self, f: RtFn, words: &[IntValue<'ctx>]) -> Result<(), IrError> {
-        self.b.build_call(self.decls.rt[f], &self.with_rt_ptr(words), rt_value_name(f)).map_err(ir_err)?;
+        self.b.build_call(self.decls.rt[f], &self.with_rt_ptr(words), f.value_name()).map_err(ir_err)?;
         Ok(())
     }
 
     fn guard(&mut self, f: RtFn) -> Result<(), IrError> {
-        let signal = call_i64(self.b, self.decls.rt[f], &[self.rt_ptr.into()], rt_value_name(f))?;
+        let signal = call_i64(self.b, self.decls.rt[f], &[self.rt_ptr.into()], f.value_name())?;
         let zero = self.ctx.i64_type().const_zero();
         let trip = self.b.build_int_compare(IntPredicate::NE, signal, zero, "trip").map_err(ir_err)?;
         let cont = self.ctx.append_basic_block(self.func, "cont");

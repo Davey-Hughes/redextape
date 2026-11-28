@@ -176,6 +176,9 @@ LEGS=(
   "base|clippy|-p redextape-mc --features ts --all-targets"
   "base|wasm|-p redextape-mc --lib --features x86"
   "base|wasm|-p redextape-mc --lib --features arm64"
+  "base|clippy|-p redextape-llvm --features ts --all-targets"
+  "base|test|-p redextape-llvm --features ts"
+  "base|wasm|-p redextape-llvm --lib --features ts"
   # `probe-no-tm-scratch-ceiling` switches `MAX_SCRATCH_TM_BYTES`' check off for one browser probe, and its doc in
   # `crates/redextape-wasm/Cargo.toml` says why. It changes which tests `crates/redextape-wasm/src/session.rs` compiles,
   # so it is a config like `ts`, and a config no leg builds is one whose tests never run.
@@ -201,16 +204,26 @@ LEGS=(
   "base|clippy|-p redextape-native --no-default-features --features clif --all-targets"
   "base|test|-p redextape-native --no-default-features --features clif"
   "base|wasm|-p redextape-native --lib --no-default-features --features clif"
+  # `ll` alone writes LLVM's text with neither Cranelift nor LLVM linked in, for the browser, so it must
+  # build for wasm32 as `clif` alone does.
+  "base|clippy|-p redextape-native --no-default-features --features ll --all-targets"
+  "base|test|-p redextape-native --no-default-features --features ll"
+  "base|wasm|-p redextape-native --lib --no-default-features --features ll"
   "base|wasm|-p redextape-native-rt --lib"
   "base|wasm|-p redextape-clif --lib"
   "base|wasm|-p redextape-clif-wasm --lib"
   "base|wasm|-p redextape-mc-wasm --lib"
   "base|wasm|-p redextape-mc-wasm --lib --no-default-features --features arm64"
+  "base|wasm|-p redextape-llvm-wasm --lib"
   "llvm|probe|"
   "llvm|clippy|-p redextape-native --features llvm --all-targets"
   "llvm|test|-p redextape-native --features llvm"
   "llvm|clippy|-p redextape-native --no-default-features --features llvm --all-targets"
   "llvm|test|-p redextape-native --no-default-features --features llvm"
+  # With both, the text `ll` writes must be LLVM's print of the module inkwell builds, and LLVM must parse
+  # it back into a module that prints the same.
+  "llvm|clippy|-p redextape-native --no-default-features --features llvm,ll --all-targets"
+  "llvm|test|-p redextape-native --no-default-features --features llvm,ll"
   # The browser tier is one leg, and the probe leads it for the same reason `llvm|probe|` leads the
   # LLVM tier: a missing browser should fail in seconds, not after wasm-pack has built a module.
   "browser|browserprobe|"

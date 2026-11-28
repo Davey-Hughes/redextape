@@ -47,6 +47,7 @@ const WASM_CRATES: readonly (readonly string[])[] = [
   ['redextape-clif-wasm'],
   ['redextape-mc-wasm'],
   ['redextape-mc-wasm', '--no-default-features', '--features', 'arm64'],
+  ['redextape-llvm-wasm'],
 ]
 
 /** Where each shipped package sits on the licences page. */

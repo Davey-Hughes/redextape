@@ -66,16 +66,6 @@ fn codegen_error(e: impl std::fmt::Display) -> LowerError {
     unsupported(format!("native codegen: {e}"))
 }
 
-/// Why `build_clif` or a build from it refused a program, as a sentence a page can show: `Unsupported`'s own words,
-/// and for `TooDeep` the guard it passed, since its node means nothing to a reader of the CLIF.
-#[must_use]
-pub fn decline_reason(e: &LowerError) -> String {
-    match e {
-        LowerError::Unsupported { what, .. } => what.clone(),
-        LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
-    }
-}
-
 /// Each subroutine of `prog` as CLIF for a target with `config`, in `partition`'s order: the text
 /// `define_all` builds before it optimises, which the JIT compiles. Each value read from or written to a
 /// register is labelled with that register's `tm::reg_label`.

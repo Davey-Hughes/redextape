@@ -6,6 +6,8 @@ members = [
     "crates/redextape-clif-wasm",
     "crates/redextape-core",
     "crates/redextape-grammar-check",
+    "crates/redextape-llvm",
+    "crates/redextape-llvm-wasm",
     "crates/redextape-lsp",
     "crates/redextape-lsp-wasm",
     "crates/redextape-mc",

@@ -31,7 +31,7 @@ The plan sequence, and the running log of what implementation falsified:
 
 ## Architecture
 
-Fourteen crates under `crates/`.
+Sixteen crates under `crates/`.
 
 **`redextape-core`** — the whole language, with **no dependencies** at default features (`cargo tree
 -p redextape-core --edges normal` lists only itself; `serde` and `ts-rs` are optional dependencies,
@@ -130,6 +130,15 @@ and arm64 by `yaxpeax-arm`. Each target is a feature.
 **`redextape-mc-wasm`** is the fourteenth: that crate's `#[wasm_bindgen]` surface, built twice, into `pkg-mc-x86-64/`
 and `pkg-mc-arm64/`, so that each target is a download of its own. It exports two functions: `machineCode` takes
 what `Session::clifInput` writes and a listing's name and returns the rows, and `target` names the package's target.
+
+**`redextape-llvm`** is the fifteenth: a program's LLVM IR as lines, with no `#[wasm_bindgen]` of its own. The lines are
+what `redextape-native`'s `llvm_text` writes under its `ll` feature: the module the LLVM backend builds before any pass,
+as LLVM prints it, written without LLVM by a third sink of the lowering walk, each line with the rxm pc whose
+instruction wrote it. With both `llvm` and `ll`, a test requires that text to be LLVM's print of inkwell's module,
+comments included, and has LLVM parse it back into a module that prints the same.
+
+**`redextape-llvm-wasm`** is the sixteenth: that crate's `#[wasm_bindgen]` surface, built into `pkg-llvm/`. It exports
+`llvmIr`, which takes what `Session::clifInput` writes and returns the lines.
 
 ### The oracle
 

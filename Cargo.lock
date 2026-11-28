@@ -1133,6 +1133,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "redextape-llvm"
+version = "0.0.0"
+dependencies = [
+ "redextape-core",
+ "redextape-native",
+ "redextape-test-support",
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
+name = "redextape-llvm-wasm"
+version = "0.0.0"
+dependencies = [
+ "console_error_panic_hook",
+ "redextape-llvm",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "redextape-lsp"
 version = "0.0.0"
 dependencies = [

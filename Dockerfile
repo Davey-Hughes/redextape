@@ -8,7 +8,7 @@
 # CI builds this image on every push to `main` (see .forgejo/workflows/ci.yml's `docker` job), and
 # again every Sunday and on a manual dispatch, because nothing else rebuilds `:latest` without a merge.
 
-########################  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp, /app/pkg-clif, /app/pkg-mc-*  ####
+########  1. WASM (Rust -> wasm32) → /app/pkg, /app/pkg-lsp, /app/pkg-clif, /app/pkg-mc-*, /app/pkg-llvm  ####
 FROM rust:slim-bookworm AS wasm
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
@@ -33,6 +33,8 @@ RUN wasm-pack build crates/redextape-clif-wasm --release --target web --out-dir 
 RUN wasm-pack build crates/redextape-mc-wasm --release --target web --out-dir /app/pkg-mc-x86-64
 RUN wasm-pack build crates/redextape-mc-wasm --release --target web --out-dir /app/pkg-mc-arm64 \
     -- --no-default-features --features arm64
+# The LLVM view's package, for the same reason.
+RUN wasm-pack build crates/redextape-llvm-wasm --release --target web --out-dir /app/pkg-llvm
 
 ########################  2. Web bundle (Vite) → /app/web/dist  ################################
 FROM node:26-slim AS web
@@ -49,6 +51,7 @@ COPY --from=wasm /app/pkg-lsp /app/pkg-lsp
 COPY --from=wasm /app/pkg-clif /app/pkg-clif
 COPY --from=wasm /app/pkg-mc-x86-64 /app/pkg-mc-x86-64
 COPY --from=wasm /app/pkg-mc-arm64 /app/pkg-mc-arm64
+COPY --from=wasm /app/pkg-llvm /app/pkg-llvm
 # **THE COMMITTED GRAMMAR `.wasm`, AND NOTHING IN CI CATCHES THEIR ABSENCE.** `web/src/colour.ts`
 # imports them as `../../grammars/<g>/<g>.wasm?url`, so `build:app` below cannot resolve them without
 # this line — and the `docker` job never runs on a PR, exactly as the note in stage 1 says of
@@ -59,7 +62,7 @@ COPY grammars/ /app/grammars/
 ARG COMMIT_HASH
 ENV COMMIT_HASH=$COMMIT_HASH
 # `build:app`, not `build`: this stage has no Rust toolchain — stage 1 already produced
-# /app/pkg, /app/pkg-lsp, /app/pkg-clif and the two /app/pkg-mc-* packages.
+# /app/pkg, /app/pkg-lsp, /app/pkg-clif, the two /app/pkg-mc-* packages and /app/pkg-llvm.
 RUN pnpm run build:app
 
 ########################  3. Runtime (static nginx)  ##########################################

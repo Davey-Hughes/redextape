@@ -61,28 +61,34 @@ pub mod codegen;
 mod codegen_snapshots;
 #[cfg(feature = "cranelift")]
 pub mod jit;
+#[cfg(feature = "ll")]
+mod ll_text;
 #[cfg(feature = "llvm")]
 pub mod llvm;
-#[cfg(any(feature = "clif", feature = "llvm"))]
+#[cfg(any(feature = "clif", feature = "llvm", feature = "ll"))]
 mod lower;
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 pub mod measure;
 #[cfg(feature = "clif")]
 mod module_free;
-#[cfg(any(feature = "clif", feature = "llvm"))]
+#[cfg(any(feature = "clif", feature = "llvm", feature = "ll"))]
 mod rt_imports;
-#[cfg(any(feature = "clif", feature = "llvm"))]
+#[cfg(any(feature = "clif", feature = "llvm", feature = "ll"))]
 pub mod shared;
 
 #[cfg(feature = "cranelift")]
 pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
+#[cfg(feature = "ll")]
+pub use ll_text::{LlFunction, LlLine, LlModule, llvm_text};
 #[cfg(feature = "clif")]
 pub use module_free::{
-    CodeRange, CodeReloc, Listing, MachineFunction, build_clif, build_listing, decline_reason, isa_free_config,
-    machine_code, machine_function, machine_isa,
+    CodeRange, CodeReloc, Listing, MachineFunction, build_clif, build_listing, isa_free_config, machine_code,
+    machine_function, machine_isa,
 };
 #[cfg(feature = "clif")]
 pub use rt_imports::RtFn;
+#[cfg(any(feature = "clif", feature = "ll"))]
+pub use shared::decline_reason;
 
 /// An ahead-of-time (AOT) object-emission / link failure. Defined unconditionally (not behind the
 /// `cranelift` feature) so the no-`cranelift` `emit_object` stub can name it too. `Link`/`NoLinker`/

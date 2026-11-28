@@ -2,10 +2,10 @@
 #   pre-commit install
 # Hooks scoped by `files:` only fire when matching files are staged: Rust hooks run on *.rs; web hooks
 # run on the web/ sources. The `always_run` hooks fire on every commit.
-# `web typecheck` needs `pkg/`, `pkg-lsp/`, `pkg-clif/`, `pkg-mc-x86-64/` and `pkg-mc-arm64/`, none checked in (see
-# .gitignore). A fresh clone runs
+# `web typecheck` needs `pkg/`, `pkg-lsp/`, `pkg-clif/`, `pkg-mc-x86-64/`, `pkg-mc-arm64/` and `pkg-llvm/`, none
+# checked in (see .gitignore). A fresh clone runs
 #   cd web && pnpm install && pnpm run build:wasm && pnpm run build:lsp-wasm && pnpm run build:clif-wasm \
-#     && pnpm run build:mc-x86-wasm && pnpm run build:mc-arm64-wasm
+#     && pnpm run build:mc-x86-wasm && pnpm run build:mc-arm64-wasm && pnpm run build:llvm-wasm
 # once before committing any TypeScript.
 repos:
   - repo: local
