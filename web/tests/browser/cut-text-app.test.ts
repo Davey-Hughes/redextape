@@ -7,7 +7,8 @@ import { whole } from './machine-views'
 /**
  * THE APP ADDS THE CUT-TEXT WATCHER ITSELF (the cut-text tooltips design, `cut-text.ts`): in views the app builds, a
  * cut text reads whole in its `title` after a real hover, with no test adding the watcher. Its texts are a row of
- * fact(12)'s clif listing, a rule of the TM view's rule table and an instruction of the TM view's diagram. Each case
+ * fact(12)'s clif listing, in a page of its own width, a rule of the TM view's rule table and an instruction of the TM
+ * view's diagram. Each case
  * first holds its text cut, so that none passes because a text happened to fit. `cut-text.test.ts` holds the watcher in
  * views built by hand. fact(12)'s result is not among them, as the clif view's values keep the room it needs (the
  * squeezed values design).
@@ -17,9 +18,15 @@ const FACT_12 = EXAMPLES.find((e) => e.id === 'fact-12')
 
 /**
  * How wide the page is: narrow enough that the TM view cuts some of fact(12)'s rules, and wide enough that a cut
- * instruction keeps part of its text drawn to hover. The clif view cuts some rows of its listing at this width too.
+ * instruction keeps part of its text drawn to hover.
  */
 const WIDTH = 760
+
+/**
+ * How wide the page is for the clif case: narrow enough that the clif view cuts the longest rows of fact(12)'s listing,
+ * which `WIDTH` gives it room for.
+ */
+const CLIF_WIDTH = 520
 
 /** How far in from a text's left edge a hover lands. */
 const HOVER_X = 4
@@ -77,12 +84,25 @@ beforeAll(async () => {
 
 describe('the cut-text watcher in the app', () => {
   it("gives a cut row of fact(12)'s clif listing its text", async () => {
-    const row = await firstCut(() => [...panelOf(clif(), 'listing').querySelectorAll<HTMLElement>('.clif-cell')])
-    if (row === undefined) throw new Error('precondition: no drawn row of the listing is cut where a hover reaches it')
-    await hover(row)
-    // THE TITLE SETS THE ROW'S COLUMNS A SPACE APART, which its text runs together (`cut-text.ts`'s `reads`).
-    expect(row.title.replaceAll(' ', ''), 'the row').toBe((row.textContent ?? '').replaceAll(' ', ''))
-    expect(row.title.length, 'the row, all of it').toBeGreaterThanOrEqual(row.textContent?.length ?? 0)
+    await page.viewport(CLIF_WIDTH, 1600)
+    try {
+      await frames()
+      // A ROW WITH NO TEXT IS LEFT OUT: `whole` reads a box with no glyphs as cut, and its title would match it.
+      const rows = () =>
+        [...panelOf(clif(), 'listing').querySelectorAll<HTMLElement>('.clif-cell')].filter(
+          (c) => (c.textContent ?? '').trim() !== '',
+        )
+      const row = await firstCut(rows)
+      if (row === undefined)
+        throw new Error('precondition: no drawn row of the listing is cut where a hover reaches it')
+      await hover(row)
+      // THE TITLE SETS THE ROW'S COLUMNS A SPACE APART, which its text runs together (`cut-text.ts`'s `reads`).
+      expect(row.title.replaceAll(' ', ''), 'the row').toBe((row.textContent ?? '').replaceAll(' ', ''))
+      expect(row.title.length, 'the row, all of it').toBeGreaterThanOrEqual(row.textContent?.length ?? 0)
+    } finally {
+      await page.viewport(WIDTH, 1600)
+      await frames()
+    }
   })
 
   it("gives a cut rule of the TM view's rule table its text", async () => {
