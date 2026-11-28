@@ -647,7 +647,7 @@ describe('a header menu with less than the threshold to spare beside its button'
   )
 })
 
-describe('every text run and control stands 4 px from its pane’s edges and the window’s', () => {
+describe('every text run, control and image stands 4 px from its pane’s edges and the window’s', () => {
   it('at 1600 × 1000', async () => {
     await at(1600, 1000, DEFAULT_STYLE)
     assertMeasured()
