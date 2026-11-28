@@ -1,7 +1,9 @@
+import { fileURLToPath } from 'node:url'
 import { inflateSync } from 'node:zlib'
+import { type Plugin, resolveConfig } from 'vite'
 import { describe, expect, it } from 'vitest'
-import { APPLE_GROUND, appleTouchIcon, faviconIco } from '../../favicons'
-import { PAGES } from '../../vite.config'
+import { APPLE_GROUND, appleTouchIcon, faviconIco, favicons } from '../../favicons'
+import config, { PAGES } from '../../vite.config'
 import { readRelative } from './read-fixture'
 
 const SVG = readRelative('../../public/favicon.svg')
@@ -180,6 +182,74 @@ describe('apple-touch-icon.png', () => {
       [179, 179],
     ] as const)
       expect(is(at(x, y), APPLE_GROUND), `the corner ${x}, ${y}, ${at(x, y)}, is ${APPLE_GROUND}`).toBe(true)
+  })
+})
+
+/** The favicon plugin as `vite.config.ts` registers it, in the config Vite resolves from it for a build. */
+async function registered(): Promise<Plugin> {
+  const root = fileURLToPath(new URL('../..', import.meta.url))
+  const resolved = await resolveConfig({ ...config, configFile: false, root }, 'build')
+  const found = resolved.plugins.filter((p) => p.name === favicons().name)
+  expect(found.length, `plugins named ${favicons().name} in the resolved config`).toBe(1)
+  return found[0] as Plugin
+}
+
+/** `plugin`'s hook `name`, called on `self` with `args`. */
+function call(plugin: Plugin, name: 'configureServer' | 'generateBundle', self: unknown, ...args: unknown[]): unknown {
+  const hook = plugin[name]
+  const fn = typeof hook === 'function' ? hook : hook?.handler
+  if (fn === undefined) throw new Error(`${plugin.name} has no ${name} hook`)
+  return (fn as (...a: unknown[]) => unknown).apply(self, args)
+}
+
+/** A dev middleware's three arguments. */
+type Middleware = (req: { url: string }, res: unknown, next: () => void) => void
+
+/** What `plugin`'s dev middleware does with a request for `url`: the content type and body it sends, or a pass. */
+function serve(plugin: Plugin, url: string): { type?: unknown; body?: unknown; passed: boolean } {
+  let middleware: Middleware | undefined
+  call(plugin, 'configureServer', undefined, {
+    middlewares: { use: (fn: Middleware) => (middleware = fn) },
+  })
+  if (middleware === undefined) throw new Error(`${plugin.name} adds no middleware`)
+  const sent: { type?: unknown; body?: unknown; passed: boolean } = { passed: false }
+  const res = {
+    setHeader: (key: string, value: unknown) => {
+      if (key.toLowerCase() === 'content-type') sent.type = value
+    },
+    end: (body: unknown) => (sent.body = body),
+  }
+  middleware({ url }, res, () => (sent.passed = true))
+  return sent
+}
+
+/**
+ * THE PLUGIN AS THE CONFIG REGISTERS IT, NOT THE FUNCTIONS IT CALLS: with `favicons()` left out of `plugins`, the
+ * build would ship no icon and nginx would answer `/favicon.ico` with `index.html`.
+ */
+describe('the plugin vite.config.ts registers', () => {
+  const ICONS = [
+    ['favicon.ico', 'image/x-icon', faviconIco(SVG)],
+    ['apple-touch-icon.png', 'image/png', appleTouchIcon(SVG)],
+  ] as const
+
+  it("emits both icons at the build's root, drawn from public/favicon.svg", async () => {
+    const emitted: { type: string; fileName?: string; source?: unknown }[] = []
+    const context = { emitFile: (asset: (typeof emitted)[number]) => emitted.push(asset) }
+    call(await registered(), 'generateBundle', context, {}, {}, true)
+    expect(emitted.map(({ type, fileName }) => [type, fileName])).toEqual(ICONS.map(([file]) => ['asset', file]))
+    for (const [i, [file, , bytes]] of ICONS.entries())
+      expect(Buffer.from(emitted[i]?.source as Uint8Array).equals(bytes), `${file}'s bytes`).toBe(true)
+  })
+
+  it.each(ICONS)('serves /%s in dev as %s, drawn from public/favicon.svg', async (file, type, bytes) => {
+    const sent = serve(await registered(), `/${file}`)
+    expect([sent.passed, sent.type], 'passed on, and the content type').toEqual([false, type])
+    expect(Buffer.from(sent.body as Uint8Array).equals(bytes), 'the bytes').toBe(true)
+  })
+
+  it("passes /favicon.svg on to Vite's public files", async () => {
+    expect(serve(await registered(), '/favicon.svg')).toEqual({ passed: true })
   })
 })
 
