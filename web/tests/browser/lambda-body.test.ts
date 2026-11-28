@@ -139,6 +139,27 @@ describe('LambdaBody', () => {
     }
   })
 
+  /**
+   * **EACH TERM IS COUNTED AGAIN.** The pane draws one step's tree straight over another's, with no flat text between,
+   * so places kept from the first term would give the second term's rows the first's counts.
+   */
+  it('counts the rows of a term drawn over another by its own siblings, not the first term’s', () => {
+    const { body } = mount()
+    const first = new Tree(wireOf('g (a b c d) (e f g h)'))
+    body.showTree(first, codeLines(first, opts(12)), false, [], false)
+    expect(
+      rows().map((r) => r.getAttribute('aria-setsize')),
+      'precondition: the first term is counted',
+    ).toEqual(['1', '2', '2'])
+    const second = new Tree(wireOf('f aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk'))
+    body.showTree(second, outlineLines(second, opts(80)), true, [], false)
+    expect(rows().length, 'precondition: every row of the second term is drawn').toBe(12)
+    expect(rows().map((r) => r.getAttribute('aria-setsize'))).toEqual(['1', ...Array(11).fill('11')])
+    expect(rows().map((r) => r.getAttribute('aria-posinset'))).toEqual(
+      Array.from({ length: 12 }, (_, i) => String(Math.max(1, i))),
+    )
+  })
+
   it('marks the next redex and the contractum each with its own shape, and says so to a screen reader', () => {
     const { body } = mount()
     // `k ((\y. y) z) (w v)`: the redex is node 3; say the last step produced node 7, `(w v)`.
