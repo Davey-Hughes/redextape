@@ -50,7 +50,8 @@ use redextape_test_support::arb_expr_below;
 /// reference == λ == unary-TM == binary-TM, guided by the reference value's type. All four must run
 /// to a value that decodes equal. A function in the result is compared as the opaque `Value::Function`,
 /// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`). Each leg is read twice, by
-/// the witness decoder and by the `_opaque` type decoder `run` uses, and both must agree.
+/// the witness decoder and by its `_opaque` type decoder, and both must agree. The TM legs' is the one
+/// `run --backend tm` prints from; `run --backend lambda` prints a function as its normal form instead.
 ///
 /// The two TM legs are DIFFERENT MACHINES compiled from the same Core, not the same machine read two
 /// ways — which is what makes this a real fourth leg rather than a restatement of the third.
