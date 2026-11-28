@@ -81,6 +81,9 @@ pub struct ZipperCursor {
     steps: u64,
     cap: u64,
     status: Option<Status>,
+    /// Set only when the depth guard, not the step cap, produced the `HitCap`, which `status()` reports
+    /// alike for both, so a caller can name the limit that stopped a run rather than infer it.
+    depth_capped: bool,
     /// Whole-term depth as `max(focus.depth() + add, floor)`. Maintained O(1) per push and pop; see
     /// `root_depth`.
     depth_add: u32,
@@ -115,6 +118,7 @@ impl ZipperCursor {
             steps: 0,
             cap,
             status: None,
+            depth_capped: false,
             depth_add: 0,
             depth_floor: 0,
             #[cfg(test)]
@@ -160,6 +164,13 @@ impl ZipperCursor {
     #[must_use]
     pub fn status(&self) -> Option<Status> {
         self.status
+    }
+
+    /// Whether the `HitCap` came from the depth guard rather than the step cap, as
+    /// `LambdaCursor::depth_capped` says for that cursor. `false` whenever `status()` is not `HitCap`.
+    #[must_use]
+    pub fn depth_capped(&self) -> bool {
+        self.depth_capped
     }
 
     /// Nodes `advance`'s climb has rebuilt so far. See the field's doc: this is the measured half of
@@ -422,6 +433,7 @@ impl Iterator for ZipperCursor {
         // `LambdaCursor` carries, held here by `root_depth` rather than by a stored field.
         if self.root_depth() > MAX_TERM_DEPTH {
             self.status = Some(Status::HitCap);
+            self.depth_capped = true;
             return None;
         }
         // THE OPTIMIZATION, in one line. The first step has no context to resume from; every later one
@@ -496,6 +508,32 @@ mod tests {
         let mut z = ZipperCursor::new(&deep, 1_000);
         assert!(z.next().is_some(), "a term AT exactly MAX_TERM_DEPTH must still be steppable");
         assert_eq!(z.status(), None, "the guard must not fire at the boundary");
+    }
+
+    /// `status()` reports `HitCap` for both producers; `depth_capped` is what tells them apart.
+    #[test]
+    fn depth_capped_tells_the_two_producers_of_hit_cap_apart() {
+        use crate::lambda::reduce::MAX_TERM_DEPTH;
+        // Two redexes in sequence, so a 1-step budget stops it on the step cap.
+        let two_steps = app(abs("x", app(abs("y", var(0)), var(0))), var(5));
+        let mut budget = ZipperCursor::new(&two_steps, 1);
+        budget.by_ref().count();
+        assert_eq!(budget.status(), Some(Status::HitCap), "a 1-step budget must not finish this term");
+        assert!(!budget.depth_capped(), "the step cap produced this HitCap, not the depth guard");
+
+        let mut deep = app(abs("x", var(0)), var(0));
+        for _ in 0..=MAX_TERM_DEPTH {
+            deep = abs("d", deep);
+        }
+        let mut depth = ZipperCursor::new(&deep, MAX_REDUCTION_STEPS);
+        depth.by_ref().count();
+        assert_eq!(depth.status(), Some(Status::HitCap), "a term past MAX_TERM_DEPTH must be refused");
+        assert!(depth.depth_capped(), "the depth guard produced this HitCap, not the step cap");
+
+        let mut done = ZipperCursor::new(&app(abs("x", var(0)), var(0)), MAX_REDUCTION_STEPS);
+        done.by_ref().count();
+        assert_eq!(done.status(), Some(Status::Normalized));
+        assert!(!done.depth_capped(), "a finished run has no HitCap for either producer to own");
     }
 
     #[test]

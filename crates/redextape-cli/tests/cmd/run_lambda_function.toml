@@ -1,0 +1,3 @@
+bin.name = "redextape"
+args = ["run", "g.rxt", "--backend", "lambda"]
+fs.sandbox = true

@@ -293,26 +293,34 @@ compiler, simulated, and decoded — and the value that comes out is the one the
 
 ## The `2`s that are not bugs
 
-**`--backend lambda` and `--backend tm` cannot decode a function-typed result.** Both decoders are
-type-directed, and both refuse `Ty::Fun` and `Ty::Var`; the encodings cover `Nat`, `Bool`, `Unit` and
-`List<T>` and nothing else. `--backend reference` has no such limit, because it never leaves the
-interpreter. A one-line program reaches it:
+**`--backend tm` cannot decode a function-typed result.** Its decoder is type-directed and refuses
+`Ty::Fun` and `Ty::Var`; a tape encodes `Nat`, `Bool`, `Unit` and `List<T>` and nothing else.
+`--backend reference` has no such limit, because it never leaves the interpreter, and
+`--backend lambda` prints the function's normal form, since a function is a value in the λ-calculus.
+A one-line program shows all three:
 
     $ redextape run g.rxt                    # g.rxt is `let g = |x| x; g`
     <non-value>
 
     $ redextape run g.rxt --backend lambda
-    error: `--backend lambda` cannot decode a result of type `(t2) -> t2`
-      the encodings cover Nat, Bool, Unit and List<T>; this type has none
+    λx. x
+
+    $ redextape run g.rxt --backend tm
+    error: `--backend tm` cannot decode a result of type `(t2) -> t2`
+      a tape encodes Nat, Bool, Unit and List<T>; this type has none
       `--backend reference` will evaluate it
     # exit 2
 
 A polymorphic identity types as `(t2) -> t2`, which carries both refused shapes at once. The program
 is fine — it parses, it typechecks, and the reference backend evaluates it — so this is exit `2` and
 not exit `1`. The `<non-value>` on the reference line is a result, not a failure: the mini-language
-can produce a closure, and no text form encodes one. `emit --lang tm` and `emit --lang rxm` refuse
-the same types at the same exit `2` and write no file, because a `result` line must name a type
-`run` can decode; `--lang lambda` writes the term whatever its type.
+can produce a closure, and no value text encodes one. `--backend lambda` prints a normal form whole or
+not at all: past `MAX_NORMAL_FORM_BYTES` (65,536 bytes) it exits `2`, and a function whose body
+recurses, returned unapplied, has no normal form and stops at a reduction cap with exit `1`, usually
+`MAX_TERM_DEPTH`, since each unfolding nests the term deeper; the message names the cap that fired.
+`emit --lang tm` and `emit --lang rxm` refuse function-typed programs at exit `2` and write no file,
+because a `result` line must name a type `run` can decode; `--lang lambda` writes the term whatever
+its type.
 
 **`--lang tm` refuses a program whose values do not fit the tape**, and refusing is the whole point:
 

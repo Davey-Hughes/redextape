@@ -19,11 +19,12 @@ pub enum Backend {
     #[default]
     Reference,
     /// Lower to the λ-calculus, reduce, and decode the normal form back to a value. The decode is
-    /// directed by the program's type and covers Nat, Bool, Unit and List<T>; a function-typed
-    /// result has no encoding at all and exits 2 (the program is fine — use `reference`).
+    /// directed by the program's type and covers Nat, Bool, Unit and List<T>; a result that holds a
+    /// function prints its normal form as λ text instead, since a function is a value there.
     Lambda,
-    /// Lower to a Turing machine, simulate it, and decode the final tapes. Same type-directed limit
-    /// as `lambda`: a tape encodes Nat, Bool, Unit and List<T>, and a function-typed result exits 2.
+    /// Lower to a Turing machine, simulate it, and decode the final tapes. The decode is directed by
+    /// the program's type: a tape encodes Nat, Bool, Unit and List<T>, and a function-typed result
+    /// exits 2 (the program is fine — use `reference`).
     Tm,
 }
 
@@ -487,11 +488,22 @@ fn run_lambda_backend(
     color: bool,
 ) -> std::io::Result<Outcome> {
     let Some((core, ty)) = analyzed(src, label, err, color)? else { return Ok(Outcome::ProgramFailed) };
-    match redextape_core::lambda::run_lambda(&core, redextape_core::lambda::MAX_REDUCTION_STEPS) {
-        redextape_core::lambda::LambdaRun::Reduced(nf) => {
-            if let Some(v) = redextape_core::lambda::decode_lambda_ty(&nf, &ty) {
+    let term = match redextape_core::lambda::lower(&core) {
+        Ok(t) => t,
+        Err(e) => {
+            writeln!(err, "error: this program has no lambda lowering: {e:?}")?;
+            return Ok(Outcome::ToolFailed);
+        }
+    };
+    let stopped = match reduce_capped(&term, redextape_core::lambda::MAX_REDUCTION_STEPS) {
+        Reduction::Normal(nf) => {
+            return if let Some(v) = redextape_core::lambda::decode_lambda_ty(&nf, &ty) {
                 print_lambda_value(&v, label, out, err)
+            } else if has_function(&ty) {
+                print_normal_form(&nf, label, MAX_NORMAL_FORM_BYTES, out, err)
             } else {
+                // Left for a bare type variable that still normalizes, or a normal form that does not
+                // match its own type, which is a lowering defect rather than a missing encoding.
                 writeln!(
                     err,
                     "error: `--backend lambda` cannot decode a result of type `{}`\n  \
@@ -500,21 +512,97 @@ fn run_lambda_backend(
                     redextape_core::ty::show(&ty)
                 )?;
                 Ok(Outcome::ToolFailed)
-            }
+            };
         }
-        redextape_core::lambda::LambdaRun::HitCap => {
-            writeln!(
-                err,
-                "error: reduction did not finish within {} steps (`MAX_REDUCTION_STEPS`)",
-                redextape_core::lambda::MAX_REDUCTION_STEPS
-            )?;
-            Ok(Outcome::ProgramFailed)
-        }
-        redextape_core::lambda::LambdaRun::LowerError(e) => {
-            writeln!(err, "error: this program has no lambda lowering: {e:?}")?;
-            Ok(Outcome::ToolFailed)
-        }
+        Reduction::Steps => format!(
+            "reduction did not finish within {} steps (`MAX_REDUCTION_STEPS`)",
+            redextape_core::lambda::MAX_REDUCTION_STEPS
+        ),
+        Reduction::Depth => format!(
+            "reduction stopped where the term nested past {} levels (`MAX_TERM_DEPTH`)",
+            redextape_core::lambda::reduce::MAX_TERM_DEPTH
+        ),
+    };
+    writeln!(err, "error: {stopped}")?;
+    if has_function(&ty) {
+        writeln!(
+            err,
+            "  a function is reduced under its binders, so a body that recurses or loops never reaches a \
+             normal form, and a function that has one can still pass this limit first\n  \
+             `--backend reference` will evaluate it"
+        )?;
     }
+    Ok(Outcome::ProgramFailed)
+}
+
+/// How a λ reduction ended. `LambdaRun::HitCap` folds two limits into one, and the user who meets one
+/// needs its name to know what ran out: the count of steps, or the depth the term reached.
+enum Reduction {
+    Normal(redextape_core::lambda::LambdaTerm),
+    Steps,
+    Depth,
+}
+
+/// `reduce_to_normal_form`, keeping which limit stopped it. `MAX_TERM_DEPTH` is named only where the
+/// cursor records that its depth guard fired, so no other producer of `HitCap` can read as depth.
+fn reduce_capped(term: &redextape_core::lambda::LambdaTerm, cap: u64) -> Reduction {
+    let mut cursor = redextape_core::trace::ZipperCursor::new(term, cap);
+    while cursor.next().is_some() {}
+    match cursor.status() {
+        Some(redextape_core::lambda::Status::HitCap) if cursor.depth_capped() => Reduction::Depth,
+        Some(redextape_core::lambda::Status::HitCap) => Reduction::Steps,
+        _ => Reduction::Normal(cursor.term()),
+    }
+}
+
+/// The most bytes of λ text `run --backend lambda` prints for a function's normal form, the web λ
+/// view's `LAMBDA_BYTE_BUDGET`. A normal form is a shared graph, so its printed size has no bound in
+/// its memory.
+pub const MAX_NORMAL_FORM_BYTES: usize = 65_536;
+
+/// Whether a result of type `ty` holds a function anywhere, the one case where the λ backend prints
+/// the term rather than a decoded value: a function is a value in the λ-calculus and has no other
+/// encoding.
+fn has_function(ty: &redextape_core::ty::Ty) -> bool {
+    use redextape_core::ty::Ty;
+    match ty {
+        Ty::Fun(..) => true,
+        Ty::List(elem) => has_function(elem),
+        Ty::Nat | Ty::Bool | Ty::Unit | Ty::Var(_) => false,
+    }
+}
+
+/// Print a normal form whole, or refuse it. A term cut at the budget is not printed, because cut λ
+/// text can reparse into a different, shorter term (`print_lambda_capped`'s doc), and a reader of
+/// stdout would take it for the answer. The depth cap is the reducer's own, so a normal form it
+/// returned is within it; a depth cut is still refused rather than trusted to be unreachable.
+fn print_normal_form(
+    nf: &redextape_core::lambda::LambdaTerm,
+    label: &str,
+    budget: usize,
+    out: &mut impl std::io::Write,
+    err: &mut impl std::io::Write,
+) -> std::io::Result<Outcome> {
+    let (text, _, cut) =
+        redextape_core::lambda::print_lambda_capped(nf, budget, redextape_core::lambda::reduce::MAX_TERM_DEPTH);
+    let limit = match cut {
+        None => {
+            writeln!(out, "{text}")?;
+            return Ok(Outcome::Ran);
+        }
+        Some(redextape_core::lambda::Cut::Bytes) => {
+            format!("`MAX_NORMAL_FORM_BYTES` limits a printed normal form to {budget} bytes")
+        }
+        Some(redextape_core::lambda::Cut::Depth) => {
+            "`MAX_TERM_DEPTH` limits how deeply a printed normal form may nest".to_string()
+        }
+    };
+    writeln!(
+        err,
+        "error: `--backend lambda` reduced `{label}` to a normal form, but it is too large to print\n  \
+         {limit}; the term may be entirely valid — this is the tool's limit, not the program's"
+    )?;
+    Ok(Outcome::ToolFailed)
 }
 
 /// `run_lambda_backend`'s "decoded value in hand, print or refuse" step — see
@@ -737,17 +825,114 @@ mod tests {
         }
     }
 
-    /// Design §6. `|x| x + 1` types as `(Nat) -> Nat`; both non-reference decoders refuse `Ty::Fun`,
-    /// while the reference interpreter evaluates it and prints `<non-value>`. The program is fine —
-    /// this tool cannot answer that question about it — so it is `ToolFailed`, not `ProgramFailed`.
+    /// Design §6. `|x| x + 1` types as `(Nat) -> Nat`; a tape has no encoding for `Ty::Fun`, while the
+    /// reference interpreter evaluates it and prints `<non-value>`. The program is fine — this tool
+    /// cannot answer that question about it — so it is `ToolFailed`, not `ProgramFailed`.
     #[test]
-    fn a_function_typed_result_is_the_tools_limit_not_the_programs_fault() {
-        for backend in [Backend::Lambda, Backend::Tm] {
-            let (out, err, outcome) = run_case(&format!("closure-{backend:?}"), "p.rxt", "|x| x + 1", Some(backend));
-            assert_eq!(out, "", "{backend:?} must print no value");
-            assert!(err.contains("decode"), "{backend:?} must say it cannot decode, got: {err}");
-            assert!(matches!(outcome, Outcome::ToolFailed), "{backend:?} must be ToolFailed");
-        }
+    fn a_function_typed_result_is_the_tm_backends_limit_not_the_programs_fault() {
+        let (out, err, outcome) = run_case("closure-tm", "p.rxt", "|x| x + 1", Some(Backend::Tm));
+        assert_eq!(out, "", "tm must print no value");
+        assert!(err.contains("decode"), "tm must say it cannot decode, got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "tm must be ToolFailed");
+    }
+
+    /// Design §6. A function is a value in the λ-calculus, so the λ backend answers with its normal
+    /// form, the text `parse_lambda` reads back.
+    #[test]
+    fn a_function_typed_result_prints_its_lambda_normal_form() {
+        let (out, err, outcome) = run_case("closure-lambda", "p.rxt", "|x| x + 1", Some(Backend::Lambda));
+        assert_eq!(out, "λx. λf. λx0. x f (f x0)\n", "stderr: {err}");
+        assert_eq!(err, "");
+        assert!(matches!(outcome, Outcome::Ran));
+        let (reparsed, ds) = redextape_core::lambda::parse_lambda(out.trim_end());
+        assert!(ds.is_empty(), "the printed term must reparse cleanly: {ds:?}");
+        let core = redextape_core::desugar::desugar(&redextape_core::parser::parse("|x| x + 1").0.unwrap());
+        let redextape_core::lambda::LambdaRun::Reduced(nf) =
+            redextape_core::lambda::run_lambda(&core, redextape_core::lambda::MAX_REDUCTION_STEPS)
+        else {
+            panic!("`|x| x + 1` must reduce")
+        };
+        assert_eq!(reparsed, Some(nf), "the printed text must read back as the term reduced");
+    }
+
+    /// A function inside a list is as undecodable as a bare one, so the rule is "holds a function",
+    /// not "is a function".
+    #[test]
+    fn a_list_of_functions_prints_its_lambda_normal_form() {
+        let (out, err, outcome) = run_case("closure-list", "p.rxt", "[|x| x]", Some(Backend::Lambda));
+        assert_eq!(out, "λn. λc. c (λx. x) (λn0. λc0. n0)\n", "stderr: {err}");
+        assert!(matches!(outcome, Outcome::Ran));
+    }
+
+    /// Normal order reduces under binders, so an unapplied recursive function unfolds without end, each
+    /// unfolding a level deeper. It stops at a cap as any program does, exit 1, the message names the
+    /// cap that fired, and it says why a function can stop there.
+    #[test]
+    fn a_function_with_no_normal_form_stops_at_the_cap_and_says_why() {
+        let src = "fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact";
+        let (out, err, outcome) = run_case("closure-no-nf", "p.rxt", src, Some(Backend::Lambda));
+        assert_eq!(out, "");
+        assert!(err.contains("MAX_TERM_DEPTH"), "the cap that fired must be named, got: {err}");
+        assert!(err.contains("reduced under its binders"), "a function's cap must say why, got: {err}");
+        assert!(matches!(outcome, Outcome::ProgramFailed));
+    }
+
+    /// The hint is about functions: a value-typed program at a cap is told only the cap.
+    #[test]
+    fn a_value_program_at_the_cap_gets_no_function_hint() {
+        let src = "let mut a = 0; while true { a = a + 1; } a";
+        let (out, err, outcome) = run_case("loop-no-hint", "p.rxt", src, Some(Backend::Lambda));
+        assert_eq!(out, "");
+        assert!(err.starts_with("error: reduction "), "the cap must be reported, got: {err}");
+        assert!(!err.contains("reduced under its binders"), "a value program must not get the hint, got: {err}");
+        assert!(matches!(outcome, Outcome::ProgramFailed));
+    }
+
+    fn lowered(src: &str) -> redextape_core::lambda::LambdaTerm {
+        let core = redextape_core::desugar::desugar(&redextape_core::parser::parse(src).0.unwrap());
+        redextape_core::lambda::lower(&core).unwrap()
+    }
+
+    /// The two caps `HitCap` folds together, told apart: a loop that stays shallow runs out of steps,
+    /// and a recursive function unfolding under its binder runs out of depth with steps to spare.
+    #[test]
+    fn a_capped_reduction_names_the_limit_that_stopped_it() {
+        let spin = lowered("fn spin(n) { spin(n) } spin(0)");
+        assert!(matches!(reduce_capped(&spin, 1_000), Reduction::Steps), "a shallow loop must run out of steps");
+        let fact = lowered("fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact");
+        assert!(
+            matches!(reduce_capped(&fact, redextape_core::lambda::MAX_REDUCTION_STEPS), Reduction::Depth),
+            "an unfolding function must run out of depth"
+        );
+        assert!(matches!(reduce_capped(&lowered("1 + 2"), 1_000), Reduction::Normal(_)));
+    }
+
+    /// Six Bool arguments choose among seven Church numerals, so the normal form holds all seven and
+    /// prints past `MAX_NORMAL_FORM_BYTES`. A cut term could reparse as a different one, so none is
+    /// printed.
+    #[test]
+    fn a_normal_form_past_the_print_budget_is_refused_not_cut() {
+        let src = "|a| |b| |c| |d| |e| |g| if a { 2500 } else { if b { 2500 } else { if c { 2500 } else { \
+                   if d { 2500 } else { if e { 2500 } else { if g { 2500 } else { 2500 } } } } } }";
+        let (out, err, outcome) = run_case("closure-too-large", "p.rxt", src, Some(Backend::Lambda));
+        assert_eq!(out, "", "a refused normal form must print nothing");
+        assert!(err.contains("too large to print"), "got: {err}");
+        assert!(err.contains("MAX_NORMAL_FORM_BYTES"), "the message must name the tool's own limit, got: {err}");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the program's: exit 2");
+    }
+
+    /// The reducer's depth guard keeps a normal form it returns within the printer's depth cap, so no
+    /// program reaches this refusal; a term built past the cap and handed to the printer does.
+    #[test]
+    fn a_normal_form_past_the_print_depth_is_refused_not_cut() {
+        let depth = u64::from(redextape_core::lambda::reduce::MAX_TERM_DEPTH);
+        let deep = redextape_core::lambda::encode::church(depth + 10);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let outcome = print_normal_form(&deep, "p.rxt", usize::MAX, &mut out, &mut err).unwrap();
+        let err = String::from_utf8(err).unwrap();
+        assert!(out.is_empty(), "a refused normal form must print nothing");
+        assert!(matches!(outcome, Outcome::ToolFailed), "the tool's limit, not the program's: exit 2");
+        assert!(err.contains("MAX_TERM_DEPTH"), "the message must name the depth cap, got: {err}");
     }
 
     /// The checked-in fixture is a real 464-line machine written by `examples/regen_fixtures.rs`

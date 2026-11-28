@@ -27,7 +27,9 @@ pub enum LambdaRun {
     /// Reduced to a normal form. Decode it with `decode` (against an expected value's shape) or with
     /// `decode_lambda_ty` (against a type).
     Reduced(LambdaTerm),
-    /// Reduction hit the step cap.
+    /// Reduction hit a cap: the step cap, or the depth guard at `MAX_TERM_DEPTH`. This variant does not
+    /// say which; a caller that names the limit drives a cursor, `ZipperCursor` or `LambdaCursor`, and
+    /// reads its `depth_capped`.
     HitCap,
     /// The program could not be lowered (e.g. a stateful closure).
     LowerError(LowerError),

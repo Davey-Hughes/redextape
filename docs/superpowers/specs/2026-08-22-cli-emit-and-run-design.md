@@ -154,13 +154,14 @@ tool could not answer.**
 | `TmRun::Overflow` after fitting | 1 |
 | `TmRun::TooLarge` — the lowering ceiling (§9) | 2 |
 | `LambdaRun::LowerError`, `TmRun::LowerError` | 2 |
-| decode refused — a function-typed result under `lambda`/`tm` (§6) | 2 |
+| decode refused — a function-typed result under `tm` (§6) | 2 |
+| a λ normal form past `MAX_NORMAL_FORM_BYTES` (§6) | 2 |
 | unreadable input, unwritable `-o`, bad flag combination | 2 |
 
-**The last three rows are why the rule is worth stating.** In each, the program is fine and the tool
+**The last four rows are why the rule is worth stating.** In each, the program is fine and the tool
 cannot answer *that question about it* — a stateful closure has no λ lowering, a function-typed result
-has no tape encoding, and neither is a defect in the source. Reporting those as 1 would tell a script
-the program failed when it did not.
+has no tape encoding, a λ normal form can be too large to print, and none is a defect in the source.
+Reporting those as 1 would tell a script the program failed when it did not.
 
 **A cap is the program's fault and a ceiling is the tool's.** `HitCap` means the program ran and did
 not finish inside a budget chosen to fail fast; `TooLarge` means the tool declined to build the thing
@@ -202,6 +203,35 @@ a user who meets it by accident will read it as a bug in the flag.
 **`format_value`'s `<non-value>` is not a failure**, and the reference row above is not an error: the
 program evaluated to a closure, which is a legitimate result the mini-language can produce and no
 text form can encode.
+
+**Revised 2026-11-26 for `--backend lambda`, reversing the refusal above for that backend alone.** A
+function is an ordinary value in the λ-calculus, so a refusal there was a dull answer to a program that
+type-checks. When a result holds a function value, a bare function or a list of them,
+`run --backend lambda` prints the reduced term in the text `parse_lambda` reads back, and exits 0. An
+empty list of functions still decodes first and prints `[]`, as `reference` does:
+
+```
+$ redextape run returns_a_function.rxt --backend lambda
+λx. λf. λx0. x f (f x0)
+```
+
+- **Printed whole or not at all.** A normal form is a shared graph, so its printed size is not bounded
+  by its memory. Past `MAX_NORMAL_FORM_BYTES` (65,536 bytes, the web λ view's budget) the CLI refuses
+  with exit 2 rather than printing a cut term, because cut λ text can reparse as a different, shorter
+  term. Six `Bool` arguments choosing among seven 2,500s reach it at 70,135 bytes.
+- **No normal form is a cap, exit 1.** Normal order reduces under binders, so a function whose body
+  recurses or loops, returned unapplied, unfolds without end and stops at a cap like any program.
+  Each unfolding nests the term a level deeper, so the cap that fires is usually `MAX_TERM_DEPTH`
+  (3,000 levels), not `MAX_REDUCTION_STEPS`: `fact` returned unapplied stops on depth after 11,980
+  steps. A function with a normal form deeper than 3,000 levels, `|x| 2998`, stops on depth too.
+  `LambdaRun::HitCap` folds both caps into one, so the CLI drives the reducer's cursor itself and
+  names the cap that fired, for every program; before this it named the step cap whichever fired.
+  For a result type that holds a function the message adds two lines: the first says a body that
+  recurses or loops never reaches a normal form, and a function that has one can still pass the
+  limit first; the second, that `--backend reference` will evaluate it.
+- **`--backend tm` and `--backend reference` are unchanged**: `tm` still refuses at exit 2 and
+  `reference` still prints `<non-value>`, so the three backends no longer agree on a function's
+  printed result, and the oracles still compare value-typed programs only. `emit` is unchanged too.
 
 ## §7 What this does not close
 

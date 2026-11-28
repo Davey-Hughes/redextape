@@ -45855,3 +45855,185 @@ with `CARGO_TARGET_DIR` naming the lane's own directory.
 | 9 | `redextape-llvm`'s tests | `cargo nextest run -p redextape-llvm --features ts`, its `Summary` line |
 | 0.25.10 | the tree-sitter `check-all.sh` pins | `$TREE_SITTER --version` |
 | 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
+
+#### `RUN --BACKEND LAMBDA` PRINTS A FUNCTION RESULT AS ITS λ NORMAL FORM, REFUSES ONE PAST 65,536 BYTES, AND NAMES THE CAP THAT STOPS A REDUCTION (2026-11-26 and 27, branch `function-results`, `7033883..bb86f21`, 13 commits, this entry's first writing, `153750f`, among them, and this entry brought up to `bb86f21` in the commit after)
+
+On #175 the user said a program whose result is a function is not wrong: it type-checks, and refusing it is a dull
+answer. Of the two ideas kept for a follow-up, this is the first: a function is an ordinary value in the λ-calculus, so
+the λ backend prints the reduced term. **This reverses, for `--backend lambda` alone, the decision the CLI design spec
+(`docs/superpowers/specs/2026-08-22-cli-emit-and-run-design.md`) recorded in §6**, and the spec says so beside it. The
+first four commits, the fourth a roadmap entry, were written in a cloud sandbox, duet, from a handoff, and applied onto
+`main` at `7033883` (#204); the rest answer two reviews of them, write this entry in place of duet's, and answer a check
+of it before the PR. The change is in `crates/redextape-cli`, its README and the spec, and in two places in
+`redextape-core`: `ZipperCursor` records which limit stopped it, and `LambdaRun::HitCap`'s doc names both limits and the
+two cursors that tell them apart. No wasm, grammar or web file changes.
+
+| Commit | What |
+|---|---|
+| `f251366` | `run --backend lambda` prints a result that holds a function value as its normal form, exit 0, refuses one past `MAX_NORMAL_FORM_BYTES` with exit 2, and adds two lines at a cap for a result type that holds a function; the `run_tool_error` transcript moves to `--backend tm`, and `run_lambda_function` is new |
+| `0d7ee16` | the CLI README, and the spec's §5 exit table and §6 |
+| `fe827bb` | the cap's message names `MAX_TERM_DEPTH` or `MAX_REDUCTION_STEPS`, whichever stopped the run, and the print refusal names the limit that cut the term |
+| `39ce2c2` | duet's roadmap entry for the three commits before it |
+| `dcc3854` | `ZipperCursor::depth_capped`, set only where the depth guard latches `HitCap`, and the CLI names depth only from it (the first review's Minor 1) |
+| `4c67907` | a test of the print refusal's depth arm (its Minor 2) |
+| `e112cfd` | the hint's last clause says "a function that has one" (its Minor 3) |
+| `a180bb6` | a spec paragraph wrapped as the rest of the file is (its Minor 4) |
+| `2d72f0c` | `run --help`'s tm line names `reference` alone, as the tm refusal does (the whole-branch review's Minor 3) |
+| `245bbeb` | `LambdaRun::HitCap`'s doc names the step cap and the depth guard (its Minor 4) |
+| `d038446` | the spec's bullet on a looping function exhausting memory before either cap goes (its Minor 2) |
+| `153750f` | this entry, written in place of duet's, to `d038446` |
+| `bb86f21` | the spec counts the hint's two lines, and `LambdaRun::HitCap`'s doc names `LambdaCursor` beside `ZipperCursor` (the check of this entry) |
+
+##### WHAT IT DOES
+
+- **λ in the CLI only.** `--backend tm` still refuses a function-typed result at exit 2, `reference` still prints
+  `<non-value>`, and `emit` and the web app are unchanged.
+- **The whole normal form or nothing.** The text is `print_lambda_capped`'s, which `parse_lambda` reads back. Past
+  `MAX_NORMAL_FORM_BYTES`, 65,536 bytes, the web λ view's `LAMBDA_BYTE_BUDGET`, it prints nothing and exits 2, as cut λ
+  text can reparse as a different, shorter term. A term past the printer's depth cap, `MAX_TERM_DEPTH`, is refused the
+  same way.
+- **Exit 0** when a normal form prints.
+- **A list of functions** prints the same way. An empty one decodes first and prints `[]`, as `reference` does.
+- **No normal form is a cap, exit 1**, as for any program. For a result type that holds a function the message adds two
+  lines: that a function is reduced under its binders, so a body that recurses or loops never reaches a normal form and
+  a function that has one can still pass the limit first, and that `--backend reference` will evaluate it.
+- **The cap is named.** `LambdaRun::HitCap` folds the step cap and the depth guard into one, and `main` printed the step
+  cap's message for every `HitCap`. The CLI now lowers the program and drives `ZipperCursor` itself, in `reduce_capped`,
+  and names `MAX_TERM_DEPTH` only where the cursor's `depth_capped` says the depth guard stopped the run; any other
+  `HitCap` reads as `MAX_REDUCTION_STEPS`. That changes the message for every program the depth guard stops under
+  `--backend lambda`, value programs included. No exit code changes.
+
+##### WHAT SHOWED
+
+The release CLI at `bb86f21`, each program on standard input under a 2G memory cap:
+
+- `|x| x + 1` prints `λx. λf. λx0. x f (f x0)`, 27 bytes with its newline. `let g = |x| x; g` prints `λx. x`, where
+  `reference` prints `<non-value>` and `tm` refuses at exit 2. `let add = |a| |b| a + b; add(2)` prints
+  `λb. λf. λx. f (f (b f x))`, and `[|x| x]` prints `λn. λc. c (λx. x) (λn0. λc0. n0)`. `tail([|x| x + 1])` prints `[]`
+  under `lambda` and `reference` alike. Numbers are Church numerals, so `let xs = [1, 2, 3]; |y| cons(y, xs)` prints 147
+  bytes and `|n| n + 1000` 4,021, each with its newline.
+- `fact` returned unapplied stops on `MAX_TERM_DEPTH` with the hint, exit 1, as each unfolding nests the term a level
+  deeper. `fn spin(n) { spin(n) } |x| spin(x)`, whose body stays shallow, stops on `MAX_REDUCTION_STEPS` with the hint.
+  Two functions whose bodies loop, `|n| { let mut a = 0; while a < n { a = a + 1; } a }` and the same with `while true`,
+  stop on `MAX_TERM_DEPTH` with the hint, and the value program `let mut a = 0; while true { a = a + 1; } a` on
+  `MAX_TERM_DEPTH` with none.
+- `|x| 2997` prints whole, 12,005 bytes with its newline, at exit 0. `|x| 2998`, which has a normal form, stops on
+  `MAX_TERM_DEPTH` in the reducer, with the hint, at exit 1, so its refusal is the reducer's message and not the
+  printer's.
+- Six `Bool` arguments choosing among seven 2,500s exit 2, *too large to print*, and the message names
+  `MAX_NORMAL_FORM_BYTES`.
+
+##### THE TESTS
+
+- **In `crates/redextape-cli/src/run.rs`.** `a_function_typed_result_prints_its_lambda_normal_form`: `|x| x + 1`'s text,
+  an empty stderr, `Ran`, and the text read back by `parse_lambda` equal to the term `run_lambda` reduces.
+  `a_list_of_functions_prints_its_lambda_normal_form`: `[|x| x]`.
+  `a_function_with_no_normal_form_stops_at_the_cap_and_says_why`: `fact` names `MAX_TERM_DEPTH` and carries the hint.
+  `a_value_program_at_the_cap_gets_no_function_hint`: the `while true` value program.
+  `a_capped_reduction_names_the_limit_that_stopped_it`: `reduce_capped` reads `spin(0)` as steps, `fact` as depth and
+  `1 + 2` as a normal form. `a_normal_form_past_the_print_budget_is_refused_not_cut`: the six-`Bool` program.
+  `a_normal_form_past_the_print_depth_is_refused_not_cut`: `print_normal_form` handed a Church numeral built past
+  `MAX_TERM_DEPTH`. `a_function_typed_result_is_the_tm_backends_limit_not_the_programs_fault` takes the place of the
+  test that held both backends to the refusal.
+- **In `crates/redextape-core/src/trace/zipper.rs`.** `depth_capped_tells_the_two_producers_of_hit_cap_apart`: a
+  one-step budget, a term past `MAX_TERM_DEPTH`, and a finished run.
+- **Transcripts.** `run_lambda_function`, `let g = |x| x; g` under `--backend lambda`; `run_tool_error`, now under
+  `--backend tm`; and `run_help`, the help text.
+
+##### THE SABOTAGES
+
+Run by the reviews and the fix round on this machine. Each saved a copy of the file it broke, ran the tests with
+`--no-fail-fast`, restored the file from the copy and found it equal by `cmp`, and `git status --short` was empty after.
+A case stops at its first failed check, so the checks after it are not shown by that sabotage.
+
+| Sabotage | By, at | What failed |
+|---|---|---|
+| the normal-form branch never taken | the first review, `39ce2c2` | `a_function_typed_result_prints_its_lambda_normal_form` at its pinned text; `a_list_of_functions_prints_its_lambda_normal_form`; `a_normal_form_past_the_print_budget_is_refused_not_cut` at its message check, after its empty stdout held; `cli_transcripts`, on `run_lambda_function` |
+| the step test in `reduce_capped` inverted, so the caps swap; the reparse check's program made `\|x\| x + 2` | the first review, `39ce2c2` | `a_capped_reduction_names_the_limit_that_stopped_it` at "a shallow loop must run out of steps"; `a_function_with_no_normal_form_stops_at_the_cap_and_says_why`, which got `MAX_REDUCTION_STEPS`; `a_function_typed_result_prints_its_lambda_normal_form` at the reparse check, after its pinned text held |
+| a byte-cut term printed; the hint's condition inverted | the first review, `39ce2c2` | `a_normal_form_past_the_print_budget_is_refused_not_cut`, the cut text on stdout; `a_value_program_at_the_cap_gets_no_function_hint`; `a_function_with_no_normal_form_stops_at_the_cap_and_says_why` at its hint check |
+| the depth guard not setting `depth_capped` | the fix round, `a180bb6` | `depth_capped_tells_the_two_producers_of_hit_cap_apart` at its depth-guard block; `a_capped_reduction_names_the_limit_that_stopped_it` at `fact`; `a_function_with_no_normal_form_stops_at_the_cap_and_says_why`, which got `MAX_REDUCTION_STEPS` |
+| the print's depth arm printing the cut text and returning `Ran` | the fix round, `a180bb6` | `a_normal_form_past_the_print_depth_is_refused_not_cut` at its first check, an empty stdout |
+| `print_normal_form` returning `ProgramFailed`; the cap path returning `ToolFailed` for a function type; the step cap setting `depth_capped` too | the whole-branch review, `a180bb6` | `depth_capped_tells_the_two_producers_of_hit_cap_apart` at its step-cap block; `a_capped_reduction_names_the_limit_that_stopped_it` at `spin`; the print-depth and print-budget tests at `ToolFailed`; the `fact` test at `ProgramFailed` |
+| the print's depth arm naming `MAX_NORMAL_FORM_BYTES`; a printed normal form returning `ToolFailed`; a finished run setting `depth_capped` | the whole-branch review, `a180bb6` | the print-depth test at its `MAX_TERM_DEPTH` check; `a_function_typed_result_prints_its_lambda_normal_form` and `a_list_of_functions_prints_its_lambda_normal_form` at `Ran`; `depth_capped_tells_the_two_producers_of_hit_cap_apart` at its finished-run block |
+
+##### THE REVIEWS
+
+- **The first review, at `39ce2c2`**, read the diff, ran `check-all.sh --no-llvm --no-browser`, the CLI on programs and
+  the sabotages above that name it, and found the change *sound, mergeable after Minor fixes*, with no Critical or
+  Important finding. Its Minors 1 to 4 are `dcc3854`, `4c67907`, `e112cfd` and `a180bb6`. Its Minor 5: `100000` stops
+  being an example of a depth stop once the `big-literals` branch makes a literal above 2,998 a λ lowering refusal, so
+  the examples here use the `while true` loop instead.
+- **The whole-branch review, at `a180bb6`**, of `7033883..a180bb6`, ran the CLI on programs and the sabotages above that
+  name it, and found the branch *ready after Minors*, with no Critical or Important finding. Its Minors 2 to 4 are
+  `d038446`, `2d72f0c` and `245bbeb`. Its Minor 1 is a note for the merge with `big-literals`, under *WHAT THIS DID NOT
+  CLOSE*, and so is its question on `|x| 2998`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`|x| 2998` exits 1**, the program's fault, though the hint it gets says a function that has a normal form can pass
+  the limit first, and the spec's §5 calls a ceiling the tool's fault, exit 2. The CLI cannot tell it from `fact`: the
+  depth guard stops both. Exit 1 there is `main`'s too. The whole-branch review left it for the user to rule on, and
+  nothing here changes it.
+- **The message for value programs** (duet's first open question): every depth stop under `--backend lambda` names
+  `MAX_TERM_DEPTH` where `main` named the step cap. The first review's answer was to keep it, as `main`'s message was
+  false for every depth stop, and the branch keeps it. Naming the cap only for a result type that holds a function is
+  the other choice.
+- **Idea 2, one opaque `<fn>` on every backend**, so the oracles can compare backends on a function result (duet's
+  second). The backends disagree on one: `reference` prints `<non-value>`, `lambda` a term, and `tm` refuses. The first
+  review's answer: after list-results, as the handoff recommended. The web app still shows *no encoding for this type*
+  for a function result. list-results, in flight, changes how the web marks a run's result (`web/src/lambda-body.ts`,
+  `web/src/protocol.ts`), not the code behind that label, and a web change for a function result waits for it.
+- **Memory before either cap** (duet's third). Neither cap counts the term's size in memory. No function run here
+  exhausted memory first: the two looping functions under *WHAT SHOWED* stop on depth, and the spec no longer says one
+  does.
+- **The *cannot decode* refusal** under `--backend lambda` is left for a bare type-variable result that normalizes, or a
+  normal form that does not match its own type (duet's fourth). No program the reviews tried reaches it, and no test
+  does. The print's depth arm, the other branch duet named, has its test in `4c67907`.
+- **`MAX_NORMAL_FORM_BYTES` equals `LAMBDA_BYTE_BUDGET` by value only**; no check ties the two.
+- **Checks never seen failing:** the empty stderr in `a_function_typed_result_prints_its_lambda_normal_form`, the
+  `ProgramFailed` in `a_value_program_at_the_cap_gets_no_function_hint`, and the normal form of `1 + 2` in
+  `a_capped_reduction_names_the_limit_that_stopped_it`.
+- **Merging beside `big-literals`.** Besides the roadmap, `crates/redextape-cli/src/run.rs` conflicts: `big-literals`
+  writes the λ lowering refusal with `{e}` for `{e:?}` in the arm this branch deletes, and this branch's own refusal, in
+  `run_lambda_backend`'s lowering, prints `{e:?}` on a line outside the conflict. Whichever merges second keeps this
+  branch's structure and writes `{e}` there, so the refusal prints `LowerError`'s text and not its fields.
+
+##### VERIFICATION
+
+At `d038446`, under the heavy lock and a 16G memory cap, `scripts/check-all.sh --no-llvm --no-browser`, with
+`TREE_SITTER` naming tree-sitter 0.25.10, the version the script pins: exit 0; the workspace's nextest 2,069 passed and
+35 skipped, `cli_transcripts` among them, and fmt, clippy, the grammar checks, the doctests and the wasm32 checks
+passed. `node scripts/check-comments.mjs --base 7033883`: 20 areas, each within its budget, and no history and no grown
+block in 6 changed files. The pre-commit hook, which runs the scans, `check-licences.sh` and `check-comments.mjs`, each
+with its self-test, and fmt and clippy where a `.rs` file is staged, passed at `2d72f0c`, `245bbeb`, `d038446` and
+`bb86f21`. At `bb86f21`, which changes a doc comment and the spec, under the same lock and cap,
+`cargo nextest run -p redextape-cli -p redextape-core`: exit 0, 1,531 passed and 33 skipped, `cli_transcripts` among
+them; and `check-comments.mjs --base 7033883` read the same 20 areas and 6 changed files, clean.
+
+Not run: `cargo llvm-cov` and its 90% floor, `check-slow.sh`, the LLVM job, the web job and the browser tier. The branch
+changes no file outside `crates/redextape-cli`, `crates/redextape-core` and `docs/`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at `bb86f21`,
+and `check-all.sh` at `d038446`, with `CARGO_TARGET_DIR` naming the lane's own directory, `lam` defined as
+`systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- cargo run -q --release -p redextape-cli -- run --backend lambda -`,
+and `be <backend>` the same with that backend.
+
+| Value | What | Produced by |
+|---|---|---|
+| 13 | the commits in `7033883..bb86f21`, `153750f` among them | `git rev-list --count 7033883..bb86f21` |
+| 10, 2, 2 | the files changed under `crates/redextape-cli`, `crates/redextape-core` and `docs/superpowers`, and none elsewhere | `git diff --name-only 7033883 bb86f21 \| cut -d/ -f1-2 \| sort \| uniq -c` |
+| 65,536; 5,000,000; 3,000; 65,536 | `MAX_NORMAL_FORM_BYTES`, `MAX_REDUCTION_STEPS`, `MAX_TERM_DEPTH`, `LAMBDA_BYTE_BUDGET` | `rg -n "pub const MAX_(NORMAL_FORM_BYTES\|REDUCTION_STEPS\|TERM_DEPTH)" crates; rg -n "export const LAMBDA_BYTE_BUDGET" web/src/protocol.ts` |
+| 2,998 | the largest literal `big-literals` lowers, `MAX_TERM_DEPTH - 2` | `git show big-literals:crates/redextape-core/src/lambda/lower.rs \| rg -n "pub const MAX_LAMBDA_LITERAL"` |
+| 27; exit 0 | `\|x\| x + 1`'s normal form, with its newline | `lam <<< "\|x\| x + 1" \| wc -c`; `lam <<< "\|x\| x + 1"` |
+| exit 0, exit 0, exit 2 | `let g = \|x\| x; g` under `lambda`, `reference` and `tm` | `lam <<< "let g = \|x\| x; g"`, `be reference <<< …`, `be tm <<< …` |
+| 147; 4,021 | `let xs = [1, 2, 3]; \|y\| cons(y, xs)` and `\|n\| n + 1000`, with the newline | `lam <<< "let xs = [1, 2, 3]; \|y\| cons(y, xs)" \| wc -c`, and the same for `\|n\| n + 1000` |
+| 12,005; exit 0 | `\|x\| 2997` | `lam <<< "\|x\| 2997" \| wc -c`; `lam <<< "\|x\| 2997" > /dev/null` |
+| exit 1, `MAX_TERM_DEPTH`, the hint | `\|x\| 2998`; `fact` unapplied; the two looping functions | `lam <<< "\|x\| 2998"`; `lam <<< "fn fact(n) { if n == 0 { 1 } else { n * fact(n - 1) } } fact"`; `lam <<< "\|n\| { let mut a = 0; while a < n { a = a + 1; } a }"`, and the same with `while true` |
+| exit 1, `MAX_REDUCTION_STEPS`, the hint | `fn spin(n) { spin(n) } \|x\| spin(x)` | `lam <<< "fn spin(n) { spin(n) } \|x\| spin(x)"` |
+| exit 1, `MAX_TERM_DEPTH`, no hint | the `while true` value program | `lam <<< "let mut a = 0; while true { a = a + 1; } a"` |
+| six, seven, 2,500; exit 2 | the too-large program's `Bool`s, branches and numerals, and its refusal | `lam <<< "\|a\| \|b\| \|c\| \|d\| \|e\| \|g\| if a { 2500 } else { … }"`, the program of `a_normal_form_past_the_print_budget_is_refused_not_cut` |
+| 2,069, 35; exit 0 | the workspace's nextest in `check-all.sh`: passed, skipped | `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 -- scripts/check-all.sh --no-llvm --no-browser`, with `TREE_SITTER` set, its workspace nextest `Summary` line and its exit |
+| 1,531, 33; exit 0 | `cargo nextest run -p redextape-cli -p redextape-core` at `bb86f21`: passed, skipped | `systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 -- cargo nextest run -p redextape-cli -p redextape-core --no-fail-fast`, its `Summary` line and its exit |
+| 0.25.10 | the tree-sitter `check-all.sh` pins | `rg -n 'PINNED to v0.25.10' scripts/check-all.sh`; `$TREE_SITTER --version` |
+| 20; 6 | `check-comments.mjs`'s areas, and the files it read as changed | `node scripts/check-comments.mjs --base 7033883 \| tail -2` |
+| 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |

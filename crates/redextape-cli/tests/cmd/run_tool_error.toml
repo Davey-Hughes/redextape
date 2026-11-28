@@ -1,4 +1,4 @@
 bin.name = "redextape"
-args = ["run", "g.rxt", "--backend", "lambda"]
+args = ["run", "g.rxt", "--backend", "tm"]
 fs.sandbox = true
 status.code = 2
