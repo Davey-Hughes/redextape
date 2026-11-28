@@ -317,7 +317,7 @@ describe('a clif view whose machine code panel is open', () => {
   })
 
   it('scrolls the machine code of the instruction the run ended at into view once it has ended, marking none of it', async () => {
-    const { host, at } = mount(634, { panels: { code: true } })
+    const { host, at } = mount(ROW_WIDE, { panels: { code: true } })
     await frames()
     const box = listingBox(host)
     const all = withCode('x86-64')
