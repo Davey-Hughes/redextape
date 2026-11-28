@@ -1421,9 +1421,12 @@ button.view-title[aria-expanded="true"] {
     margin: auto;
   }
 }
+/* THE GLYPH'S COLUMN IS AN `.icon`'s WIDTH IN EVERY ITEM, WITH A GLYPH OR WITHOUT, so every label starts where
+   *format*'s does after its `≡`. A choice and a split's view are text alone, which would take that column: an
+   empty box before the text takes it instead. */
 .view-menu button {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 1em 1fr;
   column-gap: 0.5em;
   align-items: center;
   width: 100%;
@@ -1442,6 +1445,10 @@ button.view-title[aria-expanded="true"] {
 }
 .view-menu .view-menu-label {
   grid-column: 2;
+}
+.view-menu-choice::before,
+.view-menu-pairs button::before {
+  content: "";
 }
 /* A SETTING'S CHECKED CHOICE (`view-header.ts`'s `radioGroup`), DRAWN WITHOUT RELYING ON COLOUR: heavier
    than its siblings, with a bar at its leading edge. The bar takes `--accent`, a palette token; the weight is

@@ -1,4 +1,4 @@
-import { HEADER_ORDER, KIND_WORD } from './layout'
+import { HEADER_ORDER, KIND_WORD, type MoveDirection } from './layout'
 import type { PaneKind } from './panes'
 
 /**
@@ -29,6 +29,7 @@ export type KeyPress = {
 export type ViewKeyAction =
   | { readonly kind: 'cycle'; readonly step: 1 | -1 }
   | { readonly kind: 'toggle'; readonly pane: PaneKind }
+  | { readonly kind: 'move'; readonly direction: MoveDirection }
 
 /** The prefix chord: `Ctrl` and `.` alone (spec §7.2). */
 export const PREFIX: KeyPress = { key: '.', ctrl: true, alt: false, shift: false, meta: false }
@@ -37,13 +38,40 @@ export const PREFIX: KeyPress = { key: '.', ctrl: true, alt: false, shift: false
 export const PREFIX_LABEL = 'Ctrl+.'
 
 /**
+ * A key an armed machine answers: `key` is its `KeyboardEvent.key` and how the hint and the help page write it, and
+ * `also` a second key that does the same, with how it is written.
+ */
+type ViewKeyRow = {
+  readonly key: string
+  readonly also?: { readonly key: string; readonly shown: string }
+  readonly action: ViewKeyAction
+  readonly does: string
+}
+
+/** The move keys in vim's order, `h` `j` `k` `l`, each with its arrow (the view layouts spec §7.3). */
+const MOVE_KEYS: readonly {
+  readonly direction: MoveDirection
+  readonly key: string
+  readonly arrow: string
+  readonly shown: string
+}[] = [
+  { direction: 'left', key: 'h', arrow: 'ArrowLeft', shown: '←' },
+  { direction: 'down', key: 'j', arrow: 'ArrowDown', shown: '↓' },
+  { direction: 'up', key: 'k', arrow: 'ArrowUp', shown: '↑' },
+  { direction: 'right', key: 'l', arrow: 'ArrowRight', shown: '→' },
+]
+
+/**
  * The keys an armed machine answers, in the order the hint and the help page list them: the key, what it does, and
  * the words for it. `Escape` and the prefix pressed again leave and do nothing; they are `step`'s, not rows here.
  *
  * **THE TOGGLE KEYS ARE `HEADER_ORDER`'s POSITIONS**, `1` to `N`, nine at most, so the keys and the header's buttons
  * cannot be in two orders.
+ *
+ * **A MOVE KEY AND ITS ARROW ARE ONE ROW**, so the hint and the help page name both with one action, in the words of
+ * the view's `⋯` menu item.
  */
-export const VIEW_KEYS: readonly { readonly key: string; readonly action: ViewKeyAction; readonly does: string }[] = [
+export const VIEW_KEYS: readonly ViewKeyRow[] = [
   { key: ']', action: { kind: 'cycle', step: 1 }, does: 'the next layout' },
   { key: '[', action: { kind: 'cycle', step: -1 }, does: 'the previous layout' },
   ...HEADER_ORDER.map((pane, i) => ({
@@ -51,14 +79,20 @@ export const VIEW_KEYS: readonly { readonly key: string; readonly action: ViewKe
     action: { kind: 'toggle', pane } as const,
     does: `show or hide ${KIND_WORD[pane]}`,
   })),
+  ...MOVE_KEYS.map(({ direction, key, arrow, shown }) => ({
+    key,
+    also: { key: arrow, shown },
+    action: { kind: 'move', direction } as const,
+    does: `move view ${direction}`,
+  })),
 ]
 
 /**
  * What the hint lists while the mode is armed, in its order: every row of the table, and then the way out, which
- * is `step`'s and no row of the table.
+ * is `step`'s and no row of the table. A row's second key is said as the way out's is: `h`, *or ← move view left*.
  */
 export const HINT_ROWS: readonly { readonly key: string; readonly does: string }[] = [
-  ...VIEW_KEYS,
+  ...VIEW_KEYS.map(({ key, also, does }) => ({ key, does: also === undefined ? does : `or ${also.shown} ${does}` })),
   { key: 'Esc', does: `or ${PREFIX_LABEL} leave` },
 ]
 
@@ -97,6 +131,12 @@ const MODIFIERS: ReadonlySet<string> = new Set([
 
 /** A press an armed machine may answer: no `Alt` and no `Meta`. `Ctrl`, the prefix's own modifier, may still be down. */
 const bare = (p: KeyPress): boolean => !p.alt && !p.meta
+/**
+ * The key of the table a press names. **A CAPITAL WITH `Shift` UP NAMES ITS SMALL LETTER**: Caps Lock types `h` as
+ * `H` with `shiftKey` clear, and the capital, unanswered, would reach the editor, where under vim `J` joins lines. A
+ * capital with `Shift` down names no key of the table, so `Shift`+`H` types as it always has.
+ */
+const named = (p: KeyPress): string => (p.key.length === 1 && !p.shift ? p.key.toLowerCase() : p.key)
 const isPrefix = (p: KeyPress): boolean =>
   p.key === PREFIX.key &&
   p.ctrl === PREFIX.ctrl &&
@@ -115,7 +155,7 @@ export type Step = { readonly armed: boolean; readonly consume: boolean; readonl
  * | idle | the prefix | armed | yes | none |
  * | idle | anything else | idle | no | none |
  * | armed | a modifier alone | armed | no | none |
- * | armed | a key of `VIEW_KEYS`, no `Alt` or `Meta` down, `Ctrl` held or not | idle | yes | its action |
+ * | armed | a `bare` press of a key of `VIEW_KEYS` or its `also`, as `named` reads it | idle | yes | its action |
  * | armed | `Escape` with no `Alt` or `Meta` down, or the prefix again | idle | yes | none |
  * | armed | anything else, `Escape` with `Alt` or `Meta` down included | idle | no | none |
  *
@@ -126,7 +166,8 @@ export function step(armed: boolean, press: KeyPress): Step {
   if (!armed) return { armed: isPrefix(press), consume: isPrefix(press), action: null }
   if (MODIFIERS.has(press.key)) return { armed: true, consume: false, action: null }
   if (isPrefix(press) || (press.key === 'Escape' && bare(press))) return { armed: false, consume: true, action: null }
-  const row = bare(press) ? VIEW_KEYS.find((r) => r.key === press.key) : undefined
+  const key = named(press)
+  const row = bare(press) ? VIEW_KEYS.find((r) => r.key === key || r.also?.key === key) : undefined
   if (row === undefined) return { armed: false, consume: false, action: null }
   return { armed: false, consume: true, action: row.action }
 }

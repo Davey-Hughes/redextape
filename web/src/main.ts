@@ -973,20 +973,20 @@ async function main(): Promise<EditorView> {
    * its own doc has the reason: `pane-host.ts`'s `split` can CREATE a source leaf, so the id this handler
    * closes over and the id that split mints have to be the same id in a way two literals cannot promise.)
    *
-   * `format` AND `close`, NOT SPLIT — a `viewMenu` builds only the items it is given handlers for, so the
-   * source view's `⋯` never offers a split. `update`'s SECOND ARGUMENT IS A LITERAL `false`, ALWAYS: source
-   * can never split (`splitLeaf`'s own refusal), so there is no boolean this view's chrome could ever
-   * compute for `canSplit` that isn't already known at every call site.
+   * `format`, `close` AND `move`, NOT SPLIT — a `viewMenu` builds only the items it is given handlers for, so the
+   * source view's `⋯` never offers a split (`splitLeaf`'s own refusal). `update`'s second argument says whether the
+   * views are tiled, which puts the move items in the menu.
    */
   /**
-   * A LAYOUT CHANGE, SAID AS A NOTICE (Plan 7 part 2 spec §11) — `pane-host.ts` reports a split, a close and a
-   * switch; the source view's own close, below, reports through this too.
+   * A LAYOUT CHANGE, SAID AS A NOTICE (Plan 7 part 2 spec §11) — `pane-host.ts` reports a split, a close, a
+   * switch and a move; the source view's own close, below, reports through this too.
    */
   const layoutChanged = (e: LayoutEvent): void => {
     const say = (c: PaneChoice): string =>
       c.kind === 'source' ? 'source' : pairLabel({ leg: c.kind, label: sessions.entryOf(c.session).label })
     if (e.kind === 'added') notices.notify(`view added — ${say(e.shows)}`)
     else if (e.kind === 'closed') notices.notify(`view closed — ${say(e.showed)}`)
+    else if (e.kind === 'moved') notices.notify(`view moved ${e.direction} — ${viewTitle(e.leaf)}`)
     else notices.notify(`view now shows ${say(e.shows)}`)
   }
   /**
@@ -1046,8 +1046,13 @@ async function main(): Promise<EditorView> {
       paneHost.focusView(neighbour)
       layoutChanged({ kind: 'closed', leaf: SOURCE_LEAF, showed: { kind: 'source' } })
     },
+    // THUNKS OVER `paneHost`, which is built below and reached only from the open menu.
+    move: {
+      go: (direction) => paneHost.moveOf(SOURCE_LEAF).go(direction),
+      refusal: (direction) => paneHost.moveOf(SOURCE_LEAF).refusal(direction),
+    },
   })
-  const sourceLayout = { update: (canClose: boolean, canSplit: boolean) => sourceMenu.setLayout(canClose, canSplit) }
+  const sourceLayout = { update: (canClose: boolean, tiled: boolean) => sourceMenu.setLayout(canClose, tiled) }
   sourceHost.append(sourceHeader.el, editorHost)
   // THE SOURCE VIEW CAN HOLD THE FOCUS TOO (spec §3: `focused` is any leaf): the Stage shows the focused view, and
   // a rebuild that takes the focus off the page gives it back there. Not `markActive`: that one is per leg, and the
@@ -1565,7 +1570,11 @@ async function main(): Promise<EditorView> {
   const actOnViewKey = (action: ViewKeyAction): void => {
     for (const open of document.querySelectorAll<HTMLElement>(':popover-open')) open.hidePopover()
     if (action.kind === 'cycle') switchTo(cycleFrom(combinationOf(tree), action.step))
-    else toggleView(action.pane)
+    else if (action.kind === 'toggle') toggleView(action.pane)
+    else {
+      const why = paneHost.moveByKey(focusedLeaf(), action.direction)
+      if (why !== null) notices.notify(why)
+    }
   }
   wireViewKeys(window, {
     act: actOnViewKey,

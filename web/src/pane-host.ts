@@ -10,6 +10,13 @@ import {
   type LayoutNode,
   leaves,
   MAX_TREE_LEAVES,
+  type MoveDirection,
+  type MoveRefusal,
+  type MoveStep,
+  moveBack,
+  moveLeaf,
+  pressRefusal,
+  recordMove,
   resize,
   SOURCE_LEAF,
   setLeafKind,
@@ -27,6 +34,7 @@ import { type Binding, PaneSlot, type PaneView } from './sessions'
 import { restoreScroll } from './state-table'
 import { TmPane } from './tm-pane'
 import { seedTm } from './tm-seed'
+import type { ViewMove } from './view-header'
 import {
   type ClifDisplay,
   type DisplayLeg,
@@ -94,23 +102,50 @@ export type PaneHost = {
   rebuildViews(id: LeafId): void
   /** Pre-seed the source pane's host, which `main.ts` owns the contents of. */
   seedHost(id: LeafId, host: HTMLElement): void
+  /** What the move items in the view `id`'s `⋯` menu do, and why one cannot be taken — the view layouts spec §9. */
+  moveOf(id: LeafId): ViewMove
+  /**
+   * A move key for the view `id` (the view layouts spec §7.3): the view moved one step `direction`, and `null`, or the
+   * words of what refused it, with nothing moved. See the implementation.
+   */
+  moveByKey(id: LeafId, direction: MoveDirection): string | null
   /** Tell `entry`'s view what `session` holds for it, as `SEED` does every view this module moves or builds. */
   seedPane(entry: PaneEntry<Leg>, session: SessionId): void
 }
 
 /**
- * A layout change worth a notice (Plan 7 part 2 spec §11): a view added, closed, or switched to show something
- * else. `main.ts` words it.
+ * A layout change worth a notice (Plan 7 part 2 spec §11): a view added, closed, switched to show something else,
+ * or moved (the view layouts spec §9.5). `main.ts` words it.
  */
 export type LayoutEvent =
   | { readonly kind: 'added' | 'switched'; readonly leaf: LeafId; readonly shows: PaneChoice }
   | { readonly kind: 'closed'; readonly leaf: LeafId; readonly showed: PaneChoice }
+  | { readonly kind: 'moved'; readonly leaf: LeafId; readonly direction: MoveDirection }
 
 /**
  * A split the tree had no room for, or no leaf left for — `main.ts` words it on the notice line: `leaf` is the view
  * the split was chosen on, `gesture` the split's direction, and `why` is `layout.ts`'s `addRefusal`.
  */
 export type AddRefused = { readonly leaf: LeafId; readonly gesture: Dir; readonly why: AddRefusal }
+
+/**
+ * What a refused move says, as its item's description and tooltip: the edge or the lone view as a fact about the view,
+ * and the floor as `main.ts` says a split's (`refused`), with the remedy for the axis that ran out.
+ */
+function moveRefused(why: MoveRefusal | null, direction: MoveDirection): string | null {
+  switch (why) {
+    case null:
+      return null
+    case 'alone':
+      return 'this view is the only one, so it has nowhere to go'
+    case 'edge':
+      return `this view is as far ${direction} as it can go`
+    case 'narrow':
+      return `no room to move this view ${direction} — close a view or widen the window`
+    case 'short':
+      return `no room to move this view ${direction} — close a view or make the window taller`
+  }
+}
 
 /** The class of a view on each leg: what `SEED`'s entries are handed. */
 type LegPane = { lambda: LambdaPane; rxm: RxmPane; tm: TmPane; clif: ClifPane }
@@ -132,7 +167,7 @@ type LegPane = { lambda: LambdaPane; rxm: RxmPane; tm: TmPane; clif: ClifPane }
  *
  * **`sourceSession`, `sourceLayout`, `persist`, `nextLeafId` AND `neighbourOf` ARE `main.ts`'S OWN
  * VALUES AND FUNCTIONS, LENT TO THIS MODULE.** `sourceSession` is `main()`'s one session-id constant;
- * `sourceLayout` sets whether the source view's menu offers its close, and `applyLayout` drives it
+ * `sourceLayout` sets whether the source view's menu offers its close and its move items, and `applyLayout` drives it
  * because `canClose` changes only at a structural change and the source leaf has no `PaneEntry` for
  * `draw()` to find; `persist` is `main.ts`'s `persistWorkspace`, which writes through the guarded
  * `localStorage` writer kept beside the guarded reader that restores the workspace rather than split
@@ -163,7 +198,7 @@ export function createPaneHost(deps: {
   panes: PaneCollection
   transport: { events<K extends Leg>(slot: PaneSlot<K>): PaneEvents }
   sourceSession: SessionId
-  sourceLayout: { update(canClose: boolean, canSplit: boolean): void }
+  sourceLayout: { update(canClose: boolean, tiled: boolean): void }
   nextLeafId(): LeafId
   neighbourOf(tree: LayoutNode, id: LeafId): LeafId | null
   getTree(): LayoutNode
@@ -210,7 +245,7 @@ export function createPaneHost(deps: {
   displayOf<K extends DisplayLeg>(leg: K, leaf: LeafId): LegDisplay[K] | undefined
   /** Record a view's display settings; `persist` is the caller's to make. */
   setLegDisplay<K extends DisplayLeg>(leg: K, leaf: LeafId, d: LegDisplay[K]): void
-  /** A view was added, closed, or switched to show something else — `main.ts` says it as a notice (spec §11). */
+  /** A view was added, closed, switched to show something else, or moved — `main.ts` says it as a notice (spec §11). */
   layoutChanged(e: LayoutEvent): void
   /** An add was refused, and nothing changed — `main.ts` says why as a notice. */
   refused(r: AddRefused): void
@@ -661,6 +696,7 @@ export function createPaneHost(deps: {
         focusPane(id)
         layoutChanged({ kind: 'switched', leaf: id, shows: { kind: choice.leg, session: choice.session } })
       },
+      move: moveOf(id),
       splitRow: (choice: PaneChoice) => split('row', choice),
       splitColumn: (choice: PaneChoice) => split('column', choice),
       close: () => {
@@ -792,6 +828,72 @@ export function createPaneHost(deps: {
     if (id !== null) setFocused(id)
     applyLayout()
     focusPane(id)
+  }
+
+  /**
+   * The moves made on this page, for a move straight back (`layout.ts`'s `moveBack`, the view layouts spec §9.6).
+   *
+   * **NOT STORED** (§9.6): a move back is for a move just made, and a stored history would be two trees a step for
+   * the loader to check as it checks the stored tree (`parseTree`).
+   */
+  let moves: readonly MoveStep[] = []
+
+  /**
+   * The view `id`'s move items: a move straight back where `moveBack` finds one (§9.6), else `layout.ts`'s
+   * `moveLeaf` on the tree on screen, refused where its `moveRefusal` refuses it (§9.3), and the focus kept in the
+   * view it moved (§9.5), through `focusView`, since the move rebuilds the layout under it.
+   *
+   * **THE FLOOR IS MEASURED AS `admit` MEASURES AN ADD'S**: `root`'s box, `DIVIDER_PX` between siblings, asked again
+   * at each ask, since a window resized since the menu last opened has moved it.
+   *
+   * **`go` ASKS THE REFUSAL TOO**, so whatever reaches it with a refused direction moves nothing.
+   */
+  function moveOf(id: LeafId): ViewMove {
+    return {
+      go: (direction: MoveDirection) => move(id, direction, focusView),
+      refusal: (direction: MoveDirection) => moveRefused(moveWhy(id, direction), direction),
+    }
+  }
+
+  /**
+   * Why moving `id` `direction` is refused, or `null`: `layout.ts`'s `pressRefusal` on the moves made here, which
+   * refuses no move back (the view layouts spec §9.6).
+   */
+  function moveWhy(id: LeafId, direction: MoveDirection): MoveRefusal | null {
+    const area = root.getBoundingClientRect()
+    return pressRefusal(moves, getTree(), id, direction, { width: area.width, height: area.height }, DIVIDER_PX)
+  }
+
+  /** `id` moved one step `direction` where nothing refuses it, `place` putting the focus, and the move said (§9.5). */
+  function move(id: LeafId, direction: MoveDirection, place: (id: LeafId) => void): void {
+    if (moveWhy(id, direction) !== null) return
+    const tree = getTree()
+    const back = moveBack(moves, tree, id, direction)
+    const next = back ?? moveLeaf(tree, id, direction)
+    if (next === null) return
+    moves = recordMove(moves, tree, id, direction, next, back !== null)
+    setTree(next)
+    place(id)
+    layoutChanged({ kind: 'moved', leaf: id, direction })
+  }
+
+  /**
+   * A move key: `moveOf`'s move, refused in the words its menu item is disabled with, and on the Stage, which has
+   * no arrangement to move a view in (§9.4) and so no item to take the words from.
+   *
+   * **THE FOCUS STAYS WHERE IT WAS**, as a switch leaves it (`switchViews`), and not on the view's first control as
+   * after a menu item, whose menu is gone: a key pressed from an editor leaves the caret in it.
+   */
+  function moveByKey(id: LeafId, direction: MoveDirection): string | null {
+    if (stage()) return 'the stage has no arrangement to move this view in — choose tiles to move it'
+    const why = moveRefused(moveWhy(id, direction), direction)
+    if (why !== null) return why
+    move(id, direction, () => {
+      setFocused(id)
+      const within = keepingFocus(() => applyLayout())
+      if (within && !root.contains(document.activeElement)) focusPane(id)
+    })
+    return null
   }
 
   /**
@@ -1090,7 +1192,8 @@ export function createPaneHost(deps: {
     // playback. Driving it from `applyLayout` rather than adding a source-shaped special case to `draw()`
     // is answering the fact where it changes rather than threading it through a per-frame path that has
     // no other reason to know this pane exists.
-    sourceLayout.update(live.size > 1, false)
+    // `!stage()`: THE STAGE REMOVES THE SOURCE VIEW'S MOVE ITEMS, and a `views` switch reaches this function.
+    sourceLayout.update(live.size > 1, !stage())
 
     laidOut = new Set(live.keys())
 
@@ -1163,6 +1266,8 @@ export function createPaneHost(deps: {
 
   return {
     applyLayout: () => applyLayout(),
+    moveOf,
+    moveByKey,
     seedPane,
     focusView,
     switchViews,

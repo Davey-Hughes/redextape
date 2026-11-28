@@ -46992,3 +46992,364 @@ code at `70389ff`. A long command's output went to a file, `$LOG` below, which t
 | 22; 6 | `check-comments.mjs`'s areas; the changed files it read | `node scripts/check-comments.mjs --base 19d36d4` |
 | 62; 6, 3, 3, 1, 1 | the `llvm,ll` row's tests unbroken; the failed tests of each sabotage, in the table's order | `cargo nextest run -p redextape-native --no-default-features --features llvm,ll --no-fail-fast > $LOG 2>&1` unbroken and after each sabotage, then `grep -E 'Summary \[\|^ +FAIL' $LOG` |
 | exit 100; 1 failed | the NUL refusal test with the refusal's old words | the same `nextest` with `--features ll -E 'test(two_subroutines_named_llvm)'`, its `Summary` line |
+
+#### A VIEW MOVES A STEP LEFT, RIGHT, UP OR DOWN FROM ITS `⋯` MENU, OR BY `h`, `j`, `k` AND `l` OR THE ARROWS AFTER THE VIEW-KEY PREFIX, EVERY VIEW KEEPING ITS AREA BUT THE TWO OF A TRADE, A MOVE WITH NOWHERE TO GO, OR ONE THAT WOULD LEAVE A VIEW UNDER 160 PX WIDE OR TALL, IS REFUSED WITH ITS REASON, AND A MOVE STRAIGHT BACK PUTS EVERY VIEW BACK WHERE IT WAS (2026-11-28, branch `move-a-view`, `b72c2c8..6f27d35`, 27 commits, plus this entry)
+
+#141's entry (*EACH COMBINATION OF VIEWS KEEPS ITS OWN ARRANGEMENT…*) named panel resizing, moving a view and drag and
+drop, the view layouts design's §11, §9 and §10, as the next three pull requests, and #142 resized the panels. This
+branch moves a view, as §9 of `docs/superpowers/specs/2026-10-11-view-layouts-design.md` has it, and that spec's §21
+calls it the third pull request. The first two commits were drafted in a cloud sandbox with no browser and applied here
+unchanged. The 25 after them answer the reviews below and the rulings the user gave with the branch open; §21 lists
+those that changed the design. The reviews ran, and every figure below was measured, on this machine.
+
+| Commit | What |
+|---|---|
+| `53d4d0a` | `moveLeaf` in `web/src/layout.ts`, §9.2's four cases on the layout tree, and its node tests (the sandbox) |
+| `d6ed9dc` | the four move items in each view's `⋯` menu while tiled, a direction the view cannot go disabled with its reason (the sandbox) |
+| `9ba847d` | a view moved out of its branch takes its room from that branch, as much as it held there; two comments the first review found wrong |
+| `b4d80b6` | the floor and the refusals' words (`moveRefusal`); the app's browser test by real clicks |
+| `b5fb064` | two more comments the first review found wrong |
+| `9bcf8b7` | the move-view browser test closes a menu a failed case left open |
+| `c2e74d4` | the move keys, a refused key's notice, the Stage's refusal of a key, the help page's rows |
+| `29a7ba8` | a move said on the notice line and in the live region |
+| `8ea6bc6` | the browser test of a move key on the Stage |
+| `9015b8b` | the help page's test reads the row type from `VIEW_KEYS`, which no longer exports it |
+| `1b8a060` | a view moved across the root keeps its share, as a strip along the edge (`cutLeaf`) |
+| `579e928` | a branch a view leaves gives up its share split by split, so each view left in it keeps its area |
+| `979f2e2` | a view that joins the split beside it keeps its share, and each view in that split its area (`joinSplit`) |
+| `45370d8` | the spec: §7.3 and §9 as built, and §21, the rulings |
+| `e142c2e` | the view-keys browser test puts the first load's arrangement back where a case left the views moved, and the move-view test's Stage case goes back to tiles when it fails |
+| `500265f` | the menu asks which moves it can take only when it opens |
+| `2bd0567` | Caps Lock |
+| `af25494` | the spec: what Firefox and Chrome do with the prefix and with `Ctrl` held through a move key, and §21's Caps Lock row |
+| `8204ebf` | `step`'s table in `web/src/view-keys.ts` reads a press's key as `named` does, the narrow check's Minor |
+| `9837580` | the pages test holds the help page's paragraph on the move keys to its words; a browser case drives a move key at each of the four edges |
+| `7a12f8e` | every label in a view's `⋯` menu in one column, after the place a glyph takes, the first review's M7 |
+| `2e52516` | moving back in `layout.ts` (`MoveStep`, `moveBack`, `recordMove`, `MOVES_KEPT`), its node tests and seeded sweep, the spec's §9.6 and §21 row, the help page's sentence |
+| `2492ec3` | the node case of the cap fails at a press it walks back that is not a move back, rather than pressing on for ever |
+| `4c8f9d9` | the pane host keeps the page's moves and asks them first, for the menu and the keys alike; the browser tests of moving back |
+| `3b034bc` | a move back asks no floor (`pressRefusal`), review r2's I1; §2.7 and §9.6 |
+| `69b2ae6` | what forgets the steps, worded as the code does it in §9.6, the help page and a test's name, review r2's M1 |
+| `6f27d35` | the spec: a move and the same move the other way do not always give back the tree (§9.6 and its §21 row), and a move straight back is refused for none of §9.3's reasons (§9.3 and its §21 row), the two Minors of the narrow check of `3b034bc` and `69b2ae6` |
+
+##### WHAT A PERSON USING REDEXTAPE CAN NOW DO
+
+- **Move a view from its menu.** While the views are tiled, each view's `⋯` menu, the source view's included, lists
+  *move view left*, *move view right*, *move view up* and *move view down* after its split items. A choice closes the
+  menu and moves the view one step that way, as a tiling window manager moves a window. A move the view cannot take is
+  disabled, with its reason as the item's description and tooltip, and the menu opens on its first enabled item. On the
+  Stage the four are removed, as the split items are.
+- **Move a view by a key.** After the view-key prefix `Ctrl+.`, `h`, `j`, `k` and `l`, or `←`, `↓`, `↑` and `→`, move
+  the view that has the focus one step left, down, up or right, as its menu's items do. The armed hint and its live
+  sentence gain four rows, "h or ← move view left" and the rest, and the help page's view keys table a row for each
+  letter with its arrow, with a paragraph saying which view the keys move and what a move straight back does.
+- **Move it back.** Moving a view straight back, the other way while the layout is still as the move left it, from the
+  menu or by a key, puts every view back where it was, at its size, newest move first: `l` `l` `h` `h` walks back both
+  moves.
+- **Hear what moved.** A move, from the menu or by a key, is said on the notice line and in the live region, which way
+  and which view, by its title: "view moved left — source", "view moved left — TM · program".
+- **Read the menu in one column.** Every label in a view's `⋯` menu starts where *format*'s does, after its `≡`: the
+  move and split items, a view's settings and checks, and the views a split offers.
+- **Keep it.** A moved arrangement is stored as any other: the app's browser test holds that the stored tree is the one
+  `moveLeaf` made, and the whole-branch review's drive reloaded the page and got the moved layout back.
+
+##### THE RULES
+
+- **Every view keeps its area on every move but a trade.** In §9.2's case 1 the view trades places with the view beside
+  it; the two slots keep their sizes, so the two views trade areas. In the other cases the moved view keeps the share of
+  the layout it had, and every other view its area. A view that joins the split beside it (case 2) takes its share as a
+  strip of that split, which widens by as much. A view that steps out of its branch (case 3, and case 4 where the root
+  runs the way it moves) takes its share from that branch, each split on the way down giving up only the view's share of
+  it. A view moved across the root (case 4 where the root runs across) takes its share of the tree as a strip along the
+  edge it moved to; case 4 asks the root as it was before the view left it. A move is made on the tree flattened, every
+  split inside a split of its own direction spliced into it, and answers the tree flattened, so an edge is where the
+  screen shows one. On equal shares the share a view held and a half often agree; on uneven ones they part: with A at
+  0.3 of its column in `row[col[S, A], col[L, T]]`, A moved right gives `row[S, A, col[L, T]]` at 0.35, 0.15 and 0.5.
+- **The floor, in both dimensions, by share.** A move is refused where a view it makes narrower would come out under 160
+  px (`MIN_VIEW_PX`) wide, or a view it makes shorter would come out under 160 px tall. Both are asked of every move,
+  width first, since a move sideways into a column makes views shorter: `row[S, A, col[L, T]]` with A moved right is
+  allowed in an area 664 px tall and refused in one 663.9 px tall. Narrower and shorter are judged by a view's share of
+  the area, not its pixels, since a divider the move adds, or the flattening, takes a few pixels from views whose shares
+  the move keeps: in an area 320 px wide, T moved up in `row[col[S, T], row[L, A]]` takes S from 154 px wide to 148 with
+  its share as it was, and the move goes ahead. A move straight back is not asked the floor (below).
+- **The words.** A refused item in the menu is disabled with its reason, and a refused key moves nothing and says the
+  same words on the notice line: "this view is the only one, so it has nowhere to go" for a view that is the whole tree;
+  "this view is as far left as it can go", with the move's direction, for one with nowhere to go that way; "no room to
+  move this view left — close a view or widen the window" where a view would come out too narrow, and "… or make the
+  window taller" where one would come out too short, as a refused split is worded. On the Stage a move key moves nothing
+  and says "the stage has no arrangement to move this view in — choose tiles to move it".
+- **The focus.** After a move from the menu the focus goes to the moved view's first control, through `focusView`, as
+  the menu that held it is gone. After a move key it stays where it was, as a switch of views leaves it, so a key
+  pressed in the source editor leaves the caret there.
+- **A move straight back.** A press is straight back where it moves the view of the newest move the other way, and the
+  layout on screen is the one that move left: the same splits, views and shares. It gives back the tree that move was
+  made on, where §9.2's move that way would trade two slots: in the uneven example above, A moved right and then left
+  gives `row[col[S, A], col[L, T]]` back as it was, where §9.2's move left gives `row[A, S, col[L, T]]`, S at 0.15 of
+  the area where it began at 0.35. `layout.ts` keeps each move as a step, `MoveStep`: the tree before it and after it,
+  the view and the direction. `moveBack` gives the newest step's tree before, and `recordMove` keeps the steps, at most
+  64 (`MOVES_KEPT`), the oldest dropped. Where another view moved in between, its move is the newest step, and its move
+  back comes first. The steps live in the page and are not stored: a reload starts with none.
+- **What keeps the steps and what forgets them.** The layout on screen is compared with the newest step's tree after,
+  not each gesture marked. A layout still changed at the next move, by a split, a close, a divider drag, a view toggled
+  or a cycle to another arrangement, forgets every step, and that move is the one §9.2 makes. A layout that comes back
+  to the very tree the move left keeps them: the Stage and back to tiles, a cycle away and back, a view hidden and shown
+  again, a divider nudged and back.
+- **No floor on a move back.** A move back is refused for nothing (`pressRefusal`): it gives back a layout the user had,
+  and in a window made smaller since, that layout is the one the window would show had the view not moved, where a view
+  under the floor is allowed (§2.7). Asked the floor, a view under it before the move, which the move enlarged, would
+  refuse its own move back at the size the move was made at. Edge and alone are not asked either: the view was there in
+  the tree before. So a move back can go where §9.2's move that way is refused for room.
+- **The menu and the keys agree.** An item and its key ask the same question, `pressRefusal` on the page's steps, so an
+  item is enabled where its key acts, for a move back too. A move back's words and focus are any move's: "view moved
+  left — source", with the direction pressed.
+- **Caps Lock.** A letter of the view keys' table typed as a capital with `Shift` up, as Caps Lock types it, is that
+  letter: with Caps Lock on, `h`, `j`, `k` and `l` move the view and type nothing. With `Shift` down the capital is any
+  other key: the mode ends and `Shift+H`, `J`, `K` or `L` is typed where the focus is. The rule reads the key's case and
+  `Shift`, which every press carries, not `getModifierState('CapsLock')`: under Playwright, Chromium reports the lock
+  off throughout, and Firefox reports it on and still sends `h`.
+- **`Ctrl` held through the letter.** The armed mode answers a key of its table with `Alt` and `Meta` up, `Ctrl` held or
+  not, so `Ctrl` held from the prefix through `h`, `j`, `k` or `l` moves the view, and the page cancels the key, which
+  is then `Ctrl+H`, `Ctrl+J`, `Ctrl+K` or `Ctrl+L`. Where a page lets them through, on Linux, Firefox opens its History
+  sidebar on `Ctrl+H`, puts the address bar in web search on `Ctrl+J` and on `Ctrl+K`, and focuses the address bar on
+  `Ctrl+L`; Chrome opens a history tab and a downloads tab, puts the address bar in search, and focuses it. A probe page
+  that cancels the prefix and the key after it as the view keys' listener does, in a `keydown` listener on the window in
+  the capture phase, and cancels the four pressed alone too, kept all four, after the prefix and alone, in Mozilla's
+  Firefox 161.0, Playwright's Firefox 157 (its build 1555) and Chrome 158.0.8127.88: the page saw each key with `Ctrl`
+  down, and the browser did nothing. That ran on 2026-11-28 on Linux under X11, in Xvfb with no window manager, the keys
+  sent through XTEST, each browser with a fresh profile, and on a page with no script the same keys did in each browser
+  what is said above. In Playwright's build the probe's own check of the focus did not see the focus leave even on a
+  copy of the page made not to cancel the keys, where the browser acted on each, so that build's result rests on
+  screenshots. The app cancels these keys only after the prefix; pressed alone, they are the browser's.
+
+##### THE TESTS
+
+- **`web/tests/node/layout.test.ts`**: 2 tables run row by row, §9.2's table of moves with each result's sizes, and the
+  areas before and after a move on its rows. 9 cases for `moveLeaf`: a view moved out of its branch, from deep in it,
+  into the split beside it and across the root, each keeping the share it held, on uneven sizes where a half and the
+  share held part; a trade keeping each slot's size; a lone view; the flattening, twice; and a view the tree does not
+  hold. 6 for *the floor on a move*, the floor met and missed wide and tall, among them 664 px against 663.9 for the
+  move into a column and the 320 px case above. A sweep over every tree of one to five views, every view and every
+  direction, holding that each move answers `null` or a tree `parseTree` takes with the same views, and that every view
+  keeps its area but the two of a trade, which trade theirs. And 10 for *moving back*: the uneven example given back
+  exactly, where §9.2's move the other way trades two slots; a chain; another view's move in between, walked back newest
+  first; a split, a close, a divider drag and a view's kind changed in between, each forgetting the steps; the tree the
+  move left built again, which keeps the step; a move another way, or of another view, as §9.2 makes it; the cap, 65
+  moves keeping 64; no move back refused where §9.2's move that way is refused for width, or in a window made shorter
+  since; none refused at the size the move was made at, of a view under the floor before the move; and a seeded sweep,
+  every move of random trees given back by its move back and walks of moves undone newest first (*VERIFICATION*).
+- **`web/tests/node/view-keys.test.ts`**, 5 cases: each letter and arrow to its direction; a row's second key with
+  `Ctrl` or `Shift` down as without; and three for *a move key's capital*, with `Shift` up a move, with `Ctrl` held too,
+  and with `Shift` down, `Ctrl` held or not, the mode ended and the key left to the editor. The hint's rows and sentence
+  are pinned there, and the help page's table cells in `pages.test.ts`, with 1 case more holding the paragraph on the
+  move keys, `#view-keys-move`, to its words, after the table's move rows are held to the four directions.
+- **`web/tests/browser/view-menu.test.ts`**, the menu alone, 7 cases: the four after the splits in tiles and none
+  otherwise; the four on a view with no split; a refused move disabled with its reason when the menu opens, and enabled
+  again when it can be taken; the menu opening on the first move it can take; a choice closing the menu before it moves;
+  and 2 for *the view menu's labels*, every label of the source view's menu, and of a pane's with its settings, its
+  checks and the views a split offers, starting where *format*'s starts.
+- **`web/tests/browser/move-view.test.ts`**, the app by `userEvent` clicks, 10 cases: a greyed item read by its computed
+  opacity and cursor against an enabled one and by its accessible description, at an edge and under the floor; the TM
+  view moved, drawn and stored as `moveLeaf` makes it, the focus in it and the live region's words; the source view
+  moved down, then greyed at the edge; the four on the source view; the Stage removing the four and tiles bringing them
+  back; a lone view greying all four; and 4 for *moving back*, on the four views with the left column's shares made
+  uneven by its divider's keys: the uneven example put back from the menu, stored, every view drawn where it was, the
+  focus in the moved view and the live region's words; the move back taken where §9.2's move that way is refused for
+  room; taken where the window has shrunk since, drawing the tree before in it; and taken by its key at the size the
+  move was made at, of a view under the floor before it.
+- **`web/tests/browser/view-keys.test.ts`**, also run in Firefox, 9 cases: `l` then `←` trading the source and λ views
+  by where they are drawn, the caret kept and the move said; `L` with `Shift` up moving as `l` does and typing nothing;
+  `Shift+L` typing its capital and moving nothing; a refused key saying why on the notice line; a move key at each of
+  the four edges saying how far the view has gone, in that direction's words, and moving nothing; a key on the Stage
+  refused; and 3 for moving back: `j` then `k` on the source view putting every view back where it was, where `k` as
+  §9.2 makes it would trade, the caret kept; `j` `j` `k` `k` walking both back; and `k` after a toggle made in the
+  layout the toggle left, `j` forgotten once a move is made there.
+
+##### THE SABOTAGES
+
+Each on a saved copy of the file it broke, restored from the copy and compared with `cmp`. A case stops at its first
+failed check, so the checks after it are not shown by that sabotage. Each ran before the branch was rebased onto
+`b72c2c8`, and neither that rebase nor the one before it, onto `a8033d9`, changed a line the branch adds or removes.
+The whole-branch review's ran on the branch merged with `main` as it then was.
+
+| Sabotage | What failed |
+|---|---|
+| case 4 across the root given a half each again | the spec table's row for it, the area table's, the floor test of the strip, and the sweep |
+| a branch closed up as `closeLeaf` closes one, rather than split by split | the move from deep in a branch, at its areas, and the sweep |
+| the split a view joins not widened | the spec table's case 2 row, the area table's, the floor test of a move into a column, at its areas, and the sweep |
+| the view that joins a split given half of it | the uneven case 2 test, at its areas, and the sweep; not the spec's rows, whose equal thirds give a half either way |
+| the floor never asked of a move | the node floor tests, and the app's case of a move greyed at the edge and under the floor |
+| the greyed item's style emptied | the app's cases that read a greyed item, at its look |
+| the arrows unbound from their rows | the node tests of the arrows and of a row's second key, and the browser key case at "the left arrow did not put the source view back" |
+| a refused key's notice dropped | the refused key's browser case, at the notice line |
+| the live region's line for a move dropped | the app's TM move and the browser key case, at the live region |
+| the Stage's refusal of a key dropped | the Stage case, at the notice line: the key had moved the tree under the tabs |
+| a move key's focus step dropped | the `l` and `←` case, at "the move took the focus out of the editor", and, with `e142c2e`'s test, no case after it |
+| the Caps Lock rule taken out | the node cases with `Shift` up, `Ctrl` held or not, and the browser case with `L`, at the source view's place |
+| `Shift` no longer read by the rule | the node case with `Shift` down and the row for `H` with `Shift`, and the browser case at "Shift+L did not reach the editor" |
+| the open menu's refresh in `setLayout` taken out | nothing: the view-menu, move-view, view-keys and layout-app browser tests passed, and `500265f` deletes the line |
+| the help page's paragraph on the move keys cut to its first sentence | the pages test's case for the paragraph, at its words |
+| a move key at an edge refused with no notice | the edge key case, at its first refusal, `h` at the left edge, on the notice line |
+| a key's edge words always the left's | the edge key case, at the right edge's notice: "as far left" for "as far right" |
+| the empty glyph box taken from the items that are text alone, the choices' and a split's pairs' | the pane menu's case, at its main list's labels; the pairs' alone, at the pair list; the choices' alone, review r2's, at the main list |
+| a move back never found (`moveBack` always `null`) | node: 7 cases of *moving back*, each at its first move back, the sweep's among them; Chromium: the three key cases and the three menu cases of moving back then on the branch, each at its move back or at the menu item before it. Before `2492ec3` the cap case's unwinding never ended under it |
+| the steps kept on a changed layout (`recordMove` never forgetting) | node: the case of a layout changed in between, at the split, two steps where one should be; Chromium: the toggle key case, at "k put back the tree before j, which a move since had forgotten" |
+| `sameTree` blind to shares, review r2's | node: the case of a layout changed in between, at the divider drag |
+| 65 steps kept, review r2's | node: the cap case, at the count of steps |
+| a move back of another view (`moveBack` not asking the view), review r2's | node: the case of a move another way or of another view, at the other view |
+| the floor asked of a move back again, as before `3b034bc` | node: both cases of no floor, the window made shorter and the size the move was made at; Chromium: move-view's shrunk-window case, at its item greyed where it should be enabled; its key case run alone, at its item; and with that check lifted, at the key, the tree before never coming |
+| the help page's words on what forgets the steps put back as before `69b2ae6` | the pages test's case for the paragraph, at its words |
+
+##### THE REVIEWS
+
+- **A first review of the two sandbox commits** found them sound as a first step, with no Critical finding. Its
+  Important finding, that the app's browser test clicked with `HTMLElement.click()`, read labels by `textContent` and
+  held no greyed item's look, is answered by `b4d80b6`. Its Minor findings M1 to M5, comments the commits made wrong and
+  a plan in a comment, are answered by `9ba847d`, `b4d80b6` and `b5fb064`; M6 is a sentence in `d6ed9dc`'s message only,
+  and M7, the move items' labels not lining up with *format*'s, is answered by `7a12f8e`. It measured that the sandbox's
+  sizes doubled one view and halved others on the spec's own rows, which the user's rulings on sizes answer.
+- **The rounds after it**, each with its own gates and sabotages, built the rest of §9 and the rulings: `9ba847d` to
+  `9bcf8b7` the share a view takes out of its branch and the floor; `c2e74d4` to `9015b8b` the keys, the live region and
+  the Stage's refusal; `1b8a060`, `579e928` and `979f2e2` every area kept across the root, out of a branch and into a
+  split; `45370d8` the spec.
+- **A review of the whole branch**, at `45370d8`, of every commit to it, found it ready after minor findings, with no
+  Critical or Important one. M1: the view-keys browser test's move case left the views moved when it failed, so the
+  cases after it failed at their precondition (`e142c2e`). M2: with Caps Lock on, `h`, `j`, `k` and `l` reached the
+  editor as capitals, where under vim `J` joins lines (`2bd0567`, after the user ruled the fix into this branch on
+  2026-11-28). M3: the open menu's refresh in `setLayout` was unreachable from the app and untested (`500265f` deletes
+  it). The review also merged the branch with `main` as it then was and ran the typecheck, the node tier, `build:app`
+  and the view-menu, move-view, view-keys and layout-app browser tests there; moved views at random over random trees
+  with uneven shares, every move but a trade keeping every view's area; and drove the app in Chromium with real clicks
+  and keys. It observed that a move followed by the same move the other way gave the tree back after every trade but
+  after only some of the other moves, the observation moving back answers.
+- **A check of the commits after `45370d8`**, `e142c2e` to `af25494`, as code, found no Critical or Important finding,
+  and one Minor: `step`'s table in `web/src/view-keys.ts` did not say that a capital with `Shift` up is read as its
+  small letter (`8204ebf`). It ran two sabotages of `e142c2e`'s tests on `af25494`: a failure forced between the `l`
+  move and the move back failed that case alone, and `start` put back the first load's arrangement as the page draws it;
+  the Stage case's return to tiles taken out, with its precondition broken, failed the lone-view case after it too,
+  where with the return only the Stage case fails.
+- **The user's rulings after that check**, on 2026-11-28: its Minor, the help page's paragraph pinned, the edge words
+  driven through a key and the first review's M7 fixed before the pull request (`8204ebf`, `9837580`, `7a12f8e`); and a
+  move straight back to undo the move, its place and its size, newest move first, while the layout is still what that
+  move left (`2e52516`, `2492ec3`, `4c8f9d9`). The choices not taken, a trade keeping each view's area rather than each
+  slot's size, and both, are in §9.6.
+- **Review r2, of `af25494..4c8f9d9` as code**, found it not ready, with one Important finding and one Minor. I1: a move
+  back was asked the floor, so where a view the move enlarged had been under 160 px before it, the move back was refused
+  at the very size the move was made at, and with it the move that way that `af25494` allowed, in words that blame the
+  window; the review drove it in the app in Chromium. `3b034bc` asks no floor of a move back, a call taken for the user
+  (*WHAT THIS DID NOT CLOSE*). M1: the spec, the help page and a browser case's name said a toggle or a cycle forgets
+  the steps, which the code keeps where the layout comes back; `69b2ae6` words it as the code does it. The review found
+  sound `moveRefusal`'s answers, the same as `af25494`'s on generated trees; a move back kept where the tree the move
+  left is written out and read back; the menu and the keys agreeing; the label column, by screenshot in Chromium and
+  Firefox; and the five places the build left its plan. Four of its five sabotages are in the table above; the fifth
+  tested the floor on a move back that `3b034bc` took away.
+- **A narrow check of `3b034bc` and `69b2ae6`**, as code, found no Critical or Important finding and two Minor ones, in
+  the spec's words, both fixed in `6f27d35`. §9.6's *Why* and §21's row for §9.6 said a move and the same move the other
+  way give back the tree for a trade alone, where they give it back after every trade and after some of the other moves
+  too. §9.3 said both floors are asked of every move, and did not name §9.6's move back, which asks neither. It compared
+  the refusals of `4c8f9d9` and `69b2ae6` on generated trees and walks of moves: the same answer for every press but a
+  move back, and no move back refused. Its own sabotage, `pressRefusal` taking a press that moves the newest step's view
+  the other way as a move back without comparing the layout, failed one case of `layout.test.ts` and the four browser
+  files run, move-view's lone view, at the up item that an earlier case's move down had left a step for.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **No floor on a move back** is a call taken for the user after review r2, not a ruling of theirs. The other way the
+  review gave: keep each step's tiled area, and refuse a move back only where a view of the tree before would now be
+  drawn under 160 px and smaller than it was drawn at that area.
+- **The commits after the whole-branch review** at `45370d8` had narrower reviews: `e142c2e` to `af25494` the check
+  above, `8204ebf` to `4c8f9d9` review r2, `3b034bc` and `69b2ae6`, which answer review r2, the narrow check above, and
+  `6f27d35`, which answers that check, none.
+- **The first review's suggestion** to focus `⋯` after a menu move, so that two moves from the menu are two presses of
+  Enter, was not taken: the focus goes to the moved view's first control.
+- **The `Ctrl` keys elsewhere**: Windows; macOS, where these browsers use `Cmd` for these commands; Wayland; an input
+  method, or a desktop or compositor binding, which could take `Ctrl+.` or `Ctrl` and a letter before the browser sees
+  it; the user's own Firefox profile, with its extensions, preferences and per-site keyboard shortcut permission; keys
+  pressed by a person rather than sent through XTEST; and what Firefox does with a `Ctrl+.` that a page does not cancel.
+- **Caps Lock in a real browser.** No test or run here pressed a real Caps Lock: the browser tests send `L` with `Shift`
+  up, the press the rule answers, and Chromium under Playwright reports no Caps Lock at all. What a browser sends for
+  Caps Lock with `Shift` is not measured: `h` with `Shift` down moves the view, as a key of the table with `Shift` down
+  always did, and `H` with `Shift` down is typed, as `Shift+H` is.
+- **`web/src/editor-tab.ts`'s `Ctrl-m`**, #204's way out of the editor, under Caps Lock: with `Ctrl` down CodeMirror
+  tries a press again under its key code's base name, so Caps Lock's `Ctrl+M` should still reach it. Read in
+  CodeMirror's source, not run.
+- **Firefox's *ends when the window loses the focus***, a case of `view-keys.test.ts`, fails in `firefox-capture` on the
+  branch, and failed the same in a control run with every web file the branch had changed that `main` has put back to
+  `main`'s at `7033883`: `main`'s failure, which the branch does not fix. CI installs Chromium alone, and no workflow
+  names Firefox.
+- **A hairline at the right end of a checked choice** in the λ view's menu in Firefox: review r2 saw it with `af25494`'s
+  style as well, before `7a12f8e`'s label column.
+- **Drag and drop**, §10, is not built. §21 notes that §10.3's drop on the workspace, which is `moveLeaf`'s case 4, as
+  written now keeps every view's area too.
+- **Not run**: `cargo llvm-cov` with its 90 % floor, as the branch changes no Rust; the LLVM `opt_report` example, which
+  CI runs as informational and never gating; Firefox beyond `view-keys.test.ts`, `move-view.test.ts` and
+  `view-menu.test.ts`; and CI's own jobs. CI installs wasm-pack 0.15.1, and the packages here were built with 0.15.0.
+
+##### VERIFICATION
+
+**The gates at `69b2ae6`**, with every wasm package built from the tree first, `pkg/`, `pkg-lsp/`, `pkg-clif/`,
+`pkg-mc-x86-64/`, `pkg-mc-arm64/` and `pkg-llvm/`, then the bindings. Each exit 0: `pnpm install --frozen-lockfile`;
+`scripts/check-all.sh --no-browser`, its 15 nextest legs 5,528 tests run and 5,528 passed, "green, but PARTIAL" with the
+browser tier skipped; `scripts/check-all.sh --browser-only`, the wasm-pack tests in Chrome 158, 37 passed;
+`scripts/check-slow.sh`, 35 passed, "slow tier green"; `pnpm run typecheck`; the node tier, 91 files and 1,760 tests
+passed; `pnpm run build:app`; `biome ci --error-on-warnings`, 500 files; the Chromium tier, `--project browser`, 238
+files, 2,052 tests passed and 2 failed as expected; `pnpm run test:coverage`, 331 files, 3,818 tests passed and 2 failed
+as expected, at 98.2 % of statements, 92.64 % of branches, 98.79 % of functions and 99.46 % of lines; the eight scans,
+text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and lua, each `--self-test` then
+the scan; `check-comments.mjs --self-test`, its 224 cases, then `--base origin/main`, 22 areas within budget and no
+history and no grown block in 18 changed files; `check-licences.sh` and `check-licence-editions.sh`, each `--self-test`
+then the check; and `ci-docs-only.sh --self-test`, its 14 cases, then on `origin/main` and `HEAD`, "false". Exit 1:
+`view-keys.test.ts` in `firefox-capture`, and `move-view.test.ts` and `view-menu.test.ts` in `firefox`, 73 tests, 70
+passed, 2 skipped and 1 failed, *ends when the window loses the focus*, above. `6f27d35` changes the spec alone; at it
+the pre-commit hook, `check-comments.mjs --base origin/main` and the text-bytes, citations, doc-figures and shared-docs
+scans exit 0.
+
+**The seeded sweep of moving back**, in `layout.test.ts`, seed 20261128. 400 random trees of one to nine views, every
+view moved every way: 7,445 moves taken, by §9.2's case 2,424 trades (case 1), 342 joins (case 2), 1,186 out of a branch
+(case 3), 2,945 across the root and 548 along it (case 4); each given back exactly by its move back, the other three
+directions no move back, and 4,098 of them moves that §9.2's move the other way does not give back. Then 200 walks of 30
+presses on trees of two to nine views: 5,492 moves made, 329 of them moves back met on the way, each the tree stood on
+before, and each walk undone newest first to the tree it started on.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, `RM` the
+roadmap's path and `SPEC` the view layouts spec's; the test runs under `systemd-run --user --scope -p MemoryMax=16G -p
+MemorySwapMax=0`, the `node` command under `MemoryMax=2G`. `check-all.sh` runs with `TREE_SITTER` naming a tree-sitter
+0.25.10, the version it pins, as this machine's own is 0.28.0.
+
+| Value | What | Produced by |
+|---|---|---|
+| `b72c2c8`; `6f27d35`; 27 | `origin/main`, the base; the branch's last commit before this entry; the commits from one to the other | `git merge-base origin/main 6f27d35 \| cut -c1-7; git rev-parse --short 6f27d35; git rev-list --count b72c2c8..6f27d35` |
+| the 27 commits of the table, in its order |  | `git log --reverse --format=%h b72c2c8..6f27d35` |
+| 2; 25 | the sandbox commits; the commits after them | `git rev-list --count b72c2c8..d6ed9dc; git rev-list --count d6ed9dc..6f27d35` |
+| #141; #142; the next three | the view layouts pull requests before this one, by their subjects; #141's entry naming the next three | `git log --format=%s origin/main \| grep -E '\(#14[12]\)$' \| cut -c1-60; git show b72c2c8:$RM \| grep -n 'the next three pull requests' \| cut -c1-100` |
+| 160 px | `MIN_VIEW_PX` | `grep -n '^export const MIN_VIEW_PX' web/src/layout.ts` |
+| 664 and 663.9 | the floor test of a move into a column: the heights allowed and refused | `grep -nE 'height: (664\|663\.9) ' web/tests/node/layout.test.ts` |
+| 320; 154 and 148 | the share case: the area's width; S's width before the move and after | `grep -nE 'width: 320,\|toEqual\(\[154, 148\]\)' web/tests/node/layout.test.ts` |
+| 0.3; 0.35, 0.15 and 0.5; 0.35 and 0.15 traded; the tree given back | the uneven example, A moved right: the root's sizes; A moved left as §9.2 makes it: the root's sizes; A moved straight back: the tree before, equal; the spec's line | `node --input-type=module -e "import { moveLeaf, moveBack, recordMove } from './web/src/layout.ts'; const v = (id) => ({ kind: 'leaf', id, pane: id }); const t0 = { kind: 'split', dir: 'row', sizes: [0.5, 0.5], children: [{ kind: 'split', dir: 'column', sizes: [0.7, 0.3], children: [v('source'), v('rxm')] }, { kind: 'split', dir: 'column', sizes: [0.5, 0.5], children: [v('lambda'), v('tm')] }] }; const show = (u) => u.children.map((c, i) => (c.id ?? c.dir) + ' ' + u.sizes[i].toFixed(2)).join(', '); const t = moveLeaf(t0, 'rxm', 'right'); console.log(show(t)); console.log(show(moveLeaf(t, 'rxm', 'left'))); console.log(JSON.stringify(moveBack(recordMove([], t0, 'rxm', 'right', t, false), t, 'rxm', 'left')) === JSON.stringify(t0))"`; `grep -n 'at 0.35, 0.15 and 0.5' $SPEC \| cut -c1-60` |
+| one to five | the views in the `moveLeaf` sweep's trees | `grep -nE "const views = \['S', 'L', 'R', 'T', 'C'\]\|for \(let n = 1; n <= views.length" web/tests/node/layout.test.ts` |
+| 2; 9; 6 | `layout.test.ts`'s new tables for `moveLeaf`; its new cases for `moveLeaf`; the floor's | `sed -n "/^describe('moveLeaf'/,/describe('the floor on a move'/p" web/tests/node/layout.test.ts \| grep -cE '^  it\.each'; sed -n "/^describe('moveLeaf'/,/describe('the floor on a move'/p" web/tests/node/layout.test.ts \| grep -c "^  it('"; sed -n "/describe('the floor on a move'/,/^  })/p" web/tests/node/layout.test.ts \| grep -c "it('"` |
+| 10 | the cases of *moving back* in `layout.test.ts` | `sed -n "/describe('moving back'/,/^  })/p" web/tests/node/layout.test.ts \| grep -cE '^    it\('` |
+| 64 | `MOVES_KEPT` | `grep -n '^export const MOVES_KEPT' web/src/layout.ts` |
+| 20261128; 400, one to nine; 200, 30, two to nine | the sweep of moving back: its seed; its trees and their views; its walks, their presses and their trees' views | `grep -nE 'let seed = 20261128\|trial < 400\|tree\(1 \+ Math.floor\(rnd\(\) \* 9\)\)\|w < 200\|tree\(2 \+ Math.floor\(rnd\(\) \* 8\)\)\|s < 30' web/tests/node/layout.test.ts` |
+| 7,445; 2,424, 342, 1,186, 2,945 and 548; 4,098; 5,492; 329 | the sweep of moving back: the moves taken; by case 1, 2, 3, 4 across and 4 along; those §9.2's move the other way does not give back; the walks' moves made; the moves back met on the way | the sweep with `expect({ byCase, undoneOnlyBack, walked, backsOnTheWay }).toEqual({})` added after its last check and run alone, `(cd web && pnpm exec vitest run --project node tests/node/layout.test.ts -t 'seeded sweep')`, the object it received read off; 7,445 the cases' sum |
+| 5; 3 | the node `view-keys.test.ts`'s new cases; *a move key's capital*'s | `git diff b72c2c8 69b2ae6 -- web/tests/node/view-keys.test.ts \| grep -cE '^\+\s+it\('; sed -n "/describe('a move key’s capital'/,/^  })/p" web/tests/node/view-keys.test.ts \| grep -c "it('"` |
+| 1 | `pages.test.ts`'s new case | `git diff b72c2c8 69b2ae6 -- web/tests/node/pages.test.ts \| grep -cE '^\+\s+it\('` |
+| 7; 10; 9 | the new cases of the browser `view-menu`, `move-view` and `view-keys` tests | `for f in view-menu move-view view-keys; do git diff b72c2c8 69b2ae6 -- web/tests/browser/$f.test.ts \| grep -cE '^\+\s+it\('; done` |
+| 2; 4; 3 | of those, *the view menu's labels*; move-view's *moving back*; the view-keys cases of moving back | `sed -n "/^describe('the view menu’s labels'/,/^})/p" web/tests/browser/view-menu.test.ts \| grep -cE '^  it\('; sed -n "/describe('moving back'/,/^  })/p" web/tests/browser/move-view.test.ts \| grep -cE '^    it\('; grep -cE "it\('(moves the focused view straight back\|walks two moves straight back\|makes k the move)" web/tests/browser/view-keys.test.ts` |
+| Firefox 161.0; Firefox 157, build 1555; Chrome 158.0.8127.88; 2026-11-28 | the probe's browsers and its day, as the spec's §7.3 gives them | `grep -nE "Firefox 161\.0, Playwright's Firefox 157 \(its build 1555\) and Chrome\|^  158\.0\.8127\.88" $SPEC \| cut -c1-120` |
+| 2026-11-28 | the user's rulings on Caps Lock and on moving back, in §21 | `grep -nE '^\\| §(7\.3\|9\.6) .*as the user ruled on 2026-11-28' $SPEC \| cut -c1-12` |
+| #204 | the pull request of `editor-tab.ts`'s `Ctrl-m` | `git log --format=%s origin/main \| grep -E 'Ctrl\+M.*\(#204\)$' \| cut -c1-60; grep -n "key: 'Ctrl-m'" web/src/editor-tab.ts` |
+| 0 | CI workflow files naming Firefox; the browser CI installs | `grep -rli firefox .forgejo/ \| wc -l; grep -n 'playwright install' .forgejo/workflows/ci.yml` |
+| 90 % | `cargo llvm-cov`'s floor in CI | `grep -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
+| 0.15.1; 0.15.0 | CI's wasm-pack; this machine's | `grep -no 'wasm-pack/releases/download/v[0-9.]*' .forgejo/workflows/ci.yml; wasm-pack --version` |
+| 0.25.10; 0.28.0 | the tree-sitter `check-all.sh` pins; this machine's | `grep -n '"0.25.10"' scripts/check-all.sh; tree-sitter --version` |
+| 224; 22; 18 | at `69b2ae6`: `check-comments.mjs`'s self-test cases; its areas; the files it read as changed | `node scripts/check-comments.mjs --self-test 2>&1 \| tail -1; node scripts/check-comments.mjs --base origin/main 2>&1 \| tail -2` |
+| 14; "false" | at `69b2ae6`: `ci-docs-only.sh`'s self-test cases; its answer on `origin/main` and `HEAD` | `scripts/ci-docs-only.sh --self-test 2>&1 \| tail -1; scripts/ci-docs-only.sh origin/main HEAD` |
+| 15; 5,528 and 5,528; "green, but PARTIAL" | at `69b2ae6`: `check-all.sh --no-browser`'s nextest legs, their tests run and passed; its last line | `scripts/check-all.sh --no-browser 2>&1 \| grep -E 'Summary \[\|green'`, the legs' counts summed |
+| 37; Chrome 158 | at `69b2ae6`: `check-all.sh --browser-only`'s wasm-pack tests; the browser they ran in | `scripts/check-all.sh --browser-only 2>&1 \| grep -E 'chromedriver 158\|test result: ok\. [1-9]'` |
+| 35 | at `69b2ae6`: `check-slow.sh`'s tests | `scripts/check-slow.sh 2>&1 \| grep -E 'test result: ok\. [1-9]\|slow tier'`, summed |
+| 91 files, 1,760 | at `69b2ae6`: the node tier | `(cd web && pnpm run test:node) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+| 500 | at `69b2ae6`: biome's files | `(cd web && pnpm exec biome ci --error-on-warnings) 2>&1 \| grep Checked` |
+| 238 files; 2,052 and 2 | at `69b2ae6`: the Chromium tier; tests passed and expected to fail | `(cd web && pnpm exec vitest run --project browser) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+| 331 files; 3,818 and 2; 98.2, 92.64, 98.79 and 99.46 | at `69b2ae6`: `test:coverage`; tests passed and expected to fail; statements, branches, functions and lines covered, in per cent | `(cd web && pnpm run test:coverage) 2>&1 \| grep -E 'Test Files\|Tests  \|All files'` |
+| 73; 70, 2 and 1 | at `69b2ae6`: the three files in Firefox; passed, skipped and failed | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox --project firefox-capture tests/browser/view-keys.test.ts tests/browser/move-view.test.ts tests/browser/view-menu.test.ts) 2>&1 \| grep -E 'Tests  \|FAIL'` |
+| eight | at `69b2ae6`: the scans, each `--self-test` then the scan | `for s in text-bytes citations attributions doc-figures shared-docs colours grammar-wasm lua; do scripts/check-$s.sh --self-test; print "$s --self-test exit=$?"; scripts/check-$s.sh; print "$s exit=$?"; done` |

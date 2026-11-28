@@ -368,6 +368,283 @@ export function closeLeaf(root: LayoutNode, id: LeafId): LayoutNode {
   return next
 }
 
+/** A way a view can be moved: along a row for left and right, along a column for up and down. */
+export type MoveDirection = 'left' | 'right' | 'up' | 'down'
+
+/** The four directions, in the order a view's `⋯` menu lists them. */
+export const MOVE_DIRECTIONS: readonly MoveDirection[] = ['left', 'right', 'up', 'down']
+
+/** The child indices from `root` down to the leaf `id`, or `null` where the tree does not hold it. */
+function pathTo(root: LayoutNode, id: LeafId): number[] | null {
+  if (root.kind === 'leaf') return root.id === id ? [] : null
+  for (const [i, child] of root.children.entries()) {
+    const below = pathTo(child, id)
+    if (below !== null) return [i, ...below]
+  }
+  return null
+}
+
+/** `root` with the node at `path` replaced by `next`; [] replaces the root. */
+function replaceAt(root: LayoutNode, path: number[], next: LayoutNode): LayoutNode {
+  if (path.length === 0) return next
+  if (root.kind !== 'split') throw new Error('layout path leaves the tree')
+  const [head, ...tail] = path
+  return { ...root, children: root.children.map((c, i) => (i === head ? replaceAt(c, tail, next) : c)) }
+}
+
+/**
+ * `g` with its child `i`, a leaf, taken into the split beside it on the side `toward`, at that split's end nearest
+ * where the leaf came from: the view layouts spec §9.2's case 2.
+ *
+ * **EVERY VIEW KEEPS ITS AREA**: the split widens along `g` by the share of `g` the leaf held, and the leaf takes that
+ * much of it as a strip across it, as case 4 across the root gives the leaf its share of the tree. Halving the view it
+ * lands beside would shrink that view and grow the split it left; an equal share would undo the sizes dragged in it.
+ */
+function joinSplit(g: Extract<LayoutNode, { kind: 'split' }>, i: number, toward: 1 | -1): LayoutNode {
+  const leaf = g.children[i]
+  const n = g.children[i + toward]
+  if (leaf === undefined || n === undefined || n.kind !== 'split') throw new Error('layout path leaves the tree')
+  const held = g.sizes[i] ?? 0
+  const share = (g.sizes[i + toward] ?? 0) + held
+  const part = held / share
+  // ALONG THE SPLIT'S OWN DIRECTION, SO THE FLATTENING SPLICES THE SPLIT IN, ITS CHILDREN TAKING WHAT THE LEAF LEFT.
+  const joined: LayoutNode = {
+    kind: 'split',
+    dir: n.dir,
+    children: toward === 1 ? [leaf, n] : [n, leaf],
+    sizes: toward === 1 ? [part, 1 - part] : [1 - part, part],
+  }
+  // BY ITS PLACE, NOT ITS ID: the leaf is in `joined` now as well, and a `closeLeaf` would take it out of both.
+  const children = g.children.flatMap((c, k) => (k === i ? [] : [k === i + toward ? joined : c]))
+  const sizes = g.sizes.flatMap((s, k) => (k === i ? [] : [k === i + toward ? share : s]))
+  const only = children.length === 1 ? children[0] : undefined
+  return only ?? { ...g, children, sizes: normalize(sizes) }
+}
+
+/**
+ * `node` without the leaf at `path`, with the share of `node` that leaf held; what is left fills `node`.
+ *
+ * **EACH SPLIT ON THE WAY DOWN GIVES UP ONLY THE SHARE THE LEAF HELD OF IT**, so every view left grows by one factor,
+ * 1 / (1 − held), and keeps its area once the whole is made that much smaller. `closeLeaf` gives the room to the
+ * leaf's own split alone, which grows the views beside it and shrinks every other view in `node`.
+ */
+function cutLeaf(node: LayoutNode, path: readonly number[]): { rest: LayoutNode | null; held: number } {
+  const [k, ...below] = path
+  if (k === undefined) return { rest: null, held: 1 }
+  const child = node.kind === 'split' ? node.children[k] : undefined
+  if (node.kind !== 'split' || child === undefined) throw new Error('layout path leaves the tree')
+  const inner = cutLeaf(child, below)
+  const held = (node.sizes[k] ?? 0) * inner.held
+  const children: LayoutNode[] = []
+  const sizes: number[] = []
+  for (const [i, c] of node.children.entries()) {
+    const next = i === k ? inner.rest : c
+    if (next === null) continue
+    children.push(next)
+    sizes.push((node.sizes[i] ?? 0) - (i === k ? held : 0))
+  }
+  const only = children.length === 1 ? children[0] : undefined
+  return { rest: only ?? { ...node, children, sizes: normalize(sizes) }, held }
+}
+
+/**
+ * `g` with the leaf at `inBranch` below its child `i` taken out of that child and put in beside it on the side
+ * `toward`: the view layouts spec §9.2's case 3, and its case 4 along a root that runs the way the leaf moves.
+ *
+ * **EVERY VIEW KEEPS ITS AREA**: the branch gives up the share of its area the view held (`cutLeaf`), and the view
+ * takes that much of `g` beside it. Taken from its new neighbour instead, the room would grow the views the leaf left
+ * and shrink the one it lands beside, on a move that can be made without changing either.
+ */
+function leaveBranch(
+  g: Extract<LayoutNode, { kind: 'split' }>,
+  i: number,
+  inBranch: number[],
+  leaf: LayoutNode,
+  toward: 1 | -1,
+): Extract<LayoutNode, { kind: 'split' }> {
+  const branch = g.children[i]
+  if (branch === undefined) throw new Error('layout path leaves the tree')
+  const { rest, held } = cutLeaf(branch, inBranch)
+  if (rest === null) throw new Error('a view cannot leave a branch that is the view itself')
+  const share = g.sizes[i] ?? 0
+  const children = g.children.map((c, k) => (k === i ? rest : c))
+  const sizes = g.sizes.map((s, k) => (k === i ? s * (1 - held) : s))
+  const index = toward === 1 ? i + 1 : i
+  children.splice(index, 0, leaf)
+  sizes.splice(index, 0, share * held)
+  return { ...g, children, sizes }
+}
+
+/**
+ * `node` with every split that sits in a split of its own direction spliced into it, its children taking its share.
+ *
+ * **THE SCREEN IS THE SAME, AND THE EDGE IS WHERE IT LOOKS**: `closeLeaf` can leave a row in a row, and a move asked of
+ * that tree would see an edge inside it, offering a move that only resizes.
+ */
+function flatten(node: LayoutNode): LayoutNode {
+  if (node.kind === 'leaf') return node
+  const children: LayoutNode[] = []
+  const sizes: number[] = []
+  for (const [i, child] of node.children.entries()) {
+    const flat = flatten(child)
+    const share = node.sizes[i] ?? 1 / node.children.length
+    if (flat.kind === 'split' && flat.dir === node.dir) {
+      children.push(...flat.children)
+      sizes.push(...flat.sizes.map((s) => s * share))
+    } else {
+      children.push(flat)
+      sizes.push(share)
+    }
+  }
+  return { ...node, children, sizes: normalize(sizes) }
+}
+
+/**
+ * The tree with the leaf `id` moved one step `direction`, or `null` where it has nowhere to go that way: the view
+ * layouts spec §9.2's four cases, as a tiling window manager moves a window.
+ *
+ * **EVERY VIEW KEEPS ITS AREA BUT IN CASE 1**, where the two views trade slots and each slot keeps its size: joining a
+ * split it was not in (case 2) the view takes the share it held as a strip across that split (`joinSplit`), and out of
+ * a branch (cases 3 and 4) the share of the area it held there (`cutLeaf`), across the root as a strip along the edge
+ * it moved to. It refuses nothing for size (`moveRefusal` does), and moves on the tree `flatten`ed and answers it so.
+ */
+export function moveLeaf(given: LayoutNode, id: LeafId, direction: MoveDirection): LayoutNode | null {
+  const moved = moveFlat(flatten(given), id, direction)
+  return moved === null ? null : flatten(moved)
+}
+
+function moveFlat(root: LayoutNode, id: LeafId, direction: MoveDirection): LayoutNode | null {
+  const path = pathTo(root, id)
+  if (path === null) throw new Error(`cannot move a leaf that is not in the tree: ${id}`)
+  const leaf = at(root, path)
+  const axis: Dir = direction === 'left' || direction === 'right' ? 'row' : 'column'
+  const toward = direction === 'right' || direction === 'down' ? 1 : -1
+
+  for (let depth = path.length - 1; depth >= 0; depth -= 1) {
+    const gPath = path.slice(0, depth)
+    const g = at(root, gPath)
+    const i = path[depth] ?? 0
+    if (g.kind !== 'split' || g.dir !== axis) continue
+    const n = g.children[i + toward]
+    if (n === undefined) continue
+
+    if (depth === path.length - 1) {
+      if (n.kind === 'leaf') {
+        // CASE 1: THE SLOTS STAY WHERE THEY ARE, WITH THEIR SIZES, AND THE TWO VIEWS TRADE THEM.
+        const children = g.children.map((c, k) => (k === i ? n : k === i + toward ? leaf : c))
+        return replaceAt(root, gPath, { ...g, children })
+      }
+      // CASE 2: OUT OF `G` AND INTO `N`, AT THE END NEAREST WHERE IT CAME FROM.
+      return replaceAt(root, gPath, joinSplit(g, i, toward))
+    }
+
+    // CASE 3: OUT OF ITS BRANCH, WHICH CLOSES UP, AND INTO `G` BETWEEN THE BRANCH AND `N`.
+    return replaceAt(root, gPath, leaveBranch(g, i, path.slice(depth + 1), leaf, toward))
+  }
+
+  // CASE 4.
+  if (root.kind === 'leaf') return null
+  if (root.dir === axis) {
+    // THE LEAF IS IN THE ROOT'S END CHILD, OR A `G` WOULD HAVE BEEN FOUND: THAT CHILD ITSELF, AND AT THE EDGE ALREADY,
+    // OR DEEPER, AND OUT OF IT AS IN CASE 3 WITH THE EDGE FOR `N`.
+    const end = toward === 1 ? root.children.length - 1 : 0
+    return path.length === 1 ? null : leaveBranch(root, end, path.slice(1), leaf, toward)
+  }
+  // ASKED OF THE ROOT AS IT WAS: THE VIEW TAKES THE SHARE OF THE TREE IT HELD, AS A STRIP ALONG THAT EDGE, AND WHAT IS
+  // LEFT, WHERE IT RUNS ALONG THE AXIS, IS SPLICED IN BY THE FLATTENING.
+  const { rest, held } = cutLeaf(root, path)
+  if (rest === null) throw new Error('a view cannot leave a branch that is the view itself')
+  const children = toward === 1 ? [rest, leaf] : [leaf, rest]
+  return { kind: 'split', dir: axis, sizes: toward === 1 ? [1 - held, held] : [held, 1 - held], children }
+}
+
+/** A move the app made: the tree on screen before it and the tree it gave, the view moved and which way. */
+export interface MoveStep {
+  readonly before: LayoutNode
+  readonly after: LayoutNode
+  readonly id: LeafId
+  readonly direction: MoveDirection
+}
+
+/**
+ * The most moves a history keeps, the oldest dropped first: the view layouts spec §9.6.
+ *
+ * **BOUNDED, SINCE EACH STEP HOLDS TWO TREES**: unbounded, a page that moves views all day would keep every tree it
+ * showed. A chain is walked back one press a step, and this is more presses than a chain anyone walks back.
+ */
+export const MOVES_KEPT = 64
+
+const OPPOSITE: Readonly<Record<MoveDirection, MoveDirection>> = {
+  left: 'right',
+  right: 'left',
+  up: 'down',
+  down: 'up',
+}
+
+/**
+ * Whether `a` and `b` draw the same layout: the same splits, views and kinds, in the same order, each share within
+ * `SIZE_EPSILON` of the other's.
+ */
+function sameTree(a: LayoutNode, b: LayoutNode): boolean {
+  if (a.kind === 'leaf' || b.kind === 'leaf')
+    return a.kind === 'leaf' && b.kind === 'leaf' && a.id === b.id && a.pane === b.pane
+  return (
+    a.dir === b.dir &&
+    a.children.length === b.children.length &&
+    a.children.every((c, i) => {
+      const other = b.children[i]
+      return (
+        other !== undefined && Math.abs((a.sizes[i] ?? 0) - (b.sizes[i] ?? 0)) <= SIZE_EPSILON && sameTree(c, other)
+      )
+    })
+  )
+}
+
+/**
+ * The tree the newest step of `history` was made on, where moving `id` `direction` on `tree` is that step straight
+ * back: the same view, the opposite way, on the tree the step left. Else `null`, and the move is `moveLeaf`'s. The
+ * view layouts spec §9.6.
+ *
+ * **ONLY STRAIGHT BACK GIVES THE TREE BEFORE**: §9.2's moves keep every view's area but a trade's, so the same move the
+ * other way can trade the view into a slot of another size and leave the views beside it otherwise than they were.
+ *
+ * **THE TREE ON SCREEN IS COMPARED WITH THE STEP'S, NOT WATCHED**: a split, a close, a drag, a view toggled or another
+ * arrangement each change the tree through a path of their own, and a path that forgot to say so would leave a step
+ * that puts back a tree the user has since changed.
+ */
+export function moveBack(
+  history: readonly MoveStep[],
+  tree: LayoutNode,
+  id: LeafId,
+  direction: MoveDirection,
+): LayoutNode | null {
+  const newest = history.at(-1)
+  if (newest === undefined || newest.id !== id || OPPOSITE[newest.direction] !== direction) return null
+  return sameTree(newest.after, tree) ? newest.before : null
+}
+
+/**
+ * `history` after moving `id` `direction` on `tree` gave `result`, `back` where `moveBack` gave it: a move back takes
+ * its step off, and any other move is a step on, after every step before it where the layout has changed since the
+ * newest (`tree` is not its tree after), and the oldest dropped past `MOVES_KEPT`.
+ *
+ * **A CHANGED LAYOUT FORGETS EVERY STEP, NOT THE NEWEST ALONE**: each step's tree after is the next one's tree before,
+ * so once the newest cannot be moved back none under it can.
+ */
+export function recordMove(
+  history: readonly MoveStep[],
+  tree: LayoutNode,
+  id: LeafId,
+  direction: MoveDirection,
+  result: LayoutNode,
+  back: boolean,
+): MoveStep[] {
+  if (back) return history.slice(0, -1)
+  const newest = history.at(-1)
+  const kept = newest === undefined || sameTree(newest.after, tree) ? history : []
+  return [...kept, { before: tree, after: result, id, direction }].slice(-MOVES_KEPT)
+}
+
 /** The split at `path` — [] is the root, [0] its first child, [0, 1] that child's second. */
 function at(root: LayoutNode, path: number[]): LayoutNode {
   let node = root
@@ -583,6 +860,65 @@ export function addRefusal(
   if (under('width')) return 'narrow'
   if (divides === 'height' && under('height')) return 'short'
   return null
+}
+
+/**
+ * Why a move is refused: the view is the whole tree (`'alone'`), `moveLeaf` finds it nowhere to go that way
+ * (`'edge'`), or a view the move makes narrower, or shorter, would come out under `MIN_VIEW_PX` that way
+ * (`'narrow'`, `'short'`). Alone and edge are apart because a lone view has no edge to be at; narrow and short
+ * because their remedies are, as an add's are.
+ */
+export type MoveRefusal = 'alone' | 'edge' | 'narrow' | 'short'
+
+/**
+ * Why moving the leaf `id` one step `direction` would be refused, or `null` when it may go ahead, drawn into `area`
+ * with `gap` between siblings: the view layouts spec §9.3, `addRefusal`'s floor asked of the tree `moveLeaf` makes.
+ *
+ * **SMALLER IS ASKED OF A VIEW'S SHARE OF THE AREA, NOT ITS PIXELS**: a divider a move adds, or a flattening, takes a
+ * few pixels from views it leaves alone, and a view a narrow window had squeezed would refuse every move near it.
+ * **HEIGHT IS HELD FOR EVERY MOVE**: a view moved right into a column (case 2) comes out shorter. Width is asked first.
+ */
+export function moveRefusal(
+  root: LayoutNode,
+  id: LeafId,
+  direction: MoveDirection,
+  area: Extent,
+  gap: number,
+): MoveRefusal | null {
+  const moved = moveLeaf(root, id, direction)
+  if (moved === null) return root.kind === 'leaf' ? 'alone' : 'edge'
+  const unit = { width: 1, height: 1 }
+  const was = leafExtents(root, unit, 0)
+  const now = leafExtents(moved, unit, 0)
+  const drawn = leafExtents(moved, area, gap)
+  /** Whether a view the move made smaller along `axis` comes out under the floor along it. */
+  const under = (axis: Axis): boolean =>
+    [...drawn].some(
+      ([leaf, px]) =>
+        px[axis] < MIN_VIEW_PX && (now.get(leaf)?.[axis] ?? 0) < (was.get(leaf)?.[axis] ?? 0) - SIZE_EPSILON,
+    )
+  if (under('width')) return 'narrow'
+  if (under('height')) return 'short'
+  return null
+}
+
+/**
+ * Why a press moving the leaf `id` one step `direction` would be refused, `history` the moves made, or `null`: none
+ * for a move straight back (`moveBack`), else `moveRefusal`'s. The view layouts spec §9.6.
+ *
+ * **A MOVE BACK ASKS NO FLOOR**: it gives back a layout the user had, and in a window made smaller since, that layout
+ * is the one the window would show had the view not moved, where a view under `MIN_VIEW_PX` is allowed (§2.7). Asked
+ * the floor, a view the move enlarged from under it would refuse its own move back at the size the move was made at.
+ */
+export function pressRefusal(
+  history: readonly MoveStep[],
+  root: LayoutNode,
+  id: LeafId,
+  direction: MoveDirection,
+  area: Extent,
+  gap: number,
+): MoveRefusal | null {
+  return moveBack(history, root, id, direction) === null ? moveRefusal(root, id, direction, area, gap) : null
 }
 
 /**

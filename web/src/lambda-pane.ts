@@ -172,6 +172,7 @@ export class LambdaPane {
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
       ...(on.close !== undefined ? { close: on.close } : {}),
+      ...(on.move !== undefined ? { move: on.move } : {}),
       display: {
         groups: [
           {
@@ -443,9 +444,9 @@ export class LambdaPane {
    * pane gave it at construction — see `#choices`, and `PaneView.setLayoutControls` for why the list
    * arrives here rather than through a setter of its own.
    */
-  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
+  setLayoutControls(canClose: boolean, tiled: boolean, choices: SplitChoices): void {
     this.#choices = choices
-    this.#menu.setLayout(canClose, canSplit)
+    this.#menu.setLayout(canClose, tiled)
   }
 
   /**

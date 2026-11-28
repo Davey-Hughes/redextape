@@ -4,6 +4,7 @@ import type { Shares } from './panel-stack'
 import type { ClifLoad, Leg, Listing } from './protocol'
 import type { SessionId } from './session-client'
 import type { Binding, PaneOption } from './sessions'
+import type { ViewMove } from './view-header'
 import type { ClifDisplay, LambdaDisplay, Speed, TmDisplay } from './workspace'
 
 export type PaneEvents = {
@@ -123,6 +124,8 @@ export type PaneEvents = {
   splitRow?: (choice: PaneChoice) => void
   splitColumn?: (choice: PaneChoice) => void
   close?: () => void
+  /** This pane's move items, which carry no `LeafId` for `close`'s reason. */
+  move?: ViewMove
 }
 
 /**

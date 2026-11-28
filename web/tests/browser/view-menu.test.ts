@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Dir } from '../../src/layout'
+import type { Dir, MoveDirection } from '../../src/layout'
 import type { PaneChoice, SplitChoices } from '../../src/pane-chrome'
 import { bindingKey, viewMenu } from '../../src/view-header'
 import { moreOf } from './harness'
@@ -18,16 +18,20 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-const build = (over: Partial<Parameters<typeof viewMenu>[1]> = {}, { formats = true } = {}) => {
+const build = (over: Partial<Parameters<typeof viewMenu>[1]> = {}, { formats = true, splits = true } = {}) => {
   const actions = document.createElement('div')
   document.body.append(actions)
   const log: string[] = []
   const menu = viewMenu(actions, {
-    split: (dir: Dir, c: PaneChoice) =>
-      log.push(`split ${dir} ${c.kind === 'source' ? 'source' : bindingKey(c.kind, c.session)}`),
+    ...(splits
+      ? {
+          split: (dir: Dir, c: PaneChoice) =>
+            log.push(`split ${dir} ${c.kind === 'source' ? 'source' : bindingKey(c.kind, c.session)}`),
+          choices: () => CHOICES,
+        }
+      : {}),
     close: () => log.push('close'),
     ...(formats ? { format: () => log.push('format') } : {}),
-    choices: () => CHOICES,
     ...over,
   })
   return { actions, menu, log }
@@ -105,6 +109,175 @@ describe('the view menu', () => {
     expect(actions.querySelector('.view-menu')?.matches(':popover-open')).toBe(false)
     actions.querySelector<HTMLButtonElement>('button.view-close')?.click()
     expect(log).toEqual(['format', 'close'])
+  })
+})
+
+/**
+ * **THE FOUR MOVE ITEMS** (the view layouts spec §9.1, §9.3, §9.4): after the splits, in tiles only, each disabled
+ * with its reason while it cannot be taken, and asked so when the menu opens rather than when it was built.
+ */
+describe('the view menu’s move items', () => {
+  const moving = (refused: Partial<Record<MoveDirection, string>>) => {
+    const asked = { ...refused }
+    const built = build({
+      move: {
+        go: (d: MoveDirection) => built.log.push(`move ${d}`),
+        refusal: (d: MoveDirection) => asked[d] ?? null,
+      },
+    })
+    return { ...built, asked }
+  }
+  const moveItem = (a: HTMLElement, d: MoveDirection) =>
+    a.querySelector<HTMLButtonElement>(`button.view-move[data-direction="${d}"]`)
+
+  it('lists the four after the splits in tiles, and none where the views are not tiled', () => {
+    const { actions, menu } = moving({})
+    menu.setLayout(true, true)
+    expect(items(actions)).toEqual([
+      'split right',
+      'split down',
+      'move view left',
+      'move view right',
+      'move view up',
+      'move view down',
+      'format',
+    ])
+    menu.setLayout(true, false)
+    expect(items(actions)).toEqual(['format'])
+  })
+
+  it('offers them on a view with no split, as the source view is', () => {
+    const { actions, menu } = build({ move: { go: () => {}, refusal: () => null } }, { splits: false })
+    menu.setLayout(true, true)
+    expect(items(actions)).toEqual(['move view left', 'move view right', 'move view up', 'move view down', 'format'])
+  })
+
+  it('disables a refused move with its reason when the menu opens, and enables it again when it can be taken', () => {
+    const { actions, menu, asked } = moving({ right: 'this view is as far right as it can go' })
+    menu.setLayout(true, true)
+    moreOf(actions)?.click()
+    const right = moveItem(actions, 'right')
+    expect(right?.disabled).toBe(true)
+    expect(right?.getAttribute('aria-description')).toBe('this view is as far right as it can go')
+    expect(right?.title).toBe('this view is as far right as it can go')
+    expect(moveItem(actions, 'left')?.disabled).toBe(false)
+    expect(moveItem(actions, 'left')?.hasAttribute('aria-description')).toBe(false)
+    // ASKED AGAIN AT THE NEXT OPEN: another view's gesture changes what this one can do.
+    ;(actions.querySelector('.view-menu') as HTMLElement).hidePopover()
+    delete asked.right
+    moreOf(actions)?.click()
+    expect(right?.disabled).toBe(false)
+    expect(right?.hasAttribute('aria-description')).toBe(false)
+    expect(right?.hasAttribute('title')).toBe(false)
+  })
+
+  it('opens on the first move it can take where no split comes before it', () => {
+    const { actions, menu } = build(
+      { move: { go: () => {}, refusal: (d) => (d === 'left' ? 'no' : null) } },
+      { splits: false },
+    )
+    menu.setLayout(true, true)
+    moreOf(actions)?.click()
+    expect(document.activeElement).toBe(moveItem(actions, 'right'))
+  })
+
+  it('closes the menu, then moves', () => {
+    const { actions, menu, log } = moving({})
+    menu.setLayout(true, true)
+    moreOf(actions)?.click()
+    moveItem(actions, 'down')?.click()
+    expect(actions.querySelector('.view-menu')?.matches(':popover-open')).toBe(false)
+    expect(log).toEqual(['move down'])
+  })
+})
+
+/**
+ * **ONE COLUMN OF LABELS IN EVERY VIEW'S MENU**: an item with no glyph keeps the glyph's place, so its label starts where
+ * *format*'s does after its `≡`, whatever builds the item. Measured on the stylesheet the app ships, as below.
+ */
+describe('the view menu’s labels', () => {
+  /** Where `b`'s label starts, from its menu's left edge: its label's, or the text's of an item that is text alone. */
+  const labelAt = (b: HTMLButtonElement): number => {
+    const range = document.createRange()
+    range.selectNodeContents(b.querySelector('.view-menu-label') ?? b)
+    return Math.round(range.getBoundingClientRect().left - rect(b.closest('.view-menu')).left)
+  }
+  const labels = (a: HTMLElement, list: string) =>
+    [...a.querySelectorAll<HTMLButtonElement>(`${list} button`)].map((b) => ({ item: b.textContent, at: labelAt(b) }))
+  /** Where *format*'s label starts, after its glyph, in a menu that has nothing else. */
+  const formatAt = (): number => {
+    const { actions } = build({}, { splits: false })
+    moreOf(actions)?.click()
+    const format = actions.querySelector<HTMLButtonElement>('button.format-doc') as HTMLButtonElement
+    expect(format.querySelector('.icon'), 'precondition: format has its glyph').not.toBeNull()
+    const at = labelAt(format)
+    actions.remove()
+    return at
+  }
+  const move = { go: () => {}, refusal: () => null }
+
+  it('starts every label of the source view’s menu where format’s starts', () => {
+    const column = formatAt()
+    const { actions, menu } = build({ move }, { splits: false })
+    menu.setLayout(true, true)
+    moreOf(actions)?.click()
+    const drawn = labels(actions, '.view-menu-main')
+    expect(drawn.map((d) => d.item)).toEqual([
+      'move view left',
+      'move view right',
+      'move view up',
+      'move view down',
+      'format',
+    ])
+    expect(drawn).toEqual(drawn.map((d) => ({ ...d, at: column })))
+  })
+
+  it('starts every label of a pane’s menu there too: its settings, its checks and the views a split offers', () => {
+    const column = formatAt()
+    const on = { on: () => false, set: () => {} }
+    const { actions, menu } = build(
+      {
+        move,
+        display: {
+          groups: [
+            {
+              label: 'layout',
+              choices: [
+                { value: 'code', label: 'code' },
+                { value: 'outline', label: 'outline' },
+              ],
+              current: () => 'code',
+              pick: () => {},
+            },
+          ],
+          expandAll: on,
+          reset: () => {},
+        },
+      },
+      { formats: false },
+    )
+    menu.setLayout(true, true)
+    menu.addCheck('clif-compact', 'compact', on)
+    moreOf(actions)?.click()
+    const drawn = labels(actions, '.view-menu-main')
+    expect(drawn.map((d) => d.item)).toEqual([
+      'split right',
+      'split down',
+      'move view left',
+      'move view right',
+      'move view up',
+      'move view down',
+      'code',
+      'outline',
+      'expand all',
+      'reset folds',
+      'compact',
+    ])
+    expect(drawn).toEqual(drawn.map((d) => ({ ...d, at: column })))
+    actions.querySelector<HTMLButtonElement>('button.view-split[data-dir="row"]')?.click()
+    const pairs = labels(actions, '.view-menu-pairs')
+    expect(pairs.length, 'precondition: the split offers its views').toBeGreaterThan(0)
+    expect(pairs).toEqual(pairs.map((d) => ({ ...d, at: column })))
   })
 })
 

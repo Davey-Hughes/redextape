@@ -1,17 +1,20 @@
 import type { EditorView } from '@codemirror/view'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cdp, page, userEvent } from 'vitest/browser'
-import { HEADER_ORDER } from '../../src/layout'
+import { HEADER_ORDER, LAYOUT_STORAGE_KEY, type LayoutNode, type MoveDirection, moveLeaf } from '../../src/layout'
 import { HINT_ROWS, HINT_SENTENCE } from '../../src/view-keys'
 import { chromiumOnly } from './engine'
 import {
   armed,
   chooseOption,
+  clickWorkspaceItem,
+  drawn,
   focusInPage,
   live,
   mounted,
   notice,
   PREFIX,
+  resetToFourViews,
   SHELL,
   stateIdle,
   titleText,
@@ -49,15 +52,47 @@ const typed = (text: string): string => `${SOURCE.slice(0, CARET)}${text}${SOURC
 const cut = (count: number): string => `${SOURCE.slice(0, CARET)}${SOURCE.slice(CARET + count)}`
 
 let view: EditorView
+/** The arrangement the first load drew, as `drawn` reads it: the one `start` puts back. */
+let first: string
 
 const hint = (): HTMLElement => document.querySelector('#view-keys') as HTMLElement
 
-/** All four views, the program as this file wrote it, and the caret in the source editor at `CARET`. */
+/** The tree the app stored last, which is the tree on screen once a gesture has run. */
+const storedTree = (): LayoutNode => JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? '{}').tree
+
+/** Where the view `leaf` is drawn, as plain numbers: a `DOMRect`'s are getters, which `toEqual` does not compare. */
+const place = (leaf: string) => {
+  const r = (
+    document.querySelector(`#views [data-leaf="${leaf}"]:not([role="tab"])`) as HTMLElement
+  ).getBoundingClientRect()
+  return { left: r.left, top: r.top, width: r.width, height: r.height }
+}
+
+/** Where each of the four views is drawn. */
+const everyPlace = () => Object.fromEntries(['source', 'lambda-0', 'rxm-0', 'tm-0'].map((leaf) => [leaf, place(leaf)]))
+
+/** Every view of `was` drawn within 1 px of where it was, each edge and extent, after `gesture`. */
+const placedAs = (was: ReturnType<typeof everyPlace>, gesture: string): void => {
+  for (const [leaf, box] of Object.entries(was)) {
+    const now = place(leaf)
+    for (const k of ['left', 'top', 'width', 'height'] as const)
+      expect(Math.abs(now[k] - box[k]), `after ${gesture}, ${leaf}'s ${k}`).toBeLessThanOrEqual(1)
+  }
+}
+
+/**
+ * All four views in the first load's arrangement, the program as this file wrote it, and the caret in the source
+ * editor at `CARET`.
+ */
 async function start(): Promise<void> {
   // EVERY TOGGLE BUT CLIF'S PRESSED, AND CLIF'S NOT: a case that fails between showing the CLIF view and hiding it
   // again leaves it shown.
   for (const b of document.querySelectorAll<HTMLButtonElement>('#views-shown button'))
     if ((b.getAttribute('aria-pressed') === 'true') === (b.dataset.shows === 'clif')) b.click()
+  // THE FIRST LOAD'S ARRANGEMENT, PUT BACK WHERE A CASE LEFT THE VIEWS IN OTHER PLACES: a move case that fails between
+  // its move and the move back leaves them so, and the toggles above cannot undo it, since all four come back as they
+  // were left (the view layouts spec §4.5).
+  if (drawn() !== first) await resetToFourViews()
   if (view.state.doc.toString() !== SOURCE) {
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: SOURCE } })
     await until(stateIdle, 'the program to compile again')
@@ -79,9 +114,12 @@ async function prefix(): Promise<void> {
   expect(armed(), 'the prefix did not arm the mode').toBe(true)
 }
 
-/** The caret is where `start` put it: the rebuild took the editor off the page and did not cost it its place. */
-const caretKept = (): void => {
-  expect(view.hasFocus, 'the switch took the focus out of the editor').toBe(true)
+/**
+ * The caret is where `start` put it: the rebuild took the editor off the page and did not cost it its place.
+ * `gesture` names what rebuilt it, for the failure's message.
+ */
+const caretKept = (gesture = 'switch'): void => {
+  expect(view.hasFocus, `the ${gesture} took the focus out of the editor`).toBe(true)
   expect(view.state.selection.main.head, 'the caret is not where it was').toBe(CARET)
 }
 
@@ -95,6 +133,7 @@ describe('view keys', () => {
       () => stateIdle() && (document.querySelector('#results')?.textContent ?? '').includes('λ 42'),
       'the compile',
     )
+    first = drawn()
   })
 
   afterEach(async () => {
@@ -135,6 +174,10 @@ describe('view keys', () => {
       ']',
       '[',
       ...HEADER_ORDER.map((_, i) => String(i + 1)),
+      'h',
+      'j',
+      'k',
+      'l',
       'Esc',
     ])
     expect([...hint().children].map((row) => row.textContent)).toEqual([
@@ -454,6 +497,236 @@ describe('view keys', () => {
     caretKept()
   })
 
+  /**
+   * **A MOVE KEY MOVES THE FOCUSED VIEW** (spec §7.3, §9), here the source view, which holds the caret. All four put
+   * it beside λ in a row of their own, so `l` trades their places and `←` trades them back, each place keeping its
+   * size. The live region says what moved and which way (§9.5), and the caret stays where it was, as after a switch.
+   */
+  it('moves the focused view on l and back on the left arrow, keeping the caret, and says what moved', async () => {
+    await start()
+    const tree = storedTree()
+    expect(
+      moveLeaf(moveLeaf(tree, 'source', 'right') ?? tree, 'source', 'left'),
+      'precondition: the source view moves right and back left to the tree it left',
+    ).toEqual(tree)
+    const [source, lambda] = [place('source'), place('lambda-0')]
+    expect(source.top, 'precondition: λ is beside the source view').toBe(lambda.top)
+    expect(source.left, 'precondition: λ is to the right of the source view').toBeLessThan(lambda.left)
+    await prefix()
+    await userEvent.keyboard('l')
+    expect(place('source'), 'l did not put the source view where λ was').toEqual(lambda)
+    expect(place('lambda-0'), 'l did not put λ where the source view was').toEqual(source)
+    expect(live()).toBe('view moved right — source')
+    caretKept('move')
+    await prefix()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(place('source'), 'the left arrow did not put the source view back').toEqual(source)
+    expect(live()).toBe('view moved left — source')
+    expect(view.state.doc.toString(), 'a move key was typed').toBe(SOURCE)
+    caretKept('move')
+  })
+
+  /**
+   * **A MOVE STRAIGHT BACK PUTS EVERY VIEW WHERE IT WAS, AT ITS SIZE** (spec §9.6). In all four, the source view moved
+   * down leaves its row for the column, a strip under λ, and moved up as §9.2 makes it would then trade places with λ,
+   * leaving λ a strip across the top. `k` straight after `j` puts back the row of two instead.
+   */
+  it('moves the focused view straight back on k after j, every view where it was, where up would trade it', async () => {
+    await start()
+    const tree = storedTree()
+    const down = moveLeaf(tree, 'source', 'down')
+    expect(down, 'precondition: the source view moves down').not.toBeNull()
+    expect(
+      moveLeaf(down as LayoutNode, 'source', 'up'),
+      'precondition: up as §9.2 makes it is another tree',
+    ).not.toEqual(tree)
+    const was = everyPlace()
+    await prefix()
+    await userEvent.keyboard('j')
+    expect(storedTree(), 'j did not move the source view down').toEqual(down)
+    caretKept('move')
+    await prefix()
+    await userEvent.keyboard('k')
+    expect(storedTree(), 'k did not put back the tree j was pressed on').toEqual(tree)
+    placedAs(was, 'k')
+    expect(live()).toBe('view moved up — source')
+    expect(view.state.doc.toString(), 'a move key was typed').toBe(SOURCE)
+    caretKept('move')
+  })
+
+  it('walks two moves straight back, newest first, on j j k k', async () => {
+    await start()
+    const tree = storedTree()
+    const once = moveLeaf(tree, 'source', 'down') as LayoutNode
+    const was = everyPlace()
+    for (const key of ['j', 'j']) {
+      await prefix()
+      await userEvent.keyboard(key)
+    }
+    expect(storedTree(), 'precondition: j twice moved the source view down twice').toEqual(
+      moveLeaf(once, 'source', 'down'),
+    )
+    await prefix()
+    await userEvent.keyboard('k')
+    expect(storedTree(), 'the first k did not put back the tree of the first j').toEqual(once)
+    await prefix()
+    await userEvent.keyboard('k')
+    expect(storedTree(), 'the second k did not put back the tree before').toEqual(tree)
+    placedAs(was, 'k k')
+    caretKept('move')
+  })
+
+  /**
+   * **A MOVE IN A LAYOUT CHANGED OTHERWISE FORGETS EVERY MOVE BEFORE IT** (spec §9.6). With λ toggled off after `j`,
+   * `k` is the move §9.2 makes in the three views, and `j` takes that back. λ toggled on again brings all four back
+   * as `j` left them (§4.5), and `k` there is now §9.2's trade with λ: the move in three forgot `j`, which the
+   * toggle off and on alone would have kept.
+   */
+  it('makes k the move §9.2 makes in the layout a toggle left, and forgets j once a move is made there', async () => {
+    await start()
+    const tree = storedTree()
+    await prefix()
+    await userEvent.keyboard('j')
+    const down = storedTree()
+    await prefix()
+    await userEvent.keyboard('2')
+    try {
+      const three = storedTree()
+      expect(mounted(), 'precondition: λ toggled off').toEqual(['source', 'rxm-0', 'tm-0'])
+      const up = moveLeaf(three, 'source', 'up')
+      expect(up, 'precondition: the source view moves up in the three').not.toBeNull()
+      await prefix()
+      await userEvent.keyboard('k')
+      expect(storedTree(), 'k after a toggle is not the move §9.2 makes').toEqual(up)
+      await prefix()
+      await userEvent.keyboard('j')
+      expect(storedTree(), 'j did not take back the move in the three').toEqual(three)
+    } finally {
+      await prefix()
+      await userEvent.keyboard('2')
+    }
+    expect(storedTree(), 'precondition: all four as j left them').toEqual(down)
+    const was = everyPlace()
+    await prefix()
+    await userEvent.keyboard('k')
+    expect(storedTree(), 'k put back the tree before j, which a move since had forgotten').toEqual(
+      moveLeaf(down, 'source', 'up'),
+    )
+    expect(storedTree()).not.toEqual(tree)
+    expect(place('source'), 'precondition: the trade moved the source view').not.toEqual(was.source)
+    caretKept('move')
+  })
+
+  /**
+   * **CAPS LOCK TYPES A MOVE KEY AS ITS CAPITAL, AND IT STILL MOVES** (spec §7.3). `userEvent`'s `CapsLock` changes no
+   * key sent after it, so the capital is sent as a browser with Caps Lock on reports it: `L`, with `Shift` up.
+   */
+  it('moves the focused view on a capital with Shift up, as Caps Lock types it, and types nothing', async () => {
+    await start()
+    const [source, lambda] = [place('source'), place('lambda-0')]
+    expect(source.left, 'precondition: λ is to the right of the source view').toBeLessThan(lambda.left)
+    await prefix()
+    await userEvent.keyboard('L')
+    expect(armed()).toBe(false)
+    expect(place('source'), 'L did not put the source view where λ was').toEqual(lambda)
+    expect(view.state.doc.toString(), 'the L was typed').toBe(SOURCE)
+    caretKept('move')
+    await prefix()
+    await userEvent.keyboard('H')
+    expect(place('source'), 'H did not put the source view back').toEqual(source)
+    expect(view.state.doc.toString(), 'the H was typed').toBe(SOURCE)
+    caretKept('move')
+  })
+
+  it('ends on a move key with Shift down, which types its capital, and moves nothing', async () => {
+    await start()
+    const before = place('source')
+    await prefix()
+    await userEvent.keyboard('{Shift>}L{/Shift}')
+    expect(armed()).toBe(false)
+    expect(view.state.doc.toString(), 'Shift+L did not reach the editor').toBe(typed('L'))
+    expect(place('source'), 'Shift+L moved the view').toEqual(before)
+  })
+
+  it('says why on the notice line when a move key is refused, and moves nothing', async () => {
+    await start()
+    for (const key of ['2', '3', '4']) {
+      await prefix()
+      await userEvent.keyboard(key)
+    }
+    expect(mounted(), 'precondition: the source view alone').toEqual(['source'])
+    const before = place('source')
+    await prefix()
+    await userEvent.keyboard('h')
+    expect(armed()).toBe(false)
+    expect(place('source'), 'a refused move moved the view').toEqual(before)
+    expect(notice()).toBe('this view is the only one, so it has nowhere to go')
+    expect(view.state.doc.toString(), 'the h was typed').toBe(SOURCE)
+    caretKept('refused move')
+  })
+
+  /**
+   * **AT THE EDGE A MOVE KEY IS REFUSED IN EACH DIRECTION'S OWN WORDS**, the words its greyed menu item has (spec §9.3).
+   * The source view beside the TM view is at the left edge; `j`, `l` and `k` take it to the bottom, the right and the
+   * top, and at each edge the key toward it moves nothing. **NO KEY IS THE ONE BEFORE IT STRAIGHT BACK** (§9.6), which
+   * would put back the tree before rather than reach the next edge.
+   */
+  it('says how far the view has gone on the notice line when a move key is at the edge, and moves nothing', async () => {
+    await start()
+    for (const key of ['2', '4']) {
+      await prefix()
+      await userEvent.keyboard(key)
+    }
+    expect(mounted(), 'precondition: the source view and the TM view').toEqual(['source', 'tm-0'])
+    const moved = async (key: string, d: MoveDirection): Promise<void> => {
+      const want = moveLeaf(storedTree(), 'source', d)
+      expect(want, `precondition: the source view moves ${d}`).not.toBeNull()
+      await prefix()
+      await userEvent.keyboard(key)
+      expect(storedTree(), `${key} did not move the source view ${d}`).toEqual(want)
+    }
+    const refused = async (key: string, d: MoveDirection, words: string): Promise<void> => {
+      const tree = storedTree()
+      expect(moveLeaf(tree, 'source', d), `precondition: the source view is at the ${d} edge`).toBeNull()
+      expect(notice(), 'precondition: the notice line does not say it already').not.toBe(words)
+      const before = place('source')
+      await prefix()
+      await userEvent.keyboard(key)
+      expect(armed()).toBe(false)
+      expect(place('source'), `${key} at the edge moved the view`).toEqual(before)
+      expect(storedTree(), `${key} at the edge changed the tree`).toEqual(tree)
+      expect(notice()).toBe(words)
+      expect(view.state.doc.toString(), `the ${key} was typed`).toBe(SOURCE)
+      caretKept('refused move')
+    }
+    await refused('h', 'left', 'this view is as far left as it can go')
+    await moved('j', 'down')
+    await refused('j', 'down', 'this view is as far down as it can go')
+    await moved('l', 'right')
+    await refused('l', 'right', 'this view is as far right as it can go')
+    await moved('k', 'up')
+    await refused('k', 'up', 'this view is as far up as it can go')
+  })
+
+  /**
+   * **ON THE STAGE A MOVE KEY IS REFUSED IN ITS OWN WORDS** (spec §9.4: tabs have no arrangement to move in), since the
+   * menu there has no move item to take words from, and the tree under the tabs is left as it was.
+   */
+  it('refuses a move key on the Stage, saying so, and moves nothing', async () => {
+    await start()
+    const tree = storedTree()
+    clickWorkspaceItem('[data-switch="views"][data-value="stage"]')
+    try {
+      expect(mounted(), 'precondition: the source view alone on the Stage').toEqual(['source'])
+      await prefix()
+      await userEvent.keyboard('l')
+      expect(notice()).toBe('the stage has no arrangement to move this view in — choose tiles to move it')
+      expect(storedTree(), 'a move key moved a view on the Stage').toEqual(tree)
+    } finally {
+      clickWorkspaceItem('[data-switch="views"][data-value="tiles"]')
+    }
+  })
+
   it('ends on a pointer press', async () => {
     await start()
     await prefix()
@@ -535,10 +808,10 @@ describe('view keys', () => {
   /**
    * **A KEY THE MODE CONSUMES IS SEEN BY NOTHING UNDER THE WINDOW** (spec §7.3: the editor under the focus does not see
    * it), and one it does not consume is seen as a key is while the mode is idle. A listener on the document stands for
-   * whatever is under the window. **NOTHING ON THE PAGE TODAY ACTS ON A CONSUMED KEY IT IS SENT**: CodeMirror runs no
-   * handler, vim's among them, for a `keydown` whose default was prevented, and the app's own `keydown` listeners
-   * answer the arrows, Home, End, the page keys, Enter and Space, none of which is a view key. So this holds the
-   * sentence itself, for a key added to the table that one of them does answer.
+   * whatever is under the window. CodeMirror runs no handler, vim's among them, for a `keydown` whose default was
+   * prevented, and the app's own `keydown` listeners answer the arrows, Home, End, the page keys, Enter and Space.
+   * **THE ARROWS ARE VIEW KEYS**, so an arrow after the prefix is held here with the table's other keys: the source
+   * view moved right and back left, as the move case above moves it.
    */
   it('keeps a key it consumes from every listener under the window, and no other', async () => {
     await start()
@@ -549,8 +822,14 @@ describe('view keys', () => {
     document.addEventListener('keydown', listener, { capture: true })
     try {
       await prefix()
-      await userEvent.keyboard('2')
+      await userEvent.keyboard('{ArrowRight}')
+      await prefix()
+      await userEvent.keyboard('{ArrowLeft}')
       // `Control` IS A MODIFIER PRESSED ALONE, WHICH THE MODE LEAVES ALONE.
+      expect(seen.splice(0), 'a prefix or an arrow was seen under the window').toEqual(['Control', 'Control'])
+      expect(mounted(), 'the arrows did not move the source view back').toEqual(['source', 'lambda-0', 'rxm-0', 'tm-0'])
+      await prefix()
+      await userEvent.keyboard('2')
       expect(seen.splice(0), 'the prefix or the table key was seen under the window').toEqual(['Control'])
       await prefix()
       await userEvent.keyboard('{Escape}')

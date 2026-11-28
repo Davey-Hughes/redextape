@@ -33,6 +33,7 @@ export abstract class MachineViewChrome {
         ? { split: (dir: Dir, c: PaneChoice) => (dir === 'row' ? on.splitRow?.(c) : on.splitColumn?.(c)) }
         : {}),
       ...(on.close !== undefined ? { close: on.close } : {}),
+      ...(on.move !== undefined ? { move: on.move } : {}),
       choices: () => this.#choices,
     })
   }
@@ -65,8 +66,8 @@ export abstract class MachineViewChrome {
    * `PaneView.setLayoutControls` carries the argument for `choices` riding this call. Neither is
    * repeated here.
    */
-  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void {
+  setLayoutControls(canClose: boolean, tiled: boolean, choices: SplitChoices): void {
     this.#choices = choices
-    this.menu.setLayout(canClose, canSplit)
+    this.menu.setLayout(canClose, tiled)
   }
 }

@@ -60,17 +60,11 @@ describe('the layout tree in the app', () => {
   })
 
   /**
-   * **THE ABSENCE IS REAL, BUT THIS TEST DOES NOT SAY WHICH FACT PRODUCES IT.** `viewMenu` withholds the
-   * split controls for either of two independent reasons: `canSplit: false` (`setLayout`'s doc), or a
-   * caller that leaves out `split` or `choices` (it builds the split items only when given both).
-   * `view-menu.test.ts` pins the `canSplit` half at the control's tier. `main.ts` builds the source pane's
-   * strip with no `choices`, so this assertion would hold even if the `canSplit` half were wired the other
-   * way, and nothing in this file pins the flag.
-   *
-   * WHAT KEEPS IT TRUE IS A LITERAL RATHER THAN A TEST: `pane-host.ts`'s `applyLayout` calls
-   * `sourceLayout.update(live.size > 1, false)`, with `false` written out and documented as unchangeable
-   * (source can never split — `splitLeaf` refuses it). A regression would have to edit that literal,
-   * which is a deliberate act, not a drift.
+   * **WHAT KEEPS IT TRUE IS THE SOURCE VIEW'S MENU OPTIONS, NOT A FLAG.** `viewMenu` builds the split items only for
+   * a caller that hands it both `split` and `choices`, and `main.ts` builds the source view's menu with neither.
+   * `setLayout`'s second argument, `tiled`, is true for the source view in tiles, since its move items need it,
+   * so nothing else withholds a split here. `view-menu.test.ts` pins a menu built without the two at the control's
+   * tier; this test pins that the app builds the source view's menu so.
    */
   it('offers no split control on the source pane', () => {
     expect(splitRowOn('source')).toBeNull()

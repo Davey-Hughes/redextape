@@ -14,8 +14,17 @@ import {
   MAX_TREE_LEAVES,
   MIN_PANE_FRACTION,
   MIN_VIEW_PX,
+  MOVE_DIRECTIONS,
+  MOVES_KEPT,
+  type MoveDirection,
+  type MoveStep,
+  moveBack,
+  moveLeaf,
+  moveRefusal,
   parseLayout,
   parseTree,
+  pressRefusal,
+  recordMove,
   resize,
   SOURCE_LEAF,
   serializeLayout,
@@ -321,6 +330,674 @@ describe('closeLeaf', () => {
     expect(after.sizes.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 10)
     // The survivors keep their RATIO: 0.2 : 0.5 becomes 0.2/0.7 : 0.5/0.7.
     expect(after.sizes[0]).toBeCloseTo(0.2 / 0.7, 10)
+  })
+})
+
+/**
+ * `moveLeaf` — the view layouts spec §9.2 and §14 item 3: the spec's table, and over every small tree that a move
+ * gives a tree the loader takes with the same views in it, or `null`.
+ */
+describe('moveLeaf', () => {
+  /** One letter a view, the table's own: S source, L λ, R rxm, T TM, C clif. R was A, for asm, in the spec. */
+  const V: Readonly<Record<string, LayoutNode>> = {
+    S: leafOf('source', 'source'),
+    L: leafOf('lambda-0', 'lambda'),
+    R: leafOf('rxm-0', 'rxm'),
+    T: leafOf('tm-0', 'tm'),
+    C: leafOf('clif-0', 'clif'),
+  }
+  const v = (letter: string): LayoutNode => {
+    const node = V[letter]
+    if (node === undefined) throw new Error(`no view ${letter}`)
+    return node
+  }
+  const split =
+    (dir: 'row' | 'column') =>
+    (sizes: number[] | null, ...children: (LayoutNode | string)[]): LayoutNode => ({
+      kind: 'split',
+      dir,
+      sizes: sizes ?? children.map(() => 1 / children.length),
+      children: children.map((c) => (typeof c === 'string' ? v(c) : c)),
+    })
+  const row = split('row')
+  const col = split('column')
+
+  it.each<[string, LayoutNode, string, 'left' | 'right' | 'up' | 'down', LayoutNode | null]>([
+    ['1', row(null, 'S', 'T'), 'T', 'left', row(null, 'T', 'S')],
+    ['4', row(null, 'S', 'T'), 'T', 'down', col(null, 'S', 'T')],
+    ['—', row(null, 'S', 'T'), 'T', 'right', null],
+    [
+      '3',
+      row(null, col(null, 'S', 'R'), col(null, 'L', 'T')),
+      'R',
+      'right',
+      row([0.25, 0.25, 0.5], 'S', 'R', col(null, 'L', 'T')),
+    ],
+    [
+      '2',
+      row(null, 'S', 'R', col(null, 'L', 'T')),
+      'R',
+      'right',
+      row([1 / 3, 2 / 3], 'S', col([0.5, 0.25, 0.25], 'R', 'L', 'T')),
+    ],
+    [
+      '4',
+      row(null, col(null, 'S', 'R'), col(null, 'L', 'T')),
+      'R',
+      'down',
+      col([0.75, 0.25], row([1 / 3, 2 / 3], 'S', col(null, 'L', 'T')), 'R'),
+    ],
+    ['3', col(null, 'S', row(null, 'L', 'T')), 'T', 'up', col([0.5, 0.25, 0.25], 'S', 'T', 'L')],
+    ['4', col(null, 'S', row(null, 'L', 'T')), 'T', 'down', col([0.5, 0.25, 0.25], 'S', 'L', 'T')],
+  ])('the spec table, case %s: %j moving %s %s', (_, tree, letter, direction, want) => {
+    const got = moveLeaf(tree, leaves(v(letter))[0]?.id ?? '', direction)
+    if (want === null) expect(got).toBeNull()
+    else {
+      expect(got).not.toBeNull()
+      // SIZES TO THE FLOAT, NOT EXACTLY: a half of a third is not a third's half in binary.
+      const flat = (n: LayoutNode): unknown =>
+        n.kind === 'leaf'
+          ? n.id
+          : { dir: n.dir, sizes: n.sizes.map((x) => Math.round(x * 1e9)), c: n.children.map(flat) }
+      expect(flat(got as LayoutNode)).toEqual(flat(want))
+    }
+  })
+
+  /** Each view's share of the whole area, to the float. */
+  const areas = (t: LayoutNode): Record<string, number> =>
+    Object.fromEntries(
+      [...leafExtents(t, { width: 1, height: 1 }, 0)].map(([id, e]) => [
+        id,
+        Math.round(e.width * e.height * 1e9) / 1e9,
+      ]),
+    )
+
+  /** Every view's area in `row[col[S, R], col[L, T]]`, the spec's own row for case 4 across the root. */
+  const quarters = { source: 0.25, 'rxm-0': 0.25, 'lambda-0': 0.25, 'tm-0': 0.25 }
+
+  /** `x` rounded as `areas` rounds a view's area. */
+  const rounded = (x: number): number => Math.round(x * 1e9) / 1e9
+
+  /**
+   * **CASES 2, 3 AND 4 KEEP EVERY VIEW'S AREA** in the spec's rows: into the split beside it the view takes the share it
+   * held as a strip across that split, out of a branch the share of the area it held there, and across the root that
+   * share of the tree as a strip along the edge. Case 1 trades two slots, here of one size. A row that pins its areas
+   * before the move pins them after it too.
+   */
+  it.each<[string, LayoutNode, string, MoveDirection, Record<string, number> | null, Record<string, number> | 'kept']>([
+    ['1', row(null, 'S', 'T'), 'T', 'left', null, 'kept'],
+    ['4', row(null, 'S', 'T'), 'T', 'down', { source: 0.5, 'tm-0': 0.5 }, 'kept'],
+    ['3', row(null, col(null, 'S', 'R'), col(null, 'L', 'T')), 'R', 'right', null, 'kept'],
+    [
+      '2',
+      row(null, 'S', 'R', col(null, 'L', 'T')),
+      'R',
+      'right',
+      { source: rounded(1 / 3), 'rxm-0': rounded(1 / 3), 'lambda-0': rounded(1 / 6), 'tm-0': rounded(1 / 6) },
+      'kept',
+    ],
+    ['2', row(null, 'S', col(null, 'L', 'T')), 'S', 'right', { source: 0.5, 'lambda-0': 0.25, 'tm-0': 0.25 }, 'kept'],
+    ['4', row(null, col(null, 'S', 'R'), col(null, 'L', 'T')), 'R', 'down', quarters, 'kept'],
+    ['3', col(null, 'S', row(null, 'L', 'T')), 'T', 'up', null, 'kept'],
+    ['4', col(null, 'S', row(null, 'L', 'T')), 'T', 'down', { source: 0.5, 'lambda-0': 0.25, 'tm-0': 0.25 }, 'kept'],
+    ['4', col(null, row(null, 'S', 'L'), 'T'), 'T', 'right', { source: 0.25, 'lambda-0': 0.25, 'tm-0': 0.5 }, 'kept'],
+  ])('gives each view its area, case %s: %j moving %s %s', (_, tree, letter, direction, before, after) => {
+    const got = moveLeaf(tree, leaves(v(letter))[0]?.id ?? '', direction)
+    expect(got).not.toBeNull()
+    if (before !== null) expect(areas(tree)).toEqual(before)
+    expect(areas(got as LayoutNode)).toEqual(after === 'kept' ? areas(tree) : after)
+  })
+
+  it('takes the room of a view moved out of its branch from that branch, as much as it held there', () => {
+    // UNEVEN, SO HALF THE BRANCH AND WHAT THE VIEW HELD DIFFER: R held 0.3 of a branch half the row wide.
+    const tree = row(null, col([0.7, 0.3], 'S', 'R'), col(null, 'L', 'T'))
+    const got = moveLeaf(tree, 'rxm-0', 'right') as LayoutNode
+    expect(leaves(got).map((l) => l.id)).toEqual(['source', 'rxm-0', 'lambda-0', 'tm-0'])
+    expect(areas(got)).toEqual(areas(tree))
+  })
+
+  it('keeps the area of a view moved from deep in its branch, and of every other view in the branch and out of it', () => {
+    // R HELD A QUARTER OF ITS BRANCH, HALF OF `row[C, R]`: THAT ROW GIVES IT UP, NOT S, SO S IS A QUARTER STILL.
+    const tree = row(null, col(null, 'S', row(null, 'C', 'R')), col(null, 'L', 'T'))
+    const got = moveLeaf(tree, 'rxm-0', 'right') as LayoutNode
+    expect(leaves(got).map((l) => l.id)).toEqual(['source', 'clif-0', 'rxm-0', 'lambda-0', 'tm-0'])
+    expect(areas(tree)).toEqual({ source: 0.25, 'clif-0': 0.125, 'rxm-0': 0.125, 'lambda-0': 0.25, 'tm-0': 0.25 })
+    expect(areas(got)).toEqual(areas(tree))
+  })
+
+  it('gives a view that joins the split beside it the share it held, and each view in that split its area', () => {
+    expect(moveLeaf(row(null, 'S', col(null, 'L', 'T')), 'source', 'right')).toEqual(
+      col([0.5, 0.25, 0.25], 'S', 'L', 'T'),
+    )
+    // UNEVEN, SO A HALF OF THE NEIGHBOUR OR AN EQUAL SHARE WOULD SHOW: S HELD 0.7 OF THE ROW, L AND T 0.4 AND 0.6 OF 0.3.
+    const tree = row([0.7, 0.3], 'S', col([0.4, 0.6], 'L', 'T'))
+    const right = moveLeaf(tree, 'source', 'right') as LayoutNode
+    expect(leaves(right).map((l) => l.id)).toEqual(['source', 'lambda-0', 'tm-0'])
+    expect(right.kind === 'split' && right.dir).toBe('column')
+    expect(areas(right)).toEqual(areas(tree))
+    const mirrored = row([0.3, 0.7], col([0.4, 0.6], 'L', 'T'), 'S')
+    const left = moveLeaf(mirrored, 'source', 'left') as LayoutNode
+    expect(leaves(left).map((l) => l.id)).toEqual(['lambda-0', 'tm-0', 'source'])
+    expect(areas(left)).toEqual(areas(mirrored))
+  })
+
+  it('keeps each slot its size when two views trade places', () => {
+    const tree = row([0.7, 0.3], 'S', 'T')
+    expect(moveLeaf(tree, 'tm-0', 'left')).toEqual(row([0.7, 0.3], 'T', 'S'))
+  })
+
+  it('leaves a view that is the whole tree where it is, in every direction', () => {
+    for (const d of MOVE_DIRECTIONS) expect(moveLeaf(v('L'), 'lambda-0', d)).toBeNull()
+  })
+
+  it('gives a view across a root the share of the tree it held, and splices in a row it leaves behind', () => {
+    // CASE 4 ASKS THE ROOT AS IT WAS, A COLUMN, AND T HELD HALF OF IT, SO T AND WHAT IS LEFT ARE A HALF EACH; WHAT IS
+    // LEFT IS `row[S, L]`, WHICH THE FLATTENING SPLICES INTO THE NEW ROW, EACH OF S AND L KEEPING A QUARTER.
+    const tree = col(null, row(null, 'S', 'L'), 'T')
+    expect(moveLeaf(tree, 'tm-0', 'right')).toEqual(row([0.25, 0.25, 0.5], 'S', 'L', 'T'))
+  })
+
+  it('finds the edge through a split in a split of its own direction, as the screen shows it', () => {
+    // `closeLeaf` LEAVES SUCH TREES: S is at the top of the column, though the tree puts its column inside one.
+    const tree = col([0.5, 0.5], col([0.25, 0.75], 'S', 'L'), 'T')
+    expect(moveLeaf(tree, 'source', 'up')).toBeNull()
+    expect(moveLeaf(tree, 'source', 'down')).toEqual(col([0.125, 0.375, 0.5], 'L', 'S', 'T'))
+  })
+
+  it('answers no split in a split of its own direction where a join would leave one', () => {
+    // CASE 2 OUT OF A ROW OF TWO LEAVES ITS COLUMN ALONE IN THE COLUMN ABOVE IT.
+    const tree = col(null, row(null, 'S', col(null, 'L', 'R')), 'T')
+    expect(moveLeaf(tree, 'source', 'right')).toEqual(col([0.25, 0.125, 0.125, 0.5], 'S', 'L', 'R', 'T'))
+  })
+
+  it('throws on a view the tree does not hold', () => {
+    expect(() => moveLeaf(row(null, 'S', 'T'), 'nope', 'left')).toThrow(/nope/)
+  })
+
+  /**
+   * `moveRefusal` — the view layouts spec §9.3: `moveLeaf`'s `null` said as alone or edge, and `addRefusal`'s floor
+   * asked of the tree a move makes. (h − 12) / 2 is 160 at 332 px, `DIVIDER_PX` being 12.
+   */
+  describe('the floor on a move', () => {
+    const roomy = { width: 1280, height: 800 }
+
+    it('says a lone view is alone, a view at the edge is at the edge, and lets a move with room go', () => {
+      for (const d of MOVE_DIRECTIONS) expect(moveRefusal(v('L'), 'lambda-0', d, roomy, DIVIDER_PX)).toBe('alone')
+      expect(moveRefusal(row(null, 'S', 'T'), 'tm-0', 'right', roomy, DIVIDER_PX)).toBe('edge')
+      expect(moveRefusal(row(null, 'S', 'T'), 'tm-0', 'left', roomy, DIVIDER_PX)).toBeNull()
+    })
+
+    it('refuses a move up or down that halves a view under the floor tall, and allows it at the floor', () => {
+      const tree = row(null, 'S', 'T')
+      expect(moveRefusal(tree, 'tm-0', 'down', { width: 1280, height: 332 }, DIVIDER_PX)).toBeNull()
+      expect(moveRefusal(tree, 'tm-0', 'down', { width: 1280, height: 331.9 }, DIVIDER_PX)).toBe('short')
+      expect(moveRefusal(tree, 'tm-0', 'up', { width: 1280, height: 331.9 }, DIVIDER_PX)).toBe('short')
+      expect(moveRefusal(tree, 'tm-0', 'left', { width: 1280, height: 331.9 }, DIVIDER_PX)).toBeNull()
+    })
+
+    it('refuses a move sideways that halves a view under the floor wide, and allows it at the floor', () => {
+      const tree = col(null, 'S', 'T')
+      expect(moveRefusal(tree, 'tm-0', 'right', { width: 332, height: 800 }, DIVIDER_PX)).toBeNull()
+      expect(moveRefusal(tree, 'tm-0', 'right', { width: 331.9, height: 800 }, DIVIDER_PX)).toBe('narrow')
+    })
+
+    it('refuses a move across the root whose strip would come out under the floor tall, and allows it at the floor', () => {
+      // R DOWN IS A STRIP A QUARTER OF THE TREE DEEP: (h − 12) / 4 is 160 at 652 px, `DIVIDER_PX` being 12.
+      const tree = row(null, col(null, 'S', 'R'), col(null, 'L', 'T'))
+      const area = { width: 1280, height: 652 }
+      const moved = moveLeaf(tree, 'rxm-0', 'down') as LayoutNode
+      expect(leafExtents(moved, area, DIVIDER_PX).get('rxm-0')).toEqual({ width: 1280, height: 160 })
+      expect(moveRefusal(tree, 'rxm-0', 'down', area, DIVIDER_PX)).toBeNull()
+      expect(moveRefusal(tree, 'rxm-0', 'down', { width: 1280, height: 651.9 }, DIVIDER_PX)).toBe('short')
+    })
+
+    it('holds a move sideways into a column to height, though every view keeps its area', () => {
+      // R RIGHT MAKES col[L, T] TWICE AS WIDE AND TAKES HALF OF IT, SO L KEEPS ITS AREA AT HALF ITS HEIGHT: a quarter of
+      // the height less two dividers, 160 at 664 px.
+      const tree = row(null, 'S', 'R', col(null, 'L', 'T'))
+      const area = { width: 1280, height: 664 }
+      const moved = moveLeaf(tree, 'rxm-0', 'right') as LayoutNode
+      expect(areas(moved)).toEqual(areas(tree))
+      expect(leafExtents(moved, area, DIVIDER_PX).get('lambda-0')?.height).toBe(160)
+      expect(moveRefusal(tree, 'rxm-0', 'right', area, DIVIDER_PX)).toBeNull()
+      expect(moveRefusal(tree, 'rxm-0', 'right', { width: 1280, height: 663.9 }, DIVIDER_PX)).toBe('short')
+    })
+
+    it('does not count a view whose share the move keeps, though a divider takes pixels from it', () => {
+      // T UP TRADES PLACES WITH S, AND THE ANSWER IS FLATTENED: row[L, R] SPLICED INTO THE ROOT ADDS A DIVIDER TO IT,
+      // WHICH TAKES 6 PX FROM S AND T, BOTH ALREADY UNDER THE FLOOR, WITH THEIR SHARES AS THEY WERE.
+      const tree = row(null, col(null, 'S', 'T'), row(null, 'L', 'R'))
+      const area = { width: 320, height: 800 }
+      const before = leafExtents(tree, area, DIVIDER_PX).get('source')?.width ?? 0
+      const after = leafExtents(moveLeaf(tree, 'tm-0', 'up') as LayoutNode, area, DIVIDER_PX).get('source')?.width
+      expect([before, after]).toEqual([154, 148])
+      expect(moveRefusal(tree, 'tm-0', 'up', area, DIVIDER_PX)).toBeNull()
+    })
+  })
+
+  /**
+   * Every tree of one to five views, every view and every direction (§14 item 3). The trees are built from the
+   * views in one order: a move is about where a view stands, not which view it is.
+   */
+  it('gives a tree parseTree takes with the same views, or null, for every small tree, view and direction', () => {
+    /** Every tree over `ids` in that order: a leaf, or a split of two runs or more along either axis. */
+    const trees = (ids: readonly LayoutNode[]): LayoutNode[] => {
+      if (ids.length === 1) return [ids[0] as LayoutNode]
+      const out: LayoutNode[] = []
+      /** Every way to cut `ids` into two runs or more. */
+      const cuts = (from: number): LayoutNode[][][] => {
+        if (from === ids.length) return [[]]
+        const all: LayoutNode[][][] = []
+        for (let to = from + 1; to <= ids.length; to++)
+          for (const rest of cuts(to)) all.push([ids.slice(from, to), ...rest])
+        return all
+      }
+      for (const runs of cuts(0)) {
+        if (runs.length < 2) continue
+        const each = runs.map(trees)
+        const pick = (k: number): LayoutNode[][] =>
+          k === each.length ? [[]] : (each[k] ?? []).flatMap((t) => pick(k + 1).map((r) => [t, ...r]))
+        for (const children of pick(0))
+          for (const dir of ['row', 'column'] as const) {
+            // UNEVEN SHARES, so a size carried to the wrong slot shows.
+            const weights = children.map((_, i) => i + 1)
+            const total = weights.reduce((a, b) => a + b, 0)
+            out.push({ kind: 'split', dir, children, sizes: weights.map((w) => w / total) })
+          }
+      }
+      return out
+    }
+    const views = ['S', 'L', 'R', 'T', 'C'].map(v)
+    const ids = (t: LayoutNode): string[] =>
+      leaves(t)
+        .map((l) => `${l.id}:${l.pane}`)
+        .sort()
+    /** Whether any split holds a split of its own direction. */
+    const nested = (t: LayoutNode): boolean =>
+      t.kind === 'split' && t.children.some((c) => (c.kind === 'split' && c.dir === t.dir) || nested(c))
+    /** The tree as the screen orders it: no sizes, and a split's same-direction splits spliced into it. */
+    const shape = (t: LayoutNode): unknown => {
+      if (t.kind === 'leaf') return t.id
+      const parts = t.children.flatMap((c) => {
+        const inner = shape(c)
+        return c.kind === 'split' && c.dir === t.dir ? (inner as { of: unknown[] }).of : [inner]
+      })
+      return { dir: t.dir, of: parts }
+    }
+    /** The split the view stands in as the screen draws it, and its place there. */
+    const standing = (s: unknown, id: string): { dir: string; of: unknown[]; i: number } | null => {
+      if (typeof s === 'string') return null
+      const split = s as { dir: string; of: unknown[] }
+      const i = split.of.indexOf(id)
+      if (i >= 0) return { ...split, i }
+      for (const c of split.of) {
+        const found = standing(c, id)
+        if (found !== null) return found
+      }
+      return null
+    }
+    /** Each view's share of the whole area, unrounded. */
+    const shares = (t: LayoutNode): Record<string, number> =>
+      Object.fromEntries([...leafExtents(t, { width: 1, height: 1 }, 0)].map(([id, e]) => [id, e.width * e.height]))
+    /** The most any view's share in `a` differs from its share in `b`, over the views `a` holds. */
+    const drift = (a: Record<string, number>, b: Record<string, number>): number =>
+      Math.max(0, ...Object.entries(a).map(([id, s]) => Math.abs(s - (b[id] ?? Number.NaN))))
+    const byCase = { kept: 0, traded: 0, joined: 0 }
+    let moved = 0
+    let refused = 0
+    for (let n = 1; n <= views.length; n++)
+      for (const tree of trees(views.slice(0, n)))
+        for (const l of leaves(tree))
+          for (const d of MOVE_DIRECTIONS) {
+            const got = moveLeaf(tree, l.id, d)
+            if (got === null) {
+              refused++
+              continue
+            }
+            moved++
+            expect(parseTree(structuredClone(got)), JSON.stringify({ tree, id: l.id, d })).not.toBeNull()
+            expect(ids(got)).toEqual(ids(tree))
+            expect(got, JSON.stringify({ tree, id: l.id, d })).not.toEqual(tree)
+            expect(nested(got), JSON.stringify({ tree, id: l.id, d })).toBe(false)
+            // NOT A RESIZE: with sizes set aside, and each split in a split of its own direction spliced in, as the
+            // screen draws them, the views stand otherwise than before.
+            expect(shape(got), JSON.stringify({ tree, id: l.id, d })).not.toEqual(shape(tree))
+            // THE AREAS, BY THE SPEC'S CASE: WHETHER THE VIEW HAS A NEIGHBOUR THAT WAY IN THE SPLIT IT STANDS IN.
+            const stand = standing(shape(tree), l.id)
+            const along = stand?.dir === (d === 'left' || d === 'right' ? 'row' : 'column')
+            const beside = along ? stand?.of[(stand?.i ?? 0) + (d === 'right' || d === 'down' ? 1 : -1)] : undefined
+            const was = shares(tree)
+            const now = shares(got)
+            if (typeof beside === 'string') {
+              // CASE 1: THE TWO TRADE SLOTS, EACH SLOT KEEPING ITS SIZE, SO THEY TRADE AREAS AND NO OTHER VIEW'S CHANGES.
+              byCase.traded++
+              const traded = { ...was, [l.id]: was[beside] ?? 0, [beside]: was[l.id] ?? 0 }
+              expect(drift(now, traded), JSON.stringify({ tree, id: l.id, d })).toBeLessThan(1e-9)
+            } else {
+              // CASES 2, 3 AND 4: INTO THE SPLIT BESIDE IT, OUT OF A BRANCH, OR TO THE EDGE OF THE TREE, AND EVERY VIEW
+              // KEEPS ITS AREA.
+              if (beside === undefined) byCase.kept++
+              else byCase.joined++
+              expect(drift(now, was), JSON.stringify({ tree, id: l.id, d })).toBeLessThan(1e-9)
+            }
+          }
+    // THE SWEEP REACHED BOTH OUTCOMES, so neither half of the property passed by never being asked.
+    expect(moved).toBeGreaterThan(1000)
+    expect(refused).toBeGreaterThan(100)
+    expect(Math.min(byCase.kept, byCase.traded, byCase.joined), JSON.stringify(byCase)).toBeGreaterThan(100)
+  })
+
+  /**
+   * A MOVE STRAIGHT BACK — the view layouts spec §9.6: the same view moved the opposite way, on the tree the move left,
+   * gives back the tree the move was made on, newest move first. `play` presses as `pane-host.ts`'s `move` does.
+   */
+  describe('moving back', () => {
+    const BACK: Readonly<Record<MoveDirection, MoveDirection>> = {
+      left: 'right',
+      right: 'left',
+      up: 'down',
+      down: 'up',
+    }
+    type Press = readonly [id: string, direction: MoveDirection]
+
+    /** The tree and the history after `presses` from `tree`, each a move back where the history has one. */
+    const play = (
+      tree: LayoutNode,
+      presses: readonly Press[],
+      history: readonly MoveStep[] = [],
+    ): { tree: LayoutNode; history: readonly MoveStep[] } => {
+      let t = tree
+      let h = history
+      for (const [id, d] of presses) {
+        const back = moveBack(h, t, id, d)
+        const next = back ?? moveLeaf(t, id, d)
+        if (next === null) throw new Error(`${id} cannot move ${d}`)
+        h = recordMove(h, t, id, d, next, back !== null)
+        t = next
+      }
+      return { tree: t, history: h }
+    }
+
+    /** The tree to the float: a half of a third is not a third's half in binary. */
+    const toFloat = (n: LayoutNode): unknown =>
+      n.kind === 'leaf'
+        ? n.id
+        : { dir: n.dir, sizes: n.sizes.map((x) => Math.round(x * 1e9)), c: n.children.map(toFloat) }
+
+    /** The whole-branch review's example: R at 0.3 of the column it shares with S, so a case 3 and a trade part. */
+    const uneven = row(null, col([0.7, 0.3], 'S', 'R'), col(null, 'L', 'T'))
+
+    it('puts back the tree a move was made on, where the same move the other way trades two slots', () => {
+      const right = play(uneven, [['rxm-0', 'right']])
+      expect(toFloat(right.tree)).toEqual(toFloat(row([0.35, 0.15, 0.5], 'S', 'R', col(null, 'L', 'T'))))
+      expect(toFloat(moveLeaf(right.tree, 'rxm-0', 'left') as LayoutNode)).toEqual(
+        toFloat(row([0.35, 0.15, 0.5], 'R', 'S', col(null, 'L', 'T'))),
+      )
+      const back = play(uneven, [
+        ['rxm-0', 'right'],
+        ['rxm-0', 'left'],
+      ])
+      expect(back.tree).toEqual(uneven)
+      expect(back.history).toEqual([])
+    })
+
+    it('walks a chain of moves back, newest first', () => {
+      const twice = play(uneven, [
+        ['rxm-0', 'right'],
+        ['rxm-0', 'right'],
+      ])
+      // THE SECOND PRESS IS A CASE 2: R JOINS THE COLUMN, AT ITS TOP.
+      expect(toFloat(twice.tree)).toEqual(
+        toFloat(row([0.35, 0.65], 'S', col([0.15 / 0.65, 0.25 / 0.65, 0.25 / 0.65], 'R', 'L', 'T'))),
+      )
+      expect(play(twice.tree, [['rxm-0', 'left']], twice.history).tree).toEqual(play(uneven, [['rxm-0', 'right']]).tree)
+      const back = play(
+        twice.tree,
+        [
+          ['rxm-0', 'left'],
+          ['rxm-0', 'left'],
+        ],
+        twice.history,
+      )
+      expect(back.tree).toEqual(uneven)
+      expect(back.history).toEqual([])
+    })
+
+    it('moves another view back first where it moved since, and the first view back after it', () => {
+      const between = play(uneven, [
+        ['rxm-0', 'right'],
+        ['lambda-0', 'down'],
+      ])
+      // R LEFT IS NOT STRAIGHT BACK WHILE L'S MOVE IS THE NEWEST: TODAY'S MOVE, THE TRADE.
+      const traded = play(between.tree, [['rxm-0', 'left']], between.history)
+      expect(traded.tree).toEqual(moveLeaf(between.tree, 'rxm-0', 'left'))
+      expect(traded.history).toHaveLength(3)
+      const back = play(
+        traded.tree,
+        [
+          ['rxm-0', 'right'],
+          ['lambda-0', 'up'],
+          ['rxm-0', 'left'],
+        ],
+        traded.history,
+      )
+      expect(back.tree).toEqual(uneven)
+      expect(back.history).toEqual([])
+    })
+
+    it("makes the move today's, and forgets every step, where the layout changed otherwise since", () => {
+      const right = play(uneven, [['rxm-0', 'right']])
+      const changed: [string, LayoutNode][] = [
+        ['a split', splitLeaf(right.tree, 'lambda-0', 'row', 'pane-9', 'clif')],
+        ['a close', closeLeaf(right.tree, 'tm-0')],
+        ['a divider drag', resize(right.tree, [], 0, 0.05)],
+        ['a kind changed', setLeafKind(right.tree, 'lambda-0', 'clif')],
+      ]
+      for (const [what, tree] of changed) {
+        expect(moveBack(right.history, tree, 'rxm-0', 'left'), what).toBeNull()
+        const after = play(tree, [['rxm-0', 'left']], right.history)
+        expect(after.tree, what).toEqual(moveLeaf(tree, 'rxm-0', 'left'))
+        expect(after.history, what).toEqual([{ before: tree, after: after.tree, id: 'rxm-0', direction: 'left' }])
+      }
+    })
+
+    it('finds the tree the move left by comparing, so the same tree built again keeps the step', () => {
+      const right = play(uneven, [['rxm-0', 'right']])
+      expect(play(structuredClone(right.tree), [['rxm-0', 'left']], right.history).tree).toEqual(uneven)
+    })
+
+    it("makes a move any other way, or of another view, today's move", () => {
+      const right = play(uneven, [['rxm-0', 'right']])
+      for (const d of ['right', 'up', 'down'] as const)
+        expect(moveBack(right.history, right.tree, 'rxm-0', d), d).toBeNull()
+      expect(moveBack(right.history, right.tree, 'lambda-0', 'left')).toBeNull()
+      expect(moveBack([], right.tree, 'rxm-0', 'left')).toBeNull()
+    })
+
+    it(`keeps the newest ${MOVES_KEPT} moves, dropping the oldest`, () => {
+      // T AND S TRADE PLACES BY TURNS, EACH PRESS ANOTHER VIEW'S THAN THE ONE BEFORE, SO NONE IS A MOVE BACK.
+      const start = row(null, 'S', 'T')
+      const presses = Array.from({ length: MOVES_KEPT + 1 }, (_, i): Press => [i % 2 === 0 ? 'tm-0' : 'source', 'left'])
+      const all = play(start, presses)
+      expect(MOVES_KEPT).toBe(64)
+      expect(all.history).toHaveLength(MOVES_KEPT)
+      expect(all.history[0]?.id).toBe('source')
+      let t = all.tree
+      let h = all.history
+      while (h.length > 0) {
+        const newest = h.at(-1) as MoveStep
+        // EACH PRESS A MOVE BACK, WHICH TAKES A STEP OFF: ANY OTHER MOVE PUTS ONE ON, AND THE LOOP WOULD NOT END.
+        expect(moveBack(h, t, newest.id, BACK[newest.direction]), `${h.length} steps left`).not.toBeNull()
+        ;({ tree: t, history: h } = play(t, [[newest.id, BACK[newest.direction]]], h))
+      }
+      // BACK TO THE TREE THE FIRST PRESS LEFT, WHOSE STEP WAS DROPPED.
+      expect(t).toEqual(row(null, 'T', 'S'))
+    })
+
+    it('refuses no move back, where the same move the other way is refused or the window was made smaller since', () => {
+      expect(moveRefusal(uneven, 'rxm-0', 'right', { width: 1280, height: 800 }, DIVIDER_PX), 'precondition').toBeNull()
+      const right = play(uneven, [['rxm-0', 'right']])
+      // A WINDOW NARROWED SINCE THE MOVE: THE TRADE TAKES S TO 0.15 OF 1,000 PX LESS TWO DIVIDERS, 146.4 PX.
+      const narrow = { width: 1000, height: 800 }
+      expect(moveRefusal(right.tree, 'rxm-0', 'left', narrow, DIVIDER_PX)).toBe('narrow')
+      expect(pressRefusal(right.history, right.tree, 'rxm-0', 'left', narrow, DIVIDER_PX)).toBeNull()
+      // A WINDOW MADE SHORTER SINCE: R BACK AT 0.3 OF 400 PX LESS A DIVIDER IS 116.4 PX TALL, AS THAT WINDOW WOULD DRAW
+      // IT HAD R NOT MOVED.
+      const short = { width: 1280, height: 400 }
+      expect(leafExtents(uneven, short, DIVIDER_PX).get('rxm-0')?.height, 'precondition').toBeLessThan(MIN_VIEW_PX)
+      expect(pressRefusal(right.history, right.tree, 'rxm-0', 'left', short, DIVIDER_PX)).toBeNull()
+      expect(play(right.tree, [['rxm-0', 'left']], right.history).tree).toEqual(uneven)
+    })
+
+    it('refuses no move back of a view under the floor before the move enlarged it, at the size the move was made at', () => {
+      // R AT 0.3 OF 540 PX LESS A DIVIDER IS 158.4 PX TALL, AS A DIVIDER DRAG OR A SHORTER WINDOW CAN LEAVE IT.
+      const area = { width: 1280, height: 540 }
+      expect(leafExtents(uneven, area, DIVIDER_PX).get('rxm-0')?.height, 'precondition').toBeLessThan(MIN_VIEW_PX)
+      expect(moveRefusal(uneven, 'rxm-0', 'right', area, DIVIDER_PX), 'precondition: the move').toBeNull()
+      const right = play(uneven, [['rxm-0', 'right']])
+      expect(pressRefusal(right.history, right.tree, 'rxm-0', 'left', area, DIVIDER_PX)).toBeNull()
+      expect(play(right.tree, [['rxm-0', 'left']], right.history).tree).toEqual(uneven)
+    })
+
+    /**
+     * EVERY MOVE MOVES BACK, IN EVERY CASE OF §9.2: seeded random trees of one to nine views, their shares uneven and
+     * some splits in splits of their own direction, as `closeLeaf` leaves them; every view moved every way, and walks of
+     * moves undone newest first.
+     */
+    it('puts back the tree of every move of a seeded sweep, one move at a time and a walk of them undone', () => {
+      let seed = 20261128
+      /** mulberry32: the same trees on every run. */
+      const rnd = (): number => {
+        seed = (seed + 0x6d2b79f5) | 0
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+      }
+      let made = 0
+      const tree = (n: number): LayoutNode => {
+        if (n === 1) {
+          made++
+          return leafOf(`v${made}`, KIND_ORDER[Math.floor(rnd() * KIND_ORDER.length)] as PaneKind)
+        }
+        const k = Math.min(n, 2 + Math.floor(rnd() * 3))
+        const parts = Array.from({ length: k }, () => 1)
+        for (let left = n - k; left > 0; left--) {
+          const at = Math.floor(rnd() * k)
+          parts[at] = (parts[at] ?? 0) + 1
+        }
+        const children = parts.map(tree)
+        const weights = children.map(() => (rnd() < 0.3 ? 0.03 + rnd() * 0.1 : 0.2 + rnd()))
+        const total = weights.reduce((a, b) => a + b, 0)
+        return { kind: 'split', dir: rnd() < 0.5 ? 'row' : 'column', children, sizes: weights.map((w) => w / total) }
+      }
+      /** `t` with each split in a split of its own direction spliced in, as the screen draws it. */
+      const flat = (t: LayoutNode): LayoutNode => {
+        if (t.kind === 'leaf') return t
+        const children: LayoutNode[] = []
+        const sizes: number[] = []
+        t.children.forEach((c, i) => {
+          const f = flat(c)
+          const share = t.sizes[i] ?? 0
+          if (f.kind === 'split' && f.dir === t.dir) {
+            children.push(...f.children)
+            sizes.push(...f.sizes.map((s) => s * share))
+          } else {
+            children.push(f)
+            sizes.push(share)
+          }
+        })
+        return { ...t, children, sizes }
+      }
+      const pathOf = (t: LayoutNode, id: string): number[] | null => {
+        if (t.kind === 'leaf') return t.id === id ? [] : null
+        for (const [i, c] of t.children.entries()) {
+          const p = pathOf(c, id)
+          if (p !== null) return [i, ...p]
+        }
+        return null
+      }
+      const nodeAt = (t: LayoutNode, p: readonly number[]): LayoutNode =>
+        p.reduce<LayoutNode>((n, i) => (n.kind === 'split' ? (n.children[i] as LayoutNode) : n), t)
+      /** §9.2's case for `id` moved `d` in `t`, read off the table: `G`, `N` and how deep the leaf is under `G`. */
+      const caseOf = (t: LayoutNode, id: string, d: MoveDirection): string => {
+        const r = flat(t)
+        const p = pathOf(r, id) ?? []
+        const axis = d === 'left' || d === 'right' ? 'row' : 'column'
+        const toward = d === 'right' || d === 'down' ? 1 : -1
+        for (let depth = p.length - 1; depth >= 0; depth--) {
+          const g = nodeAt(r, p.slice(0, depth))
+          if (g.kind !== 'split' || g.dir !== axis) continue
+          const n = g.children[(p[depth] ?? 0) + toward]
+          if (n === undefined) continue
+          if (depth === p.length - 1) return n.kind === 'leaf' ? '1' : '2'
+          return '3'
+        }
+        return r.kind === 'split' && r.dir === axis ? '4 along' : '4 across'
+      }
+
+      const byCase: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4 along': 0, '4 across': 0 }
+      /** Moves whose move the other way, made today, would not give back the tree. */
+      let undoneOnlyBack = 0
+      for (let trial = 0; trial < 400; trial++) {
+        const t = tree(1 + Math.floor(rnd() * 9))
+        for (const l of leaves(t))
+          for (const d of MOVE_DIRECTIONS) {
+            const got = moveLeaf(t, l.id, d)
+            if (got === null) continue
+            const kind = caseOf(t, l.id, d)
+            byCase[kind] = (byCase[kind] ?? 0) + 1
+            const what = JSON.stringify({ t, id: l.id, d })
+            const h = recordMove([], t, l.id, d, got, false)
+            expect(moveBack(h, got, l.id, BACK[d]), what).toEqual(t)
+            for (const other of MOVE_DIRECTIONS)
+              if (other !== BACK[d]) expect(moveBack(h, got, l.id, other), what).toBeNull()
+            expect(recordMove(h, got, l.id, BACK[d], t, true), what).toEqual([])
+            const today = moveLeaf(got, l.id, BACK[d])
+            if (today === null || JSON.stringify(toFloat(today)) !== JSON.stringify(toFloat(flat(t)))) undoneOnlyBack++
+          }
+      }
+
+      let walked = 0
+      let backsOnTheWay = 0
+      for (let w = 0; w < 200; w++) {
+        const start = tree(2 + Math.floor(rnd() * 8))
+        let t = start
+        let h: readonly MoveStep[] = []
+        // THE TREES THE WALK HAS STOOD ON, A MOVE BACK TAKING THE NEWEST OFF: WHAT EACH MOVE BACK MUST GIVE.
+        const stood = [start]
+        for (let s = 0; s < 30; s++) {
+          const ls = leaves(t)
+          const id = ls[Math.floor(rnd() * ls.length)]?.id ?? ''
+          const d = MOVE_DIRECTIONS[Math.floor(rnd() * 4)] as MoveDirection
+          const back = moveBack(h, t, id, d)
+          const next = back ?? moveLeaf(t, id, d)
+          if (next === null) continue
+          if (back === null) stood.push(next)
+          else {
+            backsOnTheWay++
+            stood.pop()
+            expect(back).toEqual(stood.at(-1))
+          }
+          h = recordMove(h, t, id, d, next, back !== null)
+          t = next
+          walked++
+        }
+        while (h.length > 0) {
+          const newest = h.at(-1) as MoveStep
+          const back = moveBack(h, t, newest.id, BACK[newest.direction])
+          expect(back, JSON.stringify({ start, newest })).not.toBeNull()
+          h = recordMove(h, t, newest.id, BACK[newest.direction], back as LayoutNode, true)
+          t = back as LayoutNode
+        }
+        expect(t).toEqual(start)
+      }
+
+      // EVERY CASE OF §9.2 ASKED, AND THE WALKS MET MOVES BACK ON THE WAY AS WELL AS AT THEIR ENDS.
+      expect(Math.min(...Object.values(byCase)), JSON.stringify(byCase)).toBeGreaterThan(100)
+      expect(undoneOnlyBack).toBeGreaterThan(100)
+      expect(walked).toBeGreaterThan(3000)
+      expect(backsOnTheWay).toBeGreaterThan(50)
+    })
   })
 })
 

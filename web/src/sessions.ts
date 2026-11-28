@@ -460,7 +460,7 @@ export type PaneView<T> = {
    * ITS OWN.** The split control is the split menu (`view-header.ts`'s `viewMenu`), built on open from a
    * list only the app can produce — the registry's pairs, the pane's own binding, and whether the layout
    * tree is currently without a source leaf. Two routes could reach the pane from `draw()`'s per-frame
-   * loop: widen this call, or add a sibling setter beside it. This one is the narrower claim: `canSplit`
+   * loop: widen this call, or add a sibling setter beside it. This one is the narrower claim: `tiled`
    * is what puts the split items in the menu at all, so a caller that can offer the gesture has, in the
    * same statement, said what the gesture may create. A sibling setter would make that two calls with
    * an ordering between them — a split item mountable while the list behind it was still whatever the
@@ -472,7 +472,7 @@ export type PaneView<T> = {
    * the menu that reads it is built at most once per user gesture — `viewMenu`'s own doc has the
    * argument for why the thunk exists rather than a list handed over at construction.
    */
-  setLayoutControls(canClose: boolean, canSplit: boolean, choices: SplitChoices): void
+  setLayoutControls(canClose: boolean, tiled: boolean, choices: SplitChoices): void
   /**
    * Whether this view draws its own step controls — `false` while the
    * `steps` switch is `bar` (Plan 7 part 2 spec §8).

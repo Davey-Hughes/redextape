@@ -19,6 +19,9 @@ decided with it open, what it found, and which of its rulings are the design's o
 **§20 says what changed when `+ view` was removed on 2026-11-23**: §16.3's first point answered and its third closed,
 and which lines here describe the app before the removal.
 
+**§7.3 and §9 are as amended on 2026-11-26, 27 and 28**, while the third pull request was built: §21 lists what the
+user decided with its branch open, and what each decision changed.
+
 ## §1 Scope
 
 In:
@@ -100,7 +103,8 @@ The default tree's ids are literals. Every other id is `pane-N` from `main.ts`'s
 ### §2.7 The 160 px floor
 
 `MIN_VIEW_PX` is 160. `addRefusal` holds the add gestures to it, in tiles only. A stored layout, a link's layout, an
-undo and a narrower window can each show a view under it, and the Stage is held to the leaf bound alone.
+undo, a move back (§9.6) and a narrower window can each show a view under it, and the Stage is held to the leaf bound
+alone.
 
 ### §2.8 Keys
 
@@ -577,7 +581,13 @@ The prefix is `Ctrl+.`. It is not among the 64 bindings (§2.8).
 - In Chromium under Playwright it arms the mode from the source editor, a λ copy's editor and a machine copy's
   editor, and under the vim keymap from the source editor, and the key after it reaches the listener ahead of vim.
 - The user's own browser delivered it to the page (2026-10-11).
-- Firefox is not measured.
+- In Firefox under Playwright (its build 1555, Firefox 157) it arms the mode from the source editor, and under the vim
+  keymap from the source editor, and the key after it reaches the listener ahead of vim: the view keys browser test's
+  cases that hold these pass there.
+- Sent through the X server (XTEST) and not through Playwright, it reached a page's capture listener on the window
+  with `ctrlKey` set and armed that page's copy of the mode, each of the four times it was sent, in Mozilla's Firefox
+  161.0 and in Playwright's build, under the conditions §7.3 gives (2026-11-28). What Firefox does with `Ctrl+.` on a
+  page that does not cancel it is not measured.
 
 The prefix is ignored while a modal dialog is open, and while a key event is part of a composition. An armed mode a
 modal dialog opens over is left by the next key, which is the dialog's.
@@ -590,10 +600,16 @@ Armed, the next key acts and the machine is idle again:
 |---|---|---|
 | `]`, `[` | the next or the previous stop of the cycle (§7.4) | first |
 | `1` `2` `3` `4` | the toggle for source, asm, λ, TM | first |
-| `h` `j` `k` `l`, or the arrows | move the focused view left, down, up, right (§9) | third |
+| `h` or `←` | move the focused view left (§9) | third |
+| `j` or `↓` | move the focused view down (§9) | third |
+| `k` or `↑` | move the focused view up (§9) | third |
+| `l` or `→` | move the focused view right (§9) | third |
 | `Escape` with no `Alt` or `Meta` down, or the prefix again | nothing | first |
 
-- A key the table names is consumed: the editor under the focus does not see it.
+- A key the table names is consumed: the editor under the focus does not see it. A letter of the table typed as a
+  capital with `Shift` up, as Caps Lock types it, is that letter; with `Shift` down the capital is any other key.
+- **A move key and its arrow are one row**, in the machine's table, in the hint and on the help page, with one action
+  in the words of the view's `⋯` item: `h` or `←`, *move view left*.
 - **`Ctrl` may still be down for the second key or not.** Holding the prefix's modifier through it is the natural
   motion.
 - **A key held down is one press.** A repeat of a press the listener consumed is consumed and does nothing, and a
@@ -606,7 +622,15 @@ Armed, the next key acts and the machine is idle again:
   encoding select's list is open the browser gives the keys to the list, and the mode does not arm.
 - **No key of the table is one the browser keeps under `Ctrl`.** The cycle keys were `n` and `p` in the version
   approved at `ba4514b`. The user held `Ctrl` through the second key and `Ctrl+N` opened a window, which no page can
-  stop; `Ctrl+P` prints.
+  stop; `Ctrl+P` prints. `Ctrl` held through `h`, `j`, `k` or `l` is `Ctrl+H`, `Ctrl+J`, `Ctrl+K` or `Ctrl+L`. On
+  Linux, where a page lets them through, Firefox opens its History sidebar on `Ctrl+H`, puts the address bar in web
+  search on `Ctrl+J` and on `Ctrl+K`, and focuses the address bar on `Ctrl+L`; Chrome opens a history tab and a
+  downloads tab, puts the address bar in search, and focuses it. **A page that cancels them keeps all four**, after
+  the prefix and pressed alone, in Mozilla's Firefox 161.0, Playwright's Firefox 157 (its build 1555) and Chrome
+  158.0.8127.88: the page saw each key with `Ctrl` down, and the browser did nothing. That was measured on 2026-11-28
+  on Linux under X11, in Xvfb with no window manager, the keys sent through XTEST, each browser with a fresh profile.
+  Not measured: Windows; macOS, where these browsers use `Cmd` for these commands; Wayland, or an input method; the
+  user's own profile, with its extensions and preferences.
 - **Any other key ends the mode and is handled as if the mode had never been armed.** A modifier pressed alone does
   not end it: any of the UI Events key values' modifier keys, a lock key among them.
 - A pointer press, or the window losing the focus, ends it.
@@ -617,8 +641,11 @@ and under vim those are the keys a user presses next.
 
 While the mode is armed a hint lists the keys over the foot of the page, and the live region says the hint's rows as
 one sentence: "view keys: ] the next layout, [ the previous layout, 1 show or hide source, 2 show or hide asm, 3 show
-or hide λ, 4 show or hide TM, Esc or Ctrl+. leave". Leaving the mode says nothing. A toggle key for the only view
-shown says why on the notice line.
+or hide λ, 4 show or hide TM, Esc or Ctrl+. leave". The move keys add four rows before the way out, and the sentence
+says each arrow as it says the way out's second key: "h or ← move view left, j or ↓ move view down, k or ↑ move view
+up, l or → move view right". Leaving the mode says nothing. A toggle key for the only view shown says why on the
+notice line. A move key's move is said as a menu move is (§9.5); a refused one says why on the notice line, in the
+words its menu item is disabled with (§9.3), and on the Stage in words of its own (§9.4).
 
 The help page has a table of these keys, and a test holds it to the machine's own table as `#editor-keys` is held to
 the editors' bindings.
@@ -672,33 +699,55 @@ keys act on the focused view (§7.3).
 ### §9.2 `moveLeaf`
 
 `layout.ts` gains `moveLeaf(root, id, direction)`, which returns the new tree, or `null` where the leaf has nowhere to
-go that way. The axis is a row's for left and right and a column's for up and down. `G` is the nearest split above the
-leaf that runs along the axis and in which the branch holding the leaf has a sibling on the side moved towards; `N` is
-that sibling.
+go that way. It moves on the tree flattened, every split that sits in a split of its own direction spliced into it
+with its children taking its share, and returns the new tree flattened. The screen is the same: `closeLeaf` can leave
+a row in a row, and a move asked of that tree would find an edge inside it and offer a move that only resizes. The
+axis is a row's for left and right and a column's for up and down. `G` is the nearest split above the leaf that runs
+along the axis and in which the branch holding the leaf has a sibling on the side moved towards; `N` is that sibling.
 
 | Case | Condition | Result |
 |---|---|---|
 | 1 | The leaf is a child of `G` and `N` is a leaf | the two trade places; each slot keeps its size |
 | 2 | The leaf is a child of `G` and `N` is a split | the leaf leaves `G` and joins `N`: first in it when moving right or down, last when moving left or up |
 | 3 | The leaf is deeper than a child of `G` | the leaf leaves its split and becomes a child of `G`, between its old branch and `N` |
-| 4 | There is no `G` | the leaf takes that whole side of the tree: it joins the root at that end where the root runs along the axis, and otherwise the root and the leaf become the two halves of a new split |
+| 4 | There is no `G` | the leaf takes that whole side of the tree: it joins the root at that end where the root runs along the axis, and otherwise the rest of the tree and the leaf become a new split along the axis, the leaf at that end |
 | — | Case 4, and the leaf is already the root's child at that end, or is the whole tree | `null` |
 
-A leaf that joins a split takes an equal share, as `insertBeside` gives one, and the split it left closes up as
-`closeLeaf` closes one. A new split in case 4 is a half each.
+**Every view keeps its area, but the two in case 1**, which trade slots that each keep their size, and so trade
+areas. In the other cases the moved view keeps the share of the layout it had:
 
-With S, L, A and T for the four default views:
+- **Case 2:** `N` widens along `G` by the share of `G` the leaf held, and the leaf takes that much of it as a strip
+  across it, at the end the table says. Each view in `N` keeps its area.
+- **Case 3, and case 4 where the root runs along the axis:** the branch the leaf leaves gives up the share of its area
+  the leaf held, each split on the way down giving up only the leaf's share of it, and the leaf takes that much of
+  `G`, or of the root, beside the branch. Each view left in the branch keeps its area.
+- **Case 4 where the root runs across the axis:** the tree gives up the leaf's share of it in the same way, and the
+  leaf takes that share as a strip along the edge it moved to. Case 4 asks the root as it was before the leaf left it,
+  and where the rest runs along the axis the flattening splices it in: `col[row[S, L], T]` with T moved right is
+  `row[S, L, T]`, at 1/4, 1/4 and 1/2.
 
-| Tree | Move | Case | Result |
-|---|---|---|---|
-| `row[S, T]` | T left | 1 | `row[T, S]` |
-| `row[S, T]` | T down | 4 | `col[S, T]` |
-| `row[S, T]` | T right | — | `null` |
-| `row[col[S, A], col[L, T]]` | A right | 3 | `row[S, A, col[L, T]]` |
-| `row[S, A, col[L, T]]` | A right | 2 | `row[S, col[A, L, T]]` |
-| `row[col[S, A], col[L, T]]` | A down | 4 | `col[row[S, col[L, T]], A]` |
-| `col[S, row[L, T]]` | T up | 3 | `col[S, T, L]` |
-| `col[S, row[L, T]]` | T down | 4 | `col[S, L, T]` |
+A split left with one child gives way to that child. This replaces the equal share this section first gave a leaf
+that joins a split, as `insertBeside` gave one, with the split it left closing up as `closeLeaf` closes one, and the
+half each of a new split in case 4. It replaces too the rule the first build put in the equal share's place once
+`insertBeside` was gone (§20): a moved view took half of the view it landed beside, as a split halves its view (§21).
+
+With S, L, A and T for the four default views, each split of a tree in the first column in equal shares, and the
+sizes of a result's root first and then of a split inside it:
+
+| Tree | Move | Case | Result | Sizes |
+|---|---|---|---|---|
+| `row[S, T]` | T left | 1 | `row[T, S]` | 1/2, 1/2 |
+| `row[S, T]` | T down | 4 | `col[S, T]` | 1/2, 1/2 |
+| `row[S, T]` | T right | — | `null` | |
+| `row[col[S, A], col[L, T]]` | A right | 3 | `row[S, A, col[L, T]]` | 1/4, 1/4, 1/2 |
+| `row[S, A, col[L, T]]` | A right | 2 | `row[S, col[A, L, T]]` | 1/3, 2/3; the column 1/2, 1/4, 1/4 |
+| `row[col[S, A], col[L, T]]` | A down | 4 | `col[row[S, col[L, T]], A]` | 3/4, 1/4; the row 1/3, 2/3 |
+| `col[S, row[L, T]]` | T up | 3 | `col[S, T, L]` | 1/2, 1/4, 1/4 |
+| `col[S, row[L, T]]` | T down | 4 | `col[S, L, T]` | 1/2, 1/4, 1/4 |
+
+On equal shares the share a view held and a half often agree; on uneven ones they part. With A at 0.3 of its column in
+`row[col[S, A], col[L, T]]`, A moved right gives `row[S, A, col[L, T]]` at 0.35, 0.15 and 0.5. With S at 0.7 of
+`row[S, col[L, T]]` and L at 0.4 of the column, S moved right gives `col[S, L, T]` at 0.7, 0.12 and 0.18.
 
 This is how a tiling window manager moves a window. It differs in one way from the summary the user approved, which
 said a view joins a row or column "at the spot nearest where it was". A view inside a row or column first leaves it
@@ -707,18 +756,72 @@ said a view joins a row or column "at the spot nearest where it was". A view ins
 ### §9.3 Refusals
 
 A move is refused where `moveLeaf` returns `null`, and where a view the move makes narrower would come out under
-`MIN_VIEW_PX` wide, or, for a move up or down, a view it makes shorter would come out under it tall. That is
-`addRefusal`'s rule for an add, asked of a move.
+`MIN_VIEW_PX` wide, or a view it makes shorter would come out under it tall. That is `addRefusal`'s rule for an add,
+asked of a move, in two ways of its own:
 
-A refused item in the menu is disabled with its reason. A refused key says the reason on the notice line.
+- **Both are asked of every move.** A move sideways into a column makes views shorter: `row[S, A, col[L, T]]` with
+  A moved right leaves L and T a quarter of the height after two dividers, 160 px in an area 664 px tall, and the
+  move is refused in any area shorter. Across the root the strip is as deep as the share the view held: A moved
+  down in `row[col[S, A], col[L, T]]` is a quarter of the height after one divider, 160 px at 652.
+- **Narrower and shorter are asked of a view's share of the area, not its pixels.** A divider the move adds, or the
+  flattening, takes a few pixels from views whose shares the move keeps, and a view a narrow window had squeezed
+  under the floor would refuse every move near it. In an area 320 px wide, T moved up in `row[col[S, T], row[L, A]]`
+  takes S from 154 px wide to 148 with its share as it was, and the move goes ahead.
+
+Width is asked first. A refused item in the menu is disabled with its reason, and a refused key says the same words
+on the notice line. For a view that is the whole tree they are "this view is the only one, so it has nowhere to go";
+for one with nowhere to go that way, "this view is as far left as it can go", with the move's direction. The floor is
+worded as a refused split is, `no room to split … — close a view or …`: "no room to move this view left — close a
+view or widen the window" where a view would come out too narrow, and "… or make the window taller" where one would
+come out too short.
+
+A move straight back (§9.6) is refused for none of these.
 
 ### §9.4 The Stage
 
-In Stage the four items are removed, as the split items are: tabs have no arrangement to move in.
+In Stage the four items are removed, as the split items are: tabs have no arrangement to move in. A move key there
+moves nothing and says why on the notice line: "the stage has no arrangement to move this view in — choose tiles to
+move it".
 
 ### §9.5 After a move
 
-The focus stays in the moved view, through `focusView`. The live region says what moved and which way.
+After a move from the `⋯` menu the focus goes to the moved view's first control, through `focusView`: the menu that
+had it is gone. After a move key the focus stays where it was, as a switch leaves it (`switchViews`), so a key
+pressed from an editor leaves the caret in it. The notice line and the live region say which way the view moved and
+which view it is, by its title: "view moved left — source", "view moved left — TM · program".
+
+### §9.6 Moving back
+
+A move straight back puts the views back as they were, in their places and at their sizes, newest move first. A press
+is straight back where it moves the view of the newest move the opposite way, and the layout on screen is the one that
+move left: the same splits, views and shares. `layout.ts` keeps each move as a step, `MoveStep`: the tree before it
+and after it, the view and the direction. `moveBack` gives the newest step's tree before where a press is straight
+back, and `null` otherwise; `recordMove` keeps the steps. `pane-host.ts` keeps one history a page and asks it before
+`moveLeaf`, for the `⋯` menu's items and the move keys alike, so an item is enabled where its key acts.
+
+- **A chain.** `l` `l` `h` `h` walks back both moves. Where another view moved in between, its move is the newest
+  step, and its move back comes first.
+- **What forgets it.** A layout still changed at the next move, by a split, a close, a divider drag, a view toggled
+  or a cycle to another arrangement, forgets every step there, and that move is the one §9.2 makes. The change is
+  found by comparing the tree on screen with the newest step's tree after, not by marking each gesture, so a layout
+  that comes back to the very tree the move left keeps the steps: the Stage and back to tiles, a cycle away and back,
+  a view hidden and shown again, a divider nudged and back.
+- **No floor.** A move back is refused for nothing (`layout.ts`'s `pressRefusal`). It gives back a layout the user
+  had, and in a window made smaller since, that layout is the one the window would show had the view not moved, where
+  a view under the floor is allowed (§2.7). Asked §9.3's floor, a view under it before the move, which the move
+  enlarged, would have its move back refused at the very size the move was made at. So a move back can go where §9.2's
+  move that way is refused: with A at 0.3 of its column in `row[col[S, A], col[L, T]]`, A moved right and the tiled
+  area then narrowed to 1,000 px, A moved left as §9.2 makes it trades slots and takes S to 146 px wide, and is
+  refused; the move back goes ahead. Edge and alone are not asked either: the view was there in the tree before.
+- **At most 64 steps** (`MOVES_KEPT`), the oldest dropped. They are not stored: a reload starts with none.
+- **The words and the focus** are any move's (§9.3, §9.5): "view moved left — source", with the direction pressed.
+
+Why: §9.2's moves keep every view's area but a trade's, so a move and the same move the other way do not always give
+back the tree. In that tree, A moved right gives `row[S, A, col[L, T]]` at 0.35, 0.15 and 0.5, and A moved
+left then trades slots: `row[A, S, col[L, T]]`, S down from 0.35 of the width to 0.15. The user chose on 2026-11-28 to
+have a move straight back undo the move, with a chain. Not taken: a trade that keeps each view's area rather than each
+slot's size, since the places still would not come back and it reverses §9.2's case 1; and both, which would carry
+both costs.
 
 ## §10 Drag and drop
 
@@ -922,8 +1025,9 @@ Node tier, on values:
    the kind the tree on screen gives it; and after every switch, that no id that was on screen is back on it as
    another kind. The sequences' switch is the test's copy of `main.ts`'s `switchTo`; the app's own is held in the
    browser (item 20).
-3. `moveLeaf`: §9.2's table, and for any tree and direction that the result is `null` or passes `parseTree` with the
-   same leaves.
+3. `moveLeaf`: §9.2's table with its sizes, and for any tree and direction that the result is `null` or passes
+   `parseTree` with the same leaves, and that every view keeps its area but in case 1, where the two views trade
+   theirs. `moveRefusal`: the floor met and missed, wide and tall.
 4. `dockLeaf`: the same two checks, for every target and edge.
 5. `parseWorkspace`: an absent field; each rule of §4.2 broken in turn; a workspace stored before this design; and the
    same for `panelSizes`.
@@ -1211,5 +1315,33 @@ closes its third.
 the Stage is held to the leaf bound alone, which held of `+ view`'s adds there; §4.5's list of the focuses the app
 moves, which names `+ view`'s; §5.6, which names `+ view` beside a split as refused at the bound and says what an add on
 the Stage met; and §12's `+ view` and its **OPEN**. §6's account of the toggles' first build, which names `+ view` among
-the controls they moved, §9.2's likening of a move's equal share to `insertBeside`'s, and the findings in §16.2 and §17
-are records of their time.
+the controls they moved, §9.2's likening of a move's equal share to `insertBeside`'s, since replaced (§21), and the
+findings in §16.2 and §17 are records of their time.
+
+## §21 Moving a view, decided with its branch open (2026-11-26 to 28)
+
+The third pull request's first build moved a view as §9 had it, with two rules chosen for it: a direction a view
+cannot go is disabled in its menu with the reason, in placeholder words, and a moved view takes half of the view it
+lands beside, as a split halves its view, since the equal share §9.2 named went with `insertBeside` (§20). The user
+decided the rest with the branch open, on 2026-11-26, 27 and 28. This is what changed in §7.3 and §9 from the text
+#195 (`b627fe3`) left.
+
+| Section | Was | Is |
+|---|---|---|
+| §9.2, case 2 | an equal share of the split the leaf joins; in the first build, half of the view it lands beside | the share of the layout the leaf had, as a strip of the split it joins, which widens by as much; every view keeps its area |
+| §9.2, case 3 | an equal share of `G`, the split the leaf left closing up as `closeLeaf` closes one; in the first build, half of `N` | the share of its branch's area the leaf held, which the branch gives up split by split; every view keeps its area |
+| §9.2, case 4 along the root | as case 3 | as case 3, with the edge for `N` |
+| §9.2, case 4 across the root | a new split of a half each, which the user kept on 2026-11-26 | the share of the tree the leaf held, as a strip along the edge; every view keeps its area (2026-11-27) |
+| §9.2 | which tree case 4 asks, unsaid; in the first build, the tree left behind | the root as it was |
+| §9.2 | the tree moved on as it is given | the tree flattened, before the move and after it |
+| §9.3 | width held for every move and height for a move up or down, with smaller unsaid | both held for every move but a move straight back (§9.6), smaller judged by a view's share of the area |
+| §9.3 | the reasons' words unsaid; placeholders in the first build | the words in §9.3, the floor's worded as a refused split's |
+| §9.4 | a move key on the Stage unsaid | refused, in words of its own |
+| §9.5 | the focus kept in the moved view through `focusView`, after the menu and after a key | `focusView` after the menu; after a key the focus stays where it was |
+| §7.3 | one row for `h` `j` `k` `l` and the arrows | a row for each letter with its arrow, four rows more in the hint and its sentence, and a move said as "view moved left — source" |
+| §7.3 | a capital of a table letter unsaid; in the first build, any other key, so with Caps Lock on the mode ended and the editor typed the capital | with `Shift` up, as Caps Lock types it, that letter; with `Shift` down, any other key; fixed in this pull request, as the user ruled on 2026-11-28 |
+| §9.6 | a move followed by the same move the other way unsaid, so `moveLeaf`'s, which does not always give back the tree | a move straight back puts back the tree the move was made on, newest move first, as the user ruled on 2026-11-28 |
+| §7.3 | no table key is one the browser keeps under `Ctrl` | `Ctrl+H`, `Ctrl+J`, `Ctrl+K` and `Ctrl+L` kept by a page that cancels them, in Firefox 161.0, Playwright's Firefox 157 and Chrome 158 on Linux under X11 (2026-11-28); Windows, macOS, Wayland, an input method and the user's own profile not measured |
+
+§10.3 gives a drop on the workspace `moveLeaf`'s case 4, so as written such a drop now keeps every view's area too,
+where a drop on a view still gives the two views a half each of the target's size. Neither is built.

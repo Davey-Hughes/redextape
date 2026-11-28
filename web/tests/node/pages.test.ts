@@ -5,7 +5,7 @@ import type { KeyBinding } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { CYCLE } from '../../src/arrangements'
 import { switchKey, tabKeymap } from '../../src/editor-tab'
-import { KIND_WORD } from '../../src/layout'
+import { KIND_WORD, MOVE_DIRECTIONS } from '../../src/layout'
 import { LINK_KEY } from '../../src/link-wiring'
 import { navKeymap } from '../../src/lsp-nav'
 import { HINT_ROWS, PREFIX, PREFIX_LABEL, VIEW_KEYS } from '../../src/view-keys'
@@ -134,8 +134,13 @@ describe('the help page’s view keys', () => {
    */
   it('lists exactly the keys the machine answers, each with the hint’s words', () => {
     const table = /<table id="view-keys">([\s\S]*?)<\/table>/.exec(html('help'))?.[1] ?? ''
-    const rows = [...table.matchAll(/<tr data-key="([^"]+)"><td><kbd>([^<]+)<\/kbd><\/td><td>([^<]+)<\/td><\/tr>/g)]
-    expect(rows.map(([, key, shown, does]) => [key, shown, does])).toEqual(VIEW_KEYS.map((r) => [r.key, r.key, r.does]))
+    const rows = [...table.matchAll(/<tr data-key="([^"]+)"><td>(.+?)<\/td><td>([^<]+)<\/td><\/tr>/g)]
+    // A ROW'S SECOND KEY IS WRITTEN AS THE HINT SAYS IT: the key, *or*, and the second key.
+    const shown = (r: (typeof VIEW_KEYS)[number]): string =>
+      r.also === undefined ? `<kbd>${r.key}</kbd>` : `<kbd>${r.key}</kbd> or <kbd>${r.also.shown}</kbd>`
+    expect(rows.map(([, key, cell, does]) => [key, cell, does])).toEqual(
+      VIEW_KEYS.map((r) => [r.key, shown(r), r.does]),
+    )
     // AND NO ROW THE PATTERN ABOVE DOES NOT READ: `tableKeys` throws on one with no `data-key`.
     expect(tableKeys('help', 'view-keys')).toEqual(VIEW_KEYS.map((r) => r.key))
   })
@@ -185,6 +190,20 @@ describe('the help page’s view keys', () => {
         .slice(0, -1)
         .map((stop) => `the ${stop}`)
         .join(', ')}, and ${stops.at(-1)}.`,
+    )
+  })
+
+  /**
+   * **THE PARAGRAPH SENDS A READER TO THE `⋯` MENU FOR WHAT A MOVE KEY DOES**, naming no key and no direction, which
+   * holds while the table has a move key for each way the menu moves a view.
+   */
+  it('says the move keys move the focused view as its ⋯ menu’s move items do, and a move straight back undoes one', () => {
+    const moves = VIEW_KEYS.flatMap((r) => (r.action.kind === 'move' ? [r.action.direction] : []))
+    expect([...moves].sort()).toEqual([...MOVE_DIRECTIONS].sort())
+    expect(prose('view-keys-move')).toBe(
+      'The move keys move the view that has the focus, as the move items in its ⋯ menu do. Where it cannot go that ' +
+        'way, nothing moves and the notice line says why. Moving a view straight back, the other way while the ' +
+        'layout is still as the move left it, puts every view back where it was, at its size.',
     )
   })
 })

@@ -1,6 +1,6 @@
 import { handOff, nearest } from './focus-handoff'
 import { type IconName, icon } from './icons'
-import type { Dir } from './layout'
+import { type Dir, MOVE_DIRECTIONS, type MoveDirection } from './layout'
 import { LEG_NAME } from './legs'
 import type { PaneChoice, SplitChoices } from './pane-chrome'
 import type { Leg } from './protocol'
@@ -219,8 +219,11 @@ export function sourceViewHeader(): { readonly el: HTMLElement; readonly actions
 }
 
 export type ViewMenu = {
-  /** Whether `✕` applies (not on the last view) and whether the split items do (not on the source view). */
-  setLayout(canClose: boolean, canSplit: boolean): void
+  /**
+   * Whether `✕` applies (not on the last view), and whether the views are tiled: the split items and the move items
+   * apply only there, the split items on a view that has them (not the source view).
+   */
+  setLayout(canClose: boolean, tiled: boolean): void
   /**
    * Add a display setting that is on or off at the menu's end, built as "expand all" is, and mount `⋯` if it was not.
    * For a setting the view can read only once its own constructor has run: a `MachineViewChrome` view's, whose menu
@@ -355,6 +358,19 @@ export type ViewMenuOptions = {
   /** A λ view's display settings — present only on a λ view. */
   readonly display?: DisplayMenu
   readonly choices?: () => SplitChoices
+  /** Moving this view a step in its layout — the view layouts spec §9. */
+  readonly move?: ViewMove
+}
+
+/**
+ * A view's four move items: what a press does, and why a direction cannot be taken now, or `null` when it can.
+ *
+ * **`refusal` IS A THUNK, ASKED WHEN THE MENU OPENS**, as `choices` is: whether a move applies is a fact about the
+ * whole tree, which any other view's gesture changes, and the menu is opened at most once a gesture.
+ */
+export type ViewMove = {
+  readonly go: (direction: MoveDirection) => void
+  readonly refusal: (direction: MoveDirection) => string | null
 }
 
 let viewMenuSeq = 0
@@ -400,9 +416,9 @@ function checkItem(
  * view. The two splits are menu items rather than controls in a view's strip, because neither is a thing a user
  * does every few seconds.
  *
- * **THE ITEMS STAY IN THE DOM WHILE THE MENU IS CLOSED, ADDED AND REMOVED AS THEY APPLY.** That is this file's
- * idiom for a control that cannot apply (removed, not disabled — rule 4), applied inside a popover: the popover
- * hides them, and nothing is built per frame. `⋯` itself is removed when the menu would be empty.
+ * **THE ITEMS STAY IN THE DOM WHILE THE MENU IS CLOSED, ADDED AND REMOVED AS THEY APPLY**, this file's idiom for a
+ * control that cannot apply (removed, not disabled — rule 4), but for a move in tiles, disabled with its reason (§9.3
+ * of the view layouts spec). The popover hides them, nothing is built per frame, and an empty menu's `⋯` is removed.
  *
  * **A SPLIT IS TWO CHOICES IN ONE MENU.** Choosing *split right* or *split down* replaces the main items with
  * the pairs a new view could show, the view's own pair first and reading *another view of this*, then the
@@ -506,6 +522,40 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     }
   }
 
+  // **A MOVE THAT CANNOT BE TAKEN NOW IS DISABLED WITH ITS REASON, NOT REMOVED** (the view layouts spec §9.3), unlike
+  // a split on the Stage: which of the four apply changes with every gesture on any view, and items that came and went
+  // would move the rest of the menu under the pointer. The reason is the item's `aria-description` and tooltip, as a
+  // display choice's is (`radioGroup`).
+  const moveItems: HTMLButtonElement[] = []
+  const syncMoves = (): void => {
+    if (opts.move === undefined) return
+    for (const [i, d] of MOVE_DIRECTIONS.entries()) {
+      const b = moveItems[i]
+      if (b === undefined) continue
+      const reason = opts.move.refusal(d)
+      b.disabled = reason !== null
+      if (reason === null) {
+        b.removeAttribute('aria-description')
+        b.removeAttribute('title')
+      } else {
+        b.setAttribute('aria-description', reason)
+        b.title = reason
+      }
+    }
+  }
+  if (opts.move !== undefined) {
+    const go = opts.move.go
+    for (const d of MOVE_DIRECTIONS) {
+      const b = item('view-move', `move view ${d}`)
+      b.dataset.direction = d
+      b.addEventListener('click', () => {
+        shut()
+        go(d)
+      })
+      moveItems.push(b)
+    }
+  }
+
   const fmt = opts.format === undefined ? null : item('format-doc', 'format', 'format')
   if (fmt !== null && opts.format !== undefined) {
     const run = opts.format
@@ -548,6 +598,8 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
     const open = e.newState === 'open'
     more.setAttribute('aria-expanded', String(open))
     if (open) syncChecked()
+    // BEFORE THE FIRST ITEM IS CHOSEN BELOW, which skips a disabled one.
+    if (open) syncMoves()
     if (open) {
       // THE FIRST ITEM A TAB COULD REACH, which in a radio group is its checked choice and not its first.
       // The last open's mark is cleared first: an unchecked choice is still focusable, and the popover
@@ -562,11 +614,11 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
   })
 
   let canClose = false
-  let canSplit = false
+  let tiled = false
 
   const sync = (): void => {
     const wanted: HTMLElement[] = []
-    if (canSplit) wanted.push(...splitItems)
+    if (tiled) wanted.push(...splitItems, ...moveItems)
     if (fmt !== null) wanted.push(fmt)
     wanted.push(...displayItems)
     // RECONCILED, NOT REPLACED, FOR `paint`'s REASON ONE LEVEL OUT: `replaceChildren` takes every item
@@ -614,10 +666,10 @@ export function viewMenu(actions: HTMLElement, opts: ViewMenuOptions): ViewMenu 
   if (fmt !== null || displayItems.length > 0) sync()
 
   return {
-    setLayout(nextClose: boolean, nextSplit: boolean): void {
-      if (nextClose === canClose && nextSplit === canSplit) return
+    setLayout(nextClose: boolean, nextTiled: boolean): void {
+      if (nextClose === canClose && nextTiled === tiled) return
       canClose = nextClose
-      canSplit = nextSplit
+      tiled = nextTiled
       sync()
     },
     addCheck(className: string, label: string, check: DisplayCheck): void {
