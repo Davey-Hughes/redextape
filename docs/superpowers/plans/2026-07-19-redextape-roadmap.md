@@ -46655,3 +46655,224 @@ read from that dispatch's log or, where it kept none, from its report or `progre
 | 1 and 1; `mc-panel-layout.test.ts`'s header case, `clif-worker.test.ts`'s; each in main's set, 1 and 1 | the Firefox rows the gate fails against the gate's before the rebase, new and gone; which; the new one in main's set at `a8033d9`, the gone one in main's at `adb5d5e` | `wc -l < $R/gate-rebased/07-vs-prerebase-new-rows.txt; wc -l < $R/gate-rebased/07-vs-prerebase-gone-rows.txt; cut -d'>' -f1,2 $R/gate-rebased/07-vs-prerebase-new-rows.txt $R/gate-rebased/07-vs-prerebase-gone-rows.txt; grep -cxFf $R/gate-rebased/07-vs-prerebase-new-rows.txt $R/gate-rebased/08-firefox-failset-main-a8033d9.txt; grep -cxFf $R/gate-rebased/07-vs-prerebase-gone-rows.txt $R/gate/08-firefox-failset-main-adb5d5e.txt` |
 | green at `b96f1a8`, on `adb5d5e` | the gate before the rebase | `grep -o "Every leg ran at b96f1a8; nothing red that is the branch's" $S/gate/progress.md; git merge-base b96f1a8 origin/main \| cut -c1-7` |
 | 16G | the memory cap of `run-all.sh`'s unit | `grep -o 'MemoryMax=16G, no swap' $S/gate-rebased/run-all.sh` |
+
+#### LLVM IR VIEW PR 2A: THE VIEW'S DESIGN, ITS PLAN, AND WHAT ITS PANE WILL DRAW FROM, AS PURE DATA TESTED IN NODE OVER EVERY EXAMPLE'S MODULE (2026-11-27, branch `llvm-ir-view-2a`, `9e7c493..283f2cb`, 25 commits, plus this entry's corrections)
+
+**IR views design §9, piece 4**, second part: the LLVM IR view. The design
+(`docs/superpowers/specs/2026-11-27-llvm-ir-view-design.md`) and its plan
+(`docs/superpowers/plans/2026-11-27-llvm-ir-view-pr2.md`) split the view into two pull requests. This one, 2a, is the
+design, the plan and `web/src/llvm-view.ts`, what the view's pane will draw from, as pure data with a node test. 2b, the
+kind, the pane, the worker request, the fetch on intent, the links and the help page, is the plan's Tasks 4 to 12. The
+branch builds on #209's LLVM IR text package, `pkg-llvm/`, and sits on `main` at `9e7c493`, where #214 merged, #209
+having merged as `860571d`. Its first five commits were drafted from a handoff in a cloud sandbox with no browser and
+Node 22, and applied unchanged; the twenty after them, made on this machine, answer the reviews below, a11y-leftovers'
+naming of the clif and machine code Retries, and #209's and #214's merges.
+
+| Commit | What |
+|---|---|
+| `6f89efe` | the design and the plan |
+| `f2f939d` | `llvm-view.ts`, its node test, and the LLVM IR package's types re-exported from `types.ts` |
+| `61b9d6f` | the test holds each `define` label to its function's `first_line`, not to what the line says |
+| `568c425` | the design and plan after the sandbox's own review |
+| `629d39b` | the roadmap only: the sandbox's draft of the branch's entry |
+| `033551a` | the run's end as #214 ends it: the block the run stopped on kept in view, no row marked current, none reading *runs next* |
+| `f6a96f4` | `LlvmFollow`'s and `followOf`'s docs; the design and plan have 2b call `ListingPanel.show(next, step, { follow, last? })`, as #214 makes it |
+| `4341428` | design §9 lists the link tables keyed by a leg that 2b widens: `LinkedLeg` and what it keys, `focusNode`'s frame, `pane`, `isLinkedLeg` |
+| `a54c341` | the plan's spec coverage points §5 and §4's pure parts at Task 2 |
+| `042695c` | plan Task 9 draws its refusal from a stubbed answer, as `mc-pane.test.ts` does |
+| `d2e5f08` | §9's citations name `linked-legs.ts` |
+| `ed9e829` | design §6 and §9 and plan Tasks 4 and 7: the pane's seed, its pick and its title's menu, which 2b keys by kind |
+| `42fc4de` | the test asks `pcOf(-1)` of a module whose last item has a pc |
+| `db43bae` | design §8 and plan Tasks 2 and 3 point at the plan's sabotage table and the roadmap entry |
+| `b5db195` | plan Task 9 quotes llvm-prefix-names' hand-built input whole |
+| `d8e23f0` | design §2 and the plan's Verified facts: `fn llvm` is refused at `b08753d`, not once llvm-prefix-names lands |
+| `07109c8` | `LLVM_COPY.retryName`, `Retry loading llvm`, and the design and plan give 2b's Retry that name and tooltip |
+| `3ef8e73` | the roadmap only: this entry, rebuilt for the branch at `07109c8` |
+| `827a239` | design §10 lists the Retry's name and the `llvm` view's title and pair among the designer's calls |
+| `d4450c5` | the roadmap only: this entry's corrections, made at `827a239` |
+| `6e33501` | design §7 and the plan's base put 2a on `main` once #209 merged, and the plan's Verified facts add countdown |
+| `924ddfc` | the roadmap only: this entry, remapped onto `860571d` |
+| `fae90d2` | design §4's picture at step 36 of fact's run and §10's split into 2a and 2b; the plan's Task 2 names the branch `llvm-ir-view-2a` |
+| `9dff217` | the roadmap only: this entry, at `fae90d2` |
+| `283f2cb` | the design and plan after #214's merge: 2b waits for hidden-recording-b and move-a-view alone, `ListingPanel.show` and the run's end cited as `main` has them, and design §6's line numbers `main`'s at `9e7c493` |
+
+##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
+
+Nothing they can see. Under `web/`, only the node test names `llvm-view.ts`: no page, worker or browser test imports it.
+
+##### WHAT THE VIEW WILL BE
+
+Davey's answers, as the design records them (`1a 2a 3a 4a 5b`): a sixth view, kind `llvm`, off by default, on key `6`;
+it follows the rxm leg of its session, draws rxm's step bar, shares rxm's step and counts as showing rxm, so ⏵ plays
+past the step cap with only an `llvm` view open; the listing alone, with no values, stack or heap; `pkg-llvm/` its own
+package, fetched on intent as `pkg-clif/` is; and the toggle reads `llvm`, lowercase as `clif` does, with the gloss *the
+module the LLVM backend builds, before LLVM's passes, for x86-64 Linux, written by redextape and held in CI to LLVM's
+own print*, and the help page linking `ll_text.rs`. Carried and not reopened: the module as built only, never `.opt.ll`,
+and a first view that lists and follows, with stepping and a technical page later.
+
+`llvm` is a `PaneKind` that is not a `Leg`, as `PaneKind`'s doc provides for: its pane draws the rxm leg's frames, so it
+has no history, recording or share link position of its own. Of the code keyed by `Leg`, only what answers for the view
+a click, a pane or a title comes from takes it (design §6 and §9): the pane's class, builder and seed, the pick between
+kinds, the title's menu, and the link tables.
+
+At a run's end the view keeps the block of the instruction the run stopped on in view, with no row marked current and
+none reading *runs next*, as `main`'s rxm listing does since #214, through `ListingPanel.show(next, step, { follow,
+last? })`. After a failed load its Retry is named `Retry loading llvm`, for a reader and in its tooltip, as
+a11y-leftovers names the clif notice's and the machine code panel's.
+
+##### THE PURE VIEW AND ITS TEST
+
+`llvmRows(ir)` gives `ListingPanel.setSource`'s items and labels: each function's `define` a label, found by the
+package's `first_line`, and every other line an item, so the listing reads as LLVM prints the module. Beside them:
+`pcOf`, an item's rxm pc, which a click links; `ordinalsOfPc`, a pc's items, which the run and a pin mark; and
+`followOf`, the first unbroken run of a pc's items, its `i<pc>` block, which following keeps in view. A pc's items can
+stand in two runs, since the writer puts the `cont` block a guard opens after its function's `exit`, and a block from
+first to last could take the whole function in. `llvmNotice` and `LLVM_COPY` say what the view shows instead of rows: an
+answer already received first, then nothing while the rxm leg cannot run, then a failed load, the package loading, or
+the module being written.
+
+`web/tests/node/llvm-view.test.ts` has 35 cases. 6 are on modules written in the test: two functions with a pc split
+into an `i0` run and a `cont` run after `exit`, a `define` line no function names, a module with no function, and a
+one-line module whose only item has a pc, so that a `pcOf(-1)` that read from the end would find it. 5 are on the notice
+and the copy. Then 3 on each of the 8 examples' modules, as `pkg-llvm/` writes it from `pkg/`'s `clifInput()`: the items
+and labels laid out reproduce the text, and every line that starts `define ` is a function's `first_line`; each pc of
+the rxm program has items, all of that pc, and a follow block that starts at its `i<pc>:` line, holds only that pc and
+is its first run; and the rxm run, stepped through `pkg/` to its end, stands only on pcs with items, with a block for
+each instruction about to run.
+
+##### THE SABOTAGES
+
+Each edit was made to a copy of `llvm-view.ts` put in its place; the node test ran, and the file was restored from a
+saved copy and found equal by `cmp`. All 23, made again from their descriptions, ran at `283f2cb`, over the eight
+examples `main` has at `9e7c493`, and fail the cases they failed on `860571d`, at the same lines: each fails at the
+lines it failed at before the branch's first rebase, and fails every case it failed there, with countdown's beside them.
+1 to 11 are the sandbox's, in the plan's Task 2 table; the counts its draft entry gives for them, over seven examples,
+are this table's less countdown's cases. 12 to 18 are the first review's; 19 to 22 the whole-branch review's, whose
+third is 18; 23 is the Retry name's, added to the Task 2 table. 19 is the edit the whole-branch review found passing
+every case, which `42fc4de` answers.
+
+| # | Edit to `llvm-view.ts` | Cases failed, of 35 | Lines of `llvm-view.test.ts` they failed at |
+|---|---|---|---|
+| 1 | no labels: no line is a `define` | 13 | 54, 64, 93, 100, 110, 197 |
+| 2 | `followOf` spans a pc's first item to its last | 8 | 100, 221 |
+| 3 | `ordinalsOfPc` keeps the first run only | 8 | 93, 228 |
+| 4 | `pcOf(n)` reads item `n + 1` | 17 | 64, 201, 214 |
+| 5 | the leg's reason before an answer | 1 | 138 |
+| 6 | no `writing` notice | 1 | 148 |
+| 7 | `LLVM_COPY.loading` says `LLVM` | 1 | 152 |
+| 8 | every pc numbered one higher | 27 | 64, 93, 100, 201, 218, 239 |
+| 9 | pc 0 left out of a pc's items | 18 | 93, 100, 218, 239 |
+| 10 | a notice over the rows | 1 | 124 |
+| 11 | a `define` found by its line's `define ` prefix | 1 | 110 |
+| 12 | `lineOf` one line late | 17 | 59, 201, 220 |
+| 13 | a trap shown as a refusal | 1 | 134 |
+| 14 | the leg's reason ignored | 1 | 125 |
+| 15 | `followOf` of a pc with no line answers a block | 2 | 102, 116 |
+| 16 | a failed load read as loading | 1 | 147 |
+| 17 | a label named by its ordinal, not its line | 8 | 55, 196 |
+| 18 | a label placed one item late | 10 | 55, 110, 196 |
+| 19 | `pcOf` reads a negative ordinal from the end, as `pcs.at` does | 1 | 87 |
+| 20 | `followOf` takes a pc's longest run | 7 | 220 |
+| 21 | a trap read as a failed load | 1 | 134 |
+| 22 | a failed load shown over the leg's reason | 1 | 126 |
+| 23 | `retryName` reads `Retry` | 1 | 152 |
+
+##### THE REVIEWS
+
+- **The sandbox's own review** is recorded in its draft entry (`629d39b`), and `61b9d6f` and `568c425` answer it.
+- **The first review**, of `9e7c493..629d39b`, on this machine, found the code and its node test sound, every gate it
+  owed exiting 0, and its sabotages, the sandbox's and its own, each firing. The Important finding: the design and plan
+  marked the rows of the run's end current, where #214, and Davey's ruling it records in the return-value design, follow
+  the instruction the run stopped on unmarked (`033551a`). The Minor ones: `LlvmFollow`'s doc named a
+  `ListingPanel.show` signature `main` has had neither before #214 nor since (`f6a96f4`); §9 left out the link tables
+  keyed by `LinkedLeg` (`4341428`, its citations fixed in `d2e5f08`); the plan's spec coverage pointed at Task 1
+  (`a54c341`); and the draft entry named the branch `llvm-view-2a` and quoted the node tier on Node 22. Its answer to
+  the sandbox's third question, that `fn llvm` writes a module on llvm-prefix-names, became Task 9's stubbed refusal
+  (`042695c`). The pre-commit hook passed on each of those commits.
+- **The whole-branch review** of `9e7c493..d2e5f08`: ready after Minors, with no Critical and no Important finding. The
+  Minors: the design never named the pane's seed, its pick within a leg or its title's menu, all keyed by leg, which
+  would title an `llvm` view `rxm · program` (`ed9e829`); the `pcOf(-1)` assertion could not fail (`42fc4de`); three
+  sentences pointed at a README outside the repository (`db43bae`); the draft entry still had 2b's refusal test use
+  `fn llvm`; and Task 9 quoted the hand-built input without its `program` wrapper (`b5db195`). What it checked and found
+  sound: the code against its docs; the `show` #214 brought and the plan's mapping onto it; #209's writer over every
+  example through the real packages, design §4's picture among them; the design's and plan's module, step and split-pc
+  figures and the `wasm-opt` sizes; every line design §2, §6 and §9 cite at `adb5d5e`; and llvm-prefix-names' modules,
+  `fn llvm`'s `$llvm.0` among them.
+- **After it**, llvm-prefix-names' whole-branch review found that design §2 and the plan's Verified facts still offered
+  `fn llvm` as a program the writer refuses (`d8e23f0`), and a11y-leftovers' names for the clif and machine code Retries
+  gave the llvm view's its name (`07109c8`). A check of that round found two of the designer's calls that design §4
+  and §6 make missing from §10, the Retry's name and the `llvm` view's title and pair (`827a239`), and three of this
+  entry's sentences that the record does not bear out (`d4450c5`). Then #209 merged as `860571d`, the branch was rebased
+  onto it, and `6e33501` puts design §7's and the plan's base on `main` and adds countdown, which #207 added to the
+  examples, to the plan's Verified facts. A final check of `9e7c493..924ddfc` found design §4's picture at step 41 of
+  fact's run, where `i5`, not `i13`, runs next, the plan's Task 2 naming the branch `llvm-view-2a`, and §10 without
+  the split into 2a and 2b; `fae90d2` answers them, and the plan no longer says "on this machine" or has 2b rebase 2a.
+  Then #214 merged as `9e7c493`, and the branch was rebased onto it, the roadmap its only conflict; `283f2cb` has the
+  design and plan say what `main` has now: 2b waits for hidden-recording-b and move-a-view alone, `ListingPanel.show`
+  and the run's end are cited where `9e7c493` has them, and design §6's and §9's line numbers are `main`'s there,
+  `help.html`'s one later past the sentence #214 added. The pre-commit hook passed on each commit after `d2e5f08` when
+  it was first made, `283f2cb` among them; a rebase runs no hook.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **All of 2b**: plan Tasks 4 to 12, once hidden-recording-b and move-a-view have merged. No browser test was written:
+  the pane it would test does not exist. Design §6's and §9's line numbers are `main`'s at `9e7c493`, and
+  hidden-recording-b and move-a-view move many of them.
+- **A refusal from a program.** `fn llvm(n) { n + 1 }` is refused at `860571d` and writes a module on llvm-prefix-names.
+  2b's view test (Task 9) draws its refusal from a stubbed answer; its worker case (Task 5) uses `fn llvm` only while
+  #209's writer refuses it, and otherwise needs another program the writer refuses, or goes, a call 2b makes and
+  records.
+- **The design's sizes without `wasm-opt`** are the sandbox's, which could not fetch binaryen, and were not rebuilt
+  here. Built here, with `wasm-opt`, `pkg-llvm/`'s `.wasm` is 59,597 B gzip -9, and `pkg/`'s 325,757 B.
+- **Left as they are.** No `i<pc>` run in the fixture ends at a blank line (they end at `exit:` and `}`), where every
+  real one does: a run ends at any item with no pc, and the example cases hold the blank lines. The example run case's
+  `followOf(next)` check never fails alone, since the check before it fails first; the first review found it redundant,
+  not blind.
+- **The sandbox's open questions**, as the first review answered them: following only the `i<pc>` block stays, since a
+  span to the `cont` block can take a whole function in, and the `cont` rows are marked all the same; the help page's
+  link to `ll_text.rs` waited for #209, and the file is on `main` since it merged; `fn llvm` writes a module on
+  llvm-prefix-names, so the refusal is stubbed (above); and `LlvmRows.lineOf` stays, as the test reads it and sabotage
+  12 fails 17 cases.
+- **Node 22.** The sandbox ran the node tier on Node 22, where `share-link.test.ts` cases failed. CI's web job runs in
+  `node:26-bookworm`, and under Node 26.13.1 here the tier passes whole.
+- **Not run here:** Firefox, any cargo gate, `check-slow.sh` and `check-lua.sh`; no file under `crates/` changes. The
+  browser tier ran, in `test:coverage`.
+
+##### VERIFICATION
+
+On this machine: Node 26.13.1, pnpm 11.20.0, wasm-pack 0.15.0 and rustc 1.100.0. `pkg/`, `pkg-llvm/` and the four other
+packages were built in the branch's worktree, from crates equal to `9e7c493`'s, by `build:wasm` and `web/package.json`'s
+five other `build:*-wasm` scripts, whose log shows `wasm-opt` running for each, then `build:bindings`. Those builds, `pnpm run
+typecheck`, whose binding build runs cargo, `build:app` and `test:coverage` ran in a systemd scope with `MemoryMax=16G`,
+holding the machine's heavy-build lock with `CARGO_TARGET_DIR` set, and `test:coverage` the browser lock too, with port
+63315 free. The node test, the node tier, biome, the scans and the sabotages ran in such a scope, and all but the
+sabotages again on the tree that holds this entry.
+
+| Run, at `283f2cb` | Result |
+|---|---|
+| `pnpm exec vitest run --project node tests/node/llvm-view.test.ts` | 35 passed |
+| `pnpm exec vitest run --project node` | 91 files and 1709 tests passed |
+| `pnpm run typecheck` | exit 0 |
+| `pnpm run test:coverage`, CI's web gate: the node and browser tiers under its coverage thresholds | 330 files; 3741 tests passed and 2 expected to fail; exit 0 |
+| `pnpm run build:app` | exit 0 |
+| the 23 sabotages | each fails the test, as their table gives |
+| the seven scans, text-bytes, citations, attributions, doc-figures, shared-docs, colours and grammar-wasm, each `--self-test` then the scan; `check-comments.mjs --self-test`, then `--base origin/main`, which is `9e7c493`; `check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check; `biome ci --error-on-warnings`, 499 files | exit 0 each, on the tree that holds this entry |
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under bash unless a row
+says `web/`; `$J` is a JSON file outside the tree.
+
+| Value | What | Produced by |
+|---|---|---|
+| `283f2cb`; 25 | the range's last commit; the commits on `9e7c493` to it | `git log --reverse --format=%h 9e7c493..283f2cb \| tail -1; git rev-list --count 9e7c493..283f2cb` |
+| 5; 6; 6; 2; 2; 2; 2 | the sandbox's commits, `6f89efe` to `629d39b`; the first fix round's, `033551a` to `d2e5f08`; those after the whole-branch review, `ed9e829` to `07109c8`; this entry's rebuild and design §10's two calls, `3ef8e73` and `827a239`; this entry's corrections and the docs after #209's merge, `d4450c5` and `6e33501`; this entry's remap and the final check's docs fix, `924ddfc` and `fae90d2`; this entry's update and the docs after #214's merge, `9dff217` and `283f2cb` | `git rev-list --count 9e7c493..629d39b; git rev-list --count 629d39b..d2e5f08; git rev-list --count d2e5f08..07109c8; git rev-list --count 07109c8..827a239; git rev-list --count 827a239..6e33501; git rev-list --count 6e33501..fae90d2; git rev-list --count fae90d2..283f2cb` |
+| 0; 1 | lines of `git diff --stat` under `crates/`; files under `web/` that name `llvm-view` | `git diff --stat 9e7c493 283f2cb -- crates \| wc -l; git grep -l -F llvm-view 283f2cb -- web \| wc -l` |
+| 35 | the node test's cases, all passed | `pnpm exec vitest run --project node tests/node/llvm-view.test.ts` in `web/`, its `Tests` line |
+| 6, 5 and 3; 8 | the test's `it` cases in each `describe` block, the last run for each example; the examples | `awk '/^describe/{if(c)print c; c=0} /^  it[(]/{c++} END{print c}' web/tests/node/llvm-view.test.ts \| paste -sd ' '; ls web/src/examples/*.rxt \| wc -l` |
+| 91, 1709 | the node tier's files and tests, all passed | `pnpm exec vitest run --project node` in `web/`, its `Test Files` and `Tests` lines |
+| 330; 3741, 2 | `test:coverage`'s files; its tests passed, and expected to fail | `pnpm run test:coverage` in `web/`, its `Test Files` and `Tests` lines |
+| 499 | the files `biome ci` checks | `pnpm exec biome ci --error-on-warnings` in `web/`, its `Checked` line |
+| the second and third columns of the sabotage table | each sabotage's failed cases, and the line at which each failed case failed first | the edited copy put over `web/src/llvm-view.ts`; `pnpm exec vitest run --project node tests/node/llvm-view.test.ts --reporter=json --outputFile=$J` in `web/`; `jq -r '[.numFailedTests, ([.testResults[].assertionResults[] \| select(.status == "failed") \| .failureMessages[0] \| capture("llvm-view\\.test\\.ts:(?<l>[0-9]+)").l \| tonumber] \| unique \| map(tostring) \| join(", "))] \| @tsv' $J`; then the saved copy put back and `cmp`'d with it |
+| 12 7 7 15 1 1 1 24 16 1 1 | the sandbox's counts for sabotages 1 to 11 | `git show 629d39b:docs/superpowers/plans/2026-07-19-redextape-roadmap.md \| sed -n '/^\| Sabotage \| What failed \|/,/^$/p' \| grep -oE '[\|] [0-9]+:' \| grep -oE '[0-9]+' \| paste -sd ' '` |
+| 149,919, 59,597; 919,451, 325,757 | `pkg-llvm/`'s `.wasm`, then gzipped at level 9; `pkg/`'s | `wc -c < pkg-llvm/redextape_llvm_wasm_bg.wasm; gzip -9c pkg-llvm/redextape_llvm_wasm_bg.wasm \| wc -c`, the same with `pkg/redextape_wasm_bg.wasm` |
+| 26.13.1; 0.15.0; 1.100.0; 11.20.0 | Node; wasm-pack; rustc; pnpm | `node --version; wasm-pack --version; rustc --version`; `pnpm --version` in `web/` |
+| `node:26-bookworm` | the image CI's web job runs in | `grep -n 'image: node:' .forgejo/workflows/ci.yml` |
