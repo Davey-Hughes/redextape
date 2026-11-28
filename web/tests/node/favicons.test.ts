@@ -185,10 +185,13 @@ describe('apple-touch-icon.png', () => {
   })
 })
 
-/** The favicon plugin as `vite.config.ts` registers it, in the config Vite resolves from it for a build. */
-async function registered(): Promise<Plugin> {
+/**
+ * The favicon plugin as `vite.config.ts` registers it, in the config Vite resolves from it for `command`, since a
+ * plugin applied to one command alone is missing from the other's config.
+ */
+async function registered(command: 'build' | 'serve'): Promise<Plugin> {
   const root = fileURLToPath(new URL('../..', import.meta.url))
-  const resolved = await resolveConfig({ ...config, configFile: false, root }, 'build')
+  const resolved = await resolveConfig({ ...config, configFile: false, root }, command)
   const found = resolved.plugins.filter((p) => p.name === favicons().name)
   expect(found.length, `plugins named ${favicons().name} in the resolved config`).toBe(1)
   return found[0] as Plugin
@@ -236,20 +239,20 @@ describe('the plugin vite.config.ts registers', () => {
   it("emits both icons at the build's root, drawn from public/favicon.svg", async () => {
     const emitted: { type: string; fileName?: string; source?: unknown }[] = []
     const context = { emitFile: (asset: (typeof emitted)[number]) => emitted.push(asset) }
-    call(await registered(), 'generateBundle', context, {}, {}, true)
+    call(await registered('build'), 'generateBundle', context, {}, {}, true)
     expect(emitted.map(({ type, fileName }) => [type, fileName])).toEqual(ICONS.map(([file]) => ['asset', file]))
     for (const [i, [file, , bytes]] of ICONS.entries())
       expect(Buffer.from(emitted[i]?.source as Uint8Array).equals(bytes), `${file}'s bytes`).toBe(true)
   })
 
   it.each(ICONS)('serves /%s in dev as %s, drawn from public/favicon.svg', async (file, type, bytes) => {
-    const sent = serve(await registered(), `/${file}`)
+    const sent = serve(await registered('serve'), `/${file}`)
     expect([sent.passed, sent.type], 'passed on, and the content type').toEqual([false, type])
     expect(Buffer.from(sent.body as Uint8Array).equals(bytes), 'the bytes').toBe(true)
   })
 
   it("passes /favicon.svg on to Vite's public files", async () => {
-    expect(serve(await registered(), '/favicon.svg')).toEqual({ passed: true })
+    expect(serve(await registered('serve'), '/favicon.svg')).toEqual({ passed: true })
   })
 })
 
