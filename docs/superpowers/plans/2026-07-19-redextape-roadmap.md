@@ -46877,19 +46877,21 @@ says `web/`; `$J` is a JSON file outside the tree.
 | 26.13.1; 0.15.0; 1.100.0; 11.20.0 | Node; wasm-pack; rustc; pnpm | `node --version; wasm-pack --version; rustc --version`; `pnpm --version` in `web/` |
 | `node:26-bookworm` | the image CI's web job runs in | `grep -n 'image: node:' .forgejo/workflows/ci.yml` |
 
-#### EVERY PAGE CARRIES THE RED TAPE ICON, AS THE COMMITTED `favicon.svg` AND AS A `favicon.ico` OF 16, 32 AND 48 PX FRAMES AND A 180 PX `apple-touch-icon.png` THAT THE BUILD AND THE DEV SERVER DRAW FROM IT, SO NO BINARY IS COMMITTED, AND THE LOGO STANDS BEFORE THE WORDMARK WIDER THAN A PHONE (2026-11-28, branch `favicon` on `a8033d9`, `a8033d9..9dce63c`, 7 commits, this entry's first draft `76b89c5` among them, plus this update)
+#### EVERY PAGE CARRIES THE RED TAPE ICON, AS THE COMMITTED `favicon.svg` AND AS A `favicon.ico` OF 16, 32 AND 48 PX FRAMES AND A 180 PX `apple-touch-icon.png` THAT THE BUILD AND THE DEV SERVER DRAW FROM IT, SO NO BINARY IS COMMITTED, AND THE LOGO STANDS BEFORE THE WORDMARK WIDER THAN A PHONE (2026-11-28, branch `favicon` on `9e7c493`, `9e7c493..bfa667c`, 9 commits, this entry's two drafts `108b397` and `7a0e237` among them, plus this update)
 
 The user drew the site's icon, the *Red tape* design: a λ made of a red ribbon whose ends are cut. They asked for the cut ends to show at every size, the 16 and 32 px icons included, where an earlier set drew a plain λ at small sizes. They also asked for a `favicon.ico` without committing a binary file. Of the two ways they offered, committing an SVG or keeping the ico out of the tree and loading it from disk, the ruling was the SVG, with the ico made at build time: a file that is not committed never reaches the image CI builds from the checkout. The committed SVG is the user's drawing with its C2PA `<metadata>` block and `xmlns:c2pa` attribute taken out, as the user's rule on attribution keeps such a manifest out of the tree.
 
 | Commit | What |
 |---|---|
-| `c213c78` | `web/public/favicon.svg`; `web/favicons.ts`, the Vite plugin that makes the other two icons from it, registered in `vite.config.ts`; the three icon links on all five pages; `@resvg/resvg-js` as a devDependency; `favicons.test.ts` |
-| `8765e7f` | the logo before the wordmark on all five pages, hidden at the header's phone breakpoint; `wordmark-logo.test.ts` |
-| `76b89c5` | this entry |
-| `21e7f22` | `favicons.test.ts` sees the art in each icon; `favicons.ts` exports `APPLE_GROUND` for it |
-| `76d13ba` | `favicons.test.ts` runs the plugin `vite.config.ts` registers, its build hook and its dev middleware |
-| `796eb2c` | `favicons.test.ts` holds each page's wordmark to start with the logo |
-| `9dce63c` | `edge-spacing.test.ts` measures images, the logo among them |
+| `a87a375` | `web/public/favicon.svg`; `web/favicons.ts`, the Vite plugin that makes the other two icons from it, registered in `vite.config.ts`; the three icon links on all five pages; `@resvg/resvg-js` as a devDependency; `favicons.test.ts` |
+| `f4a45b3` | the logo before the wordmark on all five pages, hidden at the header's phone breakpoint; `wordmark-logo.test.ts` |
+| `108b397` | this entry's first draft |
+| `6b70561` | `favicons.test.ts` sees the art in each icon; `favicons.ts` exports `APPLE_GROUND` for it |
+| `4092bb3` | `favicons.test.ts` runs the plugin `vite.config.ts` registers, its build hook and its dev middleware |
+| `034a6e5` | `favicons.test.ts` holds each page's wordmark to start with the logo |
+| `a19308b` | `edge-spacing.test.ts` measures images, the logo among them |
+| `7a0e237` | this entry's second draft |
+| `bfa667c` | `edge-spacing.test.ts`'s window-edge cases titled for images as well as text runs and controls |
 
 ##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
 
@@ -46956,34 +46958,40 @@ In `edge-spacing.test.ts`, the logo given `margin-left: -14px` in `src/style.css
 ##### WHAT THIS DID NOT CLOSE
 
 - No browser tab, bookmark or iOS home screen was looked at, and nothing checks which icon a browser picks.
-- The branch review ran three gates at `76b89c5` that this branch had not. The Firefox tier, `pnpm run test:firefox`, fails 52 tests in 18 files, and the same 52 by name on `a8033d9`, so the branch adds no Firefox failure. `check-slow.sh` is green. CI's `test:coverage` passed, with lines at 99.43%. The Firefox tier runs only locally: `.forgejo/workflows/ci.yml` has no Firefox job.
-- Not run: `cargo llvm-cov`, and a Docker image build. The `node:26-slim` check stands in for the image's web stage only as far as loading resvg.
+- The branch review ran three gates at `108b397` that this branch had not. The Firefox tier, `pnpm run test:firefox`, fails 52 tests in 18 files, and the same 52 by name on `a8033d9`, so the branch adds no Firefox failure. `check-slow.sh` is green. CI's `test:coverage` passed, with lines at 99.43%. The Firefox tier runs only locally: `.forgejo/workflows/ci.yml` has no Firefox job.
+- Not run: `cargo llvm-cov`, and a Docker image build; and after the rebase, the Firefox tier, the whole Chromium tier, `test:coverage` and `check-slow.sh`. The `node:26-slim` check stands in for the image's web stage only as far as loading resvg.
 - The app's header is one row taller than on `main` in the two 26 px bands per style above. Only the Explorer layout was swept; another layout's controls would put its bands elsewhere.
 - The logo's colours are held by computed style, a filter, blend or opacity on it or an ancestor; nothing compares its drawn pixels.
 
 ##### VERIFICATION
 
-**The gates at `8765e7f`**, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` naming the pinned 0.25.10, since a worktree has no `.tools/` of its own; `check-licences.sh`, `--self-test` then the check, with `third-party-licences.json` unchanged; the node tier; the Chromium tier, `pnpm run test:browser`; and `pnpm run build:app`, after which `dist/` holds `favicon.ico`, `favicon.svg` (the same bytes as `public/favicon.svg`) and `apple-touch-icon.png`, and each of the five built pages holds the three links and the logo. The pre-commit hook passed on `c213c78` and on `8765e7f`, each hook Passed or, with no files of its own, Skipped. `check-all.sh` also passed at `c213c78`. The wasm packages and bindings were built in the worktree from `a8033d9`'s crates before any of these ran.
+The branch's first eight commits, to `7a0e237`, were made on `a8033d9` and then rebased onto `9e7c493` (#214), with only this file in conflict. This entry names those commits, and the gates, breaks, sweeps and review run on them before the rebase, by the commits the rebase made of them. The gates at `7a0e237` and at `bfa667c` ran after it.
 
-**The gates at `9dce63c`**, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` as above; the node tier; and `edge-spacing.test.ts`, the one browser file these commits touch, in Chromium and in Firefox. The pre-commit hook passed on `21e7f22`, `76d13ba`, `796eb2c` and `9dce63c`.
+**The gates at `f4a45b3`**, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` naming the pinned 0.25.10, since a worktree has no `.tools/` of its own; `check-licences.sh`, `--self-test` then the check, with `third-party-licences.json` unchanged; the node tier; the Chromium tier, `pnpm run test:browser`; and `pnpm run build:app`, after which `dist/` holds `favicon.ico`, `favicon.svg` (the same bytes as `public/favicon.svg`) and `apple-touch-icon.png`, and each of the five built pages holds the three links and the logo. The pre-commit hook passed on `a87a375` and on `f4a45b3`, each hook Passed or, with no files of its own, Skipped. `check-all.sh` also passed at `a87a375`. The wasm packages and bindings were built in the worktree from `a8033d9`'s crates before any of these ran.
+
+**The gates at `a19308b`**, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` as above; and `edge-spacing.test.ts`, the one browser file these commits touch, in Chromium and in Firefox. The pre-commit hook passed on `6b70561`, `4092bb3`, `034a6e5` and `a19308b`.
+
+**The gates at `7a0e237`**, after the rebase, its `web/` the same as `a19308b`'s, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` as above; `pre-commit run --from-ref origin/main --to-ref HEAD`, each hook Passed or Skipped; the node tier; `pnpm run build:app`, with `dist/` as at `f4a45b3`; and in Chromium `wordmark-logo.test.ts`, `edge-spacing.test.ts` and, since the branch changes the tests' `harness.ts`, the four browser files #214 changed: `clif-pane.test.ts`, `mc-panel-layout.test.ts`, `rxm-pane.test.ts` and `state-diagram.test.ts`.
+
+**The gates at `bfa667c`**, each exit 0: `edge-spacing.test.ts` in Chromium, and the node tier, whose `browser-timeout-invariants.test.ts` reads the browser test files. The pre-commit hook passed on `bfa667c`.
 
 **Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, `web/` ones from `web/`.
 
 | Value | What | Produced by |
 |---|---|---|
-| 2 | the commits `a8033d9..8765e7f` | `git rev-list --count a8033d9..8765e7f` |
-| 7 | the commits `a8033d9..9dce63c` | `git rev-list --count a8033d9..9dce63c` |
+| 2 | the commits `9e7c493..f4a45b3` | `git rev-list --count 9e7c493..f4a45b3` |
+| 9 | the commits `9e7c493..bfa667c` | `git rev-list --count 9e7c493..bfa667c` |
 | 2.6.2; MPL-2.0 | `@resvg/resvg-js`'s latest release and its licence, 2026-11-28 | `pnpm view @resvg/resvg-js version license` |
 | 3 icons | `dist/favicon.ico` | `pnpm run build:app && file dist/favicon.ico` |
 | 180 x 180 | `dist/apple-touch-icon.png` | `file dist/apple-touch-icon.png`, after the build |
 | 140; 20 | the Apple art's width, and its inset from each edge | `node -e 'const a = Math.round(180 * 0.78); console.log(a, (180 - a) / 2)'` |
 | linux x64, Node 26.13.1 | where resvg-js loaded and drew | in `node:26-slim` (`sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5`), with `web/package.json` and `web/pnpm-lock.yaml` copied in: `npm install -g pnpm@11.20.0 && pnpm install --frozen-lockfile && node -e '…'`, the script requiring `@resvg/resvg-js`, drawing an 8 px SVG and printing `process.platform`, `process.arch` and `process.versions.node` |
-| 9; 23 | `favicons.test.ts`'s cases at `8765e7f`, and at `9dce63c`, each passing | `pnpm exec vitest run --project node tests/node/favicons.test.ts` |
+| 9; 23 | `favicons.test.ts`'s cases at `f4a45b3`, and at `a19308b`, each passing | `pnpm exec vitest run --project node tests/node/favicons.test.ts` |
 | 18 | `wordmark-logo.test.ts`'s cases, each passing | `pnpm exec vitest run --project browser tests/browser/wordmark-logo.test.ts` |
-| 91 files, 1,681 tests; 1,695 | the node tier at `8765e7f`, and its tests at `9dce63c`, passing | `pnpm run test:node` |
-| 54 | `edge-spacing.test.ts`'s cases at `9dce63c`, each passing in Chromium and in Firefox | `pnpm exec vitest run --project browser tests/browser/edge-spacing.test.ts`, then `REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project firefox tests/browser/edge-spacing.test.ts` |
-| 52 in 18 files; 52 | the Firefox tier's failing tests at `76b89c5`, and the same 18 files' failing tests on `a8033d9`, by the same names | `pnpm run test:firefox`, on the branch, and on `a8033d9` in a scratch worktree with the 18 files named |
-| 99.43 | `test:coverage`'s line coverage over all files at `76b89c5`, in % | `pnpm run test:coverage`, under a 16 GB memory cap |
+| 91 files, 1,681 tests; 1,696 | the node tier at `f4a45b3`, and its tests at `7a0e237` and at `bfa667c`, passing | `pnpm run test:node` |
+| 54 | `edge-spacing.test.ts`'s cases at `a19308b`, each passing in Chromium and in Firefox, and at `bfa667c` in Chromium | `pnpm exec vitest run --project browser tests/browser/edge-spacing.test.ts`, then `REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project firefox tests/browser/edge-spacing.test.ts` |
+| 52 in 18 files; 52 | the Firefox tier's failing tests at `108b397`, and the same 18 files' failing tests on `a8033d9`, by the same names | `pnpm run test:firefox`, on the branch, and on `a8033d9` in a scratch worktree with the 18 files named |
+| 99.43 | `test:coverage`'s line coverage over all files at `108b397`, in % | `pnpm run test:coverage`, under a 16 GB memory cap |
 | 240 files, 2,041 tests and 2 expected to fail | the Chromium tier, passing | `pnpm run test:browser` |
 | 181 and 136; 13.875 and 58.875; 386 and 341 | with the 30rem rule taken out, the stage-strip header's top and the λ view's height at 320 × 400, and the page's height at 320 × 320, each against its pin | `pnpm exec vitest run --project browser tests/browser/inspector-phone.test.ts`, the rule taken out of `src/style.css` and restored from a saved copy after |
 | 26 | the width the logo and its gap add | 22 px of logo and `--space-1`'s 0.25rem at 16 px |
