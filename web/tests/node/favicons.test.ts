@@ -265,3 +265,36 @@ describe('the icon links', () => {
     for (const tag of TAGS) expect(head, tag).toContain(tag)
   })
 })
+
+/** The logo every page's wordmark starts with: the site's one art file, its box set before it loads, and no name. */
+describe('the logo', () => {
+  /** The markup after each opening tag on `name`'s page whose class list holds `wordmark`. */
+  function wordmarks(name: string): string[] {
+    const html = readRelative(`../../${name}.html`)
+    return [...html.matchAll(/<[a-z]+\s[^>]*\bclass="(?:[^"]*\s)?wordmark(?:\s[^"]*)?"[^>]*>/g)].map((m) =>
+      html.slice(m.index + m[0].length),
+    )
+  }
+
+  const withWordmark = PAGES.filter((name) => wordmarks(name).length > 0)
+
+  it('precondition: the app has a wordmark', () => {
+    expect(withWordmark).toContain('index')
+  })
+
+  it.each(withWordmark)("%s.html's wordmark has the logo as its first child", (name) => {
+    for (const after of wordmarks(name)) {
+      const img = /^\s*<img(\s[^>]*)>/.exec(after)?.[1]
+      expect(img, `the wordmark's first child, before "${after.slice(0, 40)}"`).toBeDefined()
+      const attrs = Object.fromEntries(
+        [...(img ?? '').matchAll(/\s([a-z-]+)(?:="([^"]*)")?/g)].map((m) => [m[1], m[2] ?? '']),
+      )
+      expect([attrs.src, attrs.width, attrs.height, attrs.alt], 'src, width, height, alt').toEqual([
+        '/favicon.svg',
+        '22',
+        '22',
+        '',
+      ])
+    }
+  })
+})
