@@ -1,6 +1,10 @@
 //! Codegen-agnostic preparation shared by the Cranelift and LLVM backends: the register-cap guard,
-//! subroutine arity, and the frame-size-aware recursion-depth cap. No codegen-library types here —
-//! only `Program`/`Subroutine` analysis — so both backends (and neither-needs-the-other) reuse it.
+//! subroutine arity, the frame-size-aware recursion-depth cap, and the name LLVM gets for a subroutine.
+//! No codegen-library types here — only `Program`/`Subroutine` analysis — so both backends (and
+//! neither-needs-the-other) reuse it.
+
+#[cfg(any(feature = "llvm", feature = "ll"))]
+use std::borrow::Cow;
 
 #[cfg(any(feature = "cranelift", feature = "llvm"))]
 use redextape_core::tm::Caps;
@@ -168,6 +172,20 @@ pub(crate) fn native_depth_cap(prog: &Program, subs: &[Subroutine], caps: Caps) 
     caps.stack.min(safe_depth)
 }
 
+/// The name LLVM gets for the subroutine `label`: `label` itself, unless it starts with `llvm.`, the prefix LLVM
+/// keeps for its intrinsics; LLVM refuses a body to any function so named, so such a label gets a `$` in front. A
+/// source `fn llvm` is a subroutine `llvm.<n>`, so without this the LLVM backend's module fails to verify.
+///
+/// `$` names are the compiler's, never written in source, so the new name is no `fn`'s label. A hand-written rxm
+/// label can still be the same name, and LLVM then numbers the one declared later, as for any other clash. The
+/// prefix has no NUL in it, so a label takes it exactly when its part before a NUL does, the part inkwell hands LLVM.
+///
+/// `llvm.rs` names each function by this and the LLVM IR writer prints the same name, so the two cannot part.
+#[cfg(any(feature = "llvm", feature = "ll"))]
+pub(crate) fn llvm_function_name(label: &str) -> Cow<'_, str> {
+    if label.starts_with("llvm.") { Cow::Owned(format!("${label}")) } else { Cow::Borrowed(label) }
+}
+
 /// Why `build_clif`, a build from it, or `llvm_text` refused a program, as a sentence a page can show:
 /// `Unsupported`'s own words, and for `TooDeep` the guard it passed, since its node means nothing to a reader of the
 /// CLIF or the LLVM IR.
@@ -177,5 +195,24 @@ pub fn decline_reason(e: &LowerError) -> String {
     match e {
         LowerError::Unsupported { what, .. } => what.clone(),
         LowerError::TooDeep { .. } => "the program nests deeper than the rxm lowering guard allows".to_string(),
+    }
+}
+
+#[cfg(all(test, any(feature = "llvm", feature = "ll")))]
+mod tests {
+    // Clippy's `allow-*-in-tests` keys (see `clippy.toml`) recognize a BARE `#[cfg(test)]` only, not
+    // the feature-gated form this module needs, so the test exemption is restated here.
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    #[test]
+    fn a_label_with_llvms_prefix_gets_a_dollar_and_every_other_label_is_kept() {
+        assert_eq!(llvm_function_name("llvm.0"), "$llvm.0");
+        assert_eq!(llvm_function_name("llvm.uadd.sat.i64"), "$llvm.uadd.sat.i64");
+        assert_eq!(llvm_function_name("llvm.\0cut"), "$llvm.\0cut", "the prefix before a NUL is the prefix");
+        for kept in ["$main", "fact.0", "llvm", "llvmx.0", "_llvm.0", "LLVM.0", "$llvm.0", "\0llvm.0", "llvm\0.0", ""] {
+            assert!(matches!(llvm_function_name(kept), Cow::Borrowed(name) if name == kept), "{kept:?}");
+        }
     }
 }

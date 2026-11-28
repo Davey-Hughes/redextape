@@ -105,9 +105,18 @@ it('writes a word of 2^53 or more whole', () => {
   expect(text(llvmIr(input) as LlvmListing)).toMatch(/^ {2}store i64 -1, ptr %/m)
 })
 
+/** A call to a label nothing defines, which no program `pkg/` compiles can hold, so the input is built by hand, as the clif package's test builds one. */
 it('gives the reason for a program the LLVM backend refuses', () => {
-  const input = compiled('fn llvm(n) { n + 1 }\nllvm(41)\n').clifInput()
-  expect(thrown(() => llvmIr(input))).toMatch(/intrinsic prefix `llvm\.`/)
+  const input = { program: { code: [{ Call: 'missing' }, 'Halt'], labels: [] } }
+  expect(thrown(() => llvmIr(input))).toBe('call to undefined label `missing`')
+})
+
+/** `fn llvm`'s label, `llvm.0`, takes the prefix LLVM keeps for its intrinsics, so the backend names it `$llvm.0`. */
+it("writes a function whose label takes LLVM's intrinsic prefix under the name the backend gives it", () => {
+  const listing = llvmIr(compiled('fn llvm(n) { n + 1 }\nllvm(41)\n').clifInput()) as LlvmListing
+  expect(text(listing)).toMatch(/^define private i64 @"\$llvm\.0"\(ptr %0, i64 %1\) \{$/m)
+  expect(text(listing)).toMatch(/^ {2}%call = call i64 @"\$llvm\.0"\(ptr %0, /m)
+  expect(listing.functions).toContainEqual(expect.objectContaining({ name: '"$llvm.0"', label: 'llvm.0' }))
 })
 
 it('refuses an input clifInput() did not write', () => {

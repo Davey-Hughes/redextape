@@ -24,6 +24,12 @@
 //!   order.
 //! * **The intrinsics' attributes**, which LLVM attaches to an intrinsic's declaration by itself, as the
 //!   pinned release spells them.
+//!
+//! A function's name is the one `llvm.rs` gives it, not a rule copied from LLVM: `shared::llvm_function_name`,
+//! the rxm label with a `$` in front of one that takes LLVM's intrinsic prefix `llvm.`, so a `fn llvm`
+//! labelled `llvm.0` prints as `@"$llvm.0"`. A view that shows this text beside the rxm listing finds a line's
+//! instruction by the line's pc, never by a name, and `LlFunction::label` keeps the rxm label beside the
+//! printed name.
 
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -34,7 +40,7 @@ use redextape_core::tm::{LowerError, Program, Reg, reg_str};
 use crate::analysis::{Subroutine, partition};
 use crate::lower::{Banks, BodyPos, LowerFault, LowerSink, lower_subroutine};
 use crate::rt_imports::RtFn;
-use crate::shared::{MAX_REGISTERS, param_count, reg_over_cap};
+use crate::shared::{MAX_REGISTERS, llvm_function_name, param_count, reg_over_cap};
 
 /// The data layout LLVM gives x86-64 Linux, which `llvm.rs` sets from its target machine before it builds
 /// anything; it decides the `align 8` on every slot.
@@ -61,9 +67,10 @@ pub struct LlLine {
 /// One defined function of the module.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LlFunction {
-    /// Its name as the text prints it, after `@`: `"$main"`, `fact.0`.
+    /// Its name as the text prints it, after `@`: `"$main"`, `fact.0`, and `"$llvm.0"` for the label `llvm.0`,
+    /// which takes LLVM's intrinsic prefix.
     pub name: String,
-    /// The rxm subroutine it was built from, as `partition` names it.
+    /// The rxm subroutine it was built from, as `partition` names it: `$main`, `fact.0`, `llvm.0`.
     pub label: String,
     /// The index of its `define` line in `LlModule::lines`.
     pub first_line: usize,
@@ -94,8 +101,8 @@ impl LlModule {
 /// # Errors
 /// `LowerError::Unsupported` when `partition` rejects `prog`, when a register index reaches
 /// `MAX_REGISTERS`, or when the walk cannot lower a subroutine, which the native backends refuse too; and
-/// when a subroutine's name takes LLVM's `llvm.` prefix or is empty up to a NUL, which the LLVM backend
-/// refuses or names apart and the Cranelift backends do not.
+/// when a subroutine's name is empty up to a NUL, which the LLVM backend names apart and the Cranelift
+/// backends do not, or when two are `llvm` up to a NUL, which LLVM numbers into its intrinsic prefix.
 pub fn llvm_text(prog: &Program) -> Result<LlModule, LowerError> {
     if reg_over_cap(prog) {
         return Err(unsupported(format!("register index exceeds MAX_REGISTERS ({MAX_REGISTERS})")));
@@ -110,22 +117,27 @@ pub fn llvm_text(prog: &Program) -> Result<LlModule, LowerError> {
     for intrinsic in Intrinsic::ALL {
         globals.take(intrinsic.name(), true);
     }
-    // inkwell hands LLVM a name up to its first NUL, so that is the name LLVM uniques and prints. An empty
-    // one, which `parse_rxm` reads from a label that starts with a NUL, leaves the function unnamed and
-    // numbered, which this writer does not follow.
+    // inkwell hands LLVM the name `llvm.rs` gives it up to its first NUL, so that is the name LLVM uniques and
+    // prints. An empty one, which `parse_rxm` reads from a label that starts with a NUL, leaves the function
+    // unnamed and numbered, which this writer does not follow.
     let mut names = Vec::with_capacity(subs.len());
     for sub in &subs {
-        let name = sub.name.split('\0').next().unwrap_or_default();
+        let given = llvm_function_name(&sub.name);
+        let name = given.split('\0').next().unwrap_or_default();
         if name.is_empty() {
             return Err(unsupported(format!("a subroutine named {:?} has no name before its NUL", sub.name)));
         }
         names.push(globals.take(name, true));
     }
-    // LLVM reserves the prefix for its intrinsics and refuses a body for any function that has it, so
-    // `llvm.rs`'s module fails to verify and the backend refuses the program; this text would be a module
-    // LLVM rejects.
-    if let Some(name) = names.iter().find(|name| name.starts_with("llvm.")) {
-        return Err(unsupported(format!("a subroutine named `{name}` takes LLVM's intrinsic prefix `llvm.`")));
+    // Only a label that takes the prefix is renamed, so two that are `llvm` up to a NUL both reach LLVM as
+    // `llvm`, and LLVM numbers the second `llvm.1`, which takes it. LLVM refuses a body under that name, so
+    // `llvm.rs`'s module fails to verify and the backend refuses the program; this text would be a module LLVM
+    // rejects.
+    if let Some((sub, name)) = subs.iter().zip(&names).find(|(_, name)| name.starts_with("llvm.")) {
+        return Err(unsupported(format!(
+            "LLVM would name the subroutine {:?} `{name}`, which takes its intrinsic prefix `llvm.`",
+            sub.name
+        )));
     }
 
     let mut out = Out::default();
@@ -718,9 +730,28 @@ mod tests {
         }
     }
 
+    /// `$main` calls `first` and then `second`, each of which doubles its argument.
+    fn call_both(first: &str, second: &str) -> Program {
+        Program {
+            code: vec![
+                Instr::Li(Reg::Arg(0), 6),
+                Instr::Call(first.to_string()),
+                Instr::Call(second.to_string()),
+                Instr::Halt,
+                Instr::Bin(BinOp::Add, Reg::Rr, Reg::Arg(0), Reg::Arg(0)),
+                Instr::Ret,
+                Instr::Bin(BinOp::Add, Reg::Rr, Reg::Arg(0), Reg::Arg(0)),
+                Instr::Ret,
+            ],
+            labels: vec![(first.to_string(), 4), (second.to_string(), 6)],
+        }
+    }
+
     /// Programs for what the snapshots need not hold, so the exact check reaches every arm of the writer
-    /// whatever the examples are: names LLVM must rename or quote and one with a `-`, which it leaves bare,
-    /// words past `i64::MAX`, every operator, a `jz` whose target is its next instruction, so one branch
+    /// whatever the examples are: names LLVM must rename or quote and one with a `-`, which it leaves bare;
+    /// labels with LLVM's intrinsic prefix, which the backend names with a `$` in front, `fn llvm`'s and an
+    /// intrinsic's, and a hand-written `$llvm.0` declared after the `llvm.0` so named, which LLVM numbers
+    /// apart; words past `i64::MAX`, every operator, a `jz` whose target is its next instruction, so one branch
     /// names a block twice, every runtime call and guard, and an argument its caller never set, which has no
     /// slot there and passes as `0`.
     pub(super) fn edge_programs() -> Vec<(String, Program)> {
@@ -737,10 +768,13 @@ mod tests {
             "quote\"back\\slash",
             "naïve",
             "nul\0cut",
+            "llvm.uadd.sat.i64",
         ]
         .iter()
         .map(|name| (format!("call {name:?}"), call(name)))
         .collect();
+        out.push(("fn llvm".to_string(), program("fn llvm", "fn llvm(n) { n + 1 }\nllvm(41)\n")));
+        out.push(("llvm.0 then $llvm.0".to_string(), call_both("llvm.0", "$llvm.0")));
         let ops =
             [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Eq, BinOp::Ne, BinOp::Lt, BinOp::Le, BinOp::Gt, BinOp::Ge];
         let mut code = vec![Instr::Li(Reg::Loc(0), u64::MAX), Instr::Li(Reg::Loc(1), 1 << 63)];
@@ -799,6 +833,22 @@ mod tests {
         assert!(text("quote\"back\\slash").contains(r#"@"quote\22back\\slash"("#));
         assert!(text("naïve").contains(r#"@"na\C3\AFve"("#));
         assert!(text("nul\0cut").contains("define private i64 @nul(ptr %0, i64 %1) {"));
+        let intrinsic = text("llvm.uadd.sat.i64");
+        assert!(intrinsic.contains("define private i64 @\"$llvm.uadd.sat.i64\"(ptr %0, i64 %1) {"));
+        assert!(
+            intrinsic.contains("declare i64 @llvm.uadd.sat.i64(i64, i64) #0"),
+            "precondition: the module declares the intrinsic whose name the label copies"
+        );
+        let edge = |key: &str| edge_programs().into_iter().find(|(k, _)| k == key).unwrap().1;
+        let both = llvm_text(&edge("llvm.0 then $llvm.0")).unwrap().text();
+        assert!(
+            both.contains("define private i64 @\"$llvm.0\"(ptr %0, i64 %1) {"),
+            "the renamed label keeps `$llvm.0`"
+        );
+        assert!(
+            both.contains("define private i64 @\"$llvm.0.1\"(ptr %0, i64 %1) {"),
+            "the hand-written one is numbered"
+        );
         let (read, diagnostics) = parse_rxm(&print_rxm(&call("\0cut")));
         assert!(diagnostics.is_empty(), "rxm text reads a label that starts with a NUL: {diagnostics:?}");
         assert!(llvm_text(&read.unwrap()).is_err(), "a name read from rxm text, empty up to its NUL, is refused");
@@ -838,17 +888,30 @@ mod tests {
         assert!(llvm_text(&prog).is_err());
     }
 
-    /// Programs whose subroutine names take LLVM's `llvm.` prefix, one hand-built and one from source,
-    /// where `fn llvm` becomes the subroutine `llvm.0`.
-    pub(super) fn llvm_prefixed() -> Vec<Program> {
-        vec![call("llvm.uadd.sat.i64"), program("fn llvm", "fn llvm(n) { n + 1 }\nllvm(41)\n")]
+    #[test]
+    fn fn_llvm_is_written_as_the_backend_names_it_with_a_dollar() {
+        let module = llvm_text(&program("fn llvm", "fn llvm(n) { n + 1 }\nllvm(41)\n")).unwrap();
+        let text = module.text();
+        assert!(text.contains("define private i64 @\"$llvm.0\"(ptr %0, i64 %1) {"), "{text}");
+        assert!(text.contains(" = call i64 @\"$llvm.0\"(ptr %0, i64 "), "$main calls it by that name: {text}");
+        assert!(!text.lines().any(|l| l.starts_with("define") && l.contains("@llvm.")), "{text}");
+        let sub = module.functions.iter().find(|f| f.label == "llvm.0").expect("a function for `llvm.0`");
+        assert_eq!(sub.name, "\"$llvm.0\"", "the name it prints, beside the rxm label it keeps");
+        assert_eq!(module.lines[sub.first_line].text, "define private i64 @\"$llvm.0\"(ptr %0, i64 %1) {");
     }
 
+    /// Only a label that takes the prefix itself is renamed, so two that are `llvm` up to a NUL keep that name
+    /// and LLVM numbers the second `llvm.1`, which takes it. The refusal names that label beside `llvm.1`, a
+    /// name the program does not hold.
     #[test]
-    fn a_subroutine_with_llvms_prefix_is_refused() {
-        for prog in llvm_prefixed() {
-            let Err(LowerError::Unsupported { what, .. }) = llvm_text(&prog) else { panic!("{prog:?} was written") };
-            assert!(what.contains("intrinsic prefix"), "{what}");
+    fn two_subroutines_named_llvm_up_to_a_nul_are_refused_as_the_backend_refuses_them() {
+        for (first, second) in [("llvm\0a", "llvm\0b"), ("llvm", "llvm\0x")] {
+            let refused = llvm_text(&call_both(first, second));
+            assert!(
+                matches!(&refused, Err(LowerError::Unsupported { what, .. })
+                    if what.contains(&format!("the subroutine {second:?} `llvm.1`"))),
+                "{first:?} then {second:?}: {refused:?}"
+            );
         }
     }
 
@@ -907,17 +970,24 @@ mod tests {
             }
         }
 
-        /// The writer refuses these because inkwell's module does not verify; were LLVM ever to accept them,
-        /// this fails, and the writer should write them.
+        /// The writer refuses these because inkwell's module does not verify: LLVM refuses a body under `llvm.1`,
+        /// the name it numbers the second `llvm` into. This fails if LLVM accepts them, when the writer should
+        /// write them, or refuses them for another reason, when the writer's refusal gives the wrong one.
         #[test]
-        fn inkwell_refuses_a_subroutine_with_llvms_prefix_too() {
+        fn inkwell_refuses_two_subroutines_named_llvm_up_to_a_nul_too() {
             static INIT: std::sync::Once = std::sync::Once::new();
             INIT.call_once(|| Target::initialize_x86(&InitializationConfig::default()));
             let machine = llvm::target_machine(&TargetTriple::create(TRIPLE), "x86-64", "", OptLevel::O0).unwrap();
-            for prog in llvm_prefixed() {
+            for (first, second) in [("llvm\0a", "llvm\0b"), ("llvm", "llvm\0x")] {
+                let prog = call_both(first, second);
                 let ctx = Context::create();
                 let subs = partition(&prog).unwrap();
-                assert!(llvm::build_module(&ctx, &machine, &prog, &subs, OptLevel::O0).is_err(), "{prog:?}");
+                let refused = llvm::build_module(&ctx, &machine, &prog, &subs, OptLevel::O0).err();
+                assert!(
+                    matches!(&refused, Some(e) if e.contains("llvm intrinsics cannot be defined!")
+                        && e.contains("@llvm.1")),
+                    "{first:?} then {second:?}: {refused:?}"
+                );
             }
         }
 

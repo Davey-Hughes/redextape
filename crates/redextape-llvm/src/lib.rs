@@ -30,9 +30,9 @@ pub struct LlvmLine {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct LlvmFunction {
-    /// Its name as the text prints it after `@`: `"$main"`, `fact.0`.
+    /// Its name as the text prints it after `@`: `"$main"`, `fact.0`, and `"$llvm.0"` for the label `llvm.0`.
     pub name: String,
-    /// The rxm subroutine it was built from, as `partition` names it: `$main`, `fact.0`.
+    /// The rxm subroutine it was built from, as `partition` names it: `$main`, `fact.0`, `llvm.0`.
     pub label: String,
     /// The index of its `define` line in `LlvmListing::lines`.
     pub first_line: u32,

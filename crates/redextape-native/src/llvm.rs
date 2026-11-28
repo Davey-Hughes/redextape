@@ -68,7 +68,7 @@ use redextape_native_rt::{RUN_STACK_SIZE, Runtime};
 use crate::analysis::{Subroutine, partition};
 use crate::lower::{Banks, BodyPos, LowerFault, LowerSink, lower_subroutine};
 use crate::rt_imports::{PerRtFn, RtFn};
-use crate::shared::{MAX_REGISTERS, native_depth_cap, param_count, reg_over_cap};
+use crate::shared::{MAX_REGISTERS, llvm_function_name, native_depth_cap, param_count, reg_over_cap};
 use crate::{NativeRun, OptLevel};
 
 /// Wrap any inkwell/LLVM/JIT failure as a `LowerError` outcome. None of these paths is expected to
@@ -691,7 +691,8 @@ fn declare_subroutines<'ctx>(
         // `-O3`. `Private` rather than `Internal` because these names need not appear in the emitted
         // symbol table at all.
         let linkage = if sub.entry == 0 { Linkage::External } else { Linkage::Private };
-        funcs.insert(sub.entry, module.add_function(&sub.name, i64t.fn_type(&params, false), Some(linkage)));
+        let name = llvm_function_name(&sub.name);
+        funcs.insert(sub.entry, module.add_function(&name, i64t.fn_type(&params, false), Some(linkage)));
         arity.insert(sub.entry, n);
     }
     (funcs, arity)
@@ -941,6 +942,8 @@ mod tests {
         assert_eq!(llvm_value("if 2 > 1 { 10 } else { 20 }"), Value::Nat(10));
         assert_eq!(llvm_value("fn sum(n){ if n==0 {0} else { n + sum(n-1) } } sum(5)"), Value::Nat(15));
         assert_eq!(llvm_value("100 * 100"), Value::Nat(10_000)); // beyond FIELD_WIDTH
+        // Its label, `llvm.0`, takes the prefix LLVM refuses a body under, so it runs only as `$llvm.0`.
+        assert_eq!(llvm_value("fn llvm(n) { n + 1 } llvm(41)"), Value::Nat(42));
     }
 
     #[test]
@@ -1379,14 +1382,27 @@ mod tests {
     /// with an import gets uniquified (`rt_cons` → `rt_cons.1`) and the import keeps the bare name.
     /// Without that ordering the by-name lookup would bind a HOST function's address onto a user
     /// subroutine — a silent miscompile, and precisely the UB the re-fetch avoids. Pinned so a
-    /// reordering cannot break it silently.
+    /// reordering cannot break it silently. A label with LLVM's intrinsic prefix, `fn llvm`'s `llvm.0` or
+    /// an intrinsic's own name, would have no body LLVM accepts; `shared::llvm_function_name` names it
+    /// with a `$` in front, so it runs, and the intrinsic keeps its name.
     #[test]
     fn a_subroutine_named_like_an_import_does_not_hijack_it() {
         // `$main: arg0 = 6; call <name>; halt` / `<name>: rr = arg0 + arg0; ret` — 12, only if the
         // call really reached the user subroutine and not some host `rt_*` (or libc) address.
-        for name in
-            ["rt_cons", "rt_enter", "rt_faulted", "rt_leave", "$main", "main", "memcpy", "memset", "malloc", "free"]
-        {
+        for name in [
+            "rt_cons",
+            "rt_enter",
+            "rt_faulted",
+            "rt_leave",
+            "$main",
+            "main",
+            "memcpy",
+            "memset",
+            "malloc",
+            "free",
+            "llvm.0",
+            "llvm.uadd.sat.i64",
+        ] {
             let prog = Program {
                 code: vec![
                     Instr::Li(Reg::Arg(0), 6),

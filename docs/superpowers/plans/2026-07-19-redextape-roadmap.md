@@ -46876,3 +46876,119 @@ says `web/`; `$J` is a JSON file outside the tree.
 | 149,919, 59,597; 919,451, 325,757 | `pkg-llvm/`'s `.wasm`, then gzipped at level 9; `pkg/`'s | `wc -c < pkg-llvm/redextape_llvm_wasm_bg.wasm; gzip -9c pkg-llvm/redextape_llvm_wasm_bg.wasm \| wc -c`, the same with `pkg/redextape_wasm_bg.wasm` |
 | 26.13.1; 0.15.0; 1.100.0; 11.20.0 | Node; wasm-pack; rustc; pnpm | `node --version; wasm-pack --version; rustc --version`; `pnpm --version` in `web/` |
 | `node:26-bookworm` | the image CI's web job runs in | `grep -n 'image: node:' .forgejo/workflows/ci.yml` |
+
+#### A FUNCTION NAMED `llvm` BUILDS ON THE LLVM BACKEND AS `$llvm.0`, AND THE LLVM IR WRITER WRITES IT UNDER THAT NAME WHERE IT REFUSED THE PROGRAM (2026-11-27, branch `llvm-prefix-names`, `19d36d4..70389ff`, 8 commits, plus this entry)
+
+The branch closes the first item of *LLVM IR VIEW PR 1*'s *WHAT THIS DID NOT CLOSE*: the LLVM backend failed
+`fn llvm(n) { n + 1 } llvm(41)`, which `pkg/` and the Cranelift backends run, and the LLVM IR writer refused it to
+match. It sits on `19d36d4`, main after #216, which holds that entry's branch, `llvm-ir-text`, merged as #209. The first
+five commits were drafted from a handoff in a cloud sandbox with no browser and no LLVM 23, and applied unchanged; the
+last three answer the reviews, which ran on this machine.
+
+##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
+
+On the LLVM backend, `fn llvm(n) { n + 1 } llvm(41)` builds and answers 42, where its module failed to verify.
+`pkg-llvm/`'s `llvmIr` writes it, defining and calling `@"$llvm.0"`, and lists the function with that name beside its
+label `llvm.0`, where it refused the program. No page shows LLVM IR yet: no file under `web/src` imports `pkg-llvm/`
+or `llvm-view.ts`, which #216 added for the view's pane.
+
+##### THE CAUSE
+
+A `fn`'s label is its name, a dot and a counter, so `fn llvm`'s label starts `llvm.`. LLVM keeps the prefix
+`llvm.` for its intrinsics and refuses a body to any function so named: `opt -passes=verify` refuses a module that
+defines `@llvm.0`, "llvm intrinsics cannot be defined!", and accepts one that defines `@"$llvm.0"`. `llvm.rs` named
+each function by its label, so the module failed to verify, and the writer, whose text is LLVM's print of that module,
+refused the program.
+
+##### DECISIONS
+
+Decisions 1 to 4 are the handoff's recommendations; duet's notes record them as the answers given in its session.
+
+1. **Only a label that starts with `llvm.` is renamed.** No `.ll` snapshot defines a function with the prefix, so
+   none changes.
+2. **The new name is the label with a `$` in front**, `$llvm.0`, printed `@"$llvm.0"` as `$main` is printed
+   `@"$main"`. The lexer reads no `$`, so no `fn` has that label. A hand-written rxm label can, and LLVM numbers
+   the one declared later, as for any clash: a `$llvm.0` after `llvm.0` is `$llvm.0.1`, in the backend and the writer.
+3. **One function names both sides.** `llvm.rs`'s `declare_subroutines` and the writer each call
+   `shared::llvm_function_name`, the writer before its NUL cut and its uniquing, in the order `llvm.rs` adds functions.
+4. **The printed name and the rxm label differ, and only the docs say so.** `LlFunction` and `LlvmFunction` carry
+   both, and each line an instruction wrote carries its rxm pc, so a view need not match lines by name.
+5. **Two subroutines that are `llvm` up to a NUL are refused, not renamed** (duet's third open question). Neither
+   label starts with `llvm.`, so both reach LLVM as `llvm`, LLVM names the second `llvm.1`, and the backend's
+   module fails to verify. Only a hand-built program holds such labels, and renaming them would put a `$` on labels
+   without the prefix. The writer's check for the prefix after uniquing stays for this case, so the writer and the
+   backend refuse the same programs with the prefix; the writer also refuses a name empty up to a NUL, which the
+   backend names apart (*LLVM IR VIEW PR 1*'s second open item). The refusal names the label it came from beside
+   `llvm.1`, which the program does not hold: "LLVM would name the subroutine `"llvm\0b"` `llvm.1`, which takes its
+   intrinsic prefix `llvm.`".
+
+##### THE TESTS
+
+- **`shared.rs`**: which labels take the `$`, and that ten others, `llvm`, `_llvm.0`, `llvm\0.0` and the empty label
+  among them, come back unchanged and borrowed.
+- **`ll_text.rs`, with `ll`.** `fn llvm` is written and called as `@"$llvm.0"`, where a test held its refusal. The edge
+  programs grow from 15 to 18: `call "llvm.uadd.sat.i64"`, `fn llvm` from source, and `llvm.0 then $llvm.0`. The NUL
+  refusal test holds the refusal, and the label it names, for `llvm\0a` then `llvm\0b` and `llvm` then `llvm\0x`.
+- **With `llvm`.** The exact check, `llvm_parses_every_edge_programs_text_into_inkwells_module`, reads the new edge
+  programs; the inkwell test that refused two of them, `call "llvm.uadd.sat.i64"` and `fn llvm`, goes, and one that
+  holds LLVM's reason for the NUL pairs comes. `a_subroutine_named_like_an_import_does_not_hijack_it` adds `llvm.0`
+  and `llvm.uadd.sat.i64`, and `arithmetic_and_control_flow` runs `fn llvm` and expects 42.
+- **`web/tests/node/llvm-package.test.ts`.** The refusal case builds its input by hand, a call to `missing`; a new case
+  holds that `fn llvm` is written and called as `@"$llvm.0"` and listed with that name and the label `llvm.0`.
+
+##### HOW EACH WAS SEEN TO FAIL
+
+Each sabotage was made after a copy of the file was saved, and undone from the copy, which `cmp` found equal. The
+first five were made at `70389ff` and run on `redextape-native` with `llvm,ll`, whose 62 tests pass unbroken; the
+sixth ran the NUL refusal test alone with `ll`.
+
+| Sabotage | What failed |
+|---|---|
+| `llvm_function_name` answers every label unchanged | 6 of 62: the unit test, the `fn llvm` test, the edge test, the exact check, `arithmetic_and_control_flow` and the import test |
+| `llvm.rs` names each function by its label again | 3 of 62: the exact check, `arithmetic_and_control_flow` and the import test, the three duet's notes predicted |
+| the writer names each subroutine by its label | 3 of 62: the `fn llvm` test, the edge test and the exact check |
+| the writer's check for the prefix after uniquing never fires | 1 of 62: the NUL refusal test |
+| `llvm.rs` gives a label with the prefix a `_` where the writer gives it a `$` | 1 of 62: the exact check, at its comparison of the two texts for `call "llvm.uadd.sat.i64"` |
+| the refusal's words as before `70389ff` | the NUL refusal test, run alone, on the old words |
+
+In the fix round, with `build_module` made to refuse the NUL pairs for another reason, the inkwell test as it was at
+`a908827` passed and `7ec6c13`'s failed.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The writer's names meet the backend's on the LLVM tier alone.** The exact check, the one test the fifth sabotage
+  failed, builds with `llvm`; the `ll` rows and `pkg-llvm/` do not compile `llvm.rs`, so they stay green if the two
+  part. CI's `rust-llvm` job runs it.
+- **The NUL pair and the name empty up to a NUL stay refused** (decision 5).
+- **The LLVM IR view's refused program.** Its plan, on main since #216, gives 2b's worker test (Task 5) `fn llvm` as a
+  refused program only while #209's writer refuses it; this branch's writer writes that program, so that case needs
+  another program the writer refuses, or goes, as the plan says.
+- **Not run on this machine:** the browser tier and Firefox (no line under `web/src` changes), the node tier beyond
+  `llvm-package.test.ts` and `llvm-view.test.ts`, `pnpm run typecheck`, `pnpm run test:coverage`, `check-slow.sh`,
+  CI's `opt_report` step, `build:app` and the Docker image.
+
+##### VERIFICATION
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, with the
+code at `70389ff`. A long command's output went to a file, `$LOG` below, which the row's filter read.
+
+| Value | What | Produced by |
+|---|---|---|
+| `70389ff`; 8: `4478da3`, `608b4f7`, `cac73d4`, `8041068`, `a908827`, `7ec6c13`, `af539a6`, `70389ff` | the last commit to change code; the commits on `19d36d4` to it, oldest first | `git log -1 --format=%h -- crates web; git rev-list --count 19d36d4..70389ff; git log --reverse --format=%h 19d36d4..70389ff` |
+| 5; 3 | the sandbox's commits, to `a908827`; those after it | `git rev-list --count 19d36d4..a908827; git rev-list --count a908827..70389ff` |
+| 2026-11-27; 2026-11-27 | the author dates of `4478da3` and `70389ff`, in the heading | `git log -1 --format=%ad --date=short 4478da3`, the same for `70389ff` |
+| 18: 13 and 5; 15: 12 and 3 | the edge programs, the `call` programs and the others, at `70389ff`; at `19d36d4` | `git show 70389ff:crates/redextape-native/src/ll_text.rs \| awk '/fn edge_programs\(\)/,/^    }$/' \| awk '/let mut out: Vec/,/\.iter\(\)/{ if ($0 ~ /^            "/) n++ } /out\.push\(\(/{ p++ } END { print n + p, n, p }'`, the same for `19d36d4` |
+| 10 | the labels `shared.rs`'s test holds unchanged and borrowed | `git show 70389ff:crates/redextape-native/src/shared.rs \| grep 'for kept in' \| grep -o '"[^"]*"' \| wc -l` |
+| 2 | the programs `19d36d4`'s inkwell refusal test ran, those of `llvm_prefixed()` | `git show 19d36d4:crates/redextape-native/src/ll_text.rs \| grep -A1 'fn llvm_prefixed' \| grep -oE '(call\|program)\(' \| wc -l` |
+| 146; 0; 0 | the `.ll` snapshot files, `.opt.ll` among them; those that define a function with the prefix; `git diff --stat` lines under the snapshots | `git ls-tree --name-only 70389ff crates/redextape-native/snapshots/ \| grep -c '\.ll$'; git grep -lE '^define .*@"?llvm\.' 70389ff -- crates/redextape-native/snapshots \| wc -l; git diff --stat 19d36d4 70389ff -- crates/redextape-native/snapshots \| wc -l` |
+| exit 1, "llvm intrinsics cannot be defined!"; exit 0 | `opt -passes=verify` on a module that defines `@llvm.0`; on one that defines `@"$llvm.0"` | `printf 'define void @%s() {\n  ret void\n}\n' llvm.0 \| opt -passes=verify -disable-output; echo $?`, then with `'"$llvm.0"'` |
+| 0; 0; 1 | `git diff --stat` lines under `web/src`; files under `web/src` that import `pkg-llvm/` or `llvm-view.ts`; that import `pkg-clif/`, which shows the pattern finds an import | `git diff --stat 19d36d4 70389ff -- web/src \| wc -l; git grep -lE "(from \|import\()'[./]*(pkg-llvm/\|llvm-view')" 70389ff -- web/src \| wc -l`, then with `pkg-clif/` alone in the last group |
+| 1.100.0; 0.9.149; 23.1.5; 26.13.1; 0.15.0; 0.9.1; 0.28.0 | rustc and cargo; cargo-nextest; LLVM; Node; wasm-pack; cargo-llvm-cov; the machine's tree-sitter | `rustc --version; cargo --version; cargo nextest --version; llvm-config --version; node --version; wasm-pack --version; cargo llvm-cov --version; tree-sitter --version` |
+| exit 0; 2101, 35; 10, 18, 17; 128, 52, 62; 9; 42 | `check-all.sh --no-browser`: its exit; the workspace's tests passed and skipped; `redextape-native` with no features, `clif`, `ll`; with `llvm`, `llvm` and no default features, `llvm,ll`; `redextape-llvm --features ts`; what `arithmetic_and_control_flow`, which passed there, expects of `fn llvm` | `TREE_SITTER=… scripts/check-all.sh --no-browser > $LOG 2>&1; echo $?`, then `grep -E '^==> cargo nextest\|Summary \[' $LOG`; `git grep -n 'llvm(41)' 70389ff -- crates/redextape-native/src/llvm.rs` |
+| 0.25.10 | the tree-sitter CLI `check-all.sh` ran | `grep -o 'using tree-sitter [0-9.]*' $LOG`, the same `$LOG` |
+| 3; 3 | `check-all.sh`'s `^warning` lines; those on doc tests for `cdylib` crates | `grep -c '^warning' $LOG; grep -c 'doc tests are not supported' $LOG` |
+| exit 0; 95.57%; 96.83%; 100.00% | `cargo llvm-cov`, as CI's `rust` job runs it: its exit; the workspace's lines covered; `ll_text.rs`'s; `shared.rs`'s | `cargo llvm-cov clean --verbose && cargo llvm-cov nextest --workspace --features redextape-mc/arm64 --fail-under-lines 90 > $LOG 2>&1; echo $?`, then `grep -E '^TOTAL\|/(ll_text\|shared)\.rs ' $LOG`, its Lines `Cover` column |
+| 12; 35 | `llvm-package.test.ts`'s tests, all passed; `llvm-view.test.ts`'s, all passed, on the same packages | `(cd web && pnpm run build:wasm && pnpm run build:llvm-wasm && pnpm exec vitest run --project node tests/node/llvm-package.test.ts)`, its `Tests` line; then the same `vitest` with `tests/node/llvm-view.test.ts` |
+| 22; 6 | `check-comments.mjs`'s areas; the changed files it read | `node scripts/check-comments.mjs --base 19d36d4` |
+| 62; 6, 3, 3, 1, 1 | the `llvm,ll` row's tests unbroken; the failed tests of each sabotage, in the table's order | `cargo nextest run -p redextape-native --no-default-features --features llvm,ll --no-fail-fast > $LOG 2>&1` unbroken and after each sabotage, then `grep -E 'Summary \[\|^ +FAIL' $LOG` |
+| exit 100; 1 failed | the NUL refusal test with the refusal's old words | the same `nextest` with `--features ll -E 'test(two_subroutines_named_llvm)'`, its `Summary` line |

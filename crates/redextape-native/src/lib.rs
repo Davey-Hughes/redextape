@@ -43,7 +43,7 @@
 // module — under `--all-targets` each lib compiles twice, and `cfg(test)` holds only in the
 // test-harness pass, so production warnings still surface from the other one.
 //
-// This ALSO covers the five `#[cfg(all(test, ...))]` modules in redextape-native that
+// This ALSO covers the six `#[cfg(all(test, ...))]` modules in redextape-native that
 // clippy.toml's header calls out as unreachable by clippy's own in-test detection: that limitation
 // is specific to clippy's `is_in_test` heuristic, and this is ordinary `cfg` evaluation.
 #![cfg_attr(test, allow(clippy::pedantic))]
