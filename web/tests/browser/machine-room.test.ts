@@ -342,7 +342,7 @@ describe.each(VIEWS)('the lines of the $kind view’s call stack and heap', (vie
     await frames()
     expect(heapText(host).textContent?.includes('←'), 'precondition: no value names the cell').toBe(false)
     expect(heapLine(host).getBoundingClientRect().height, 'the line, fewer names').toBeCloseTo(more, 0)
-    expect(whole(heapText(host)), 'its text').toBe(true)
+    expect(whole(heapLine(host)), 'the line, whole').toBe(true)
     forget(view, pane)
     draw(named(0))
     await frames()
