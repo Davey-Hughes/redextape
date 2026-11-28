@@ -10,18 +10,21 @@ a PR, and once CI has run, squash-merge it in the Forgejo web UI:
     git push -u origin my-branch
     # open a PR at forge.daveynet.xyz, squash-merge once CI is green
 
-CI runs against the PR head on every push to a **non-draft** PR and whenever the PR's title or body
-is edited, so its result is visible on the PR before anyone merges it: `rust`, `rust-llvm` and
-`rust-browser` run `scripts/check-all.sh` (`--no-llvm --no-browser`, `--llvm-only` and
-`--browser-only` respectively, which together cover every config), and `rust-slow` runs
-`scripts/check-slow.sh`.
+CI runs against the PR head when a **non-draft** PR is opened, reopened or pushed to, so its result
+is visible on the PR before anyone merges it: `rust`, `rust-llvm` and `rust-browser` run
+`scripts/check-all.sh` (`--no-llvm --no-browser`, `--llvm-only` and `--browser-only` respectively,
+which together cover every config), and `rust-slow` runs `scripts/check-slow.sh`. Editing a PR's
+title or body starts no run; the `pull_request` comment in `ci.yml` says why. Changing its base
+branch starts no run either, so the comment guard, which judges only what the branch adds to its
+base, keeps the old base's verdict: a PR moved onto `main` needs a push, or a close and reopen,
+before its gate covers the new base.
 
 A **draft** PR gets `rust-scoped` instead: a fast check that escalates rather than skips; on CI it
 always covers the whole branch diff — see the `rust-scoped` job header for what it actually buys.
 It is explicitly non-gating — its own banner says so. `rust`, `rust-llvm`, `rust-browser` and
-`rust-slow` do not run on a draft PR, and `gate` deliberately stays red until the PR leaves draft;
-that is expected, not a failure to investigate. `ci / gate (pull_request)` is the single required
-status check either way.
+`rust-slow` do not run on a draft PR, and `gate` deliberately stays red until the PR leaves draft and
+a push or a close and reopen runs the full tier; that is expected, not a failure to investigate.
+`ci / gate (pull_request)` is the single required status check either way.
 
 What a web-UI merge does **not** do by itself, the way the retired `scripts/land.sh` did, is check the
 merged tree. `land.sh` ran the gate **on the merged tree, before the commit existed**, and refused to
@@ -32,12 +35,11 @@ is a decision a person makes by reading CI's result, not a check the merge itsel
 **`main` is branch-protected** (enabled 2026-08-04), which is what stands in for that ordering:
 
 - direct pushes are off — a PR is the only way in
-- `ci / gate (pull_request)` is the single required status check. Naming `rust`, `rust-llvm`,
-  `rust-slow` or `linear-history` directly was tried and measured unsound: Forgejo reports a
-  *skipped* job as `success` on the commit-status API, so a required context naming one of those
-  jobs cannot tell "ran and passed" from "never ran." `gate` instead reads `needs.<job>.result` — a
-  different subsystem that reports `skipped` as `skipped` — and fails unless every gating job
-  actually succeeded.
+- `ci / gate (pull_request)` is the single required status check. Naming `rust`, `rust-slow`,
+  `rust-llvm` or `rust-browser` directly is unsound: Forgejo posts a *skipped* job as `skipped`,
+  and its merge check passes a required context in that state, so a required context naming one of
+  those jobs lets a PR merge on which that job never ran. `gate` instead reads `needs.<job>.result`,
+  which it can hold to `success`, and fails unless every gating job actually succeeded.
 - `block_on_outdated_branch` is on, so a PR green against a `main` that has since moved cannot merge
 - `apply_to_admins` is on, so the rule binds the repository owner too — without it the whole rule is
   advisory for the only account that merges

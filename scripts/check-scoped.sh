@@ -6,8 +6,8 @@
 #
 # THIS IS NOT THE MERGE GATE. scripts/check-all.sh is. This exists so a WIP push that only touched a
 # test does not pay for the whole feature matrix, and CI wires it to DRAFT pull requests only
-# (.forgejo/workflows/ci.yml, the `rust-scoped` job). The moment a PR leaves draft, the full jobs run
-# on every push. See docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §4.2.
+# (.forgejo/workflows/ci.yml, the `rust-scoped` job). Once a PR is out of draft, every push runs the
+# full-tier jobs. See docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §4.2.
 #
 # WHY THIS IS NOT A PATH FILTER IN ci.yml: on a `pull_request` event, Actions evaluates `paths`
 # against the whole base...head diff, so a branch whose first commit touched a src file runs
@@ -15,11 +15,11 @@
 # that is only sound for a check nobody merges on.
 #
 # BUT CI CANNOT GIVE THIS SCRIPT A PUSH INCREMENT: `github.event.before` is EMPTY on Forgejo's
-# synchronize event, and `base.sha` is the merge-base with `main`. So the `rust-scoped` job always
-# passes an unresolvable range and this script always takes the whole-branch fallback below. Run it
-# by hand with a real range (`main..HEAD`, or any two resolvable commits) and the narrow paths do
-# work — they are exercised by the local case, not the CI one. See the `rust-scoped` job's header
-# for what that leaves the job buying.
+# synchronize event, and `base.sha` is the target's tip when the event fired, not the head before
+# the push. So the `rust-scoped` job always passes an unresolvable range and this script always
+# takes the whole-branch fallback below. Run it by hand with a real range (`main..HEAD`, or any two
+# resolvable commits) and the narrow paths do work — they are exercised by the local case, not the
+# CI one. See the `rust-scoped` job's header for what that leaves the job buying.
 #
 # THE DEFAULT IS ALWAYS TO RUN MORE. A path this script has not been taught escalates to
 # `check-all.sh --no-llvm --no-browser`; it never becomes a skip. Permissive scoping — skipping
@@ -171,4 +171,4 @@ done
 
 echo
 echo "scoped check green for ${base}..${head}"
-echo "NOT THE MERGE GATE — scripts/check-all.sh is. Take the PR out of draft to run it."
+echo "NOT THE MERGE GATE — scripts/check-all.sh is. CI runs it once the PR is out of draft and is pushed to, or closed and reopened."

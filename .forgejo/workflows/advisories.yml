@@ -37,8 +37,7 @@ on:
   #
   # THIS IS DELIBERATELY NOT A REQUIRED STATUS, AND THE FILTER IS WHY IT MUST STAY THAT WAY. A PR that touches
   # none of these never reports it, so a required check would leave that PR pending forever — the hazard
-  # ci.yml's own `pull_request` comment describes. `gate` does not list this check, and must not. No `edited`
-  # either: there is no draft tier here.
+  # ci.yml's own `pull_request` comment describes. `gate` does not list this check, and must not.
   pull_request:
     paths:
       - "**/Cargo.toml"

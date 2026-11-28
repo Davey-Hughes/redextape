@@ -46037,3 +46037,125 @@ and `be <backend>` the same with that backend.
 | 0.25.10 | the tree-sitter `check-all.sh` pins | `rg -n 'PINNED to v0.25.10' scripts/check-all.sh`; `$TREE_SITTER --version` |
 | 20; 6 | `check-comments.mjs`'s areas, and the files it read as changed | `node scripts/check-comments.mjs --base 7033883 \| tail -2` |
 | 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
+
+#### A PULL REQUEST'S TITLE OR DESCRIPTION EDIT STARTS NO CI RUN, SO IT NO LONGER SETS A PASSED GATE BACK TO PENDING OR CANCELS A RUN IN PROGRESS, AND A DRAFT'S GATE STAYS RED AFTER IT LEAVES DRAFT UNTIL A PUSH OR A CLOSE AND REOPEN (2026-11-27, branch `ci-no-edit-runs` on `9e18a1a`: 7 commits that change the workflows, `scripts/check-scoped.sh` and `docs/conventions.md`, the last of them `c44df48`, plus the commits that write this entry)
+
+Every edit of an open PR's title or description started a `ci.yml` run on the head the PR already had. That run
+posted `ci / gate (pull_request)` as pending when it was created, so a PR that had passed could not merge until the
+whole tier ran again, and in the `ci-${{ github.ref }}` concurrency group, with `cancel-in-progress: true`, it
+cancelled any run still going on that PR. `edited` was in `on.pull_request.types` so that taking `WIP:` off a draft's
+title would start the full tier. The branch takes `types` out, which leaves Forgejo's default, and corrects the
+sentences that said leaving draft runs the full tier by itself, and, in a commit of its own, those that said a skipped
+job posts `success`. It also says that a PR moved onto `main` needs a push, or a close and reopen, before its gate
+covers the new base. The change is in `.forgejo/workflows/ci.yml`, one comment of `advisories.yml`, the header of
+`scripts/check-scoped.sh` and the last line it prints, and `docs/conventions.md`. What Forgejo does is read from
+its source at tag v16.0.2, the version the forge runs.
+
+| Commit | What |
+|---|---|
+| `46a12f8` | `ci.yml`: `on.pull_request` has no `types`, so Forgejo's default, `opened`, `synchronize` and `reopened`, applies; its comment says why an edit starts no run |
+| `6befc34` | the gate's draft message, `check-scoped.sh`'s last line and `docs/conventions.md` say a draft's gate stays red after it leaves draft until a push or a close and reopen runs the full tier, and the `rust-scoped` header says why a stale `draft` fails safe; `advisories.yml` drops its contrast with `ci.yml`'s `edited` |
+| `0beddfd` | the gate's header and failure message, `ci.yml`'s opening comment and `docs/conventions.md` say a skipped job posts `skipped`, which the merge check passes, where they said it posts `success` |
+| `8672620` | `ci.yml`'s `pull_request` comment and `docs/conventions.md` say a base change is `edited` too and the comment guard judges only what the branch adds to its base, so a PR moved onto `main` needs a push, or a close and reopen, before its gate covers the new base |
+| `01c6972` | `docs/conventions.md` names `rust`, `rust-slow`, `rust-llvm` and `rust-browser`, the jobs a draft skips, as the ones a required context cannot name directly, where it named `linear-history`, which has no `if:` |
+| `3fa146c` | the `rust-scoped` header and `check-scoped.sh`'s header say that once a PR is out of draft every push runs the full-tier jobs |
+| `c44df48` | the comment guard's step in `ci.yml`, the `rust-scoped` header and `check-scoped.sh`'s header say a PR's `base.sha` is its target's tip when the event fired, where they called it the merge base; the comment guard and `ci-docs-only.sh` each take the merge base from it, so no check changes |
+
+##### WHAT CHANGED FOR A PERSON USING THE FORGE
+
+- Editing a PR's title or description starts no run. A PR whose gate passed stays mergeable, and an edit cancels no
+  run in progress.
+- Taking `WIP:` off a draft's title starts no run either. The draft run's failed gate stays the head's gate until a
+  push (`synchronize`) or a close and reopen (`reopened`) starts a run whose payload reads the title without `WIP:`.
+  Re-running the draft run does not do it: `services/actions/rerun.go` resets the jobs and keeps the stored event
+  payload, so the rerun reads `draft` as true again. The gate's failure message names the push and the close and
+  reopen.
+- Changing a PR's base branch starts no run, as Forgejo sends that as `edited` too, with `changes.ref`
+  (`PullRequestChangeTargetBranch` in `services/actions/notifier.go`). The full tier tests the head's tree whatever
+  the base, `detect` sets `docs_only` only for a PR into `main`, so a PR moved onto `main` without a push keeps a
+  verdict the full tier gave, and `block_on_outdated_branch` still holds a head that is behind `main`. The comment
+  guard is the exception: it judges only what the branch adds to the base its run read, `base.sha`, so a PR moved
+  onto `main` from a branch ahead of `main` keeps a guard verdict that never read that branch's commits beyond
+  `main`. Such a PR needs a push, or a close and reopen, before its gate covers the new base, as leaving draft does.
+
+##### WHY NO RUN ON `edited` IS SOUND ON FORGEJO 16.0.2
+
+1. **A title edit and a description edit reach Actions as the same event.** In `services/actions/notifier.go`,
+   `IssueChangeTitle` (line 67) and `IssueChangeContent` (line 74) both drop the old text and call `issueChange`
+   (line 80), whose payload is the action `edited` with no `changes`. The webhook notifier fills in `changes.title`
+   and `changes.body`; the Actions one does not. So a workflow cannot tell the two edits apart, and a job that runs on
+   `edited` runs on both.
+2. **Any run on the head resets the gate.** `services/actions/notifier_helper.go` line 473 posts every job's status
+   when the run is created, and `models/git/commit_status.go`'s `GetLatestCommitStatus` takes the highest `index` of
+   each context, so an edit run's pending `gate` replaces a passed one at once.
+3. **A draft cannot merge on its draft run.** On a draft, `rust`, `rust-slow`, `rust-llvm` and `rust-browser` skip,
+   so `gate` fails, unless the PR is docs-only into `main`, which `gate` passes as it would out of draft. Taking
+   `WIP:` off changes no status, so the head's gate stays a failure until a new run. What `edited` bought was only
+   that the full run at draft exit started by itself.
+4. **A skipped job posts `skipped`, and the merge check passes it.** `services/actions/commit_status.go`'s
+   `toCommitStatus` maps a skipped job to `skipped`; `modules/structs/commit_status.go` ranks `skipped` (5) above
+   `success` (4); and `services/pull/commit_status.go`'s `MergeRequiredContextsCommitStatus` keeps the worst state of
+   each required context, starting from `success`, so a `skipped` one never lowers it. So the gate's two reasons hold
+   as they were: a required context naming a tier job would pass on a skip, and `if: always()` keeps `gate` itself
+   from being that skip. `0beddfd` changes what the comments say the status is, and no logic.
+
+##### DECISIONS
+
+1. **No `types` key, rather than `[opened, synchronize, reopened]`.** Those three are Forgejo's default when the key
+   is absent (`modules/actions/workflows.go`, lines 449-452), and with no key there is no list to check against it.
+   The runner's parser reads an `on.pull_request` with no value as an event with no activity filter
+   (`act/jobparser/model.go`, lines 387-392, in runner v12.13.2).
+2. **The draft tier stays.** Deleting `rust-scoped` is not needed for this and would make the branch larger.
+3. **The skipped-status correction is its own commit**, `0beddfd`, so it can be dropped without touching the
+   trigger.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **Leaving draft takes a push or a close and reopen.** Nothing starts the full tier when `WIP:` comes off, and a
+  rerun of the draft run takes the draft path again.
+- **No edit has been seen starting no run.** The proof is from source and from the parsers. For a PR from a branch of
+  this repository, Forgejo reads the workflow from the PR's head, not its base: `services/actions/notifier_helper.go`
+  line 116 sets the ref to `refs/pull/N/head`, lines 211-229 read that ref's commit and detect its workflows, and
+  `services/actions/trust.go` lines 81-82 keep the head for a PR that is not from a fork. So an edit of this PR's
+  description after it opens, with no push, is matched against this branch's `ci.yml`, and seeing no new run is the
+  live check.
+- **Other open PRs still run on an edit** until they are rebased onto a `main` that has this change, as each runs the
+  `ci.yml` of its own head.
+- **Dated documents keep the old account:** `docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md` §3.1, on
+  `edited` for leaving draft, and §4.4, on a skipped job reported as `success` on Forgejo 15.0.5, its plan, and earlier
+  entries here. The gate's header still points at §4.4 for the design.
+
+##### VERIFICATION
+
+On this machine, the pre-commit hook passed on each of the 7 commits that change more than this entry, its 9 hooks
+that always run passing and the rest having no files to check. At `3fa146c`, and again at `c44df48`, each of the 11
+scans `ci.yml` runs exits 0 with `--self-test` and then alone, and PyYAML 6.0.4 parses `ci.yml` and `advisories.yml`
+and reads `ci.yml`'s `on.pull_request` as null. The runner v12.13.2 `jobparser.ParseRawOn`, called by a probe kept
+outside the tree on `ci.yml`'s `on:`, gives `pull_request` no activity filter at `3fa146c`, and `types`
+`opened synchronize reopened edited` at `9e18a1a`. actionlint 1.7.12 exits 1 on `ci.yml` at both, with
+the same 28 findings once their line numbers are taken off: `runner-label` for `docker`, `action` for the
+code.forgejo.org URLs, and `shellcheck`. At both `3fa146c` and `c44df48`, `node scripts/check-comments.mjs` finds 20
+areas within their budgets, and no history and no grown block in 3 changed files.
+
+Not run: CI, and the Rust, web, browser and slow tiers. Besides comments and docs, the branch takes out `ci.yml`'s
+`types:` line and changes 4 `echo` lines, three of the gate's and `check-scoped.sh`'s last.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh on
+`3fa146c`, apart from the commit counts, run at the branch's head, with `F` for the Forgejo v16.0.2 source, `R` for
+the runner v12.13.2 source, and `$AL` for that actionlint.
+
+| Value | What | Produced by |
+|---|---|---|
+| 7 | the commits on `9e18a1a` that change more than this entry | `git rev-list --count 9e18a1a..HEAD -- . ':!docs/superpowers/plans/2026-07-19-redextape-roadmap.md'` |
+| 9 | the pre-commit hooks that passed on each commit | `git commit` into a log, then `grep -c 'Passed$'` on it, for each of the seven |
+| 11 | the scans `ci.yml` runs | `rg -o 'scripts/check-[a-z-]+\.(sh\|mjs)' .forgejo/workflows/ci.yml \| sort -u \| grep -v -e check-all -e check-scoped -e check-slow \| wc -l` |
+| 4 | the `echo` lines the branch changes | `git diff -U0 9e18a1a 3fa146c -- .forgejo scripts \| grep -cE '^\+\s*echo'` |
+| 6.0.4 | PyYAML | `python3 -I -c 'import yaml; print(yaml.__version__)'` |
+| 28 | actionlint's findings on `ci.yml`, at `3fa146c` and at `9e18a1a` | `$AL -no-color -oneline .forgejo/workflows/ci.yml \| wc -l`, and the same on `git show 9e18a1a:.forgejo/workflows/ci.yml` written to a file |
+| 20; 3 | `check-comments.mjs`'s areas, and the files it read as changed | `node scripts/check-comments.mjs \| tail -2` |
+| 67, 74, 80 | the lines of `IssueChangeTitle`, `IssueChangeContent` and `issueChange` | `rg -n 'func \(n \*actionsNotifier\) (IssueChangeTitle\|IssueChangeContent\|issueChange)\(' $F/services/actions/notifier.go` |
+| 473 | the line that posts every job's status as a run is created | `rg -n 'CreateCommitStatus\(ctx, alljobs' $F/services/actions/notifier_helper.go` |
+| 5, 4 | the ranks of `skipped` and `success` | `rg -n 'CommitStatus(Skipped\|Success):' $F/modules/structs/commit_status.go` |
+| 449-452 | the default activity types when `types` is absent | `sed -n 449,452p $F/modules/actions/workflows.go` |
+| 387-392 | the runner's parse of an event with no value | `sed -n 387,392p $R/act/jobparser/model.go` |
+| 116; 211-229; 81-82 | the PR head's ref, the commit whose workflows are detected, and the head kept for a PR not from a fork | `sed -n 116p $F/services/actions/notifier_helper.go; sed -n 211,229p $F/services/actions/notifier_helper.go; sed -n 81,82p $F/services/actions/trust.go` |

@@ -3,7 +3,7 @@
 #
 # The `detect` job checks what exists and gates the rest: the Rust jobs run when there is a
 # Cargo.toml, and `web` (and the `docker` job behind it) when there is a web/package.json, SKIPPING
-# cleanly (green) when there is not. It also decides docs-only runs: when every changed path is under
+# (not failing) when there is not. It also decides docs-only runs: when every changed path is under
 # docs/, the Rust and web jobs skip and `gate` does not require them. See docs/ for the design specs.
 #
 # Forgejo specifics (vs GitHub): actions come from the code.forgejo.org mirror, toolchains are
@@ -25,12 +25,15 @@ on:
     # `matchPushEvent` counts `paths`/`paths-ignore` as matched for any tag push, so a release always runs.
     paths-ignore: ["docs/**"]
   pull_request:
-    # `edited` is load-bearing, not decoration. Forgejo has NO `ready_for_review` event — its drafts
-    # are a `WIP:` title prefix — so taking a PR out of draft surfaces as `edited`. Without it the
-    # full jobs would not run until the next push, which is a window in which a draft-scoped PR could
-    # be merged having never had a full run. The cost is that editing a non-draft PR's title or body
-    # also re-runs the full jobs; that is the cheaper mistake.
-    types: [opened, synchronize, reopened, edited]
+    # NO `types`, SO FORGEJO'S DEFAULT HOLDS: `opened`, `synchronize` and `reopened`, not `edited`.
+    # Forgejo sends a title edit and a description edit to Actions as one `edited` event with no
+    # `changes`, so a run on `edited` cannot tell them apart: it re-runs the whole tier for a description
+    # edit and sets `gate` back to pending on a head that had passed. Leaving draft, by taking `WIP:` off
+    # the title, needs no such run: a draft's `gate` fails (unless it is docs-only into `main`, whose run
+    # is the same out of draft) and stays the head's latest `gate` until a push or a close and reopen
+    # starts a new run. A base change is `edited` too, and the comment guard judges only what the branch
+    # adds to its base, so a PR moved onto `main` needs one of those before its `gate` covers the new base.
+
     # NO `paths-ignore` HERE, unlike `push` above, and that asymmetry is forced, not chosen. On
     # `pull_request`, a path filter that matches the WHOLE diff means the workflow never runs at all, so no
     # `ci / gate (pull_request)` status is ever posted. A required context with no status never passes,
@@ -275,12 +278,12 @@ jobs:
         run: scripts/check-lua.sh
       # THE COMMENT GUARD'S BASE IS CHOSEN HERE AND PASSED AS `--base`, because the script's default, the
       # merge base with `origin/main`, would give rules 1 and 2 an empty diff on a push to `main`, where
-      # `origin/main` is `HEAD`. A pull request takes `base.sha`, the merge base with its target; an empty
-      # one reaches the script as `--base ''`, which it refuses, so a missing base fails. A push to `main`
-      # takes `before`, falling back to `HEAD~1` as `Reject merge commits` below does. A tag push and every
-      # other event take `HEAD`: nothing lands in them, so rules 1 and 2 judge an empty diff and rule 3
-      # checks every budget. The rules are in docs/superpowers/specs/2026-10-29-comment-guard-design.md.
-      # Self-test first, then the scan.
+      # `origin/main` is `HEAD`. A pull request takes `base.sha`, its target's tip when the event fired,
+      # whose merge base with `HEAD` the script takes; an empty `base.sha` reaches it as `--base ''`, which
+      # it refuses, so a missing base fails. A push to `main` takes `before`, falling back to `HEAD~1` as
+      # `Reject merge commits` below does. A tag push and every other event take `HEAD`: nothing lands in
+      # them, so rules 1 and 2 judge an empty diff and rule 3 checks every budget. The rules are in
+      # docs/superpowers/specs/2026-10-29-comment-guard-design.md. Self-test first, then the scan.
       - name: Prove the comment guard still detects
         run: node --version && node scripts/check-comments.mjs --self-test
       - name: Reject history, over-long blocks and share growth in comments
@@ -365,17 +368,17 @@ jobs:
           fi
           echo "no merge commits in $range"
 
-  # DRAFT pull requests only. Explicitly NOT a gate — the moment the PR leaves draft, the full-tier
-  # jobs run on every push and this job stops.
+  # DRAFT pull requests only. Explicitly NOT a gate — once the PR is out of draft, every push runs the
+  # full-tier jobs and this job stops.
   #
   # A DOCS-ONLY DRAFT INTO `main` IS THE EXCEPTION: this job skips with the others (`docs_only`), and
   # `gate` passes it, since the full tier would not be required out of draft either. Forgejo's `WIP:`
   # title still blocks its merge.
   #
   # It cannot scope against the PUSH INCREMENT:
-  # `github.event.before` is EMPTY on Forgejo's `synchronize`, and `base.sha` is the merge-base with
-  # `main`, so the payload offers no per-push increment at all — `check-scoped.sh` always takes its
-  # whole-branch fallback.
+  # `github.event.before` is EMPTY on Forgejo's `synchronize`, and `base.sha` is the target's tip when
+  # the event fired, not the head before the push, so the payload offers no per-push increment at all —
+  # `check-scoped.sh` always takes its whole-branch fallback.
   #
   # What it buys instead is cost: ~6 CPU-minutes instead of ~12, and 3-5 wall-clock minutes on a draft
   # push. What it does not buy is a narrower diff. Restoring genuine per-push scoping would mean
@@ -384,8 +387,8 @@ jobs:
   #
   # The DRAFT BOOLEAN, not a `full-ci` label, decides. A label does not follow the head commit: push
   # after labelling and it still reads green while the full run describes an older tree — a run that
-  # covers less than it claims. `draft` cannot go stale, because leaving draft makes the full jobs run
-  # on every subsequent push.
+  # covers less than it claims. A `draft` gone stale fails safe: each run reads it from the title at its
+  # own event, and a draft run's `gate` fails, so leaving draft is followed by a full run before merge.
   rust-scoped:
     needs: detect
     if: >-
@@ -800,18 +803,18 @@ jobs:
 
   # THE ONE REQUIRED STATUS CHECK. Nothing else in this workflow should be one.
   #
-  # FORGEJO REPORTS A SKIPPED JOB AS `success` ON THE COMMIT-STATUS API. When the draft gating skips
-  # `rust`, `rust-slow`, `rust-llvm` and `rust-browser`, each publishes `success` having never run, so
-  # a pull request on which none of them ran reads `success`. A required context naming those jobs
-  # directly therefore cannot distinguish "ran and passed" from "did not run" — on ANY pull request,
-  # draft or not. A `detect` emitting `has_rust=false` would do the same thing on a non-draft PR.
+  # FORGEJO'S MERGE CHECK PASSES A SKIPPED JOB. A skipped job posts `skipped`, which the merge check
+  # ranks above `success`. When the draft gating skips `rust`, `rust-slow`, `rust-llvm` and
+  # `rust-browser`, a required context naming those jobs directly would pass a pull request on which
+  # none of them ran — on ANY pull request, draft or not. A `detect` emitting `has_rust=false` would do
+  # the same thing on a non-draft PR.
   #
-  # `needs.<job>.result` IS A DIFFERENT SUBSYSTEM AND IT DOES MAKE THAT DISTINCTION — it reports
-  # `skipped` as `skipped`. The `docker` job below relies on that. This job is the bridge: it reads
-  # the internal results and publishes ONE external context that a skip cannot fake.
+  # `needs.<job>.result` CAN BE HELD TO `success`, WHERE THE MERGE CHECK CANNOT: it reports a skip as
+  # `skipped`, and the `docker` job below relies on that. This job is the bridge: it reads the
+  # internal results and publishes ONE external context that a skip cannot fake.
   #
   # `if: always()` IS LOAD-BEARING, NOT DEFENSIVE. Without it this job would itself be skipped
-  # whenever its `needs` were skipped, and a skipped `gate` publishes `success` — reproducing the
+  # whenever its `needs` were skipped, and a skipped `gate` passes the merge check — reproducing the
   # exact hole it exists to close, one level up.
   #
   # See docs/superpowers/specs/2026-08-04-ci-scope-filters-design.md §4.4.
@@ -894,10 +897,10 @@ jobs:
           if [ "$fail" -ne 0 ]; then
             echo >&2
             echo "THIS is the required check, not the jobs above it. A job that was SKIPPED" >&2
-            echo "publishes 'success' to the status API, so requiring those directly would let a" >&2
-            echo "draft PR — or any run where they were skipped — read green having never run." >&2
+            echo "posts 'skipped', which the merge check passes, so requiring those directly would let a" >&2
+            echo "draft PR — or any run where they were skipped — merge having never run." >&2
             echo "A draft PR is EXPECTED to fail here, unless it is docs-only into main: take it out" >&2
-            echo "of draft to run the full tier." >&2
+            echo "of draft, then push or close and reopen it to run the full tier." >&2
             exit 1
           fi
           echo "all gating jobs ran and passed"
