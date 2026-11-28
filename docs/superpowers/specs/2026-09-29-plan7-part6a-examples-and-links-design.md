@@ -573,8 +573,7 @@ Every new control follows umbrella §4's rules.
 
 *Amended 2026-11-28, in branch `a11y-leftovers`: `settings` is a disclosure too, like the workspace menu's button,
 `examples`, `share` and `about` — `aria-controls` and `aria-expanded`, and no `aria-haspopup`, since its popover
-holds selects, a checkbox and a button: no menu items, and no arrow keys between them. That closes the question the
-amendment above recorded as open.*
+holds selects, a checkbox and a button: no menu items, and no arrow keys between them.*
 
 ## §7 When things fail
 
