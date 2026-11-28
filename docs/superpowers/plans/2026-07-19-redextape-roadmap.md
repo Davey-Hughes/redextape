@@ -46343,15 +46343,15 @@ tree-sitter is 0.28.
 | 238 files; 2,000 and 2 | the Chromium tier; tests passed and expected to fail | `(cd web && VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars) 2>&1 \| grep -E 'Test Files\|Tests  '` |
 | 26 | `worker.test.ts` in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox tests/browser/worker.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
 
-#### THE ORACLES READ A FUNCTION RESULT AS ONE OPAQUE `<fn>` ON THE REFERENCE, λ, RXM, TM, NATIVE AND LLVM LEGS, `run` PRINTS ONE AS `<fn>` UNDER `reference` AND `tm`, AND `run` AND `emit` NAME WHAT A PROGRAM HAS NO LOWERING FOR (2026-11-27, branch `function-results-everywhere`, `f37d749..bc16677`, 19 commits by `git rev-list --count`, plus this entry)
+#### THE ORACLES READ A FUNCTION RESULT AS ONE OPAQUE `<fn>` ON THE REFERENCE, λ, RXM, TM, NATIVE AND LLVM LEGS, `run` PRINTS ONE AS `<fn>` UNDER `reference` AND `tm`, AND `run` AND `emit` NAME WHAT A PROGRAM HAS NO LOWERING FOR (2026-11-27, branch `function-results-everywhere`, `f37d749..5270818`, 23 commits by `git rev-list --count`, plus this entry)
 
 The entry for `function-results` (#208) left *Idea 2, one opaque `<fn>` on every backend* open, so that the oracles
 could compare backends on a function result. This branch is its Rust half, on main at `f37d749`. Its first seven commits
 were drafted in a cloud sandbox with no browser and no LLVM 23, from a handoff, and applied unchanged on top of #208;
 the commits after them answer the reviews below, which ran on this machine. Once #208 and #212 had merged, the branch
 was rebased onto main, which changed no added or removed line of a code commit but one export line in `tm.rs`, which now
-keeps main's `result_heap_runs` too. The reviews ran before the rebase, and this entry names their commits by the
-rebased SHAs; every run in VERIFICATION and every sabotage ran again after it. The clif leg, the web app's panes,
+keeps main's `result_heap_runs` too. The first three reviews ran before the rebase, and this entry names their commits
+by the rebased SHAs; every run in VERIFICATION and every sabotage ran again after it. The clif leg, the web app's panes,
 `emit`, the `.tm` and `.rxm` headers and AOT still refuse a function.
 
 | Commit | What |
@@ -46374,6 +46374,8 @@ rebased SHAs; every run in VERIFICATION and every sabotage ran again after it. T
 | `6f42b7a` | `assert_native_matches_rxm` compares native's raw result word and heap with the interpreter's |
 | `4fe9509` | a transcript of a program that nests past the lowering guard, for each of the three CLI sites that print `tm::LowerError`'s `Display` |
 | `bc16677` | the λ cap's hint, the CLI README and the CLI spec say such a function may have no normal form |
+| `cac3c3a`, `1d7ee00`, `cd0afc4` | the roadmap only: this entry, before the final check |
+| `5270818` | `DecodeFailure::Mismatch`'s doc says a function is read under a function witness too; the head-taking cap test asserts the hint's *may have no normal form* |
 
 ##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
 
@@ -46455,6 +46457,7 @@ README lists sabotages of its own; they were not re-run here.
 | LLVM's `constant` emits n + 1 for every nonzero n | `reference_cranelift_llvm_agree` and `cranelift_and_llvm_agree_on_random_first_order_programs`, on first-order programs, and the function case at the raw comparison `1179adc` added |
 | `decode_rxm_ty_opaque` decodes in `Refuse` mode | `a_function_word_that_points_at_no_heap_cell_does_not_decode` and `rxm_decodes_a_function_as_the_opaque_function`, the four-way oracle at native's type read, `native_matches_rxm_interp_on_function_results` at the interpreter's, and the LLVM function case at its type read |
 | the λ cap's hint without the head-or-tail clause | the head-taking cap test, at its hint assertion |
+| the λ cap's hint says *never reaches a normal form* again | the head-taking cap test, at the assertion `5270818` added |
 | `tm::LowerError`'s `Display` prints `what`'s `Debug` | `cli_transcripts`, on `emit_no_rxm_lowering`, `emit_no_tm_lowering` and `run_tool_error` |
 | `observable` made recursive | `observable_of_a_long_list_does_not_overflow_a_small_stack`, by a stack overflow |
 | `TooDeep`'s sentence changed | `cli_transcripts`, on the three `*_lowering_deep` cases `4fe9509` added |
@@ -46478,6 +46481,10 @@ README lists sabotages of its own; they were not re-run here.
   decoder docs said only the `_opaque` decoder reads a function; a 135-column line; and the tm refusal arm's comment
   left out a decode past its budget. `26b3b03` to `bc16677` answer them, one commit each. It ran `check-slow.sh` at
   `97b8ac2`, exit 0.
+- **The final check, at `cd0afc4`**, after the rebase, of every commit from `f37d749`: no Critical or Important finding.
+  Its Minors: `DecodeFailure::Mismatch`'s doc said only an `_opaque` decode reads a function; no test held the hint to
+  *may have no normal form*, and with its old *never* back every CLI test passed; and this entry counted three sites
+  that word `TooDeep` as nesting, of four. `5270818` answers the first two, and this entry the third.
 
 ##### WHAT THIS DID NOT CLOSE
 
@@ -46493,15 +46500,16 @@ README lists sabotages of its own; they were not re-run here.
   so `|l| head(l)`, which uses no builtin as a value, stops at the same cap, and refusing a builtin would not close the
   case.
 - **`TooDeep`'s sentence speaks of nesting** for a flat list literal, which the user did not nest. The wasm session's
-  `rxm_decline_reason` and the λ lowering's `Display`, from #212, word it the same way, so the three are left to change
-  together.
+  `rxm_decline_reason`, `redextape-native`'s `decline_reason` and the λ lowering's `Display`, from #212, word it the
+  same way, so the four are left to change together.
 - **Headers, `emit` and AOT.** A `.tm` or `.rxm` `result` line names no function type.
 - **The sandbox's other questions**, for Davey, both answered *no* by the first review: a codegen snapshot of the
   function demos (closure construction is already in the snapshot corpus, and the raw compares see a wrong closure); and
   comparing the per-backend oracles and property tests through `observable()` (it checked: `arb_expr_over` generates
   only Nat arithmetic and `if`, and no per-backend corpus program returns a function).
 - **`97b8ac2`'s message** quotes the old `Debug` line with two stray backslashes; a squash message should drop them.
-- **Not run on `bc16677`:** the web job, the browser tier, Firefox and the Docker image.
+- **Not run on `bc16677`:** the web job, the browser tier, Firefox and the Docker image. **Nor on `5270818`**, one doc
+  comment and one assertion past it: `check-all.sh`, the coverage line and `check-slow.sh`.
 
 ##### VERIFICATION
 
@@ -46510,7 +46518,7 @@ and gate held the machine's heavy-build lock and ran in a systemd scope with `Me
 naming the lane's own directory; each CLI run had `MemoryMax=2G`. `TREE_SITTER` named a tree-sitter CLI that
 `check-all.sh` accepts, as it refuses this machine's 0.28. The pre-commit hook, which runs the scans,
 `check-licences.sh`, `check-comments.mjs`, fmt and clippy, passed on each commit from `1179adc` on when it was made,
-before the rebase, and on this entry's last commit.
+and on this entry's last commit.
 
 | Run, at `bc16677`'s code | Result |
 |---|---|
@@ -46520,25 +46528,30 @@ before the rebase, and on this entry's last commit.
 | `scripts/check-slow.sh` | exit 0, *slow tier green*; its `test result` lines 35 passed and 0 failed |
 | `redextape run` and `redextape emit`, built from `bc16677`'s code, on each program *WHAT CHANGED* names | the output and exit code it quotes; main's are read from its tests, help text and code, not run |
 
+At `5270818`, under the same lock and cap, `cargo nextest run -p redextape-cli --no-fail-fast` exited 0: 196 passed and
+1 skipped, `cli_transcripts` among them.
+
 **Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh on the tree
 that holds this entry, with `cap` standing for `flock` on the heavy-build lock and `systemd-run --user --scope -q -p
 MemoryMax=16G -p MemorySwapMax=0 --`.
 
 | Value | What | Produced by |
 |---|---|---|
-| `bc16677`; 19; 7; 5; 7 | the last code commit; the commits in `f37d749..bc16677`; the sandbox's, to `f9f0889`; the fix round's, to `97b8ac2`; those after it | `git log -1 --format=%h f37d749..HEAD -- crates; git rev-list --count f37d749..bc16677; git rev-list --count f37d749..f9f0889; git rev-list --count f9f0889..97b8ac2; git rev-list --count 97b8ac2..bc16677` |
-| 29, 10, 2, 2; 0 | the files changed under `crates/redextape-cli`, `crates/redextape-core`, `crates/redextape-native` and `docs/superpowers`, and none elsewhere; those under `web/` | `git diff --name-only f37d749 bc16677 \| cut -d/ -f1-2 \| sort \| uniq -c; git diff --name-only f37d749 bc16677 -- web \| wc -l` |
-| 22; 0; 5 | the `#[test]` lines the branch adds; those it removes; the transcripts it adds | `git diff f37d749 bc16677 \| grep -c '^+\s*#\[test\]'`, the same with `^-`; `git diff --name-only --diff-filter=A f37d749 bc16677 -- crates/redextape-cli/tests/cmd \| grep -c '\.toml$'` |
+| `5270818`; 23; 7; 5; 11 | the last code commit; the commits in `f37d749..5270818`; the sandbox's, to `f9f0889`; the fix round's, to `97b8ac2`; those after it | `git log -1 --format=%h f37d749..HEAD -- crates; git rev-list --count f37d749..5270818; git rev-list --count f37d749..f9f0889; git rev-list --count f9f0889..97b8ac2; git rev-list --count 97b8ac2..5270818` |
+| 29, 10, 2, 2; 0 | the files changed under `crates/redextape-cli`, `crates/redextape-core`, `crates/redextape-native` and `docs/superpowers`, and none elsewhere; those under `web/` | `git diff --name-only f37d749 5270818 \| cut -d/ -f1-2 \| sort \| uniq -c; git diff --name-only f37d749 5270818 -- web \| wc -l` |
+| 22; 0; 5 | the `#[test]` lines the branch adds; those it removes; the transcripts it adds | `git diff f37d749 5270818 \| grep -c '^+\s*#\[test\]'`, the same with `^-`; `git diff --name-only --diff-filter=A f37d749 5270818 -- crates/redextape-cli/tests/cmd \| grep -c '\.toml$'` |
 | 9; 9 | the programs in core's and native's `FUNCTION_RESULT_DEMOS` | `sed -n '/^const FUNCTION_RESULT_DEMOS/,/^];/p' F \| grep -c '^    "'` for F `crates/redextape-core/tests/three_way_oracle.rs`, then `crates/redextape-native/tests/native_oracle.rs` |
 | 3 | the programs in the LLVM oracle's `FUNCTION_RESULT_CASES` | `grep '^const FUNCTION_RESULT_CASES' crates/redextape-native/tests/llvm_oracle.rs \| grep -o '"[^"]*"' \| wc -l` |
 | 600; 580 | the elements of the list literal the three `*_lowering_deep` transcripts share; `MAX_LOWER_DEPTH` | `grep -o '[0-9]' crates/redextape-cli/tests/cmd/run_no_tm_lowering_deep.in/p.rxt \| wc -l`, and `cmp` of that file with the two `emit_no_*_lowering_deep.in/p.rxt`; `rg -n 'const MAX_LOWER_DEPTH' crates/redextape-core/src/tm/lower_rxm.rs` |
-| 135; 0 | the widest line of `tm/rxm.rs` before `26b3b03`; its lines over 120 columns at `bc16677` | `git show 26b3b03~1:crates/redextape-core/src/tm/rxm.rs \| awk 'length > 120 {print length}'; git show bc16677:crates/redextape-core/src/tm/rxm.rs \| awk 'length > 120' \| wc -l` |
+| 135; 0 | the widest line of `tm/rxm.rs` before `26b3b03`; its lines over 120 columns at `5270818` | `git show 26b3b03~1:crates/redextape-core/src/tm/rxm.rs \| awk 'length > 120 {print length}'; git show 5270818:crates/redextape-core/src/tm/rxm.rs \| awk 'length > 120' \| wc -l` |
 | 0 | the calls of `evaluate` or `evaluateWithBudget` under `web/src` | `rg -n '\.evaluate(WithBudget)?\(' web/src \| wc -l` |
 | 2 | the wasm session's `TmDecline::Lower(format!("{e:?}"))` sites | `rg -c 'TmDecline::Lower\(format!\("\{e:\?\}"\)\)' crates/redextape-wasm/src/session.rs` |
+| 4 | the sites outside tests that word `TooDeep` as nesting | `rg -n 'TooDeep \{ \.\. \} =>' crates --glob '!**/tests/**' \| wc -l` |
 | 2 | the stray backslashes in `97b8ac2`'s message | `git log -1 --format=%B 97b8ac2 \| sed -n 4p \| grep -o '\\' \| wc -l` |
 | 1.100.0; 0.9.149; 23.1.5; 0.9.1; 0.25.10; 0.28.0 | rustc and cargo; cargo-nextest; LLVM; cargo-llvm-cov; the tree-sitter `TREE_SITTER` names; the machine's | `rustc --version; cargo --version; cargo nextest --version; llvm-config --version; cargo llvm-cov --version; $TREE_SITTER --version; tree-sitter --version` |
 | exit 0; 2,120, 35; 130; 51; 60 | `check-all.sh`; its workspace nextest, passed and skipped; its LLVM nextest with `llvm`; with `llvm` and no default features; with `llvm,ll` and no default features | `cap scripts/check-all.sh --no-browser`, with `TREE_SITTER` set, its exit and its `Summary` lines: the first, and the three after `using LLVM` |
 | exit 0; 2,127, 35; 95.59% of 35,749 | CI's coverage line: its tests passed and skipped, and its lines | `cap bash -c 'cargo llvm-cov clean --verbose && cargo llvm-cov nextest --workspace --features redextape-mc/arm64 --fail-under-lines 90'`, its exit, its `Summary` line and its `TOTAL` row |
 | exit 0; 35, 0 | `check-slow.sh`; its tests passed and failed | `cap scripts/check-slow.sh`, its exit and its last line, *slow tier green*; the `N passed; M failed` of each `test result` line it prints, summed |
+| exit 0; 196, 1 | the CLI package's nextest at `5270818`: its exit, and its tests passed and skipped | `cap cargo nextest run -p redextape-cli --no-fail-fast`, its exit and its `Summary` line |
 | 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
 | 22; 21 | `check-comments.mjs`'s areas, and the files it read as changed | `node scripts/check-comments.mjs --base f37d749 \| tail -2` |
