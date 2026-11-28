@@ -79,7 +79,7 @@ pub use aot::{LinkOptions, LinkerChoice, emit_object, link_executable};
 #[cfg(feature = "clif")]
 pub use module_free::{
     CodeRange, CodeReloc, Listing, MachineFunction, build_clif, build_listing, decline_reason, isa_free_config,
-    machine_code,
+    machine_code, machine_function, machine_isa,
 };
 #[cfg(feature = "clif")]
 pub use rt_imports::RtFn;

@@ -199,9 +199,15 @@ The disassembler is a pure Rust crate that builds for `wasm32-unknown-unknown`, 
 feature: `iced-x86` for x86-64, which prints both AT&T and Intel (Q5), and `yaxpeax-arm` for arm64. A relocation in an
 instruction names its target on the row: a subroutine's `u0:N` and the label the call stack gives it, or a runtime
 import's `rt_*` name. The data the code carries is found, not guessed: x86-64's constant pool starts at the first
-rip-relative target past the code, and arm64's far-call addresses are its `Abs8` relocations. Bytes the disassembler
-cannot decode show as `.byte` rows, except a whole arm64 word, which is one `.inst` row; §8 holds that the corpus has
-none.
+rip-relative target past the code, and arm64's far-call addresses are its `Abs8` relocations. Data found no such way is
+not read as code or as data: each reader refuses its function's code at the first instruction that shows such data (on
+x86-64 an indirect jump, a branch into the constants or a rip-relative read back into the code; on arm64 an indirect
+jump, an `adr` no relocation fills in, or a literal load from anything but a far call's address), and the whole listing
+declines, the functions before that one included, as `LowerError::Unsupported` with the reason `u0:N's <target> code
+holds data the listing cannot place: at byte 0x<offset>, <the kind of instruction>`, where the target is `x86-64` or
+`arm64` and the offset is in the function's code. The panel shows it as it shows any declined program (§4), through the
+decline path the listing already had, so no binding, worker or panel code knows of it. Bytes the disassembler cannot
+decode show as `.byte` rows, except a whole arm64 word, which is one `.inst` row; §8 holds that the corpus has none.
 
 ### §5.3 Packages
 

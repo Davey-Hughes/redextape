@@ -10,7 +10,7 @@ use cranelift_codegen::entity::PrimaryMap;
 use cranelift_codegen::ir::{
     ExtFuncData, ExternalName, FuncRef, Function, UserExternalName, UserExternalNameRef, UserFuncName,
 };
-use cranelift_codegen::isa::{self, CallConv, TargetFrontendConfig};
+use cranelift_codegen::isa::{self, CallConv, OwnedTargetIsa, TargetFrontendConfig, TargetIsa};
 use cranelift_codegen::settings::{self, Configurable, Flags, OptLevel};
 use cranelift_codegen::{CodegenResult, Context};
 use cranelift_codegen::{MachReloc, RelocTarget};
@@ -197,42 +197,59 @@ pub struct CodeReloc {
 /// `build_clif`'s, and `LowerError::Unsupported` when this build has no ISA for `target`, a function
 /// does not compile, or a relocation in its code names no import or subroutine (`code_relocs`).
 pub fn machine_code(prog: &Program, listing: Listing, target: &str) -> Result<Vec<MachineFunction>, LowerError> {
-    let flags = jit_flags(listing.opt_level()).map_err(codegen_error)?;
-    let isa = isa::lookup_by_name(target).map_err(codegen_error)?.finish(flags).map_err(codegen_error)?;
-    let funcs = build_clif(prog, isa.frontend_config())?;
-    let mut out = Vec::with_capacity(funcs.len());
-    for func in funcs {
-        let base = func.params.base_srcloc();
-        let names = func.params.user_named_funcs().clone();
-        let mut ctx = Context::for_function(func);
-        let code =
-            ctx.compile(&*isa, &mut ControlPlane::default()).map_err(|e| codegen_error(format!("{:?}", e.inner)))?;
-        let ranges = code
-            .buffer
-            .get_srclocs_sorted()
-            .iter()
-            .filter_map(|range| {
-                let loc = if range.loc.is_abs() { range.loc.as_abs() } else { range.loc.relocate(base) };
-                (!loc.is_default() && range.start < range.end).then(|| CodeRange {
-                    start: range.start,
-                    end: range.end,
-                    pc: loc.bits(),
-                })
-            })
-            .collect();
-        let relocs = code_relocs(code.buffer.relocs(), &names)?;
-        out.push(MachineFunction { bytes: code.code_buffer().to_vec(), ranges, relocs });
-    }
-    Ok(out)
+    let isa = machine_isa(listing, target)?;
+    build_clif(prog, isa.frontend_config())?.into_iter().map(|func| machine_function(func, &*isa)).collect()
 }
 
-/// `relocs` as `CodeReloc`s, each naming its callee by `names`.
+/// The ISA `machine_code` compiles with: `target` (a triple) with the JIT's flags at `listing`'s level and no host
+/// CPU features.
+///
+/// # Errors
+/// `LowerError::Unsupported` when this build has no ISA for `target`.
+pub fn machine_isa(listing: Listing, target: &str) -> Result<OwnedTargetIsa, LowerError> {
+    let flags = jit_flags(listing.opt_level()).map_err(codegen_error)?;
+    isa::lookup_by_name(target).map_err(codegen_error)?.finish(flags).map_err(codegen_error)
+}
+
+/// `func` compiled by `isa`, as `machine_code` compiles each subroutine. It is public so that a test can put code
+/// no program makes, such as a jump table, through the same compile and the same relocation check.
+///
+/// # Errors
+/// `LowerError::Unsupported` when `func` does not compile, or a relocation in its code names no import or
+/// subroutine (`code_relocs`).
+pub fn machine_function(func: Function, isa: &dyn TargetIsa) -> Result<MachineFunction, LowerError> {
+    let name = func.name.to_string();
+    let base = func.params.base_srcloc();
+    let names = func.params.user_named_funcs().clone();
+    let mut ctx = Context::for_function(func);
+    let code = ctx.compile(isa, &mut ControlPlane::default()).map_err(|e| codegen_error(format!("{:?}", e.inner)))?;
+    let ranges = code
+        .buffer
+        .get_srclocs_sorted()
+        .iter()
+        .filter_map(|range| {
+            let loc = if range.loc.is_abs() { range.loc.as_abs() } else { range.loc.relocate(base) };
+            (!loc.is_default() && range.start < range.end).then(|| CodeRange {
+                start: range.start,
+                end: range.end,
+                pc: loc.bits(),
+            })
+        })
+        .collect();
+    let relocs = code_relocs(&name, code.buffer.relocs(), &names)?;
+    Ok(MachineFunction { bytes: code.code_buffer().to_vec(), ranges, relocs })
+}
+
+/// `relocs`, the relocations in the code of the function named `func`, as `CodeReloc`s, each naming its callee by
+/// `names`.
 ///
 /// # Errors
 /// `LowerError::Unsupported` for a relocation to anything but a runtime import or a subroutine, such as a
 /// Cranelift library call: its target has no index to name, and on arm64 the address it fills in is data that
-/// only a relocation marks, so dropping it would decode that address as instructions.
+/// only a relocation marks, so dropping it would decode that address as instructions. The decline names the
+/// function, the relocation and what it points at, since a page shows it as the reason no code is listed.
 fn code_relocs(
+    func: &str,
     relocs: &[MachReloc],
     names: &PrimaryMap<UserExternalNameRef, UserExternalName>,
 ) -> Result<Vec<CodeReloc>, LowerError> {
@@ -242,9 +259,25 @@ fn code_relocs(
             RelocTarget::ExternalName(ExternalName::User(name)) if let Some(callee) = names.get(*name) => {
                 Ok(CodeReloc { offset: reloc.offset, callee: callee.index, absolute: reloc.kind == Reloc::Abs8 })
             }
-            target => Err(codegen_error(format!("a relocation to {target:?}, which names no import or subroutine"))),
+            target => Err(codegen_error(format!(
+                "{func}'s {} relocation at byte {:#x} names {}, which is neither a runtime import nor a subroutine",
+                reloc.kind,
+                reloc.offset,
+                reloc_target(target)
+            ))),
         })
         .collect()
+}
+
+/// What a relocation `code_relocs` declines points at, in words a decline can show.
+fn reloc_target(target: &RelocTarget) -> String {
+    match target {
+        RelocTarget::ExternalName(ExternalName::LibCall(call)) => format!("Cranelift's library call {call}"),
+        RelocTarget::ExternalName(ExternalName::KnownSymbol(symbol)) => format!("the linker symbol {symbol}"),
+        RelocTarget::ExternalName(ExternalName::TestCase(name)) => format!("the test case name {name}"),
+        RelocTarget::ExternalName(ExternalName::User(name)) => format!("{name}, a name the function does not declare"),
+        RelocTarget::Label(label) => format!("a place in its own code, func+{label}"),
+    }
 }
 
 /// Each subroutine of `prog` as `listing` shows it, built for `isa_free_config` in `partition`'s order.
@@ -288,15 +321,20 @@ mod tests {
     use cranelift_codegen::binemit::Reloc;
     use cranelift_codegen::entity::{EntityRef, PrimaryMap};
     use cranelift_codegen::ir::{
-        ExternalName, Function, LibCall, UserExternalName, UserExternalNameRef, ValueLabelAssignments,
+        AbiParam, ExternalName, Function, InstBuilder, KnownSymbol, LibCall, Signature, UserExternalName,
+        UserExternalNameRef, UserFuncName, ValueLabelAssignments, types,
     };
     use cranelift_codegen::isa;
     use cranelift_codegen::settings;
-    use cranelift_codegen::{MachReloc, RelocTarget};
+    use cranelift_codegen::{LabelOrOffset, MachReloc, RelocTarget};
+    use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
     use redextape_core::tm::{Instr, LowerError, Program, Reg, label_reg, lower_program, reg_str};
     use redextape_core::{desugar::desugar, parser::parse};
 
-    use super::{CodeReloc, Listing, MAX_REGISTERS, build_clif, build_listing, code_relocs, isa_free_config};
+    use super::{
+        CodeReloc, Listing, MAX_REGISTERS, build_clif, build_listing, code_relocs, isa_free_config, machine_function,
+        machine_isa,
+    };
 
     /// How many of `func`'s defined values (each block's parameters, then its instructions' results, in
     /// layout order) carry labels, and the registers those labels name.
@@ -412,18 +450,64 @@ mod tests {
     }
 
     #[test]
-    fn a_relocation_naming_no_import_or_subroutine_is_refused() {
+    fn a_relocation_naming_no_import_or_subroutine_is_refused_by_name() {
         let mut names = PrimaryMap::new();
         let rt = names.push(UserExternalName { namespace: 0, index: 3 });
-        let reloc =
-            |name| MachReloc { offset: 8, kind: Reloc::Abs8, target: RelocTarget::ExternalName(name), addend: 0 };
-        let named = code_relocs(&[reloc(ExternalName::User(rt))], &names);
+        let reloc = |target| MachReloc { offset: 8, kind: Reloc::Abs8, target, addend: 0 };
+        let named = code_relocs("u0:12", &[reloc(RelocTarget::ExternalName(ExternalName::User(rt)))], &names);
         assert_eq!(named, Ok(vec![CodeReloc { offset: 8, callee: 3, absolute: true }]));
-        for name in [ExternalName::LibCall(LibCall::FloorF64), ExternalName::User(UserExternalNameRef::new(1))] {
-            let Err(LowerError::Unsupported { what, .. }) = code_relocs(&[reloc(name.clone())], &names) else {
-                panic!("a relocation to {name:?} was not refused as `Unsupported`");
+        let at = "native codegen: u0:12's Abs8 relocation at byte 0x8 names";
+        let tail = "which is neither a runtime import nor a subroutine";
+        for (target, want) in [
+            (
+                ExternalName::LibCall(LibCall::FloorF64).into(),
+                format!("{at} Cranelift's library call FloorF64, {tail}"),
+            ),
+            (
+                ExternalName::KnownSymbol(KnownSymbol::ElfGlobalOffsetTable).into(),
+                format!("{at} the linker symbol ElfGlobalOffsetTable, {tail}"),
+            ),
+            (ExternalName::testcase("probe").into(), format!("{at} the test case name %probe, {tail}")),
+            (
+                ExternalName::User(UserExternalNameRef::new(1)).into(),
+                format!("{at} userextname1, a name the function does not declare, {tail}"),
+            ),
+            (
+                RelocTarget::Label(LabelOrOffset::offset(0x20)),
+                format!("{at} a place in its own code, func+0x20, {tail}"),
+            ),
+        ] {
+            let Err(LowerError::Unsupported { what, .. }) = code_relocs("u0:12", &[reloc(target)], &names) else {
+                panic!("a relocation to what {want:?} names was not refused as `Unsupported`");
             };
-            assert!(what.contains("names no import or subroutine"), "{what}");
+            assert_eq!(what, want);
         }
+    }
+
+    /// A declined relocation is named by the function it is in, which `machine_function` reads from the function:
+    /// x86-64 with no SSE4.1 floors an `f64` through Cranelift's library call, a relocation no program makes.
+    #[test]
+    fn a_declined_relocation_names_the_function_it_is_in() {
+        let isa = machine_isa(Listing::Optimised, "x86_64-unknown-linux-gnu").unwrap();
+        let mut sig = Signature::new(isa.default_call_conv());
+        sig.params.push(AbiParam::new(types::F64));
+        sig.returns.push(AbiParam::new(types::F64));
+        let mut func = Function::with_name_signature(UserFuncName::user(0, 13), sig);
+        let mut fctx = FunctionBuilderContext::new();
+        let mut b = FunctionBuilder::new(&mut func, &mut fctx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let x = b.block_params(entry)[0];
+        let floor = b.ins().floor(x);
+        b.ins().return_(&[floor]);
+        b.finalize(isa.frontend_config());
+        let Err(LowerError::Unsupported { what, .. }) = machine_function(func, &*isa) else {
+            panic!("a call to Cranelift's FloorF64 was not refused as `Unsupported`");
+        };
+        let (head, tail) = what.split_once(" names ").unwrap_or_default();
+        assert!(head.starts_with("native codegen: u0:13's Abs8 relocation at byte 0x"), "{what}");
+        assert_eq!(tail, "Cranelift's library call FloorF64, which is neither a runtime import nor a subroutine");
     }
 }

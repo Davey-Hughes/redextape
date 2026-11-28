@@ -5,16 +5,24 @@
 //! **CONSTANTS ARE DATA, NOT CODE.** Cranelift places a function's constants after its code and reads them
 //! rip-relative (`cmovoq 0xb8, %rax`). Every offset such an operand reads is where data starts: from the first
 //! of them to the end the bytes are `.quad` rows, and an instruction that would run into one stops short of
-//! it as `.byte` rows. The zeros that align the constants are one `.zero` row. This holds while no data sits
-//! inside the code, which is so because redextape-native emits no `br_table`: Cranelift puts a jump table in the
-//! code and reads it rip-relative, so every instruction after one would read as `.quad` rows.
+//! it as `.byte` rows. The zeros that align the constants are one `.zero` row.
+//!
+//! **DATA INSIDE THE CODE IS REFUSED, NOT READ.** The finder holds only while every byte after the first datum is
+//! data. A jump table, which Cranelift places in the code after the indirect jump that reads it, breaks that: the
+//! code after the table would read as `.quad` rows. So the code is refused (`Unplaced`) at the first sign of what
+//! the finder cannot place: an indirect jump, whose targets nothing in the code names; a branch into the bytes it
+//! reads as data; or a rip-relative operand that reads back into the code. A forward read is taken as where data
+//! starts, so one that reads code after it is not refused: in a jump table's code, the indirect jump is.
 
-use iced_x86::{Decoder, DecoderOptions, Formatter, GasFormatter, Instruction, IntelFormatter};
+use iced_x86::{Decoder, DecoderOptions, Formatter, GasFormatter, Instruction, IntelFormatter, Mnemonic, OpKind};
 
-use crate::{Decoded, data_text};
+use crate::{Decoded, Unplaced, data_text};
 
-pub(crate) fn decode(bytes: &[u8]) -> Vec<(u32, Decoded)> {
+pub(crate) fn decode(bytes: &[u8]) -> Result<Vec<(u32, Decoded)>, Unplaced> {
     let data_from = data_start(bytes);
+    if let Some(unplaced) = unplaced(bytes, data_from) {
+        return Err(unplaced);
+    }
     let mut gas = GasFormatter::new();
     gas.options_mut().set_gas_show_mnemonic_size_suffix(true);
     let mut intel = IntelFormatter::new();
@@ -68,7 +76,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Vec<(u32, Decoded)> {
             push_data(&mut out, at, chunk, ".byte");
         }
     }
-    out
+    Ok(out)
 }
 
 fn offset(at: usize) -> u32 {
@@ -99,4 +107,124 @@ fn data_start(bytes: &[u8]) -> usize {
         }
     }
     end
+}
+
+/// The first instruction before `data_from` that shows code or data the finder cannot place, or `None` for none.
+fn unplaced(bytes: &[u8], data_from: usize) -> Option<Unplaced> {
+    let code = &bytes[..data_from];
+    let mut decoder = Decoder::with_ip(64, code, 0, DecoderOptions::NONE);
+    let mut inst = Instruction::default();
+    while decoder.can_decode() {
+        let start = decoder.position();
+        decoder.decode_out(&mut inst);
+        if inst.is_invalid() {
+            // `decode` shows the bytes as `.byte` rows; one that consumed none ends the code there, as it does there.
+            if decoder.position() == start {
+                break;
+            }
+            continue;
+        }
+        let branch = matches!(inst.op0_kind(), OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64)
+            .then(|| usize::try_from(inst.near_branch_target()).unwrap_or(usize::MAX));
+        let why = if inst.mnemonic() == Mnemonic::Jmp && matches!(inst.op0_kind(), OpKind::Register | OpKind::Memory) {
+            "an indirect jump, as through a jump table placed in the code"
+        } else if branch.is_some_and(|target| target >= data_from && target < bytes.len()) {
+            "a branch into the bytes read as constants"
+        } else if inst.is_ip_rel_memory_operand()
+            && usize::try_from(inst.ip_rel_memory_address()).is_ok_and(|target| target < data_from)
+        {
+            "a rip-relative operand that reads the code itself"
+        } else {
+            continue;
+        };
+        return Some(Unplaced { offset: offset(start), why });
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode;
+    use crate::{Target, compiled};
+
+    /// `bytes` decoded, as each row's offset and AT&T text, or the offset and reason of its refusal.
+    fn read(bytes: &[u8]) -> Result<Vec<(u32, String)>, (u32, &'static str)> {
+        decode(bytes).map(|rows| rows.into_iter().map(|(at, d)| (at, d.text)).collect()).map_err(|u| (u.offset, u.why))
+    }
+
+    /// A jump through a table placed in the code, as Cranelift emits a `br_table`: the `leaq` names the table as
+    /// the first datum, so without the refusal its two `retq`s after the table read as `.byte` rows.
+    #[test]
+    fn a_jump_table_in_the_code_is_refused_at_its_indirect_jump() {
+        let bytes = [
+            0x48, 0x8d, 0x05, 0x09, 0x00, 0x00, 0x00, // leaq 0x10(%rip), %rax: the table
+            0x48, 0x63, 0x0c, 0xb8, // movslq (%rax,%rdi,4), %rcx
+            0x48, 0x01, 0xc1, // addq %rax, %rcx
+            0xff, 0xe1, // jmpq *%rcx
+            0x08, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, // the table: each case's offset from it
+            0xc3, 0xc3, // the two cases
+        ];
+        assert_eq!(read(&bytes), Err((0xe, "an indirect jump, as through a jump table placed in the code")));
+    }
+
+    /// A branch to the constant's first byte is into the constants, as one further in is.
+    #[test]
+    fn a_branch_into_the_constants_is_refused() {
+        for (rel, lands) in [(0x04, "on its first byte"), (0x05, "inside it")] {
+            let bytes = [
+                0x48, 0x8b, 0x05, 0x06, 0x00, 0x00, 0x00, // movq 0xd(%rip), %rax: the constant
+                0xeb, rel, // jmp 0xd or 0xe
+                0xc3, 0x90, 0x90, 0x90, // retq and padding
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f, // 1.0
+            ];
+            assert_eq!(read(&bytes), Err((7, "a branch into the bytes read as constants")), "a jump landing {lands}");
+        }
+    }
+
+    #[test]
+    fn a_rip_relative_read_of_the_code_itself_is_refused() {
+        let bytes = [
+            0x90, // nop, which the read below takes as data
+            0x48, 0x8b, 0x05, 0xf8, 0xff, 0xff, 0xff, // movq -0x8(%rip), %rax: offset 0
+            0xc3, // retq
+        ];
+        assert_eq!(read(&bytes), Err((1, "a rip-relative operand that reads the code itself")));
+    }
+
+    /// The constants after the code, read forward and branched over by nothing, are what the finder places.
+    #[test]
+    fn constants_after_the_code_are_quad_rows() {
+        let bytes = [
+            0x48, 0x8b, 0x05, 0x01, 0x00, 0x00, 0x00, // movq 0x8(%rip), %rax: the constant
+            0xc3, // retq
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f, // 1.0
+        ];
+        assert_eq!(
+            read(&bytes),
+            Ok(vec![
+                (0, "movq 8, %rax".to_string()),
+                (7, "retq".to_string()),
+                (8, ".quad 0x3ff0000000000000".to_string())
+            ])
+        );
+    }
+
+    /// Cranelift's own jump table and constant, compiled here.
+    #[test]
+    fn cranelifts_jump_table_is_refused_and_its_constant_pool_read() {
+        assert_eq!(
+            read(&compiled::jump_table(Target::X86_64).bytes),
+            Err((0x22, "an indirect jump, as through a jump table placed in the code"))
+        );
+        let rows = read(&compiled::f64_constant(Target::X86_64).bytes).unwrap();
+        assert!(rows.iter().all(|(_, text)| !text.starts_with(".byte")), "{rows:?}");
+        assert_eq!(
+            rows[rows.len() - 3..],
+            [
+                (0x53, ".zero 13".to_string()),
+                (0x60, ".quad 0x3ff199999999999a".to_string()),
+                (0x68, ".quad 0x0".to_string())
+            ]
+        );
+    }
 }

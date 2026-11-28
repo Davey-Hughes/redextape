@@ -28,5 +28,7 @@ yaxpeax-arch = { version = "0.3", optional = true, default-features = false }
 ts-rs = { version = "12", optional = true }
 
 [dev-dependencies]
+# The tests compile with it the code no program makes, such as a jump table, to hold each reader to Cranelift's own.
+cranelift-frontend = "0.137.2"
 redextape-test-support = { path = "../redextape-test-support" }
 serde_json = "1"

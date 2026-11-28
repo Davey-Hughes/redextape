@@ -8,12 +8,16 @@
 
 #[cfg(feature = "arm64")]
 mod arm64;
+#[cfg(test)]
+#[cfg(any(feature = "x86", feature = "arm64"))]
+mod compiled;
 #[cfg(feature = "x86")]
 mod x86;
 
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use redextape_core::core::NodeId;
 use redextape_core::tm::{LowerError, Program};
 #[cfg(feature = "arm64")]
 use redextape_native::CodeReloc;
@@ -151,13 +155,32 @@ pub(crate) struct Decoded {
     pub(crate) intel: Option<String>,
 }
 
+/// Where a target's reader stopped because what follows may be data or code, and reading it as either could show
+/// the wrong one: the first instruction that shows such data, at `offset` in its function, and what it is.
+#[cfg_attr(not(any(feature = "x86", feature = "arm64")), allow(dead_code))]
+#[derive(Debug)]
+pub(crate) struct Unplaced {
+    pub(crate) offset: u32,
+    pub(crate) why: &'static str,
+}
+
 /// `prog`'s machine code on `target` at `listing`'s level, as rows.
 ///
 /// # Errors
-/// `machine_code`'s and `partition`'s.
+/// `machine_code`'s and `partition`'s, and `LowerError::Unsupported` naming the function, the byte and the kind
+/// of instruction where a function's code holds data its target's reader cannot place.
 pub fn machine_listing(prog: &Program, listing: Listing, target: Target) -> Result<McListing, LowerError> {
     let funcs = machine_code(prog, listing, target.triple())?;
     let names: Vec<String> = partition(prog)?.into_iter().map(|sub| sub.name).collect();
+    list(&funcs, &names, target)
+}
+
+/// `funcs`, the code of the subroutines `names` names in order, as `target`'s rows.
+///
+/// # Errors
+/// `LowerError::Unsupported`, as `decline` words it, where a function's code holds data its target's reader cannot
+/// place: the first such function declines the whole listing, the functions before it included.
+fn list(funcs: &[MachineFunction], names: &[String], target: Target) -> Result<McListing, LowerError> {
     let callee = |index: u32| -> String {
         let index_us = index as usize;
         if let Some(rt) = RtFn::ALL.get(index_us) {
@@ -181,7 +204,8 @@ pub fn machine_listing(prog: &Program, listing: Listing, target: Target) -> Resu
         });
         out.rows.push(label_row(McRowKind::Function, function));
         let mut loads = CalleeLoads::default();
-        for (offset, piece) in decode(target, func) {
+        let pieces = decode(target, func).map_err(|unplaced| decline(k, target, &unplaced))?;
+        for (offset, piece) in pieces {
             let start = offset as usize;
             let end = (start + piece.len as usize).min(func.bytes.len());
             let bytes = func.bytes[start..end].iter().fold(String::new(), |mut hex, b| {
@@ -243,6 +267,18 @@ impl CalleeLoads {
     }
 }
 
+/// The decline for the `k`th function's code on `target`, which holds data its reader cannot place: a page shows it
+/// as the reason no code is listed, so it names the function as the clif listing does, the byte and the kind of instruction.
+fn decline(k: usize, target: Target, unplaced: &Unplaced) -> LowerError {
+    let Unplaced { offset, why } = unplaced;
+    let what = format!(
+        "u0:{}'s {} code holds data the listing cannot place: at byte {offset:#x}, {why}",
+        RtFn::ALL.len() + k,
+        target.name()
+    );
+    LowerError::Unsupported { node: NodeId::default(), what }
+}
+
 fn label_row(kind: McRowKind, function: u32) -> McRow {
     McRow { kind, function, offset: 0, bytes: String::new(), pc: None, text: String::new(), intel: None, callee: None }
 }
@@ -252,9 +288,10 @@ fn pc_at(func: &MachineFunction, offset: u32) -> Option<u32> {
     func.ranges.iter().find(|r| r.start <= offset && offset < r.end).map(|r| r.pc)
 }
 
-/// `func`'s code decoded from its first byte to its last, each piece with its offset.
+/// `func`'s code decoded from its first byte to its last, each piece with its offset, or where the target's reader
+/// cannot place its data.
 #[cfg_attr(not(any(feature = "x86", feature = "arm64")), allow(unused_variables))]
-fn decode(target: Target, func: &MachineFunction) -> Vec<(u32, Decoded)> {
+fn decode(target: Target, func: &MachineFunction) -> Result<Vec<(u32, Decoded)>, Unplaced> {
     match target {
         #[cfg(feature = "x86")]
         Target::X86_64 => x86::decode(&func.bytes),
@@ -275,4 +312,65 @@ pub(crate) fn data_text(directive: &str, bytes: &[u8]) -> String {
 #[cfg(feature = "arm64")]
 pub(crate) fn is_data(reloc: &CodeReloc) -> bool {
     reloc.absolute
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(feature = "x86", feature = "arm64"))]
+    use super::{LowerError, McListing, Target, compiled, list};
+
+    #[cfg(any(feature = "x86", feature = "arm64"))]
+    fn names() -> Vec<String> {
+        vec!["$main".to_string(), "f.0".to_string()]
+    }
+
+    /// The decline `list` returns, or a panic naming the listing it returned instead.
+    #[cfg(any(feature = "x86", feature = "arm64"))]
+    fn declined(listed: Result<McListing, LowerError>) -> String {
+        match listed {
+            Err(LowerError::Unsupported { what, .. }) => what,
+            other => panic!("the listing was not declined as `Unsupported`: {other:?}"),
+        }
+    }
+
+    /// A function holding data its reader cannot place declines the whole listing, the function before it, which
+    /// lists alone, included: Cranelift's `br_table` places its jump table in the code.
+    #[cfg(feature = "x86")]
+    #[test]
+    fn a_jump_table_declines_the_whole_x86_64_listing() {
+        let target = Target::X86_64;
+        let plain = compiled::plain(target);
+        assert!(list(std::slice::from_ref(&plain), &names(), target).is_ok());
+        assert_eq!(
+            declined(list(&[plain, compiled::jump_table(target)], &names(), target)),
+            "u0:12's x86-64 code holds data the listing cannot place: at byte 0x22, an indirect jump, as through a \
+             jump table placed in the code"
+        );
+    }
+
+    /// As on x86-64, with the data arm64 cannot place and x86-64 can: an `f64` constant, which arm64 loads from a pool.
+    #[cfg(feature = "arm64")]
+    #[test]
+    fn a_constant_pool_declines_the_whole_arm64_listing() {
+        let target = Target::Arm64;
+        let plain = compiled::plain(target);
+        assert!(list(std::slice::from_ref(&plain), &names(), target).is_ok());
+        assert_eq!(
+            declined(list(&[plain, compiled::f64_constant(target)], &names(), target)),
+            "u0:12's arm64 code holds data the listing cannot place: at byte 0x4, a literal load from data no \
+             relocation marks, as from a constant pool"
+        );
+    }
+
+    #[cfg(feature = "x86")]
+    #[test]
+    fn a_decline_names_the_function_the_target_the_byte_and_the_kind_of_instruction() {
+        use super::{Target, Unplaced, decline, decline_reason};
+        let unplaced = Unplaced { offset: 0x2c, why: "an indirect jump, as through a jump table placed in the code" };
+        assert_eq!(
+            decline_reason(&decline(1, Target::X86_64, &unplaced)),
+            "u0:12's x86-64 code holds data the listing cannot place: at byte 0x2c, an indirect jump, as through a \
+             jump table placed in the code"
+        );
+    }
 }

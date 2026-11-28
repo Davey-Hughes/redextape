@@ -531,7 +531,12 @@ jobs:
       #
       # The five points of headroom are a deliberate trade, not an oversight.
       - name: Test + coverage
-        run: cargo llvm-cov nextest --workspace --fail-under-lines 90
+        # `redextape-mc/arm64` because `--workspace` turns on no feature: the crate gets `x86` alone, by
+        # `redextape-mc-wasm`'s default, and its arm64 reader and tests would be in no figure. `redextape-mc-wasm` reads
+        # its own features, so it still builds as the x86-64 package, and `redextape-native`'s tests already turn on
+        # Cranelift's arm64 ISA, so the flag adds the crate's arm64 code and, as `cargo tree` lists them, `yaxpeax-arm`,
+        # `yaxpeax-arch`, `bitvec`, `funty`, `radium`, `tap` and `wyz`.
+        run: cargo llvm-cov nextest --workspace --features redextape-mc/arm64 --fail-under-lines 90
 
   # The SLOW test tier: exhaustive sweeps marked `#[ignore = "slow tier: ..."]`, which `cargo test`
   # skips by default. In its own job for the same reason as `rust-llvm` — a multi-minute sweep must

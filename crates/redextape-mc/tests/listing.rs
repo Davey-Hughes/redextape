@@ -158,6 +158,51 @@ fn every_pc_a_row_carries_is_a_clif_rows() {
     });
 }
 
+/// Spec §8: every row inside a source-location range carries that range's pc, asked of the ranges `machine_code`
+/// returns rather than through `pc_at`, and a row in no range, or one that is not an instruction, carries none.
+#[test]
+fn every_row_inside_a_range_carries_its_pc() {
+    let mut in_range = 0;
+    each(|key, prog, target, listing, rows| {
+        let funcs = machine_code(prog, listing, target.triple()).unwrap();
+        for (k, func) in funcs.iter().enumerate() {
+            for row in rows.rows.iter().filter(|r| r.function as usize == k) {
+                let range = func.ranges.iter().find(|r| r.start <= row.offset && row.offset < r.end);
+                let want = if row.kind == McRowKind::Inst { range.map(|r| r.pc) } else { None };
+                assert_eq!(
+                    row.pc, want,
+                    "{key} {target:?} {listing:?} u{k} {:04x} {:?}: {}",
+                    row.offset, row.kind, row.text
+                );
+                in_range += usize::from(want.is_some());
+            }
+        }
+    });
+    assert!(in_range > 0, "no row of the corpus is inside a range");
+}
+
+/// Spec §8: prologue rows carry no pc. The prologue is the code before a function's first range; it carries no source
+/// location, so `machine_code` makes no range there, which the test above cannot tell from a range carrying the
+/// default location's bits. It must occur on every target and at every level, so that a range made for one of them
+/// cannot hide its prologue from the test.
+#[test]
+fn prologue_rows_carry_no_pc() {
+    let mut prologue = std::collections::BTreeMap::new();
+    each(|key, prog, target, listing, rows| {
+        let funcs = machine_code(prog, listing, target.triple()).unwrap();
+        for (k, func) in funcs.iter().enumerate() {
+            let first_range = func.ranges.first().map_or(u32::MAX, |r| r.start);
+            for row in rows.rows.iter().filter(|r| r.function as usize == k && r.kind == McRowKind::Inst) {
+                if row.offset < first_range {
+                    assert_eq!(row.pc, None, "{key} {target:?} {listing:?} u{k} {:04x}: {}", row.offset, row.text);
+                    *prologue.entry((target.name(), format!("{listing:?}"))).or_insert(0) += 1;
+                }
+            }
+        }
+    });
+    assert_eq!(prologue.len(), TARGETS.len() * LISTINGS.len(), "a target or level with no prologue row: {prologue:?}");
+}
+
 #[test]
 fn x86_rows_have_both_syntaxes_and_arm64_rows_one() {
     each(|key, _, target, _, rows| {

@@ -45455,3 +45455,209 @@ machine's 0.28.
 | exit 0; 2061 and 35; 1; 0; 2 | `check-all.sh --no-llvm --no-browser`: its exit; `cargo nextest run --workspace`'s tests passed and skipped; `aot_oracle`'s `PASS` lines; `unused dependency` and `unused import` lines; `^warning` lines | `scripts/check-all.sh --no-llvm --no-browser > $LOG 2>&1; echo $?`, then `grep -m1 'Summary \[' $LOG; grep -c 'PASS .*aot_oracle' $LOG; grep -cE 'unused (dependency\|import)' $LOG; grep '^warning' $LOG` |
 | exit 0; 126; 51; 0 | `check-all.sh --llvm-only`: its exit; nextest's tests passed with `llvm`, then with `llvm` and no default features; `^warning` lines | `scripts/check-all.sh --llvm-only > $LOG 2>&1; echo $?`, then `grep 'Summary \[' $LOG; grep -c '^warning' $LOG` |
 | 3: `crates/redextape-native/Cargo.toml`, `docs/development.md`, the roadmap | the files a merge with `llvm-ir-text` leaves in conflict | `git merge-tree --write-tree --name-only native-rt-hygiene llvm-ir-text` |
+
+#### THE MACHINE CODE READERS DECLINE A LISTING WHOSE CODE HOLDS DATA THEY CANNOT PLACE, A DECLINED RELOCATION NAMES WHAT IT POINTS AT, §8'S TWO PC CLAIMS ARE TESTED, AND CI'S COVERAGE COUNTS `arm64.rs` (2026-11-25 to 27, branch `mc-followups`, `7033883..a692cc6`, 11 commits, plus this entry)
+
+The open items #198 and #200 left in the machine code crate, from a handoff that quoted each entry's *WHAT THIS DID NOT
+CLOSE*: §8's two pc claims had no test, a Cranelift library call's relocation was declined without being named, the data
+finders held for today's code only, and `arm64.rs` was in no coverage figure; and, needing the user's choice, iced's
+decimal immediates and a row field telling a register move from a clif instruction with no pc. The first six commits,
+the sixth duet's roadmap entry, were written in a cloud sandbox, duet, from that handoff, and applied onto `main` at
+`7033883` (#204); the five after them answer the first review. The change is in `crates/redextape-mc`, in
+`crates/redextape-native`'s `module_free.rs` and its exports, in CI's coverage step, in the machine code spec's §5.2 and
+in one line of `Cargo.lock`. No file under `web/` and no binding or wasm crate changes.
+
+| Commit | What |
+|---|---|
+| `11d09a9` | `tests/listing.rs`: every row inside a source range carries its pc, and prologue rows carry none, on both targets and both listings (§8) |
+| `b8d7a49` | `module_free.rs`: a declined relocation's error names the function, the relocation, its byte and its target in words, where it printed the target's `Debug` form |
+| `e1620c6` | `redextape-mc`: each reader refuses at the first instruction that shows data it cannot place, and the listing declines with the reason |
+| `b81c21b` | `ci.yml`: the coverage step turns on `redextape-mc/arm64` |
+| `554624e` | duet's own review's fixes: the prologue test wants prologue rows on each target at each level, and the docs say a decline names a kind of instruction and x86-64 refuses a rip-relative read only back into the code |
+| `e4f5d00` | duet's roadmap entry |
+| `2493169` | `machine_code`'s compile of one function is `machine_function`, and its ISA `machine_isa`, both public; a test compiles Cranelift's `FloorF64` library call in a function named `u0:13` and holds the decline to that name (the first review's M1) |
+| `a591f0f` | `machine_listing`'s loop over the functions is `list`, and two tests decline a whole listing with code Cranelift compiles as they run; the readers' tests of Cranelift's own code compile it too, in the new test-only `compiled.rs`, where they held byte arrays (its I1 and duet's first open question) |
+| `de96476` | x86-64's test branches to the constants' first byte as well, and arm64 refuses a literal load from a call's relocation in a new test (its M2 and M3) |
+| `69de9ca` | the CI comment names every package the flag adds (its M4) |
+| `a692cc6` | spec §5.2: what each reader refuses, that the whole listing declines, the reason's words, and that the panel shows it as any decline (its M5) |
+
+##### WHAT CHANGED FOR A PERSON USING THE MACHINE CODE PANEL
+
+Nothing, for any program the reviews listed. At `a692cc6` the whole-branch review listed each of the 79 programs in
+`web/src/examples/*.rxt` and `crates/redextape-native/snapshots/*.clif` on x86-64 and arm64, as built and optimised,
+with a scratch example not kept in the tree, and again with the five changed source files taken from `main`: every
+listing listed both times, and the hash of each listing's JSON was the same both times.
+
+For code that holds a jump table or a constant pool, the panel shows its existing decline, *No machine code for this
+program:*, with a reason such as
+`u0:12's x86-64 code holds data the listing cannot place: at byte 0x22, an indirect jump, as through a jump table placed in the code`,
+the reason a test gets from Cranelift's own `br_table`. #198's entry said what such code would have listed: on x86-64
+the code after a jump table as `.quad` rows, and on arm64 a constant pool or a jump table as instructions. A declined
+relocation, which no listed program reaches either, now reads
+`native codegen: u0:12's Abs8 relocation at byte 0x8 names Cranelift's library call FloorF64, which is neither a runtime import nor a subroutine`.
+
+##### DECISIONS
+
+1. **A refusal declines the whole listing**, the functions before the refusing one included: the user's pick, as duet's
+   README records it. Showing that function's rest as `.byte` rows would read as decoder failures and still carry pcs;
+   an *unknown* row kind would change the TS bindings and need browser work. The decline takes the path a declined
+   relocation already takes, `LowerError::Unsupported`, which `redextape-mc-wasm` hands the worker as a string and the
+   panel shows as the reason, so no binding, worker or panel code changes.
+2. **Each reader refuses on a sign, not on proof of data**, at the first instruction that shows it. x86-64: an indirect
+   `jmp`; a branch into the bytes read as constants, their first byte included; or a rip-relative operand that reads
+   back into the code, as a forward read is where the constants start. arm64: `br`; an `adr` no relocation fills in; or
+   a literal `ldr`/`ldrsw` from anything but a far call's address, an absolute relocation at the literal. The tests
+   compile a `br_table` and an `f64` constant as they run, with the Cranelift in `Cargo.lock`, 0.137.2, at `speed`,
+   through `machine_function`, the compile `machine_code` runs for each function, and the readers refuse that code at
+   three of the signs: x86-64's indirect `jmp`, for the `br_table`; arm64's `adr`, for the `br_table`, and its literal
+   load, for the `f64` constant. x86-64's other two signs and arm64's `br` are held only by the hand-built bytes and
+   words of *THE TESTS*. x86-64's constants after its code still read as `.quad` rows; arm64, which finds data only
+   through relocations, refuses the `f64` constant x86-64 lists.
+3. **Coverage turns the feature on rather than merging a second run.** `--workspace` builds `redextape-mc` with `x86`
+   alone, by `redextape-mc-wasm`'s default, so `arm64.rs` was in no figure. `redextape-mc-wasm` reads its own features,
+   so it still builds as the x86-64 package, and `redextape-native`'s tests already turn on Cranelift's arm64 ISA, so
+   the flag adds the crate's arm64 code and 7 packages, as `cargo tree` lists them: `yaxpeax-arm`, `yaxpeax-arch`,
+   `bitvec`, `funty`, `radium`, `tap` and `wyz`. With it, the figure counts `arm64.rs`: 96.00% of its 125 lines.
+4. **`machine_function` and `machine_isa` are public in `redextape-native`**, the two halves `machine_code` composes, so
+   that a test in `redextape-mc`, another crate, puts code no program makes through the same compile and the same
+   relocation check; `pub(crate)` cannot reach it. They add no type and no capability: `build_clif` already returns
+   Cranelift `Function`s. `compiled.rs`, which calls them, is declared under `#[cfg(test)]`, and `cranelift-frontend`,
+   which it builds with, is a dev-dependency, so no package or wasm build compiles it.
+5. **Left, as duet's README records the user's choice:** iced's decimal immediates, and the row field (*WHAT THIS DID
+   NOT CLOSE*).
+
+##### THE TESTS
+
+- **`tests/listing.rs`**, over the snapshot programs on both targets at both levels:
+  `every_row_inside_a_range_carries_its_pc`, asked of the ranges `machine_code` returns rather than through `pc_at`; and
+  `prologue_rows_carry_no_pc`, which also wants a prologue row on each target at each level, so that a range made for
+  one of them cannot hide its prologue.
+- **`module_free.rs`**: `a_relocation_naming_no_import_or_subroutine_is_refused_by_name` holds each of the 5 kinds of
+  target `reloc_target` names to its whole sentence; `a_declined_relocation_names_the_function_it_is_in` compiles an
+  `f64` `floor` for x86-64 with no SSE4.1, which Cranelift makes a call to its library's `FloorF64`, in a function named
+  `u0:13`, and holds the decline to that name.
+- **`x86.rs`**, on hand-built bytes: a jump through a table placed in the code, refused at its indirect jump; a branch
+  to the constant's first byte and one a byte further in; a rip-relative read back into the code; and constants after
+  the code, read forward, as `.quad` rows. `cranelifts_jump_table_is_refused_and_its_constant_pool_read` compiles a
+  `br_table` and an `f64` constant.
+- **`arm64.rs`**, on hand-built words: a far call's literal as one `.8byte` row; a literal load no relocation marks; a
+  literal load from a call's relocation; and a jump table's `adr` and its `br`, each refused alone.
+  `cranelifts_jump_table_and_constant_pool_are_refused` compiles both.
+- **`lib.rs`**: `a_jump_table_declines_the_whole_x86_64_listing` and `a_constant_pool_declines_the_whole_arm64_listing`
+  list a compiled plain function alone, then decline it with Cranelift's `br_table`, or on arm64 its `f64` constant, as
+  the second function, with the whole sentence;
+  `a_decline_names_the_function_the_target_the_byte_and_the_kind_of_instruction` holds `decline`'s sentence.
+
+##### THE SABOTAGES
+
+Each ran at `a692cc6` on this machine: a saved copy of the file, a break, `cargo nextest run --no-fail-fast` on the
+crate whose tests hold it, a restore from the copy, and `cmp`, which found every file equal; `git status --short` was
+empty after. A case stops at its first failed check, so the checks after it are not shown by that sabotage.
+
+| Sabotage | What failed |
+|---|---|
+| x86-64's indirect-`jmp` rule taken out | `a_jump_table_in_the_code_is_refused_at_its_indirect_jump`; `cranelifts_jump_table_is_refused_and_its_constant_pool_read`, at the compiled `br_table`; `a_jump_table_declines_the_whole_x86_64_listing`, "the listing was not declined as `Unsupported`" |
+| x86-64's branch-into-the-constants rule taken out; then, apart, its `>=` made `>` | `a_branch_into_the_constants_is_refused`, each time at "a jump landing on its first byte" |
+| x86-64's rule for a rip-relative read back into the code taken out | `a_rip_relative_read_of_the_code_itself_is_refused` |
+| arm64's `br` rule taken out | `a_jump_tables_adr_and_its_indirect_jump_are_refused` |
+| arm64's literal rule taken out | `a_literal_no_relocation_marks_is_refused`, `a_literal_at_a_call_relocation_is_refused`, `cranelifts_jump_table_and_constant_pool_are_refused` and `a_constant_pool_declines_the_whole_arm64_listing` |
+| arm64's `adr` rule taken out | `a_jump_tables_adr_and_its_indirect_jump_are_refused`; `cranelifts_jump_table_and_constant_pool_are_refused`, at the compiled `br_table` |
+| arm64's literal rule taking any relocation at the literal, not only an absolute one | `a_literal_at_a_call_relocation_is_refused` |
+| `list` swallowing a reader's refusal and listing the function as no rows | both whole-listing tests, at "the listing was not declined as `Unsupported`", after their check that the plain function lists alone held |
+| the decline numbering the function from 0, not after the runtime imports | both whole-listing tests and `a_decline_names_the_function_the_target_the_byte_and_the_kind_of_instruction` |
+| the decline's sentence without its byte | the same tests |
+| a linker symbol named "the symbol" | `a_relocation_naming_no_import_or_subroutine_is_refused_by_name` |
+| a relocation's byte written without `0x` | that test, and `a_declined_relocation_names_the_function_it_is_in`, which got `at byte 6` |
+| a declined relocation's function always `u0:12` | `a_declined_relocation_names_the_function_it_is_in`, which got `u0:12` where `u0:13` was wanted |
+| `pc_at` off by one, `r.start < offset` | `every_row_inside_a_range_carries_its_pc` |
+| `machine_function` keeping a range with the default source location | `every_pc_a_row_carries_is_a_clif_rows`; `prologue_rows_carry_no_pc`, at its count of the targets and levels with a prologue row |
+| the same on arm64 alone | the same two, the prologue test again at its count |
+
+##### THE REVIEWS
+
+- **Duet's own**, in its sandbox, of the code commits before `554624e`, which is its fixes. Only duet's summary of it
+  was delivered.
+- **The first review, at `e4f5d00`**, on this machine, read the branch and ran `check-all.sh --no-llvm --no-browser`,
+  the scans, the licence checks, the census above at `main` and at the branch, and sabotages, and found the change
+  sound, with no Critical finding. Its Important finding, I1: no test drove a refusal through `machine_listing`, so a
+  listing that swallowed a refusal passed every test. Its Minors: M1, the function named in a declined relocation was
+  untested, as a fixed `u0:12` passed; M2, x86-64's branch rule passed with its `>=` made `>`; M3, arm64's literal rule
+  passed taking any relocation; M4, the CI comment named `yaxpeax-arm` alone of the packages the flag adds; M5, the spec
+  did not say that data a reader cannot place declines the listing; and M6, sentences of duet's entry. `2493169`,
+  `a591f0f`, `de96476`, `69de9ca` and `a692cc6` answer I1 and M1 to M5, as the commit table says.
+- **The whole-branch review, at `a692cc6`**, of `7033883..a692cc6`, found the branch *ready after Minors*, with no
+  Critical or Important finding. It ran the census again, `redextape-mc`'s and `module_free`'s tests, `cargo tree` with
+  and without the flag, CI's coverage line, and `git merge-tree` against the other open branches. Its M1 is the merge
+  note under *WHAT THIS DID NOT CLOSE*. Its M2 lists sentences of duet's entry that the fix commits had made false, that
+  Cranelift's code was kept in the tests as byte arrays and that no test refused through `machine_listing`, and the
+  first review's M6: the third x86-64 rule given as a read of "the code itself", and the flag said to add `yaxpeax-arm`
+  "and nothing else".
+
+##### WHAT THIS DID NOT CLOSE
+
+- **iced prints small immediates in decimal** (`movl $4`) where Cranelift's own text reads `$0x4`; iced's one setting
+  covers immediates and displacements alike, and Cranelift prints `8(%rsp)`, so either choice reads unlike the snapshot
+  somewhere. Left, as duet's README records the user's choice.
+- **Rows with no pc inside a current block stay unmarked**, so the block reads as two. The Rust half, a field on the
+  row, changes the TS bindings and so the web side. Left for later, as duet's README records the user's choice.
+- **A refusal is a sign, not a proof.** An indirect `jmp` through a function pointer, or an arm64 `br` that is a tail
+  call through a register, would decline a listing that holds no data. No file under `crates/` names `return_call`, so
+  no tail call reaches either today. If one comes, a reader needs the jump table's own bounds, from `MachBuffer`'s
+  labels, rather than a sign.
+- **The first sign declines everything**: a function with a jump table lists nothing, and neither do the functions
+  beside it.
+- **`every_row_inside_a_range_carries_its_pc` finds a row's range as `pc_at` does**, the first range that holds it, so
+  it would not notice ranges that overlap; Cranelift's sorted source-location ranges do not overlap (the first review,
+  by reading).
+- **One line of the new reader code is not covered:** line 123 of `x86.rs`, where `unplaced` stops at an invalid
+  instruction that takes no byte, as `decode` does at lines 55-58, which `main` leaves uncovered too.
+- **Merging beside `llvm-ir-text`.** Besides the roadmap, `crates/redextape-native/src/lib.rs` conflicts in its
+  `pub use module_free::{...}` list: this branch adds `machine_function` and `machine_isa`, and `llvm-ir-text` takes
+  `decline_reason` out, as it re-exports it from `shared`. Whichever merges second writes
+  `CodeRange, CodeReloc, Listing, MachineFunction, build_clif, build_listing, isa_free_config, machine_code, machine_function, machine_isa`.
+  The merged tree has not been built.
+- **Duet's open questions.** Should the tests compile Cranelift's `br_table` and `f64` constant as they run rather than
+  keep 0.137's bytes? Yes: `a591f0f` does, and before the arrays went, a test kept out of the commit held the compiled
+  code equal to them byte for byte on both targets. Does `check-licences.sh` pass on this machine? Yes: after a real
+  `pnpm install --frozen-lockfile`, it and `check-licence-editions.sh` exit 0 with and without `--self-test` (the first
+  review).
+
+##### VERIFICATION
+
+On `a692cc6`'s code, on this machine, with `CARGO_TARGET_DIR` naming the lane's own directory and each test and coverage
+run under a 16G memory cap: `scripts/check-all.sh --no-llvm --no-browser`, with `TREE_SITTER` naming tree-sitter
+0.25.10, the version the script pins, exit 0, the workspace's nextest 2,071 passed and 35 skipped and `redextape-mc`'s
+with `x86,arm64,ts` 31, and fmt, clippy, the doctests and the wasm32 checks passed; CI's coverage line,
+`cargo llvm-cov nextest --workspace --features redextape-mc/arm64 --fail-under-lines 90`, exit 0, 2,078 tests passed and
+35 skipped, lines 95.53% of 34,599, and `x86.rs` 93.53% of 170, `lib.rs` 99.35% of 153 and `compiled.rs` 100% of 52; the
+node tests of the machine code package and panel, 4 files and 71 tests passed; and
+`node scripts/check-comments.mjs --base 7033883`, 20 areas, each within its budget, and no history and no grown block in
+9 changed files. The fix round also ran, at `a692cc6`, each with exit 0:
+`cargo clippy --workspace --all-targets --features redextape-mc/arm64 -- -D warnings`, and `pnpm run build:wasm`,
+`build:clif-wasm`, `build:mc-x86-wasm`, `build:mc-arm64-wasm` and `build:bindings`.
+
+Not run: the browser tier, Firefox, the LLVM tier and `check-slow.sh`. The branch changes no file under `web/`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh on `a692cc6`'s
+code, with `CARGO_TARGET_DIR` naming the lane's own directory and `cap` standing for
+`systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=0 --`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 11; 6; 5 | the commits in `7033883..a692cc6`; duet's, to `e4f5d00`; those after it | `git rev-list --count 7033883..a692cc6; git rev-list --count 7033883..e4f5d00; git rev-list --count e4f5d00..a692cc6` |
+| 1, 1, 6, 2, 2 | the files changed in `.forgejo/workflows`, `Cargo.lock`, `crates/redextape-mc`, `crates/redextape-native` and `docs/superpowers`, and none elsewhere | `git diff --name-only 7033883 a692cc6 \| cut -d/ -f1-2 \| sort \| uniq -c` |
+| 2 | §8's pc claims, in one sentence | `rg -n -B1 'prologue rows carry none' docs/superpowers/specs/2026-11-24-machine-code-panel-design.md` |
+| 79 | the programs the census listed | `ls web/src/examples/*.rxt crates/redextape-native/snapshots/*.clif \| wc -l` |
+| 5 | the source files the census took from `main`: those of `redextape-mc/src` and `redextape-native/src` the branch changes rather than adds | `git diff --name-only --diff-filter=M 7033883 a692cc6 -- crates/redextape-mc/src crates/redextape-native/src \| wc -l` |
+| 0.137.2 | the Cranelift in `Cargo.lock` | `grep -A1 '^name = "cranelift-codegen"' Cargo.lock` |
+| 7 | the packages the flag adds | `comm -13 <(cargo tree --workspace -e normal,dev,build --prefix none \| cut -d' ' -f1 \| sort -u) <(cargo tree --workspace -e normal,dev,build --prefix none --features redextape-mc/arm64 \| cut -d' ' -f1 \| sort -u)` |
+| 5 | the kinds of target `reloc_target` names | `sed -n '/^fn reloc_target/,/^}/p' crates/redextape-native/src/module_free.rs \| grep -c '=>'` |
+| 0 | the files under `crates/` that name `return_call` | `rg -l return_call crates \| wc -l` |
+| 0.25.10 | the tree-sitter `check-all.sh` pins | `rg -n 'PINNED to v0.25.10' scripts/check-all.sh; $TREE_SITTER --version` |
+| exit 0; 2,071, 35 | `check-all.sh`, and its workspace nextest: passed, skipped | `cap scripts/check-all.sh --no-llvm --no-browser`, with `TREE_SITTER` set, its exit and its first `Summary` line |
+| 31 | `redextape-mc`'s tests with `x86,arm64,ts` | `cap cargo nextest run -p redextape-mc --features x86,arm64,ts`, its `Summary` line |
+| exit 0; 2,078, 35; 95.53% of 34,599; 96.00% of 125, 93.53% of 170, 99.35% of 153, 100% of 52 | CI's coverage line: its tests passed and skipped, its lines, and those of `arm64.rs`, `x86.rs`, `lib.rs` and `compiled.rs` | `cap cargo llvm-cov nextest --workspace --features redextape-mc/arm64 --fail-under-lines 90`, its exit, its `Summary` line, and its `TOTAL` and `redextape-mc/src/` rows |
+| 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
+| 123; 55-58 | `x86.rs`'s uncovered line the branch adds; `decode`'s, from `main` | `cap cargo llvm-cov report --show-missing-lines \| grep 'redextape-mc/src'`, then `git blame -s -L N,N 7033883..a692cc6 -- crates/redextape-mc/src/F` for each line N it lists in each file F: a line from `main` starts with `^` |
+| 4, 71 | the node test files of the machine code package and panel, and their tests | `cd web && cap pnpm exec vitest run --project node tests/node/mc-package.test.ts tests/node/machine-code.test.ts tests/node/machine-row.test.ts tests/node/mc-view.test.ts` |
+| 20; 9 | `check-comments.mjs`'s areas, and the files it read as changed | `node scripts/check-comments.mjs --base 7033883 \| tail -2` |
