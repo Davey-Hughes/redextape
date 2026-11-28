@@ -8,10 +8,9 @@ import { whole } from './machine-views'
  * THE APP ADDS THE CUT-TEXT WATCHER ITSELF (the cut-text tooltips design, `cut-text.ts`): in views the app builds, a
  * cut text reads whole in its `title` after a real hover, with no test adding the watcher. Its texts are a row of
  * fact(12)'s clif listing, in a page of its own width, a rule of the TM view's rule table and an instruction of the TM
- * view's diagram. Each case
- * first holds its text cut, so that none passes because a text happened to fit. `cut-text.test.ts` holds the watcher in
- * views built by hand. fact(12)'s result is not among them, as the clif view's values keep the room it needs (the
- * squeezed values design).
+ * view's diagram. Each case first holds its text cut, so that none passes because a text happened to fit.
+ * `cut-text.test.ts` holds the watcher in views built by hand. fact(12)'s result is not among them, as the clif view's
+ * values keep the room it needs (the squeezed values design).
  */
 
 const FACT_12 = EXAMPLES.find((e) => e.id === 'fact-12')
