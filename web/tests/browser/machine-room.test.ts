@@ -84,8 +84,8 @@ function withoutRoom<T>(host: HTMLElement, read: () => T): T {
 
 /**
  * The first width from `from` px up, a step of `by`, at which the room `ONE_NINE` keeps draws fewer tracks than
- * `SHORT`'s: where value 0 moves the cells. Each width mounts a view of its own and draws `SHORT` and then
- * `ONE_NINE`, as the cases do, so the width found does not rest on `forget`, which a case of its own holds.
+ * `SHORT`'s: where value 0 moves the cells. Each width mounts a view of its own and draws `SHORT` and then `ONE_NINE`,
+ * as the cases do, so the width found does not rest on `forget`, which a case of its own holds.
  */
 async function widthWhereRoomMoves(view: View, from: number, by: number): Promise<number> {
   for (let w = from; w < view.wide + 300; w += by) {
