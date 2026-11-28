@@ -311,12 +311,20 @@ export function heapPanel(o: MachinePanelOptions): RoomPanel<HeapView> {
         }
         li.append(text)
         const kept = room.take(item)
-        if (kept !== null) li.style.setProperty('--line-room', JSON.stringify(kept))
+        if (kept !== null) li.style.setProperty('--line-room', cssString(kept))
         return li
       })
       body.replaceChildren(...items)
     },
   }
+}
+
+/**
+ * `s` as a CSS string, which `--line-room` is read as (`content: var(--line-room)`): a quote and a backslash escaped,
+ * and each control character as its code point, as CSS reads JSON's `\n` as an `n`.
+ */
+export function cssString(s: string): string {
+  return `"${s.replace(/["\\]/g, '\\$&').replace(/\p{Cc}/gu, (c) => `\\${(c.codePointAt(0) ?? 0).toString(16)} `)}"`
 }
 
 /**

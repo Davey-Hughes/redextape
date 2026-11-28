@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ClifPane } from '../../src/clif-pane'
 import { pcColumn } from '../../src/clif-view'
+import { type HeapView, heapPanel } from '../../src/machine-panels'
 import type { RxmPane } from '../../src/rxm-pane'
 import type { ClifAt } from '../../src/types'
 import { FACT3 } from '../node/rxm-fixtures'
@@ -395,5 +396,22 @@ describe("the clif view's call stack", () => {
       expect(boxes(), `at ${w} px, each frame's top and height`).toEqual(was)
     }
     expect(wrapped, 'precondition: some width at which the frame goes on below').toBe(true)
+  })
+})
+
+describe("a heap line's room", () => {
+  it('reads back as the text it keeps, where that holds a quote, a backslash and a line break', () => {
+    const heap = heapPanel({ name: 'heap', label: 'heap', open: true, onToggle: () => {} })
+    document.body.append(heap.panel.el)
+    const line = (body: string): HeapView => ({
+      count: '',
+      items: [{ kind: 'line', lead: '#1', body, refs: [], result: false }],
+    })
+    heap.show(line('say "hi" \\ to\nme'))
+    heap.show(line('0'))
+    const li = heap.panel.el.querySelector('.rxm-cell-line') as HTMLElement
+    // THE BROWSER'S OWN SERIALIZATION OF THE STRING IT READ (CSSOM's): a quote and a backslash escaped, a line break as
+    // its code point.
+    expect(getComputedStyle(li, '::after').content, 'the kept text').toBe('"#1 say \\"hi\\" \\\\ to\\a me"')
   })
 })
