@@ -1,0 +1,129 @@
+import { inflateSync } from 'node:zlib'
+import { describe, expect, it } from 'vitest'
+import { appleTouchIcon, faviconIco } from '../../favicons'
+import { PAGES } from '../../vite.config'
+import { readRelative } from './read-fixture'
+
+const SVG = readRelative('../../public/favicon.svg')
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+/** Each entry of an ICO's directory, as its 16 bytes state it. */
+function entries(
+  ico: Buffer,
+): { width: number; height: number; planes: number; bits: number; bytes: number; at: number }[] {
+  return Array.from({ length: ico.readUInt16LE(4) }, (_, i) => {
+    const e = ico.subarray(6 + 16 * i, 22 + 16 * i)
+    return {
+      width: e.readUInt8(0),
+      height: e.readUInt8(1),
+      planes: e.readUInt16LE(4),
+      bits: e.readUInt16LE(6),
+      bytes: e.readUInt32LE(8),
+      at: e.readUInt32LE(12),
+    }
+  })
+}
+
+/** A PNG's chunks, by type in file order. */
+function chunks(png: Buffer): { type: string; data: Buffer }[] {
+  expect(png.subarray(0, 8).equals(PNG_SIGNATURE), 'the PNG signature').toBe(true)
+  const found = []
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at)
+    found.push({ type: png.toString('latin1', at + 4, at + 8), data: png.subarray(at + 8, at + 8 + length) })
+    at += 12 + length
+  }
+  return found
+}
+
+/** A PNG's size from its header. */
+function size(png: Buffer): [number, number] {
+  const head = chunks(png)[0]
+  expect(head?.type).toBe('IHDR')
+  return [head?.data.readUInt32BE(0) ?? 0, head?.data.readUInt32BE(4) ?? 0]
+}
+
+/** Every alpha of an 8-bit RGBA PNG, each scan line's filter undone. */
+function alphas(png: Buffer): number[] {
+  const all = chunks(png)
+  const head = all[0]?.data ?? Buffer.alloc(13)
+  expect([head.readUInt8(8), head.readUInt8(9), head.readUInt8(12)], 'bit depth, colour type, interlace').toEqual([
+    8, 6, 0,
+  ])
+  const [width, height] = size(png)
+  const raw = inflateSync(Buffer.concat(all.filter((c) => c.type === 'IDAT').map((c) => c.data)))
+  const stride = width * 4
+  const rows: Buffer[] = []
+  for (let y = 0; y < height; y++) {
+    const filter = raw.readUInt8(y * (stride + 1))
+    const row = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)))
+    const up = rows[y - 1] ?? Buffer.alloc(stride)
+    for (let x = 0; x < stride; x++) {
+      const a = x < 4 ? 0 : (row[x - 4] ?? 0)
+      const b = up[x] ?? 0
+      const c = x < 4 ? 0 : (up[x - 4] ?? 0)
+      const p = a + b - c
+      const paeth =
+        Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c)
+          ? a
+          : Math.abs(p - b) <= Math.abs(p - c)
+            ? b
+            : c
+      const predict = [0, a, b, (a + b) >> 1, paeth][filter]
+      if (predict === undefined) throw new Error(`row ${y} has filter ${filter}`)
+      row[x] = ((row[x] ?? 0) + predict) & 0xff
+    }
+    rows.push(row)
+  }
+  return rows.flatMap((row) => Array.from({ length: width }, (_, x) => row[x * 4 + 3] ?? 0))
+}
+
+describe('favicon.ico', () => {
+  const ico = faviconIco(SVG)
+
+  it('is an icon file of three frames, 16, 32 and 48 px square, each 32-bit', () => {
+    expect([ico.readUInt16LE(0), ico.readUInt16LE(2), ico.readUInt16LE(4)], 'reserved, type, count').toEqual([0, 1, 3])
+    expect(entries(ico).map(({ width, height, planes, bits }) => [width, height, planes, bits])).toEqual([
+      [16, 16, 1, 32],
+      [32, 32, 1, 32],
+      [48, 48, 1, 32],
+    ])
+  })
+
+  it('stores each frame as a PNG of the size its entry states, the frames filling the file after the directory', () => {
+    let next = 6 + 16 * entries(ico).length
+    for (const { width, height, bytes, at } of entries(ico)) {
+      expect(at, 'each frame starts where the one before it ends').toBe(next)
+      expect(size(ico.subarray(at, at + bytes))).toEqual([width, height])
+      next = at + bytes
+    }
+    expect(next).toBe(ico.length)
+  })
+})
+
+describe('apple-touch-icon.png', () => {
+  const png = appleTouchIcon(SVG)
+
+  it('is 180 px square', () => {
+    expect(size(png)).toEqual([180, 180])
+  })
+
+  it('is opaque in every pixel, since iOS would fill a transparent one with black', () => {
+    const seen = alphas(png)
+    expect(seen.length).toBe(180 * 180)
+    expect(seen.filter((a) => a !== 255).length, 'pixels not fully opaque').toBe(0)
+  })
+})
+
+describe('the icon links', () => {
+  const TAGS = [
+    '<link rel="icon" href="/favicon.ico" sizes="32x32" />',
+    '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />',
+    '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />',
+  ]
+
+  it.each(PAGES)('%s.html carries all three in its head', (name) => {
+    const head = readRelative(`../../${name}.html`).split('</head>')[0] ?? ''
+    for (const tag of TAGS) expect(head, tag).toContain(tag)
+  })
+})

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>redextape</title>
+  <defs>
+    <clipPath id="leg">
+      <polygon points="3,28.5 7.3,25.3 11.6,28.5 17.9,15.8 13.6,9.3" />
+    </clipPath>
+  </defs>
+  <polygon points="3,28.5 7.3,25.3 11.6,28.5 17.9,15.8 13.6,9.3" fill="#E53935" />
+  <line x1="4.6" y1="4" x2="18.9" y2="28" stroke="#9A2226" stroke-width="6" clip-path="url(#leg)" />
+  <polygon points="3,3.5 14,3.5 28.8,28.5 24,25.3 19.2,28.5 7.6,9 3,9" fill="#E53935" />
+</svg>

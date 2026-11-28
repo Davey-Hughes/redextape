@@ -14,6 +14,7 @@ import type { Browser, BrowserContext, Page, Request, Route } from 'playwright'
 // same Vite `defineConfig` plus that import path.
 import { configDefaults, defineConfig, type TestProjectInlineConfiguration } from 'vitest/config'
 import type { BrowserCommand } from 'vitest/node'
+import { favicons } from './favicons.ts'
 import { inlinePrepaint } from './src/prepaint.ts'
 import { inlineViewToggles } from './src/view-toggle-markup.ts'
 
@@ -29,7 +30,7 @@ import { inlineViewToggles } from './src/view-toggle-markup.ts'
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /** The site's pages: the app, and the four beside it (about pages design §4). */
-const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
+export const PAGES = ['index', 'about', 'help', 'licences', 'privacy']
 
 /**
  * The probes' own files, excluded from every browser project's default set unless `REDEXTAPE_PROBE` is
@@ -395,6 +396,7 @@ export default defineConfig({
   plugins: [
     { name: 'redextape-prepaint', transformIndexHtml: { order: 'pre', handler: inlinePrepaint } },
     { name: 'redextape-view-toggles', transformIndexHtml: { order: 'pre', handler: inlineViewToggles } },
+    favicons(),
   ],
   define: { 'import.meta.env.VITE_COMMIT_HASH': JSON.stringify(process.env.COMMIT_HASH ?? '') },
   worker: { format: 'es' },
