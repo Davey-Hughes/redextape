@@ -204,8 +204,8 @@ fn result_ty(src: &str) -> Ty {
 
 /// Native's primary new cross-check: `run_native` and `run_rxm` on the SAME lowered `Program` decode
 /// to the same `Value`. Since both share `lower_rxm`/`defunc`, this isolates codegen (compile) from
-/// interpretation. Each leg is read twice, by the witness decoder and by `decode_rxm_ty_opaque`, and
-/// both must agree.
+/// interpretation. The interpreter's outcome is read by the witness decoder and by `decode_rxm_ty_opaque`,
+/// and native's must equal it raw, result word and heap, so it reads the same by either.
 fn assert_native_matches_rxm(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let ty = result_ty(src);
@@ -218,9 +218,12 @@ fn assert_native_matches_rxm(src: &str) {
             let rxm_val = decode_rxm(&rxm_outcome, &reference);
             assert_eq!(rxm_val, Some(reference.observable()), "rxm-interp vs reference disagree for: {src}");
             assert_eq!(decode_rxm_ty_opaque(&rxm_outcome, &ty), rxm_val, "rxm-interp's type decode for: {src}");
-            let native_val = decode_rxm(&native_outcome, &reference);
-            assert_eq!(native_val, rxm_val, "native vs rxm-interp disagree for: {src}");
-            assert_eq!(decode_rxm_ty_opaque(&native_outcome, &ty), native_val, "native's type decode for: {src}");
+            assert_eq!(
+                native_outcome,
+                rxm_outcome,
+                "native vs rxm-interp result word or heap differ for: {src}; native decodes to {:?}",
+                decode_rxm(&native_outcome, &reference)
+            );
         }
         (a, n) => panic!("native vs rxm-interp mismatch for {src}:\n  rxm={a:?}\n  native={n:?}"),
     }
@@ -320,19 +323,11 @@ fn native_matches_rxm_interp_on_the_first_order_suite() {
 }
 
 /// Both decode a function to the same opaque `Value::Function`, so a codegen slip in a closure's tag or
-/// environment would pass `assert_native_matches_rxm`. The raw result word and heap must match too.
+/// environment would pass a decoded comparison; `assert_native_matches_rxm` compares them raw.
 #[test]
 fn native_matches_rxm_interp_on_function_results() {
     for src in FUNCTION_RESULT_DEMOS {
         assert_native_matches_rxm(src);
-        let core = core_of(src);
-        let prog = lower_program(&core).unwrap_or_else(|e| panic!("lowering failed for `{src}`: {e:?}"));
-        match (run_rxm(&prog, DEFAULT_CAPS), run_native(&core, DEFAULT_CAPS)) {
-            (RxmRun::Ran(rxm), NativeRun::Ran(native)) => {
-                assert_eq!(native, rxm, "native vs rxm-interp result word or heap differ for: {src}");
-            }
-            (a, n) => panic!("native vs rxm-interp mismatch for {src}:\n  rxm={a:?}\n  native={n:?}"),
-        }
     }
 }
 
