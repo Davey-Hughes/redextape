@@ -571,9 +571,10 @@ Every new control follows umbrella §4's rules.
 `aria-expanded`, and no `aria-haspopup`, since its popover is a field and a button and not a menu. `settings` keeps its
 `aria-haspopup="menu"`, though its popover is not a menu either; that is recorded as open.*
 
-*Amended 2026-11-28, in branch `a11y-leftovers`: `settings` is a disclosure too, like the workspace menu's button,
-`examples`, `share` and `about` — `aria-controls` and `aria-expanded`, and no `aria-haspopup`, since its popover
-holds selects, a checkbox and a button: no menu items, and no arrow keys between them.*
+*Amended 2026-11-28, in branch `a11y-leftovers`: the workspace menu's button, `examples` (§4.2's markup above included)
+and `settings` are disclosures too, like `share` and `about` — `aria-controls` and `aria-expanded`, and no
+`aria-haspopup`, since their popovers hold buttons, selects and a checkbox: no menu items, and no arrow keys between
+them.*
 
 ## §7 When things fail
 
