@@ -38,7 +38,7 @@ import { until } from './until'
  */
 export const SHELL = `
   <header class="bar">
-    <span class="wordmark">redextape</span>
+    <span class="wordmark"><img src="/favicon.svg" width="22" height="22" alt="" />redextape</span>
     <button type="button" id="workspace" aria-haspopup="menu" aria-controls="workspace-menu" aria-expanded="false">Explorer <span aria-hidden="true">▾</span></button>
     <div id="workspace-menu" class="header-menu" popover>
       <button type="button" id="reset-preset">reset preset — restores the default views</button>
