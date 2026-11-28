@@ -925,6 +925,7 @@ mod tests {
             assert_eq!(out, "", "{src}");
             assert!(err.contains("MAX_REDUCTION_STEPS"), "the cap that fired must be named for {src}, got: {err}");
             assert!(err.contains("takes the head or tail of a list it is given"), "{src} got: {err}");
+            assert!(err.contains("may have no normal form"), "{src} got: {err}");
             assert!(matches!(outcome, Outcome::ProgramFailed), "{src}");
         }
     }

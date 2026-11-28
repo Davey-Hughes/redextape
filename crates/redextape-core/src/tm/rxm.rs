@@ -772,8 +772,8 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 pub enum DecodeFailure {
     /// The word/heap does not have the shape `ty` claims — a header (or a `result` directive) that
     /// lies about what the run actually produced. The FILE's fault. A function word that points at no
-    /// heap cell is one too, but only an `_opaque` decode reads a function, and those read the tool's
-    /// own runs, where it would be a lowering defect.
+    /// heap cell is one too, but a function is read only from the tool's own runs, by an `_opaque`
+    /// decode or under a function witness, where it would be a lowering defect.
     Mismatch,
     /// `MAX_DECODE_NODES` ran out on an otherwise well-formed decode — the declared type may be
     /// entirely truthful; the decoder simply built more `Value` nodes than the budget allows (nested
