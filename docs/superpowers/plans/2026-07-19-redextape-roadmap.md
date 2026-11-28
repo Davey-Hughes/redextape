@@ -46877,7 +46877,7 @@ says `web/`; `$J` is a JSON file outside the tree.
 | 26.13.1; 0.15.0; 1.100.0; 11.20.0 | Node; wasm-pack; rustc; pnpm | `node --version; wasm-pack --version; rustc --version`; `pnpm --version` in `web/` |
 | `node:26-bookworm` | the image CI's web job runs in | `grep -n 'image: node:' .forgejo/workflows/ci.yml` |
 
-#### EVERY PAGE CARRIES THE RED TAPE ICON, AS THE COMMITTED `favicon.svg` AND AS A `favicon.ico` OF 16, 32 AND 48 PX FRAMES AND A 180 PX `apple-touch-icon.png` THAT THE BUILD AND THE DEV SERVER DRAW FROM IT, SO NO BINARY IS COMMITTED, AND THE LOGO STANDS BEFORE THE WORDMARK WIDER THAN A PHONE (2026-11-28, branch `favicon` on `a8033d9`, `a8033d9..8765e7f`, 2 commits, plus this entry)
+#### EVERY PAGE CARRIES THE RED TAPE ICON, AS THE COMMITTED `favicon.svg` AND AS A `favicon.ico` OF 16, 32 AND 48 PX FRAMES AND A 180 PX `apple-touch-icon.png` THAT THE BUILD AND THE DEV SERVER DRAW FROM IT, SO NO BINARY IS COMMITTED, AND THE LOGO STANDS BEFORE THE WORDMARK WIDER THAN A PHONE (2026-11-28, branch `favicon` on `a8033d9`, `a8033d9..9dce63c`, 7 commits, this entry's first draft `76b89c5` among them, plus this update)
 
 The user drew the site's icon, the *Red tape* design: a λ made of a red ribbon whose ends are cut. They asked for the cut ends to show at every size, the 16 and 32 px icons included, where an earlier set drew a plain λ at small sizes. They also asked for a `favicon.ico` without committing a binary file. Of the two ways they offered, committing an SVG or keeping the ico out of the tree and loading it from disk, the ruling was the SVG, with the ico made at build time: a file that is not committed never reaches the image CI builds from the checkout. The committed SVG is the user's drawing with its C2PA `<metadata>` block and `xmlns:c2pa` attribute taken out, as the user's rule on attribution keeps such a manifest out of the tree.
 
@@ -46885,6 +46885,11 @@ The user drew the site's icon, the *Red tape* design: a λ made of a red ribbon 
 |---|---|
 | `c213c78` | `web/public/favicon.svg`; `web/favicons.ts`, the Vite plugin that makes the other two icons from it, registered in `vite.config.ts`; the three icon links on all five pages; `@resvg/resvg-js` as a devDependency; `favicons.test.ts` |
 | `8765e7f` | the logo before the wordmark on all five pages, hidden at the header's phone breakpoint; `wordmark-logo.test.ts` |
+| `76b89c5` | this entry |
+| `21e7f22` | `favicons.test.ts` sees the art in each icon; `favicons.ts` exports `APPLE_GROUND` for it |
+| `76d13ba` | `favicons.test.ts` runs the plugin `vite.config.ts` registers, its build hook and its dev middleware |
+| `796eb2c` | `favicons.test.ts` holds each page's wordmark to start with the logo |
+| `9dce63c` | `edge-spacing.test.ts` measures images, the logo among them |
 
 ##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
 
@@ -46901,6 +46906,8 @@ The same art stands before the word *redextape* at the top left of every page, i
 
 In a build the plugin emits both with `emitFile` at the dist root, beside `favicon.svg`. `deploy/nginx.conf`'s `location /` serves a file at the root by `try_files $uri`, so nginx needed no change. In dev a middleware serves both, made from the SVG on disk at each request. The 16, 32 and 48 px frames and the Apple icon were looked at as images: the cut ends show in each.
 
+`favicons.test.ts` holds each frame and the Apple icon to show the art: at least an eighth of its pixels within 8 per channel of the ribbon's red and a 128th within 8 of the shadow's, both colours read from the SVG, and the Apple icon red at its centre and `#FAFAFA` at its four corners. It also finds the plugin in the config Vite resolves from `vite.config.ts`, and runs its build hook with a stub `emitFile` and its dev middleware with a stub request and response, so a build without the plugin fails it.
+
 ##### THE DEPENDENCY
 
 `@resvg/resvg-js` 2.6.2, the registry's latest on 2026-11-28, MPL-2.0, pinned exactly as the other devDependencies are. It runs in Node only, at build time and in dev, and nothing of it reaches the browser. What the gates ask of a new dependency:
@@ -46916,7 +46923,7 @@ The user asked for the logo to the left of the wordmark, at the top left of each
 
 The 22 px fits inside the wordmark's line, so the row is no taller. But the logo and its gap add 26 px to the header's first row, and wherever a row of controls already fills its width to within 26 px, one control wraps onto another row. On a phone that cost the views their height: with the logo shown at every width, `inspector-phone.test.ts`'s stage-strip layout at 320 × 400 px got a header 181 px tall where it pins 136, and the λ view 13.875 px tall where it pins 58.875. At 320 × 320 the page grew from 341 to 386 px. The user's ruling, 2026-11-28, was to hide the logo at `max-width: 30rem`, the header's existing phone breakpoint, so every phone width and those pins stay as on `main`.
 
-Above 30rem the cost stays, in two 26 px bands of window widths per style in the app's Explorer header, where the header is one row taller than on `main`: Paper 494-518 and 1034-1058 px, Terminal 526-550 and 1096-1120 px, Instrument 508-532 and 1080-1104 px. The four pages have none above 30rem. At 1280 px the header is as tall with the logo as without it, in every style, on the app and on the pages.
+Above 30rem the cost stays, in two 26 px bands of window widths per style in the app's Explorer header, where the header is one row taller than on `main`. In Chromium: Paper 494-518 and 1034-1058 px, Terminal 526-550 and 1096-1120 px, Instrument 508-532 and 1080-1104 px. In Firefox, the user's browser, swept from 482 px on the app and `about.html` only: Paper 490-514 and 1034-1058 px, Terminal 522-546 and 1092-1116 px, Instrument 504-528 and 1072-1096 px. The four pages have none above 30rem in Chromium, and `about.html` none in Firefox. At 1280 px the header is as tall with the logo as without it, in every style, on the app and on the pages.
 
 The test file draws the logo from the SVG's text as a `data:` URL, because the tester's server answers `/favicon.svg` with Vitest's own icon. The built pages keep `src="/favicon.svg"`, which is the committed file at the site's root.
 
@@ -46929,6 +46936,10 @@ Each break was a saved copy, the break, a run of the test file, and a restore fr
 - The Apple icon's side made 192: *is 180 px square* fails, and so does *is opaque in every pixel…*, which counts 180 × 180 pixels.
 - The Apple icon's ground taken out: only *is opaque in every pixel…* fails.
 - The apple-touch-icon link taken out of `privacy.html`: only *privacy.html carries all three in its head* fails.
+- Each ICO frame drawn from an empty 32 px SVG: only the three *draws the art in its … px frame* cases fail.
+- The Apple icon's `<image>` taken out: only *draws the art, red at its centre, on the ground that fills its corners* fails.
+- `favicons()` taken out of `vite.config.ts`'s `plugins`: only the four cases under *the plugin vite.config.ts registers* fail.
+- `help.html`'s logo pointed at `/favicon.ico`, and in a second break moved after the word: each time only *help.html's wordmark has the logo as its first child* fails.
 
 In `wordmark-logo.test.ts`, which runs each case on `about.html`'s header and on the mounted app's:
 
@@ -46940,10 +46951,13 @@ In `wordmark-logo.test.ts`, which runs each case on `about.html`'s header and on
 - The logo's `width` and `height` taken out of `about.html`: *takes its place before the logo has loaded* fails, and so do `about.html`'s three header-height cases.
 - The 30rem rule taken out: only the two *hides … at the phone breakpoint* cases fail.
 
+In `edge-spacing.test.ts`, the logo given `margin-left: -14px` in `src/style.css` fails only *at 1600 × 1000*, naming the logo 2 px from the window's left; the logo hidden at every width fails the same case on its precondition.
+
 ##### WHAT THIS DID NOT CLOSE
 
 - No browser tab, bookmark or iOS home screen was looked at, and nothing checks which icon a browser picks.
-- Not run: Firefox, CI's `test:coverage`, `check-slow.sh`, `cargo llvm-cov`, and a Docker image build. The `node:26-slim` check stands in for the image's web stage only as far as loading resvg.
+- The branch review ran three gates at `76b89c5` that this branch had not. The Firefox tier, `pnpm run test:firefox`, fails 52 tests in 18 files, and the same 52 by name on `a8033d9`, so the branch adds no Firefox failure. `check-slow.sh` is green. CI's `test:coverage` passed, with lines at 99.43%. The Firefox tier runs only locally: `.forgejo/workflows/ci.yml` has no Firefox job.
+- Not run: `cargo llvm-cov`, and a Docker image build. The `node:26-slim` check stands in for the image's web stage only as far as loading resvg.
 - The app's header is one row taller than on `main` in the two 26 px bands per style above. Only the Explorer layout was swept; another layout's controls would put its bands elsewhere.
 - The logo's colours are held by computed style, a filter, blend or opacity on it or an ancestor; nothing compares its drawn pixels.
 
@@ -46951,20 +46965,27 @@ In `wordmark-logo.test.ts`, which runs each case on `about.html`'s header and on
 
 **The gates at `8765e7f`**, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` naming the pinned 0.25.10, since a worktree has no `.tools/` of its own; `check-licences.sh`, `--self-test` then the check, with `third-party-licences.json` unchanged; the node tier; the Chromium tier, `pnpm run test:browser`; and `pnpm run build:app`, after which `dist/` holds `favicon.ico`, `favicon.svg` (the same bytes as `public/favicon.svg`) and `apple-touch-icon.png`, and each of the five built pages holds the three links and the logo. The pre-commit hook passed on `c213c78` and on `8765e7f`, each hook Passed or, with no files of its own, Skipped. `check-all.sh` also passed at `c213c78`. The wasm packages and bindings were built in the worktree from `a8033d9`'s crates before any of these ran.
 
+**The gates at `9dce63c`**, each exit 0: `scripts/check-all.sh`, "all configs green — base, LLVM and browser", with `TREE_SITTER` as above; the node tier; and `edge-spacing.test.ts`, the one browser file these commits touch, in Chromium and in Firefox. The pre-commit hook passed on `21e7f22`, `76d13ba`, `796eb2c` and `9dce63c`.
+
 **Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, `web/` ones from `web/`.
 
 | Value | What | Produced by |
 |---|---|---|
 | 2 | the commits `a8033d9..8765e7f` | `git rev-list --count a8033d9..8765e7f` |
+| 7 | the commits `a8033d9..9dce63c` | `git rev-list --count a8033d9..9dce63c` |
 | 2.6.2; MPL-2.0 | `@resvg/resvg-js`'s latest release and its licence, 2026-11-28 | `pnpm view @resvg/resvg-js version license` |
 | 3 icons | `dist/favicon.ico` | `pnpm run build:app && file dist/favicon.ico` |
 | 180 x 180 | `dist/apple-touch-icon.png` | `file dist/apple-touch-icon.png`, after the build |
 | 140; 20 | the Apple art's width, and its inset from each edge | `node -e 'const a = Math.round(180 * 0.78); console.log(a, (180 - a) / 2)'` |
 | linux x64, Node 26.13.1 | where resvg-js loaded and drew | in `node:26-slim` (`sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5`), with `web/package.json` and `web/pnpm-lock.yaml` copied in: `npm install -g pnpm@11.20.0 && pnpm install --frozen-lockfile && node -e '…'`, the script requiring `@resvg/resvg-js`, drawing an 8 px SVG and printing `process.platform`, `process.arch` and `process.versions.node` |
-| 9 | `favicons.test.ts`'s cases, each passing | `pnpm exec vitest run --project node tests/node/favicons.test.ts` |
+| 9; 23 | `favicons.test.ts`'s cases at `8765e7f`, and at `9dce63c`, each passing | `pnpm exec vitest run --project node tests/node/favicons.test.ts` |
 | 18 | `wordmark-logo.test.ts`'s cases, each passing | `pnpm exec vitest run --project browser tests/browser/wordmark-logo.test.ts` |
-| 91 files, 1,681 tests | the node tier, passing | `pnpm run test:node` |
+| 91 files, 1,681 tests; 1,695 | the node tier at `8765e7f`, and its tests at `9dce63c`, passing | `pnpm run test:node` |
+| 54 | `edge-spacing.test.ts`'s cases at `9dce63c`, each passing in Chromium and in Firefox | `pnpm exec vitest run --project browser tests/browser/edge-spacing.test.ts`, then `REDEXTAPE_FIREFOX=1 pnpm exec vitest run --project firefox tests/browser/edge-spacing.test.ts` |
+| 52 in 18 files; 52 | the Firefox tier's failing tests at `76b89c5`, and the same 18 files' failing tests on `a8033d9`, by the same names | `pnpm run test:firefox`, on the branch, and on `a8033d9` in a scratch worktree with the 18 files named |
+| 99.43 | `test:coverage`'s line coverage over all files at `76b89c5`, in % | `pnpm run test:coverage`, under a 16 GB memory cap |
 | 240 files, 2,041 tests and 2 expected to fail | the Chromium tier, passing | `pnpm run test:browser` |
 | 181 and 136; 13.875 and 58.875; 386 and 341 | with the 30rem rule taken out, the stage-strip header's top and the λ view's height at 320 × 400, and the page's height at 320 × 320, each against its pin | `pnpm exec vitest run --project browser tests/browser/inspector-phone.test.ts`, the rule taken out of `src/style.css` and restored from a saved copy after |
 | 26 | the width the logo and its gap add | 22 px of logo and `--space-1`'s 0.25rem at 16 px |
 | the bands above | widths where the header is taller with the logo than without it | `~/.local/state/agents/redextape/favicon/sweep-header-bands.mjs`, a Playwright run against `pnpm exec vite --port 5199` that sets each style and measures `header.bar`'s height with the logo and with it taken out, at 300 to 1920 px in 2 px steps, on the app and the four pages |
+| the Firefox bands above | widths where the header is taller with the logo than without it, in Firefox | `~/.local/state/agents/redextape/favicon/sweep-firefox.mjs`, the same measure in Playwright's Firefox against `pnpm exec vite --port 5199`, at 482 to 1920 px in 2 px steps, on the app and `about.html` |
