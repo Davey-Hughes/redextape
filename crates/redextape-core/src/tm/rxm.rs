@@ -764,10 +764,10 @@ pub(crate) const MAX_DECODE_NODES: usize = 4 * DEFAULT_CAPS.heap as usize;
 /// `budget == 0` meaning exhaustion, anything else a mismatch — would be UNSOUND. `budget` can
 /// legitimately reach exactly `0` from prior, correctly-decremented nodes elsewhere in the same decode
 /// — a sibling `Nat` leaf, an earlier list's `Nil`/`Cons` nodes — and every mismatch arm (`Ty::Bool`'s
-/// `_ => ...`, both pointer-validity checks in `Ty::List`, a function word's range check, the
-/// cyclic-heap fallback) checks its condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact state would
-/// leave `budget == 0` behind it, identical to what real exhaustion leaves — a real counterexample,
-/// not a hypothetical one, which is why every arm below tags its own reason instead.
+/// `_ => ...`, both pointer-validity checks in `Ty::List`, a function word's range check, the cyclic-heap fallback)
+/// checks its condition and returns BEFORE touching `budget`. So a mismatch discovered in that exact state would leave
+/// `budget == 0` behind it, identical to what real exhaustion leaves — a real counterexample, not a hypothetical one,
+/// which is why every arm below tags its own reason instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodeFailure {
     /// The word/heap does not have the shape `ty` claims — a header (or a `result` directive) that
