@@ -14,6 +14,17 @@ pub enum LowerError {
     TooDeep { node: NodeId },
 }
 
+/// Names the construct only: each caller's message already says which lowering it asked for ("has no
+/// TM lowering", "has no rxm lowering"), and this one lowering serves the rxm, TM and native legs.
+impl std::fmt::Display for LowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LowerError::Unsupported { what, .. } => f.write_str(what),
+            LowerError::TooDeep { .. } => f.write_str("the program nests deeper than the lowering guard allows"),
+        }
+    }
+}
+
 /// Bounds `lower_into` recursion so a deeply-nested Core (a huge list literal desugars to a deep
 /// `cons`-`Apply` spine) yields `TooDeep` instead of overflowing the native stack. Tuned for the
 /// production 8 MiB main thread with a ~2x margin (the real stack-safety invariant is the margin,

@@ -244,7 +244,7 @@ pub fn run(
             match redextape_core::tm::lower_program(&core) {
                 Ok(prog) => format!("{RXM_PREAMBLE}{}", redextape_core::tm::print_rxm_with(&prog, &header)),
                 Err(e) => {
-                    writeln!(err, "error: this program has no rxm lowering: {e:?}")?;
+                    writeln!(err, "error: this program has no rxm lowering: {e}")?;
                     return Ok(Outcome::ToolFailed);
                 }
             }
@@ -360,7 +360,7 @@ fn emit_tm(
         // The same sentence `run --backend tm`, `--lang lambda` and `--lang rxm` use for this exact
         // condition: nothing was built here, so header construction is not what went wrong.
         Err(redextape_core::tm::TmRun::LowerError(e)) => {
-            writeln!(err, "error: this program has no TM lowering: {e:?}")?;
+            writeln!(err, "error: this program has no TM lowering: {e}")?;
             Ok(None)
         }
         // Not reachable as `run_tm_described` is written — an outcome from a run that started comes

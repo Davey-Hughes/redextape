@@ -1,0 +1,1 @@
+fn ap(f, x) { f(x) } ap(head, [1])

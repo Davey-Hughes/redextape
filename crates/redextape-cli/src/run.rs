@@ -703,7 +703,7 @@ fn run_tm_backend(
             Ok(Outcome::ToolFailed)
         }
         redextape_core::tm::TmRun::LowerError(e) => {
-            writeln!(err, "error: this program has no TM lowering: {e:?}")?;
+            writeln!(err, "error: this program has no TM lowering: {e}")?;
             Ok(Outcome::ToolFailed)
         }
     }
