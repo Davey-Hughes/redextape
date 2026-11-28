@@ -58,6 +58,62 @@ afterAll(async () => {
   if (permissionSet) await cdp().send('Browser.resetPermissions', { browserContextId: await context() })
 })
 
+/** The program `setup.ts` stores, which the page opens on. */
+const PROGRAM = 'let x = 40; x + 2'
+
+/** `PROGRAM` after 400 lines of TEXT THAT DOES NOT COMPRESS, a number per line from a seeded generator, as a comment. */
+const LONG_PROGRAM = (() => {
+  let s = 7
+  const noise = Array.from({ length: 400 }, () => {
+    s = (s * 1103515245 + 12345) % 2147483648
+    return `// ${s.toString(36)}`
+  }).join('\n')
+  return `${noise}\n${PROGRAM}`
+})()
+
+/** What the line under the field says of `link`, and what the live region says with it. */
+const lengthWords = (link: string): string =>
+  `this link is ${link.length.toLocaleString('en-US')} characters long — some chat and mail apps cut links past 2,000`
+
+/** Write `source` in the editor, and wait for its compile, which `what` names. Each program here evaluates to 42. */
+async function write(source: string, what: string): Promise<void> {
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source } })
+  await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), what)
+}
+
+/**
+ * Run `act` with every link the page makes held until `act` ends, and answer how many it held. **HELD, NOT RACED**:
+ * a link is made sooner than a click that awaits the browser returns, so a case whose gestures must land before a link
+ * does holds the link's deflate, and a gesture can be the real one. **A HOLD THAT HELD NONE HELD NOTHING**: the caller
+ * asserts the count.
+ */
+async function holdingLinks(act: () => Promise<void>): Promise<number> {
+  const Deflate = globalThis.CompressionStream
+  let open = () => {}
+  const gate = new Promise<void>((resolve) => {
+    open = resolve
+  })
+  let count = 0
+  globalThis.CompressionStream = class {
+    readonly writable: WritableStream<BufferSource>
+    readonly readable: ReadableStream<Uint8Array>
+    constructor(format: CompressionFormat) {
+      const deflate = new Deflate(format)
+      count += 1
+      this.writable = deflate.writable
+      // A TRANSFORM TAKES NO CHUNK BEFORE ITS `start` SETTLES, so no byte reaches the link until the gate opens.
+      this.readable = deflate.readable.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({ start: () => gate }))
+    }
+  } as unknown as typeof CompressionStream
+  try {
+    await act()
+  } finally {
+    globalThis.CompressionStream = Deflate
+    open()
+  }
+  return count
+}
+
 /** Open the popover with a click, and answer its link once it is made. */
 async function openShare(): Promise<string> {
   if (shareMenuOpen()) shareMenu().hidePopover()
@@ -158,8 +214,7 @@ describe('share', () => {
     expect(opened.kind === 'whole' && opened.program).toBe('let y = 1; y + 2')
     expect(opened.kind === 'whole' && opened.positions).toEqual({})
     shareMenu().hidePopover()
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    await write(PROGRAM, 'the program’s compile')
   })
 
   it('offers copy link disabled, with its reason, until the link is made', async () => {
@@ -227,20 +282,13 @@ describe('share', () => {
   })
 
   it('says how long a link is past 2,000 characters, and that some apps cut it', async () => {
-    // TEXT THAT DOES NOT COMPRESS: a number per line from a seeded generator, as a comment.
-    let s = 7
-    const noise = Array.from({ length: 400 }, () => {
-      s = (s * 1103515245 + 12345) % 2147483648
-      return `// ${s.toString(36)}`
-    }).join('\n')
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${noise}\nlet x = 40; x + 2` } })
-    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the long program’s compile')
+    await write(LONG_PROGRAM, 'the long program’s compile')
     const heard = hear()
     const link = await openShare()
     heard.stop()
     expect(link.length).toBeGreaterThan(2000)
     const line = shareMenu().querySelector('#share-length')
-    const words = `this link is ${link.length.toLocaleString('en-US')} characters long — some chat and mail apps cut links past 2,000`
+    const words = lengthWords(link)
     expect(line?.textContent).toBe(words)
     expect(shareLinkField().getAttribute('aria-describedby')).toBe('share-length')
     // SAID, NOT ONLY DESCRIBED: the field had the focus before the line was there, so a reader may not read it out.
@@ -250,8 +298,61 @@ describe('share', () => {
     ).toHaveLength(1)
     expect(heard.notices, 'not drawn as a notice: the popover shows it').not.toContain(words)
     shareMenu().hidePopover()
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let x = 40; x + 2' } })
-    await until(() => stateIdle() && (segments()[0] ?? '').startsWith('λ 42'), 'the program’s compile')
+    await write(PROGRAM, 'the program’s compile')
+  })
+
+  /**
+   * **SAID FOR THE OPEN ON SHOW ALONE.** Each open builds its own field, so a link that arrives after share was opened
+   * again fills a field no longer on the page; said, a reader who opened share twice would hear the line twice.
+   */
+  it('says the line once when share is opened again before the first open’s link arrives', async () => {
+    await write(LONG_PROGRAM, 'the long program’s compile')
+    if (shareMenuOpen()) shareMenu().hidePopover()
+    const heard = hear()
+    const fields: HTMLInputElement[] = []
+    const held = await holdingLinks(async () => {
+      await userEvent.click(shareButton())
+      fields.push(shareLinkField())
+      await userEvent.keyboard('{Escape}')
+      await userEvent.click(shareButton())
+      fields.push(shareLinkField())
+    })
+    expect(held, 'both opens’ links held').toBe(2)
+    expect(shareMenuOpen()).toBe(true)
+    const [first, second] = fields as [HTMLInputElement, HTMLInputElement]
+    expect(first.isConnected, 'the second open took the first open’s field off the page').toBe(false)
+    await until(() => first.value !== '' && second.value !== '', 'both opens’ links')
+    heard.stop()
+    expect(second.value.length).toBeGreaterThan(2000)
+    expect(
+      heard.said.filter((said) => said.startsWith('this link is')),
+      'said once, for the open on show',
+    ).toEqual([lengthWords(second.value)])
+    shareMenu().hidePopover()
+    await write(PROGRAM, 'the program’s compile')
+  })
+
+  /** **NOR FOR AN OPEN SINCE CLOSED**: its field is still in the popover, but nothing on screen shows the line. */
+  it('says nothing of a link that arrives after share was closed', async () => {
+    await write(LONG_PROGRAM, 'the long program’s compile')
+    if (shareMenuOpen()) shareMenu().hidePopover()
+    const heard = hear()
+    const fields: HTMLInputElement[] = []
+    const held = await holdingLinks(async () => {
+      await userEvent.click(shareButton())
+      fields.push(shareLinkField())
+      await userEvent.keyboard('{Escape}')
+    })
+    expect(held, 'the link held').toBe(1)
+    expect(shareMenuOpen()).toBe(false)
+    const [field] = fields as [HTMLInputElement]
+    await until(() => field.value !== '', 'the link')
+    heard.stop()
+    // THE FIELD IS STILL ON THE PAGE AND THE LINE WRITTEN, so what leaves it unsaid is the popover's being closed.
+    expect(field.isConnected).toBe(true)
+    expect(shareMenu().querySelector('#share-length')?.textContent).toBe(lengthWords(field.value))
+    expect(heard.said.filter((said) => said.startsWith('this link is'))).toEqual([])
+    await write(PROGRAM, 'the program’s compile')
   })
 
   /**
