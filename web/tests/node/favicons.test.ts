@@ -1,10 +1,20 @@
 import { inflateSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { appleTouchIcon, faviconIco } from '../../favicons'
+import { APPLE_GROUND, appleTouchIcon, faviconIco } from '../../favicons'
 import { PAGES } from '../../vite.config'
 import { readRelative } from './read-fixture'
 
 const SVG = readRelative('../../public/favicon.svg')
+
+/** A colour of the art, read from the SVG so that the test follows the drawing. */
+function artColour(attribute: 'fill' | 'stroke'): string {
+  const found = new RegExp(`${attribute}="(#[0-9A-Fa-f]{6})"`).exec(SVG)?.[1]
+  if (found === undefined) throw new Error(`favicon.svg has no ${attribute} colour`)
+  return found
+}
+
+/** The ribbon's red, and the red of the shadow where one leg passes under the other. */
+const [RIBBON, SHADOW] = [artColour('fill'), artColour('stroke')]
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 /** Each entry of an ICO's directory, as its 16 bytes state it. */
@@ -43,8 +53,10 @@ function size(png: Buffer): [number, number] {
   return [head?.data.readUInt32BE(0) ?? 0, head?.data.readUInt32BE(4) ?? 0]
 }
 
-/** Every alpha of an 8-bit RGBA PNG, each scan line's filter undone. */
-function alphas(png: Buffer): number[] {
+type Rgba = [number, number, number, number]
+
+/** Every pixel of an 8-bit RGBA PNG, row by row, each scan line's filter undone. */
+function pixels(png: Buffer): Rgba[] {
   const all = chunks(png)
   const head = all[0]?.data ?? Buffer.alloc(13)
   expect([head.readUInt8(8), head.readUInt8(9), head.readUInt8(12)], 'bit depth, colour type, interlace').toEqual([
@@ -75,7 +87,45 @@ function alphas(png: Buffer): number[] {
     }
     rows.push(row)
   }
-  return rows.flatMap((row) => Array.from({ length: width }, (_, x) => row[x * 4 + 3] ?? 0))
+  return rows.flatMap((row) =>
+    Array.from(
+      { length: width },
+      (_, x): Rgba => [row[x * 4] ?? 0, row[x * 4 + 1] ?? 0, row[x * 4 + 2] ?? 0, row[x * 4 + 3] ?? 0],
+    ),
+  )
+}
+
+/** Every alpha of an 8-bit RGBA PNG. */
+const alphas = (png: Buffer): number[] => pixels(png).map((p) => p[3])
+
+/**
+ * How far each channel may stray from a colour and still be that colour. resvg draws the art's flat fills exactly, and
+ * this leaves room for a renderer that rounds its blending differently.
+ */
+const CHANNEL_SLACK = 8
+
+/** Whether `p` is opaque and `hex` to within `CHANNEL_SLACK` in each channel. */
+function is(p: Rgba, hex: string): boolean {
+  const want = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16))
+  return p[3] === 255 && want.every((v, i) => Math.abs(v - (p[i] ?? 0)) <= CHANNEL_SLACK)
+}
+
+/**
+ * The least share of an icon's pixels that is the ribbon's red, and the shadow's. The art leaves about a sixth to a
+ * quarter of each icon red and over a hundredth shadow, the 16 px frame the least of both; a frame drawn blank, or
+ * without the leg's shadow, has none.
+ */
+const LEAST_SHARE = { ribbon: 1 / 8, shadow: 1 / 128 } as const
+
+/** Assert that `png` shows the art: enough of its pixels in the ribbon's red, and enough in the shadow's. */
+function expectArt(png: Buffer): void {
+  const all = pixels(png)
+  expect(all.filter((p) => is(p, RIBBON)).length, `pixels of the ribbon's ${RIBBON}`).toBeGreaterThanOrEqual(
+    all.length * LEAST_SHARE.ribbon,
+  )
+  expect(all.filter((p) => is(p, SHADOW)).length, `pixels of the shadow's ${SHADOW}`).toBeGreaterThanOrEqual(
+    all.length * LEAST_SHARE.shadow,
+  )
 }
 
 describe('favicon.ico', () => {
@@ -99,6 +149,10 @@ describe('favicon.ico', () => {
     }
     expect(next).toBe(ico.length)
   })
+
+  it.each(entries(ico).map((e) => [e.width, e]))('draws the art in its %i px frame', (_, { at, bytes }) => {
+    expectArt(ico.subarray(at, at + bytes))
+  })
 })
 
 describe('apple-touch-icon.png', () => {
@@ -112,6 +166,20 @@ describe('apple-touch-icon.png', () => {
     const seen = alphas(png)
     expect(seen.length).toBe(180 * 180)
     expect(seen.filter((a) => a !== 255).length, 'pixels not fully opaque').toBe(0)
+  })
+
+  it('draws the art, red at its centre, on the ground that fills its corners', () => {
+    expectArt(png)
+    const all = pixels(png)
+    const at = (x: number, y: number): Rgba => all[y * 180 + x] ?? [0, 0, 0, 0]
+    expect(is(at(90, 90), RIBBON), `the centre, ${at(90, 90)}, is ${RIBBON}`).toBe(true)
+    for (const [x, y] of [
+      [0, 0],
+      [179, 0],
+      [0, 179],
+      [179, 179],
+    ] as const)
+      expect(is(at(x, y), APPLE_GROUND), `the corner ${x}, ${y}, ${at(x, y)}, is ${APPLE_GROUND}`).toBe(true)
   })
 })
 

@@ -13,7 +13,7 @@ const APPLE_SIZE = 180
 const APPLE_ART = 0.78
 
 /** iOS fills a transparent pixel with black, so the Apple icon is drawn on a ground of its own. */
-const APPLE_GROUND = '#FAFAFA'
+export const APPLE_GROUND = '#FAFAFA'
 
 /** `svg` drawn `width` px wide, as a PNG. */
 const png = (svg: string, width: number): Buffer =>
