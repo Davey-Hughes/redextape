@@ -27,7 +27,7 @@
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{DEFAULT_CAPS, decode_rxm_reason};
+use redextape_core::tm::{DEFAULT_CAPS, RxmRun, decode_rxm_reason, lower_program, run_rxm};
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
@@ -107,14 +107,28 @@ fn reference_cranelift_llvm_agree() {
 }
 
 /// A function result as a bare closure, in a list, and holding a captured list in its environment:
-/// each function is a `cons(tag, env)` heap cell, so both compilers must hand back a pointer to a real
-/// cell where the type says a function is, at every `OptLevel`.
+/// each function is a `cons(tag, env)` heap cell.
 const FUNCTION_RESULT_CASES: &[&str] = &["|x| x + 1", "[|x| x, |y| y + 1]", "let xs = [1, 2]; |y| head(xs) + y"];
 
+/// The decode reads any word that points at a heap cell as the same opaque `Value::Function`, so
+/// `assert_cross_backend_agree` cannot see a closure with a wrong tag or environment. Each backend's
+/// raw result word and heap must equal the rxm interpreter's on the same lowered `Program`, at every
+/// `OptLevel`, as `native_oracle.rs` checks for the default Cranelift build.
 #[test]
 fn reference_cranelift_llvm_agree_on_function_results() {
     for src in FUNCTION_RESULT_CASES {
         assert_cross_backend_agree(src);
+        let core = core_of(src);
+        let prog = lower_program(&core).unwrap_or_else(|e| panic!("lowering failed for `{src}`: {e:?}"));
+        let RxmRun::Ran(rxm) = run_rxm(&prog, DEFAULT_CAPS) else { panic!("rxm-interp did not run `{src}`") };
+        for opt in OPT_LEVELS {
+            for codegen in [Codegen::Cranelift { opt }, Codegen::Llvm { opt }] {
+                let NativeRun::Ran(outcome) = run_native_with(&core, DEFAULT_CAPS, codegen) else {
+                    panic!("{codegen:?} did not run `{src}`")
+                };
+                assert_eq!(outcome, rxm, "{codegen:?} vs rxm-interp result word or heap differ for: {src}");
+            }
+        }
     }
 }
 
