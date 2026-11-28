@@ -104,8 +104,13 @@ language in an editor rather than failing, so nothing else in this tree could se
 repository's two copies of the GPLv3 to the same words: `LICENSE.md` is GNU's Markdown edition and
 `COPYING` its plain-text one, and with the Markdown's heading marks, list markers and backslash
 escapes out, the whitespace-separated words of the first must be the second's, in the same order. A
-failure names the first word that differs and its line in each file. It took 0.212-0.223 s with its
-self-test over five runs (2026-11-21).
+failure names the first word that differs and its line in each file. Then each file's SHA-256 must be
+the one pinned in the script, GNU's edition byte for byte, so the same edit made to both files, or a
+Markdown mark added or taken out, fails too; only a new edition from GNU changes a hash. It took
+0.268-0.303 s with its self-test over five runs (2026-11-26, at a 1-minute load average of 21.07 on
+32 cores). `.gitattributes` checks these two files out with no line-ending conversion and every
+other text file with LF, whatever `core.autocrlf` says, so a checkout made with it set to `true`
+still holds the hashes and runs this check and `check-licences`.
 The other nine — `check-text-bytes`, `check-citations`, `check-attributions`, `check-doc-figures`,
 `check-shared-docs`, `check-colours`, `check-grammar-wasm`, `check-licences` and `check-comments` — are
 unscoped and run on every commit whatever is staged: the first eight because they catch things that

@@ -1,0 +1,8 @@
+# Every text file checks out with LF whatever core.autocrlf says: a CRLF script does not run, and
+# check-licences regenerates its JSON from texts in the tree and compares it with the committed copy.
+* text=auto eol=lf
+# The licence check pins each file's SHA-256 to GNU's edition, so Git must check both out exactly as
+# committed. These lines come after the one above because the later line wins. Anchored: other
+# LICENSE.md files are not pinned.
+/LICENSE.md -text
+/COPYING -text

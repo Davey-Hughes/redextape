@@ -953,10 +953,10 @@ jobs:
       - name: Third-party licences match what the site ships
         run: ../scripts/check-licences.sh
       # BESIDE THE CHECK WHOSE INPUT IT GUARDS: `COPYING` is the text that check reads, and this holds
-      # `LICENSE.md`, the edition a forge renders, to the same words.
-      - name: LICENSE.md and COPYING hold the same words (self-test)
+      # `LICENSE.md`, the edition a forge renders, to the same words, and each of them to GNU's edition's bytes.
+      - name: LICENSE.md and COPYING are GNU's editions, word for word and byte for byte (self-test)
         run: ../scripts/check-licence-editions.sh --self-test
-      - name: LICENSE.md and COPYING hold the same words
+      - name: LICENSE.md and COPYING are GNU's editions, word for word and byte for byte
         run: ../scripts/check-licence-editions.sh
       - name: Install the Chromium Playwright needs
         run: pnpm exec playwright install --with-deps chromium

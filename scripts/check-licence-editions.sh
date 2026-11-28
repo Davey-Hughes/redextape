@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Hold `LICENSE.md` to the words of `COPYING`.
+# Hold `LICENSE.md` to the words of `COPYING`, and each of them to GNU's text byte for byte.
 #
 # CI invokes this same script (.forgejo/workflows/ci.yml) and so does the pre-commit hook
 # (.pre-commit-config.yaml), so the local and CI gates cannot drift — the convention
 # `scripts/check-all.sh` states and the nine sibling `check-*.sh` scripts already follow.
 #
-#   scripts/check-licence-editions.sh              # compare the two files
-#   scripts/check-licence-editions.sh --self-test  # prove the comparison still fires
+#   scripts/check-licence-editions.sh              # compare the two files, then check each one's hash
+#   scripts/check-licence-editions.sh --self-test  # prove the comparison and the hash check still fire
 #
 # WHY THIS GATE EXISTS. The repository carries the GPLv3 twice: `LICENSE.md` is GNU's Markdown edition, which a
 # forge renders, and `COPYING` is GNU's plain-text edition, which the licences page shows
@@ -19,10 +19,17 @@
 # `COPYING`'s order. Line breaks and indentation may differ, since the two editions wrap and indent differently.
 #
 # NOTHING IS TAKEN OUT OF `COPYING`, so a `#` or `-` that began one of its lines would fail here, not pass unread.
+#
+# WHY EACH FILE'S HASH IS PINNED TOO. The words cannot see the same edit made to both files, nor a Markdown mark added
+# to `LICENSE.md` or taken from it, which changes how a forge draws the licence and none of its words. Both files are
+# GNU's editions byte for byte, so each is held to its SHA-256. The words are compared first because a failure there
+# names the word; a hash failure can only name the file. A new edition from GNU is the one reason to change a hash.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 readonly MARKDOWN=LICENSE.md PLAIN=COPYING
+readonly MARKDOWN_SHA256=cc5470feed66192387f06ae93aed0bd4fefae5a5fd7c1e54a4acf4ea64f1028b
+readonly PLAIN_SHA256=3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986
 
 fail() {
   echo "check-licence-editions: $*" >&2
@@ -65,6 +72,21 @@ if not txt:
     bad(f"{md_path} and {txt_path} hold no words")
 print(len(txt))
 PY
+}
+
+# Print file $1's SHA-256. Python rather than `sha256sum`, which macOS does not ship, and `compare` needs Python already.
+sha256() {
+  python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
+}
+
+# Pass when file $1's SHA-256 is $2; otherwise name the file and both hashes, and fail.
+pinned() {
+  local actual
+  actual="$(sha256 "$1")" || return 1
+  [ "$actual" = "$2" ] || {
+    echo "check-licence-editions: $1's SHA-256 is $actual, not GNU's $2" >&2
+    return 1
+  }
 }
 
 self_test() {
@@ -127,6 +149,21 @@ self_test() {
   rejects "a list marker in the plain text" "$md" "${txt/'    a)'/-   a)}" "word 6 differs"
 
   rejects "two files with no words" "" "" "hold no words"
+
+  # The hash check, on the same Markdown text: its own hash passes, and one byte changed fails with the file named.
+  local hash out
+  printf '%s\n' "$md" >"$tmp/LICENSE.md"
+  hash="$(sha256 "$tmp/LICENSE.md")"
+  out="$(pinned "$tmp/LICENSE.md" "$hash" 2>&1)" || fail "self-test: a file with its own hash was rejected: $out"
+  printf '%s\n' "${md/Title/Titlf}" >"$tmp/LICENSE.md"
+  if out="$(pinned "$tmp/LICENSE.md" "$hash" 2>&1)"; then
+    fail "self-test: a file with one byte changed passed its hash"
+  fi
+  case "$out" in
+    *"$tmp/LICENSE.md's SHA-256 is "*", not GNU's $hash"*) ;;
+    *) fail "self-test: a file with one byte changed was rejected, but not for its hash: $out" ;;
+  esac
+
   rm -f "$tmp/COPYING"
   if compare "$tmp/LICENSE.md" "$tmp/COPYING" >/dev/null 2>&1; then
     fail "self-test: a missing plain-text file was accepted"
@@ -144,8 +181,8 @@ case "$#:${1-}" in
     cat >&2 <<'MSG'
 usage: scripts/check-licence-editions.sh [--self-test]
 
-  (no argument)   compare LICENSE.md's words with COPYING's
-  --self-test     prove the comparison still fires, against planted differences
+  (no argument)   compare LICENSE.md's words with COPYING's, then each file's SHA-256 with GNU's edition's
+  --self-test     prove the comparison and the hash check still fire, against planted differences
 MSG
     exit 2
     ;;
@@ -155,3 +192,10 @@ count="$(compare "$MARKDOWN" "$PLAIN")" ||
   fail "$MARKDOWN and $PLAIN no longer hold the same words." \
     "The GPL's text is not this project's to reword: restore the file that changed."
 echo "check-licence-editions: $MARKDOWN and $PLAIN hold the same $count words in the same order"
+# Both files are checked before failing, so a change to each names each.
+hashes_ok=true
+pinned "$MARKDOWN" "$MARKDOWN_SHA256" || hashes_ok=false
+pinned "$PLAIN" "$PLAIN_SHA256" || hashes_ok=false
+"$hashes_ok" ||
+  fail "The GPL's text is not this project's to edit, by a word or a mark: restore the file that changed."
+echo "check-licence-editions: $MARKDOWN and $PLAIN are GNU's editions byte for byte"

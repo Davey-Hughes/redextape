@@ -125,9 +125,9 @@ repos:
         files: (\.lua$|^grammars/.*/src/parser\.c$)
         pass_filenames: false
       # SCOPED, and nothing is left to CI alone: what it checks is a property of `LICENSE.md`, `COPYING` and
-      # the script that compares them, and `files:` names all three. Self-test first, then the check.
+      # the script that checks them, and `files:` names all three. Self-test first, then the check.
       - id: check-licence-editions
-        name: LICENSE.md and COPYING hold the same words
+        name: LICENSE.md and COPYING are GNU's editions, word for word and byte for byte
         entry: bash -c 'scripts/check-licence-editions.sh --self-test && scripts/check-licence-editions.sh'
         language: system
         files: ^(LICENSE\.md|COPYING|scripts/check-licence-editions\.sh)$

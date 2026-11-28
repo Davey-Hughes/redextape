@@ -46342,3 +46342,127 @@ tree-sitter is 0.28.
 | 224; 20; 16 | `check-comments.mjs`'s self-test cases; its areas; the files it read as changed | `node scripts/check-comments.mjs --self-test 2>&1 \| tail -1; node scripts/check-comments.mjs --base main 2>&1 \| tail -2` |
 | 238 files; 2,000 and 2 | the Chromium tier; tests passed and expected to fail | `(cd web && VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars) 2>&1 \| grep -E 'Test Files\|Tests  '` |
 | 26 | `worker.test.ts` in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox tests/browser/worker.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+
+#### THE LICENCE CHECK HOLDS `LICENSE.md` AND `COPYING` EACH TO GNU'S EDITION BYTE FOR BYTE, SO THE SAME EDIT MADE TO BOTH, OR A MARKDOWN MARK ADDED TO `LICENSE.md`, FAILS IT, AND GIT CHECKS EVERY OTHER TEXT FILE OUT WITH LF, SO A CHECKOUT MADE WITH `core.autocrlf` SET RUNS IT (2026-11-26 and 27, branch `licence-pin` on `7033883`, `7033883..fd426c2`, 7 commits, this entry's first two writings, `eb3726a` and `0e91ed0`, among them, plus this entry)
+
+The open item #191's entry (*`LICENSE.md` IS GNU'S MARKDOWN EDITION OF THE GPLv3*) leaves: `check-licence-editions.sh`
+compared the two files' words with each other and with nothing else, so the same edit made to both, or a Markdown mark
+that changes no word, passed it. The user chose to pin both files' hashes, and to ship this apart from
+`native-rt-hygiene`. The first two commits were written in a sandbox with no browser and applied here unchanged; the
+reviews, the commits after them and every figure below ran on this machine.
+
+| Commit | What |
+|---|---|
+| `96ddd12` | `check-licence-editions.sh` pins each file's SHA-256 and its self-test holds the hash check; the hook, CI's steps and `docs/development.md` say what it now holds |
+| `eb3726a` | this entry's first writing |
+| `928b438` | `.gitattributes` marks `/LICENSE.md` and `/COPYING` `-text`, so Git writes both out as committed |
+| `57fa151` | `docs/development.md` gives the check's time again, measured with its hashes |
+| `0b0e5c6` | `.gitattributes` checks every other text file out with LF, whatever `core.autocrlf` says, and `docs/development.md` says why |
+| `0e91ed0` | this entry's second writing |
+| `fd426c2` | `.gitattributes`'s comment says only that a CRLF script does not run, where it had said bash stops one at its first line |
+
+##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
+
+Nothing in the app: the licences page reads `COPYING` as before, and both files are unchanged. A clone made after this
+rule, with a Git that converts line endings as Git for Windows does as it installs, gets every text file with LF, so
+line endings no longer stop either licence check.
+
+##### THE CHECK
+
+The word comparison still runs first, because its failure names the word that differs; a hash can only name the file.
+Then each file's SHA-256 is checked, both before the script fails, so a change to each names each. The hash is taken
+with Python, which the comparison already needs. A new edition from GNU is the one reason to change a hash, and the
+script's header says so. Both pins are GNU's current files: the first review fetched `gpl-3.0.txt` and `gpl-3.0.md`
+from gnu.org on 2026-11-26, and each hashed to its pin and was byte for byte the committed file.
+
+##### LINE ENDINGS
+
+The pins make the two files' line endings part of what the check reads, and Git for Windows installs with
+`core.autocrlf=true`, which writes text files out with CRLF. `928b438` marked the two files `-text`, anchored to the
+root, since a bare `LICENSE.md` also matches `web/scripts/palette-licences/tinted-theming/LICENSE.md`, which the pin
+does not cover. The whole-branch review found that this kept the two files' bytes but not the check: in a checkout made
+with `core.autocrlf=true`, bash stops both licence scripts at the line that sets `pipefail`, reading the CR as part of
+the option's name, and `check-licences.sh`, run past that line, found the CRLF `web/pnpm-lock.yaml` differing from
+pnpm's copy. The user chose the rule for the whole tree: `0b0e5c6` puts `* text=auto eol=lf` above the two `-text`
+lines, which come later and so win for their files.
+
+A fresh clone made with `core.autocrlf=true`, at `main` (`adb5d5e`) and on the branch (`0b0e5c6`), each with
+`pnpm install --frozen-lockfile` in `web/` before `check-licences.sh`:
+
+| | `main` | branch |
+|---|---|---|
+| tracked files written with CRLF | 1,480 of 1,531 | 0 of 1,526 |
+| `LICENSE.md` and `COPYING` | CRLF, neither hash its pin | LF, each hash its pin |
+| `check-licence-editions.sh`, `--self-test` then the check | exit 2, exit 2 | exit 0, exit 0 |
+| `check-licences.sh`, `--self-test` then the check | exit 2, exit 2 | exit 0, exit 0 |
+
+The index holds no text file with CRLF, so `git add --renormalize .` at `0b0e5c6` stages nothing: the rule changes no
+committed byte. `git check-attr` gives the two pinned files `text: unset`, under which their `eol: lf` does nothing,
+and every other path `text: auto`, which leaves a file Git reads as binary, such as the 4 grammar `.wasm` files,
+unconverted.
+
+##### HOW EACH WAS SEEN TO FAIL
+
+Each break was a saved copy, a break, a run, and a restore from the copy checked with `cmp`. The first review ran these
+at `eb3726a`, the four breaks to the files also under `main`'s script on copies of them:
+
+- **The same one-byte edit to both files**, the first `Foundation` made `Foundatiom`: passes at `main`, fails on the
+  branch, naming both files and their hashes.
+- **A heading mark changed in `LICENSE.md` alone**, its first `### ` made `## `: passes at `main`, fails on the branch,
+  naming `LICENSE.md`.
+- **One space doubled in `COPYING`**, its words unchanged: passes at `main`, fails on the branch, naming `COPYING`.
+- **A newline in `LICENSE.md` made a space, and `COPYING` converted to CRLF**: passes at `main`, fails on the branch,
+  naming both.
+- **The hash check made to pass any file**: the self-test fails, *a file with one byte changed passed its hash*.
+- **The hash failure's message without the file and the hashes**: the self-test fails, *rejected, but not for its
+  hash*.
+
+The whole-branch review ran two again at `57fa151`, where the script and both files are as at `eb3726a`: the hash
+check made to pass any file, with the same self-test failure, and *Everyone* made *Anyone* in both files, where the
+words still agree and the check fails naming both files and both hashes.
+
+##### THE REVIEWS
+
+The first review, at `eb3726a`, found the check sound, with nothing critical or important. Its minor findings were
+the timing `docs/development.md` had dropped, which `57fa151` restores, and the roadmap's record of the branch. The fix
+round added `928b438` for duet's question on `.gitattributes`. The whole-branch review, at `57fa151`, found the branch
+ready after its minor findings: the line endings above, which `0b0e5c6` answers, and claims in the roadmap entry it
+read that the branch had made false. A check of `0b0e5c6` and `0e91ed0`, at `0e91ed0`, found nothing critical or
+important. Its minor findings were that `.gitattributes`'s comment was wrong about how a CRLF script fails, which
+`fd426c2` corrects, and wording here and in the pull request's text that said more than was shown, reworded.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The self-test tests the functions, not the script's call on the real files**: deleting that last block would leave
+  the self-test green. That is the script's shape from before this branch, and the hook and CI, which run the check on
+  the real files, are what hold the pins. The first review and the whole-branch review read it as no finding.
+- **Duet's open questions**: whether the pins match gnu.org (they do, above); whether to add `.gitattributes` (added,
+  then widened to the whole tree); and `share-link.test.ts` under Node 26, which is `native-rt-hygiene`'s.
+- **Not run: Windows, a Mac, the browser tier, Firefox and CI's jobs.** The `core.autocrlf=true` clones ran on Linux.
+  The branch changes no code the app runs.
+
+##### VERIFICATION
+
+**The gates at `0b0e5c6`**, each exit 0: `check-licence-editions.sh` and `check-licences.sh`, each `--self-test` then
+the check; the eight scans, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and
+lua, each `--self-test` then the scan; `check-comments.mjs --self-test`, then `--base main`; `cargo fmt --all --check`;
+`biome ci --error-on-warnings`; and the pre-commit hook, on the commit and by `pre-commit run` on the two files, the
+script, `.gitattributes` and `docs/development.md`, every hook Passed or, with no files of its own, Skipped.
+
+**The gates at `fd426c2`, with this entry's edit in the tree**, each exit 0: both licence checks and the eight scans,
+each `--self-test` then the check; `check-comments.mjs --self-test`, then `--base main`; and the pre-commit hook on
+`fd426c2`.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh; the clone
+rows ran from each clone's root, the clone made by `git clone -q -c core.autocrlf=true --depth 1 -b <branch>`
+from this repository, `main` at `adb5d5e` and `licence-pin` at `0b0e5c6`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 7 | the commits `7033883..fd426c2` | `git rev-list --count 7033883..fd426c2` |
+| 1,480 of 1,531; 0 of 1,526 | tracked files written with CRLF, at `main` and on the branch | `echo "$(git ls-files --eol \| grep -c 'w/crlf') of $(git ls-files \| wc -l)"`, in each clone |
+| exit 2, exit 2; exit 0, exit 0 | `check-licence-editions.sh`, `--self-test` then the check, at `main` and on the branch | `bash scripts/check-licence-editions.sh --self-test; echo $?`, then without `--self-test`, in each clone |
+| exit 2, exit 2; exit 0, exit 0 | `check-licences.sh` the same | `(cd web && pnpm install --frozen-lockfile)`, then `(cd web && bash ../scripts/check-licences.sh --self-test); echo $?`, then without `--self-test`, in each clone |
+| 0 | text files the index holds with CRLF | `git ls-files --eol \| grep -c 'i/crlf'` |
+| 0 | files `git add --renormalize .` stages at `0b0e5c6` | `git add --renormalize . && git status --porcelain \| wc -l`, with `0b0e5c6` checked out and the tree clean |
+| 4 | grammar `.wasm` files, each left as committed | `git ls-files '*.wasm' \| wc -l; git ls-files --eol '*.wasm' \| grep -c 'w/-text'` |
