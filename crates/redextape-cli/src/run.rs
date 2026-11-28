@@ -655,10 +655,10 @@ fn run_tm_backend(
             if let Some(v) = redextape_core::tm::decode_tape_ty_opaque(&tapes, &ty, &enc) {
                 print_tm_value(&v, label, out, err)
             } else {
-                // Left for a bare type variable, or tapes that do not match their own type, which is a
-                // lowering defect: a function reads as `<fn>` above. Code 2, where `run_artifact_text`
-                // answers 1 on the same expression — that asymmetry is deliberate and its reasoning is
-                // written out at that site.
+                // Left for tapes that do not match their own type, which is a lowering defect, and for a
+                // decode past `MAX_DECODE_NODES`, which `decode_tape_ty_opaque` folds into `None`: a
+                // function reads as `<fn>` above. Code 2, where `run_artifact_text` answers 1 on the same
+                // expression — that asymmetry is deliberate and its reasoning is written out at that site.
                 writeln!(
                     err,
                     "error: `--backend tm` cannot decode a result of type `{}` from the final tapes\n  \
