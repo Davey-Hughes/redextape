@@ -5,16 +5,17 @@ import type { RxmPane } from '../../src/rxm-pane'
 import type { ClifAt } from '../../src/types'
 import { FACT3 } from '../node/rxm-fixtures'
 import { controlState, frames, hearLoops } from './harness'
-import { type Counts, factClif, loadViews, mount, resize, VIEWS, type View, whole } from './machine-views'
+import { arrangement, type Counts, factClif, loadViews, mount, resize, VIEWS, type View, whole } from './machine-views'
 
 /**
  * THE ROOM THE MACHINE PANELS KEEP (the squeezed values design), in an rxm view and a clif view built by hand. Each
- * track of the values grid is at least as wide as the widest row the run has drawn since the view was told of its
- * program, so a value reads whole wherever the panel is as wide as its row, and is cut, with the tooltip `cut-text.ts`
- * gives it, only where the panel is narrower. A frame or a heap line too long for its panel goes on below, indented,
- * and a heap line keeps the lines its longest text took, as a clif frame keeps its pc as wide as the listing's widest.
- * The room only grows: a step back to shorter texts or a frame of none moves nothing, and only a new program or listing
- * forgets it. `result-app.test.ts` holds fact(12)'s `rr` in the app.
+ * track of the rxm registers is at least as wide as the widest row the run has drawn since the view was told of its
+ * program, and each of the clif values as wide as a 20-digit word's row from the first step, so a value reads whole
+ * wherever the panel is as wide as its row, and is cut, with the tooltip `cut-text.ts` gives it, only where the panel
+ * is narrower. A frame or a heap line too long for its panel goes on below, indented, and a heap line keeps the lines
+ * its longest text took, as a clif frame keeps its pc as wide as the listing's widest. The room only grows: a step back
+ * to shorter texts or a frame of none moves nothing, and only a new program or listing forgets it.
+ * `result-app.test.ts` holds fact(12)'s `rr` in the app.
  */
 
 loadViews()
@@ -34,6 +35,8 @@ const LINES = 90
 const SHORT: Counts = { depth: 1, cells: 1, boxes: 0, rows: { stack: 0, values: 12 } }
 /** The same frame with `NINE` in value 0. */
 const ONE_NINE: Counts = { ...SHORT, words: (i) => (i === 0 ? NINE : String(i)) }
+/** The same frame with `LONG` in value 0. */
+const ONE_LONG: Counts = { ...SHORT, words: (i) => (i === 0 ? LONG : String(i)) }
 
 /** The name of value `i`'s row: a local's in rxm, a value's in clif. */
 const nameOf = (view: View, i: number) => (view.kind === 'rxm' ? `r${i}` : `v${i}`)
@@ -67,12 +70,12 @@ const places = (host: HTMLElement) =>
     }),
   )
 
-/** Whether `dd` is whole with the grid's room taken away, its least track alone. */
-function wholeWithoutRoom(host: HTMLElement, dd: HTMLElement): boolean {
+/** What `read` answers with the grid's room taken away, its least track alone. */
+function withoutRoom<T>(host: HTMLElement, read: () => T): T {
   const kept = body(host).style.getPropertyValue('--values-room')
   body(host).style.removeProperty('--values-room')
   try {
-    return whole(dd)
+    return read()
   } finally {
     body(host).style.setProperty('--values-room', kept)
   }
@@ -127,7 +130,7 @@ describe.each(VIEWS)('the room of the $kind view’s values', (view) => {
       expect(body(host).scrollWidth, `at ${w} px, the panel scrolls sideways`).toBeLessThanOrEqual(
         body(host).clientWidth,
       )
-      if (room >= needs + 1 && !wholeWithoutRoom(host, dd)) cutBefore.push(w)
+      if (room >= needs + 1 && !withoutRoom(host, () => whole(dd))) cutBefore.push(w)
     }
     expect(
       cutBefore.length,
@@ -135,6 +138,10 @@ describe.each(VIEWS)('the room of the $kind view’s values', (view) => {
     ).toBeGreaterThan(0)
     expect(narrower.length, 'precondition: widths at which the panel is narrower than the row').toBeGreaterThan(0)
   })
+})
+
+describe("the room of the rxm view's registers", () => {
+  const view = VIEWS[0]
 
   it('moves no cell at a step back to shorter values, at an empty frame, or at the longer value again', async () => {
     const width = await widthWhereRoomMoves(view, 200, 10)
@@ -185,6 +192,45 @@ describe.each(VIEWS)('the room of the $kind view’s values', (view) => {
     draw(SHORT)
     await frames()
     expect(tracks(host), 'the tracks, a new program drawn').toBe(before)
+  })
+})
+
+describe("the room of the clif view's values", () => {
+  const view = VIEWS[1]
+
+  it("keeps a 20-digit word's room from the first step, and no cell moves for one or at a new listing", async () => {
+    const roomMoves: number[] = []
+    for (let w = 100; w <= view.wide + 300; w += 20) {
+      // A VIEW OF ITS OWN AT EACH WIDTH, so its first frame of values is the run's first step.
+      const { host, pane, draw } = mount(view, w)
+      await frames()
+      draw(SHORT)
+      const at = places(host)
+      if (withoutRoom(host, () => tracks(host)) > tracks(host)) roomMoves.push(w)
+      for (const [when, c] of [
+        ['nine digits', ONE_NINE],
+        ['20 digits', ONE_LONG],
+        ['a step back', SHORT],
+      ] as const) {
+        draw(c)
+        expect(places(host), `at ${w} px, the cells, ${when}`).toEqual(at)
+      }
+      forget(view, pane)
+      draw(SHORT)
+      expect(places(host), `at ${w} px, the cells, a new listing`).toEqual(at)
+      host.remove()
+    }
+    expect(roomMoves.length, 'precondition: widths at which the least track alone draws more tracks').toBeGreaterThan(0)
+  })
+
+  it("holds a 20-digit word and a register after it whole in the row's least wide width", async () => {
+    const { host, draw } = mount(view, view.wide)
+    draw({ ...ONE_LONG, regs: ['rr'] })
+    await frames()
+    expect(arrangement(host), 'precondition: the row is wide').toBe('wide')
+    const dd = value(host, view, 0)
+    expect(dd.textContent, 'precondition: the word and the register').toBe(`${LONG} rr`)
+    expect(whole(dd), 'the word and the register').toBe(true)
   })
 })
 

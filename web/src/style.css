@@ -3176,10 +3176,11 @@ main {
 /* THE REGISTERS (spec §6.3): name and word in a wrapping grid. The register the last instruction wrote is outlined —
    a shape, not a colour — and a local the current call has not written is dimmed behind its `·`.
    EACH TRACK HAS THE ROOM THE WIDEST ROW HAS NEEDED (the squeezed values design): `--values-room`, which
-   `machine-panels.ts` sets on the panel's body and only ever widens until the view is told of a new program, plus the
-   row's padding on both sides, which the room leaves out, and a pixel, since the track and the text it holds are
-   rounded apart. So a value is cut only where the panel is narrower than its row: `min(100%, …)` makes that one track
-   as wide as the panel, rather than a track wider than the panel that the grid would carry past its edge. */
+   `machine-panels.ts` sets on the panel's body (in the rxm view only ever wider until the view is told of a new
+   program, in the clif view a 20-digit word's from the start), plus the row's padding on both sides, which the room
+   leaves out, and a pixel, since the track and the text it holds are rounded apart. So a row no wider than the room is
+   cut only where the panel is narrower than it: `min(100%, …)` makes that one track as wide as the panel, rather than
+   a track wider than the panel that the grid would carry past its edge. */
 .rxm-register-list {
   display: grid;
   grid-template-columns: repeat(

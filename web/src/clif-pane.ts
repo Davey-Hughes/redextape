@@ -25,6 +25,7 @@ import {
   type StackView,
   type ValuesView,
   valuesPanel,
+  WORD_ROOM,
 } from './machine-panels'
 import { MachineRow } from './machine-row'
 import { MachineViewChrome } from './machine-view-chrome'
@@ -109,7 +110,7 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
   /** Whether `#frame` is the run's result, which the values and the heap mark: `setResult`. */
   #result = false
   #listing: ListingPanel
-  #values: RoomPanel<ValuesView>
+  #values: MachinePanel<ValuesView>
   #stack: MachinePanel<StackView>
   #heap: RoomPanel<HeapView>
   /**
@@ -246,12 +247,17 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     }
     watchIntent(machinePanel.toggle, () => on.machineCode?.intent(this.#target()))
 
-    this.#values = valuesPanel({
-      name: 'values',
-      label: 'values',
-      open: panels.values ?? true,
-      onToggle: (open) => on.panel?.('values', open),
-    })
+    // A 20-DIGIT WORD'S ROOM FROM THE FIRST STEP (the squeezed values design), not the room the run's widest value has
+    // needed: most clif runs reach one, and the grid would change its tracks at that step.
+    this.#values = valuesPanel(
+      {
+        name: 'values',
+        label: 'values',
+        open: panels.values ?? true,
+        onToggle: (open) => on.panel?.('values', open),
+      },
+      WORD_ROOM,
+    )
     this.#stack = callStackPanel({
       name: 'stack',
       label: 'call stack',
@@ -267,8 +273,8 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
 
     // THE VALUES, THE CALL STACK AND THE HEAP, laid out by the view's width as the rxm view's are (`machine-row.ts`).
     // THE THREE AS WIDE AS EACH OTHER (the squeezed values design): the call stack's and the heap's least width holds a
-    // header's count whole (the machine panels row design §5.1), and the values' holds a value of 20 digits and the
-    // register after it, which most runs show.
+    // header's count whole (the machine panels row design §5.1), and the values' holds the track they keep, a 20-digit
+    // word's, with a register after it.
     const row = new MachineRow({
       values: this.#values.panel,
       stack: this.#stack.panel,
@@ -317,8 +323,8 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
 
   /**
    * The program's CLIF: its listing, or why it has none; `null` while none has come, which the view says is loading.
-   * Its rows do not change as the run moves. The values and the heap forget the room their texts needed, which was
-   * another listing's run.
+   * Its rows do not change as the run moves. The heap forgets the room its lines needed, which was another listing's
+   * run; the values keep a 20-digit word's room whatever the listing.
    */
   setProgram(p: ClifCompiled | null): void {
     this.#program = p
@@ -339,7 +345,6 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
       '--ret-room',
       `${this.#shown === null ? 0 : widestPc(this.#shown.listing)}ch`,
     )
-    this.#values.forget()
     this.#heap.forget()
     this.#frame = null
     this.#draw()

@@ -46,6 +46,12 @@ export type ValuesView = {
 export const NAME_CH = 4
 
 /**
+ * The room `rowRoom` counts for a row of a 64-bit word's widest text, 18446744073709551615, under a name of the least
+ * width: the room a clif view's values keep from the first step (`valuesPanel`'s `fixed`).
+ */
+export const WORD_ROOM = NAME_CH + 1 + '18446744073709551615'.length
+
+/**
  * The room a values row needs to read whole, in `ch`: its name's column, the 1ch gap after it, and its word with the
  * registers a CLIF value stands for after it. **IT COUNTS `style.css`'s `.rxm-register` BOX, LESS ITS PADDING**, which
  * the track adds (`.rxm-register-list`), and every character as 1ch, which the monospace font makes true:
@@ -64,7 +70,8 @@ export function rowRoom(r: ValueRow): number {
  * the step it first does, and nothing moves at a step back to a shorter value or at a rewind of the same run, which
  * draws an empty frame between the old recording and the new one's first. It counts the frames the view draws, so a
  * value at a step a jump or a fast play passed over widens the tracks at the step back that first draws it. The view
- * forgets it when it is told of a new program or a new listing, a run the room it kept says nothing about.
+ * forgets it when it is told of a new program, a run the room it kept says nothing about. A clif view keeps no such
+ * room: its values have a 20-digit word's from the start (`WORD_ROOM`).
  *
  * **THE RESULT'S ROW IS LEFT OUT**: it spans every track and wraps (`style.css`'s `.is-result`), so it needs none.
  */
@@ -113,7 +120,7 @@ export function lineText(l: HeapLine): string {
  * panel lays it out hidden in the line's place, so a line that wrapped onto more lines at a step keeps them at the
  * steps after, where fewer registers name its cell. A cell's head and tail never change; what names it does, and a
  * box's content can. It counts the lines the view draws, as the values' room does. **IT ONLY GROWS**, and the view
- * forgets it with the values' room, at a new program or listing.
+ * forgets it at a new program or listing.
  */
 export function lineRoom(): { take(l: HeapLine): string | null; forget(): void } {
   const longest = new Map<string, string>()
@@ -137,9 +144,10 @@ export function lineRoom(): { take(l: HeapLine): string | null; forget(): void }
  * itself in an `aria-description`, so none is colour alone. A CLIF value's row names the rxm registers it stands for
  * after its word, in a `span.value-regs`. The run's result is marked `is-result`, and the word `result` at the end of
  * its `dd`, in a `span.result-word`, says so; the registers and the word go in one `span.result-tail`. Each track of
- * the grid is at least as wide as the widest row has needed (`valuesRoom`), as `--values-room` on the body.
+ * the grid is at least as wide as the widest row has needed (`valuesRoom`), or `fixed` ch from the start where it is
+ * given, which no row changes, as `--values-room` on the body.
  */
-export function valuesPanel(o: MachinePanelOptions): RoomPanel<ValuesView> {
+export function valuesPanel(o: MachinePanelOptions, fixed?: number): RoomPanel<ValuesView> {
   const body = document.createElement('div')
   body.className = 'rxm-registers'
   const panel = machinePanel(o, body)
@@ -152,6 +160,7 @@ export function valuesPanel(o: MachinePanelOptions): RoomPanel<ValuesView> {
     if (to === 0) body.style.removeProperty('--values-room')
     else body.style.setProperty('--values-room', `${to}ch`)
   }
+  if (fixed !== undefined) keep(fixed)
   return {
     panel,
     show(view) {
@@ -159,7 +168,7 @@ export function valuesPanel(o: MachinePanelOptions): RoomPanel<ValuesView> {
         body.replaceChildren()
         return
       }
-      keep(room.take(view))
+      if (fixed === undefined) keep(room.take(view))
       const list = document.createElement('dl')
       list.className = 'rxm-register-list'
       for (const r of view.rows) {
@@ -202,6 +211,7 @@ export function valuesPanel(o: MachinePanelOptions): RoomPanel<ValuesView> {
       body.replaceChildren(list, ...notes)
     },
     forget() {
+      if (fixed !== undefined) return
       room.forget()
       keep(0)
     },

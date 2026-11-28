@@ -61,11 +61,12 @@
           iterations, as the compiled program's does, not instructions. At the end of a run, the rxm and clif listings,
           the machine code panel and the state diagram's program level show the row the run stopped on. In the TM, rxm
           and clif views, a value, an instruction or a line cut short reads whole in a tooltip while the pointer rests
-          on it. The rxm and clif views give their values the room the run's widest value has needed, so a value is cut
-          only where its panel is narrower than the value with its name and any registers after it, and a call stack or
-          heap line too long for its panel goes on below, indented. Each combination of views keeps its own arrangement,
-          so views come back where they were left. A window about 640 px wide or narrower, at the browser's usual text
-          size, has no room for the buttons; the workspace menu holds them there, in its <strong>show</strong> row.
+          on it. The rxm view gives its registers the room the run's widest value has needed, so a register is cut only
+          where its panel is narrower than the value with its name, and the clif view gives its values the room of a
+          20-digit value from the run's first step, so a longer value never moves them. A call stack or heap line too
+          long for its panel goes on below, indented. Each combination of views keeps its own arrangement, so views come
+          back where they were left. A window about 640 px wide or narrower, at the browser's usual text size, has no
+          room for the buttons; the workspace menu holds them there, in its <strong>show</strong> row.
         </li>
         <li>
           <strong>share</strong> makes a link to the program, the views and where each one stands; the workspace
