@@ -224,7 +224,7 @@ pub fn run(
         Lang::Lambda => match redextape_core::lambda::lower(&core) {
             Ok(term) => format!("{}\n", redextape_core::lambda::print_lambda(&term)),
             Err(e) => {
-                writeln!(err, "error: this program has no lambda lowering: {e:?}")?;
+                writeln!(err, "error: this program has no lambda lowering: {e}")?;
                 return Ok(Outcome::ToolFailed);
             }
         },

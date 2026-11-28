@@ -3,6 +3,7 @@
 
 use crate::core::{Core, NodeId};
 use crate::lambda::encode;
+use crate::lambda::reduce::MAX_TERM_DEPTH;
 use crate::lambda::term::{Dir, LambdaTerm, Path, abs, app, app_owned, shift, var};
 
 /// Scope sentinel for a store binder introduced by store-passing. `$` is not a legal identifier
@@ -39,6 +40,13 @@ const GROUP: &str = "$group";
 /// a smaller test thread — see `lower_rxm::MAX_LOWER_DEPTH`'s doc for why.
 const MAX_LAMBDA_LOWER_DEPTH: u32 = 700;
 
+/// The largest literal the λ lowering accepts. Its Church numeral is as deep as the reducer will step
+/// (`MAX_TERM_DEPTH`, the numeral's two binders on top of its spine), so a larger one could only be
+/// refused at its first step, and the bound loses nothing the λ view could show; a literal inside a larger
+/// program sits deeper still. It also bounds the numeral's size, which is as large as its value: wasm32's memory is
+/// bounded, and running out of it aborts the whole module, every other leg with it.
+pub const MAX_LAMBDA_LITERAL: u64 = MAX_TERM_DEPTH as u64 - 2;
+
 // `lower` refuses nothing on shared-subterm grounds: `term.rs`'s `shift` and `subst` return their argument's
 // allocation when no free index is in range, and `reduce.rs`'s `depth_exceeds` reads a stored `depth`, so a
 // shared subterm's logical size is not paid per step.
@@ -56,6 +64,20 @@ pub enum LowerError {
     Unsupported { node: NodeId, what: String },
     /// Core nested deeper than the lowering guard allows (bounds this module's native recursion).
     TooDeep { node: NodeId },
+}
+
+/// The reason a reader is shown for each decline. The session's λ status and the command line's refusal both
+/// print it, so the page and the terminal give a program the same reason.
+impl std::fmt::Display for LowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LowerError::StatefulClosure { .. } => {
+                f.write_str("a closure assigns a variable captured from an outer scope")
+            }
+            LowerError::Unsupported { what, .. } => write!(f, "the λ backend does not support {what}"),
+            LowerError::TooDeep { .. } => f.write_str("the program nests deeper than the λ lowering guard allows"),
+        }
+    }
 }
 
 /// The `fix` combinator (call-by-name Y): `\f. (\x. f (x x)) (\x. f (x x))`.
@@ -295,6 +317,11 @@ fn lower_expr(
     // (which `lower_region` re-enters on the same node), so each node keeps exactly one path.
     origins.at_root(core.id());
     match core {
+        Core::Nat(id, n) if *n > MAX_LAMBDA_LITERAL => Err(LowerError::Unsupported {
+            node: *id,
+            // The literal stays as the source writes it, so the reader can find it there.
+            what: format!("a literal above {} (this one is {n})", crate::grouped(MAX_LAMBDA_LITERAL)),
+        }),
         Core::Nat(_, n) => Ok(encode::church(*n)),
         Core::Bool(_, b) => Ok(if *b { encode::tru() } else { encode::fls() }),
         // A mutable variable in a region reads by projecting from the current store; everything else
@@ -1314,5 +1341,30 @@ mod tests {
         );
         let term = lower(&core).expect("the corpus maximum must lower");
         assert_eq!(crate::lambda::term::max_shared_logical_size(&term), 684, "the corpus maximum, pinned");
+    }
+
+    /// The largest literal lowers to a numeral the reducer steps; one more declines, naming the literal.
+    #[test]
+    fn a_literal_above_the_bound_declines_and_the_bound_itself_lowers() {
+        let at = lower(&core_of(&MAX_LAMBDA_LITERAL.to_string())).expect("the bound itself must lower");
+        assert_eq!(at.depth(), MAX_TERM_DEPTH, "the bound's numeral must be exactly as deep as the reducer steps");
+        assert!(!crate::lambda::reduce::depth_exceeds(&at, MAX_TERM_DEPTH));
+
+        let above = MAX_LAMBDA_LITERAL + 1;
+        let core = core_of(&format!("1 + {above}"));
+        let Err(LowerError::Unsupported { node, what }) = lower(&core) else {
+            panic!("a literal above the bound must decline as unsupported")
+        };
+        assert_eq!(what, format!("a literal above 2,998 (this one is {above})"));
+        assert!(nat_nodes(&core).contains(&(node, above)), "the decline must name the literal's own node");
+    }
+
+    #[test]
+    fn the_largest_u64_declines() {
+        let what = match lower(&core_of("18446744073709551615")) {
+            Err(LowerError::Unsupported { what, .. }) => what,
+            other => panic!("expected a decline, got {other:?}"),
+        };
+        assert_eq!(what, "a literal above 2,998 (this one is 18446744073709551615)");
     }
 }

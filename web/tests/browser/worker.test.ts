@@ -342,7 +342,7 @@ const LONG_SRC =
 /** `LONG_SRC` over a list twice as long, whose λ leg is still unfinished after one `extend` (`LONG_SRC`'s is not). */
 const LONGER_SRC = LONG_SRC.replace('].map', ', 3, 1, 2, 4, 3, 1, 2, 4, 3, 1, 2, 4, 3, 1, 2, 4].map')
 
-/** The hidden-recording spec's example: its λ leg is refused at its first step, and its rxm leg records many chunks. */
+/** The hidden-recording spec's example: its λ leg declines its literal, and its rxm leg records many chunks. */
 const EXAMPLE = 'let mut n = 100000; while n > 0 { n = n - 1; } n'
 
 /** A recording is waited on in stages of this many frames, each within `until`'s one bound. */
@@ -667,6 +667,12 @@ describe('session-worker rewind', () => {
    * rxm leg records, where `keepInFlight` posts the leg's held part, so either one left over would be posted for it.
    */
   it('posts a new generation’s own rxm part in its first result, not the one the last posted or a rewind of it found', async () => {
+    /**
+     * `EXAMPLE` with its count written in literals the λ lowering takes and a value that reads no variable. Its rxm leg
+     * records the same many chunks, and its λ leg ends in its first fill, since normal order never reduces a loop whose
+     * result nothing reads, so the λ extend posts generation 2's first `result` at once.
+     */
+    const lowered = EXAMPLE.replace('100000', '400 * 250').replace(/n$/, '0')
     const w = watch(true)
     try {
       let rewound = false
@@ -695,14 +701,18 @@ describe('session-worker rewind', () => {
       )
       expect(one?.legs.rxm.status.run, 'precondition: generation 1’s rxm value is decided').toBe('Ended')
 
-      w.post(run(EXAMPLE, 2))
+      w.post(run(lowered, 2))
       await w.settle(() => firstResult(2) !== undefined, 'generation 2’s first result')
       const two = firstResult(2)
+      const compiled = of(2).find((r) => r.kind === 'compiled')
+      expect(
+        compiled?.kind === 'compiled' && compiled.statuses.lambda.available,
+        'precondition: generation 2’s λ leg lowers, so its extend posts a result',
+      ).toBe(true)
       expect(
         stopped(of(2, w.replies.slice(0, at(two))), 'rxm', 0),
         'precondition: generation 2’s rxm leg still recorded at its first result',
       ).toBe(false)
-      const compiled = of(2).find((r) => r.kind === 'compiled')
       expect(
         { steps: two?.legs.rxm.status.total_steps, value: two?.legs.rxm.value },
         'generation 2’s first rxm part',

@@ -491,7 +491,7 @@ fn run_lambda_backend(
     let term = match redextape_core::lambda::lower(&core) {
         Ok(t) => t,
         Err(e) => {
-            writeln!(err, "error: this program has no lambda lowering: {e:?}")?;
+            writeln!(err, "error: this program has no lambda lowering: {e}")?;
             return Ok(Outcome::ToolFailed);
         }
     };

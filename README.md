@@ -41,8 +41,9 @@ are Scott-encoded, recursion goes through the Y combinator, and `mut` and `while
 store-passing style. The term has to be reduced in normal order, because under call-by-value the Y
 combinator never stops unfolding and an `if` evaluates both of its branches. The answer is read back
 from the normal form using the program's type. A few programs that use `mut` have no λ-term,
-such as one where a closure changes a variable it captured. For those, the λ view shows the reason
-in place of a term.
+such as one where a closure changes a variable it captured, and neither does a program with a
+literal above 2,998, whose numeral is deeper than the reducer steps. For those, the λ view shows the
+reason in place of a term.
 
 The Turing machine backend first compiles the program to rxm, a register machine with instructions
 for arithmetic, jumps, calls, pairs and mutable cells. A function used as a value becomes a tagged

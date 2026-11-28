@@ -1,0 +1,1 @@
+error: this program has no lambda lowering: a closure assigns a variable captured from an outer scope

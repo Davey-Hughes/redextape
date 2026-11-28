@@ -348,23 +348,7 @@ pub fn decoded_value(v: &redextape_core::value::Value) -> Decoded {
     }
 }
 
-/// `n` with a comma between every three digits: `6100000` reads `6,100,000`.
-///
-/// **FOR THE COUNTS `redextape-wasm` WRITES INTO A MESSAGE A PANE SHOWS**, beside lines the pane composes itself with
-/// `web/src/format.ts`'s `n`, which groups the same way; a raw `11571215` next to `241,666 steps` reads as a
-/// different kind of number. Written here because nothing in the workspace groups digits.
-#[must_use]
-pub fn grouped(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, d) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(d);
-    }
-    out
-}
+pub use redextape_core::grouped;
 
 /// A decoder's `Option<Value>` answer (`decode_lambda_ty`, `decode_tape_ty`, `decode_rxm_ty`), turned into a
 /// `Decoded` — the shared "decode answered, print-or-refuse" step for the value of each `redextape-wasm` leg.
@@ -386,28 +370,5 @@ pub fn decoded_of(run: Result<redextape_core::value::Value, redextape_core::inte
     match run {
         Ok(v) => decoded_value(&v),
         Err(e) => Decoded::Fault { message: e.message },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Commas every three digits from the right, and none in a number of three digits or fewer.
-    #[test]
-    fn grouped_puts_a_comma_between_every_three_digits() {
-        let cases = [
-            (0, "0"),
-            (7, "7"),
-            (999, "999"),
-            (1_000, "1,000"),
-            (241_666, "241,666"),
-            (6_100_000, "6,100,000"),
-            (11_571_215, "11,571,215"),
-            (u64::MAX, "18,446,744,073,709,551,615"),
-        ];
-        for (n, want) in cases {
-            assert_eq!(grouped(n), want);
-        }
     }
 }

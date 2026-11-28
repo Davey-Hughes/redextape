@@ -98,7 +98,6 @@ describe('a CLIF session built from clifInput()', () => {
     expect(session.rxmValue()).toEqual({ Fault: { message: 'head of empty list at pc1' } })
   })
 
-  /** Not `18446744073709551615 + 1` alone: pkg/'s compile aborts the module on it. */
   it.each(['as-built', 'optimised'])('carries a word past 2^53 across both builds, %s', (listing) => {
     const session = compiled('{ let mut x = 1; let x = 18446744073709551615; x + 1 }')
     expect(session.clifInput().program.code, 'precondition: an li of the word').toContainEqual({

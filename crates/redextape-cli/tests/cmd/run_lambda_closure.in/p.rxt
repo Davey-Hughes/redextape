@@ -1,0 +1,1 @@
+let mut c = 0; let inc = |x| { c = c + x; c }; inc(1)

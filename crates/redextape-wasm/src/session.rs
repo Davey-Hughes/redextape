@@ -763,16 +763,10 @@ impl Session {
                 run: Some(lambda_run_status(&leg.cursor)),
             },
             Err(e) => {
-                let (reason, node) = match e {
-                    LowerError::StatefulClosure { node } => {
-                        ("a closure assigns a variable captured from an outer scope".to_string(), *node)
-                    }
-                    LowerError::Unsupported { node, what } => (format!("the λ backend does not support {what}"), *node),
-                    LowerError::TooDeep { node } => {
-                        ("the program nests deeper than the λ lowering guard allows".to_string(), *node)
-                    }
-                };
-                LambdaStatus { available: false, reason, node: Some(node), run: None }
+                let (LowerError::StatefulClosure { node }
+                | LowerError::Unsupported { node, .. }
+                | LowerError::TooDeep { node }) = e;
+                LambdaStatus { available: false, reason: e.to_string(), node: Some(*node), run: None }
             }
         }
     }
@@ -2027,11 +2021,11 @@ mod tests {
         s.raise_lambda_cap(1_000_000).expect("λ available");
         assert_eq!(s.lambda_status().run, Some(RunStatus::Running), "continuing is honest here");
 
-        // DepthRefused — a Church numeral is a spine as deep as its value, so a literal above
-        // `reduce::MAX_TERM_DEPTH` (3,000) lowers to a term the reducer refuses to recurse over. It is
+        // DepthRefused — a Church numeral is a spine as deep as its value, so two literals that each lower
+        // well inside `reduce::MAX_TERM_DEPTH` (3,000) sum to a term the reducer refuses to recurse over. It is
         // NOT `Capped`: raising the cap cannot make a term shallower, and the status must not invite
         // the caller to try.
-        let mut s = Session::compile("let x = 5000; x + 1", EncodingKind::Unary).session.expect("compiles");
+        let mut s = Session::compile("let x = 1500; x + 1501", EncodingKind::Unary).session.expect("compiles");
         while s.step_lambda().expect("λ available") {}
         assert_eq!(
             s.lambda_status().run,
@@ -2190,9 +2184,9 @@ mod tests {
     /// and this is the one run that provably cannot take it.
     #[test]
     fn run_lambda_reports_a_depth_refusal_as_itself_not_as_capped() {
-        // A Church numeral is a spine as deep as its value, so a literal above `reduce::MAX_TERM_DEPTH`
-        // (3,000) lowers to a term the reducer refuses to recurse over.
-        let mut s = Session::compile("let x = 5000; x + 1", EncodingKind::Unary).session.expect("compiles");
+        // A Church numeral is a spine as deep as its value, so two literals that each lower well inside
+        // `reduce::MAX_TERM_DEPTH` (3,000) sum to a term the reducer refuses to recurse over.
+        let mut s = Session::compile("let x = 1500; x + 1501", EncodingKind::Unary).session.expect("compiles");
         assert_eq!(
             s.run_lambda(1_000_000).expect("λ leg present"),
             RunStatus::DepthRefused,

@@ -816,12 +816,11 @@ mod tests {
     /// whose full printing is enormous must not first build the enormous string.
     #[test]
     fn the_budget_bounds_the_allocation_not_just_the_result() {
-        // A single large Church numeral. `MAX_LAMBDA_LOWER_DEPTH` bounds Core AST depth, not numeral
-        // magnitude — a bare `Nat` literal has depth 1 regardless of its value — so this lowers to a
-        // half-million-node application chain (`encode::church` loops, it does not recurse) from a
-        // one-line, depth-1 source program. Its full printing would be megabytes; this test never
-        // builds it, only the 128-byte-capped walk runs.
-        let t = lowered("500000");
+        // A single large Church numeral, built directly because the lowering declines a literal this
+        // big: the byte budget is the printer's own bound, whatever term it is handed. A half-million-node
+        // application chain (`encode::church` loops, it does not recurse) whose full printing would be
+        // megabytes; this test never builds it, only the 128-byte-capped walk runs.
+        let t = crate::lambda::encode::church(500_000);
 
         let (short, _, truncated) = print_lambda_capped(&t, 128, MAX_TERM_DEPTH);
         assert_eq!(truncated, Some(Cut::Bytes));

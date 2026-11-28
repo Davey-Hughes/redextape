@@ -46159,3 +46159,186 @@ the runner v12.13.2 source, and `$AL` for that actionlint.
 | 449-452 | the default activity types when `types` is absent | `sed -n 449,452p $F/modules/actions/workflows.go` |
 | 387-392 | the runner's parse of an event with no value | `sed -n 387,392p $R/act/jobparser/model.go` |
 | 116; 211-229; 81-82 | the PR head's ref, the commit whose workflows are detected, and the head kept for a PR not from a fork | `sed -n 116p $F/services/actions/notifier_helper.go; sed -n 211,229p $F/services/actions/notifier_helper.go; sed -n 81,82p $F/services/actions/trust.go` |
+
+#### A LITERAL ABOVE 2,998 DECLINES THE λ LEG, ON THE PAGE AND ON THE COMMAND LINE, WITH ITS OWN REASON, AND THE COMPILE GOES ON WITHOUT IT, WHERE `33554431 + 1` AND THE THREE SATURATION PROGRAMS ABORTED `pkg/`'S WHOLE COMPILE (2026-11-26 and 27, branch `big-literals`, `7033883..69d43a5`, 11 commits, plus this entry)
+
+#189's entry left open that a number literal of 33,554,431 or more aborts `pkg/`'s compile on `main`, `33554431 + 1`
+throwing `RuntimeError: unreachable` in node, and #198's found the three `saturation` programs, whose sources hold
+4,294,967,295 and 18,446,744,073,709,551,615, throwing the same. On `main` the λ lowering turned every literal into its
+Church numeral with no bound, and a numeral is as large as its value. The first four commits were drafted in a cloud
+sandbox with no browser, from a handoff that offered (a), a bound on each literal, and (b), a bound on the numerals'
+total size; the branch takes (a). The seven after them answer the reviews below, made on this machine, where nothing
+ran `main`'s code on a big literal.
+
+##### WHAT THE BRANCH DOES
+
+- **The bound.** `MAX_LAMBDA_LITERAL`, in `crates/redextape-core/src/lambda/lower.rs`, is `MAX_TERM_DEPTH` − 2 =
+  2,998. A Church numeral of n is n + 2 deep, its spine under its two binders, so the bound's numeral is exactly as
+  deep as the reducer steps, and a larger literal could only be refused at the reducer's first step: the bound costs
+  the λ view no step it could show. The guard is a match arm ahead of `encode::church`, so a literal above the bound
+  builds nothing, `u64::MAX` included.
+- **The decline.** Above the bound the lowering returns `LowerError::Unsupported` on the literal's own node, and the
+  session makes it an unavailable λ leg, as it does every other decline, with the reason "the λ backend does not
+  support a literal above 2,998 (this one is N)". `grouped` groups the bound's digits; it moves from
+  `redextape-wire` into `redextape-core` and is re-exported where it was. N is the literal's value in plain digits,
+  ungrouped so a reader can find it in the source: a literal written with leading zeros reads without them, and one
+  past `u64::MAX` reads as `u64::MAX`, the value the lexer gives it. The rxm leg compiles, which the node test
+  checks, and under unary the TM leg declines
+  these programs on its own grounds, a value that does not fit its encoding.
+- **The command line.** `LowerError` gains a `Display` with the three wordings the session's match gave, byte for
+  byte, and the session takes its reason from it, so the page and the terminal give a program the same reason.
+  `redextape run --backend lambda` and `redextape emit --lang lambda` print it after "error: this program has no
+  lambda lowering: ", where they printed the error's Rust `Debug` form, and exit 2 as before. `emit --lang lambda`
+  now refuses a program with a literal above the bound, where `main`'s lowering built the numeral and `emit` printed
+  the term; `crates/redextape-cli/README.md` says so. The README's λ paragraph names such a literal among the programs
+  with no λ-term.
+- **The comment budgets.** `redextape-wire` rises from 0.6328 to 0.6667 and `redextape-wasm` from 0.3612 to 0.3616,
+  each to its area's share once code left it, `grouped` from `redextape-wire` and the decline's mapping from
+  `session.rs`, with no comment added.
+
+##### THE TESTS
+
+- **`lower.rs`**: `a_literal_above_the_bound_declines_and_the_bound_itself_lowers`, the bound's numeral exactly
+  `MAX_TERM_DEPTH` deep and one above it declining with the exact wording on the literal's own node; and
+  `the_largest_u64_declines`.
+- **`web/tests/node/big-literals.test.ts`**, on the release `pkg/`, every compile in one instance as the session
+  worker's are: `33554431 + 1`, `2999` and the three saturation programs each decline the λ leg with the reason,
+  the decline's node spanning exactly the literal, and compile the rxm leg; then `2998` and an ordinary program keep
+  their λ legs, and the ordinary one runs to its end.
+- **`crates/redextape-cli/tests/cmd/`**: `run_lambda_literal` and `emit_lambda_literal` on `2999`;
+  `run_lambda_closure`, a closure that assigns a captured variable, `lower.rs`'s own fixture; and
+  `run_lambda_deep`, a list of 700 zeros, one level past `MAX_LAMBDA_LOWER_DEPTH`. Each exits 2 with nothing on
+  stdout and the decline's whole wording on stderr, so each arm of `Display` is pinned.
+- **Tests that used a literal above the bound to build something else** now build it another way. The two
+  depth-refusal tests in `session.rs` compile `let x = 1500; x + 1501`, which lowers inside the bound and reaches
+  the reducer's limit by reducing; `main`'s `let x = 5000; x + 1` would now decline at the lowering. The printer's
+  budget test builds `church(500_000)` directly.
+- **`worker.test.ts`'s *posts a new generation's own rxm part in its first result…*** compiled `EXAMPLE`,
+  `let mut n = 100000; while n > 0 { n = n - 1; } n`, as generation 2 and asked its λ leg to `extend`, so that a
+  `result` comes while the rxm leg still records. On `main` that λ leg compiled and was refused at its first step,
+  and its extend answered at once. Here the leg declines at the lowering, `onExtend` posts no result for a leg that
+  did not compile, and the first result waited for the rxm fill to end: the sandbox, with no browser, expected the case
+  to pass, and in the whole-branch review's runs it failed its precondition *generation 2's rxm leg still recorded at
+  its first result*. `1e3abae` gives generation 2 `EXAMPLE` with its count as `400 * 250` and its value `0`,
+  `let mut n = 400 * 250; while n > 0 { n = n - 1; } 0`. Its λ leg lowers and ends in its first fill, since normal
+  order never reduces a loop whose result nothing reads, so the extend posts the first result at once, and its rxm leg
+  records the same loop. A new precondition holds that generation 2's λ leg lowers.
+- **Three comments the branch made false** now say what a program with a literal above 2,998 does: `EXAMPLE`'s in
+  `worker.test.ts`, `readout-history-held.test.ts`'s, and `clif-package.test.ts`'s, which loses a sentence saying
+  `18446744073709551615 + 1` aborts the module.
+
+##### THE SABOTAGES
+
+Each on a saved copy of the file it broke, restored from the copy and compared with `cmp`, with `pkg/` rebuilt from
+the branch after any that changed it. A case stops at its first failed check, so the checks after it are not shown by
+that sabotage.
+
+| Sabotage | What failed |
+|---|---|
+| the guard compares against the bound plus one | the Rust bound test, at the decline; the node test's `2999` case, at the λ leg |
+| the bound raised | both Rust bound tests |
+| `lambda_status` names the node after the literal's | the node test's declines at *the decline names the literal*, but for `4294967295 * 4294967295 * 4294967295`, whose next literal has the same text: a check of the text cannot tell equal literals apart |
+| `run.rs` and `emit.rs` print `{e:?}` again | `run_lambda_literal` and `emit_lambda_literal`, at stderr |
+| both declines exit 1 | the same two, at the exit status |
+| the closure's and the nesting's wordings changed in `Display` | `run_lambda_closure` and `run_lambda_deep`, at stderr, and not `run_lambda_literal` |
+| the worker case compiles `EXAMPLE` again | the case, at its new precondition |
+| `forgetResult` keeps the part the last generation posted; keeps the one a rewind found | the case, at its claim, past both preconditions, each time |
+
+Not run: a sabotage that takes the guard away, which would let `u64::MAX` build its numeral.
+
+##### THE REVIEWS
+
+- **A review of the four sandbox commits**, at `b428420`, found no Critical or Important defect. Its Minor findings:
+  three comments the branch made false (`c16e91d`); the node test's check of the decline's node, which any node
+  passed (`6e45ed9`); the command line printing a decline as a Rust struct (`d9c1d0f`); `emit --lang lambda`'s
+  refusal said nowhere (`daee84a`); and `1761517`'s message (*WHAT THIS DID NOT CLOSE*).
+- **A review of the whole branch**, at `daee84a`, found it not ready: the worker case above failed on the branch.
+  Its Minor findings: `Display`'s closure and nesting arms pinned by no test (`61e7465`); the node test's doc saying the
+  saturation programs hold the biggest literals a `u64` takes, which the third does not (`69d43a5`); and the roadmap's account of the branch.
+- **A re-review**, at `69d43a5`, found those fixes holding and no new code finding. It ran the worker case in
+  Chromium and in Firefox, the Chromium tier and the CLI tests, failed the case by keeping `forgetResult`'s posted
+  part, and found by `git merge-tree` that taking hidden-recording-b's side of `worker.test.ts` is the right
+  resolution, as that branch replaces the case.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **The session worker's stack.** Plan 7 part 4a's entry recorded an optimised worker overflowing on `N + 0` from
+  N = 2,540, under the reducer's 3,000 (*THE WORKER'S STACK DOES NOT REACH `MAX_TERM_DEPTH`*), and lists it as open.
+  A literal from about 2,540 to 2,998 passes this bound and may still end in "Maximum call stack size exceeded" in an
+  optimised worker. The margin predates the branch, and nothing here measures it.
+- **A depth refusal reads as the step cap on the command line.** `redextape run --backend lambda` on `2998 + 1`
+  prints "error: reduction did not finish within 5000000 steps (`MAX_REDUCTION_STEPS`)" and exits 1, where the
+  session reports `DepthRefused`: the reducer's `Status`, which core's `run_lambda` reads, has only `Normalized`
+  and `HitCap`. The sandbox asked whether to fix it; the first review's answer: yes, in its own branch.
+- **The page keeps an instance that trapped.** After a throw the session worker's `catch` drops the live session and
+  posts `worker-error`, and nothing starts a fresh worker or instance. The branch removes the trap the two entries
+  recorded, not the others a trap could come from. The sandbox asked whether a `worker-error` should restart the
+  worker; the first review's answer: yes for a wasm trap, in its own lane, after hidden-recording-b lands.
+- **`LambdaTerm`'s destructor**, the `Drop` in `term.rs`, is unchanged. The sandbox asked whether its worklist
+  was worth tightening; the first review's answer: leave it, since under the bound a numeral is at most 3,000 deep and
+  nothing measured shows a cost.
+- **The bound is on each literal, not on their total.** A program of many literals at or below it builds a numeral for
+  each, and nothing bounds their sum.
+- **The trap was not reproduced on this machine**, as nothing here ran `main`'s code on a big literal. That the
+  numerals' size aborted the module rests on the code, which built a numeral as large as each literal, and on the node
+  test, where the same compiles keep the module whole now that no such numeral is built.
+- **`1761517`'s message** keeps, as a commit cannot change, three sentences the squash message should leave out: its
+  subject's "where a literal of 33,554,431 or more ran pkg/ out of memory", which its own body contradicts with a sum
+  of smaller literals, though no code and no run here shows it false; and two the code shows false, its body's "now
+  reach it by a sum, `let x = 2998; x + 3`, which reduces past the depth", a program the reducer refuses before its
+  first step, which `37e6031` replaced, and its "`session.rs`'s mapping is unchanged", which `d9c1d0f` changed.
+- **Left from the sandbox's own review**: the node test's `SATURATION` copies the native corpus's three programs, as
+  the node tier has no reader for the Rust corpus; and `MAX_LAMBDA_LITERAL`'s re-export from `lambda` has no user
+  outside the crate.
+- **On a merged tree.** hidden-recording-b's cases that compile `EXAMPLE`, in `worker`, `hidden-recording`,
+  `step-cap`, `step-cap-narrow`, `step-to-end` and `restart-rewind`, meet a λ leg that declines where `main`'s
+  was refused at its first step. Each reads the TM or the rxm leg, and none ran on a merged tree: whichever of the two
+  branches merges second runs them there.
+- **Not run**: coverage, `check-slow.sh`, `check-all.sh --llvm-only`, the whole Firefox tier, and CI's other jobs.
+
+##### VERIFICATION
+
+**On the branch's code at `69d43a5`**, each test run under a 16G memory cap and the shared locks:
+`pnpm run build:wasm`, exit 0, `pkg/` the same bytes before and after; `scripts/check-all.sh --no-llvm
+--no-browser`, exit 0, "green, but PARTIAL" with the LLVM and browser tiers skipped; `cargo test -p redextape-cli
+--test cli`, 9 tests passed, among them `cli_transcripts`, which runs the 45 transcripts under `tests/cmd`;
+`cargo test -p redextape-core --lib lambda::lower`, 28 passed; the node tier, 88 files and 1,647 tests passed, and
+`big-literals.test.ts` alone, 6 of 6; `biome ci --error-on-warnings`, 494 files; `pnpm run typecheck`, exit 0;
+`check-comments.mjs`, its self-test's 224 cases, and `--base main`, 20 areas within budget and no history and no
+grown block in 16 changed files; the pre-commit hook's scans, each with its self-test, exit 0; the Chromium tier,
+`--project browser --project browser-scrollbars` in 4 tabs, 238 files, 2,000 tests passed and 2 failed as expected;
+and `worker.test.ts` in Firefox, 26 of 26. The command line runs quoted above ran under a 2G cap.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, `RM` the
+roadmap's path; the CLI runs under `systemd-run --user --scope -p MemoryMax=2G`, the test runs under a 16G cap.
+`check-all.sh` runs with `TREE_SITTER` naming a tree-sitter 0.25.10, the version it pins, as this machine's own
+tree-sitter is 0.28.
+
+| Value | What | Produced by |
+|---|---|---|
+| `7033883`; `69d43a5`; 11 | `main`, the base; the last code commit; the commits from one to the other | `git rev-parse --short main; git rev-parse --short 69d43a5; git rev-list --count 7033883..69d43a5` |
+| `b428420`; 4; 7 | the fourth commit; the sandbox commits, to it; the commits after it | `git log --reverse --format=%h 7033883..69d43a5 \| sed -n 4p; git rev-list --count 7033883..b428420; git rev-list --count b428420..69d43a5` |
+| #189; #198 | the PRs of *CLIF VIEW PR 1* and *MACHINE CODE PANEL PR 1*, by their subjects, and those two entries' headings | `git log --format=%s 7033883 \| grep -E '\(#(189\|198)\)$' \| sed -E 's/^(.{40}).*(\(#[0-9]+\))$/\1 ... \2/'; git show 7033883:$RM \| grep -nE '^#### (CLIF VIEW PR 1\|MACHINE CODE PANEL PR 1):' \| cut -c1-80` |
+| 33,554,431; `33554431 + 1` | #189's open item | `git show 7033883:$RM \| grep -n 'A number literal of 33,554,431'` |
+| three; 4,294,967,295 and 18,446,744,073,709,551,615; 3 | #198's saturation programs and their literals; the node test's copies of them | `git show 7033883:$RM \| grep -n 'unreachable. in node for .saturation-00.,\\|whose sources hold the literals 4,294,967,295 and 18,446,744,073,709,551,615'; grep -c "^  \['" web/tests/node/big-literals.test.ts` |
+| 700; 2,998; 3,000 | `MAX_LAMBDA_LOWER_DEPTH`; `MAX_LAMBDA_LITERAL`, `MAX_TERM_DEPTH` − 2; `MAX_TERM_DEPTH` | `grep -n 'pub const MAX_LAMBDA_LITERAL\\|^const MAX_LAMBDA_LOWER_DEPTH' crates/redextape-core/src/lambda/lower.rs; grep -n 'pub const MAX_TERM_DEPTH' crates/redextape-core/src/lambda/reduce.rs` |
+| 0.3612 to 0.3616; 0.6328 to 0.6667 | `redextape-wasm`'s and `redextape-wire`'s comment budgets | `git diff 7033883 69d43a5 -- scripts/comment-budget.json \| grep '^[-+] '` |
+| 2 lines, the format only | the change to `run.rs` and `emit.rs` | `git diff 7033883 69d43a5 -- crates/redextape-cli/src/run.rs crates/redextape-cli/src/emit.rs \| grep '^[-+] '` |
+| 3 | the wordings `main`'s session gave a λ decline | `git show 7033883:crates/redextape-wasm/src/session.rs \| grep -c '                    LowerError::'` |
+| 2 each; 0 bytes | the four λ transcripts' exit codes; their stdout | `grep -H 'status.code' crates/redextape-cli/tests/cmd/{run_lambda_literal,emit_lambda_literal,run_lambda_closure,run_lambda_deep}.toml; wc -c crates/redextape-cli/tests/cmd/{run_lambda_literal,emit_lambda_literal,run_lambda_closure,run_lambda_deep}.stdout \| tail -1` |
+| 700; `2999`; the closure | the zeros in `run_lambda_deep`'s input; the other two transcripts' inputs | `tr -cd 0 < crates/redextape-cli/tests/cmd/run_lambda_deep.in/p.rxt \| wc -c; cat crates/redextape-cli/tests/cmd/run_lambda_{literal,closure}.in/p.rxt` |
+| 45 | the transcripts under `tests/cmd` | `ls crates/redextape-cli/tests/cmd/*.toml \| wc -l` |
+| 2; 2; `church(500_000)` | the depth-refusal tests' program, on the branch and on `main`; the printer test's numeral | `grep -c 'let x = 1500; x + 1501' crates/redextape-wasm/src/session.rs; git show 7033883:crates/redextape-wasm/src/session.rs \| grep -c 'let x = 5000; x + 1'; grep -n 'church(500_000)' crates/redextape-core/src/lambda/syntax.rs` |
+| `100000`; `400 * 250`, `0` | `EXAMPLE`'s count; the worker case's count and value | `grep -n "^const EXAMPLE = \\|const lowered = " web/tests/browser/worker.test.ts` |
+| 3 files | the comments `c16e91d` fixes | `git show --stat --format= c16e91d \| tail -1` |
+| 2,540 | plan 7 part 4a's stack margin | `git show 7033883:$RM \| grep -n 'overflowed on .N + 0. from N = 2,540'` |
+| 3 | `1761517`'s sentences the squash message should leave out: the subject its body contradicts, and two the code shows false | `git log -1 --format=%B 1761517 \| grep -c -e 'a literal of 33,554,431 or more ran pkg/ out of memory' -e 'now reach it by a sum, .let x = 2998; x + 3., which reduces past the depth' -e '.session.rs..s mapping is unchanged'` |
+| exit 2; exit 2; exit 1 and 5000000 steps; exit 0 | `run --backend lambda` on `2999`, `33554431 + 1`, `2998 + 1` and `2998` | `for s in '2999' '33554431 + 1' '2998 + 1' '2998'; do print -r -- "== $s"; print -r -- $s \| systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- cargo run -q -p redextape-cli -- run - --backend lambda; print exit=$?; done` |
+| exit 2 | `emit --lang lambda` on `2999` | `print -r -- '2999' \| systemd-run --user --scope -q -p MemoryMax=2G -p MemorySwapMax=0 -- cargo run -q -p redextape-cli -- emit - --lang lambda; print exit=$?` |
+| exit 0, "green, but PARTIAL" | `check-all.sh` without the LLVM and browser tiers | `TREE_SITTER=/home/davey/.local/state/agents/redextape/tm-return-tag/tools/tree-sitter scripts/check-all.sh --no-llvm --no-browser 2>&1 \| tail -1; print exit=${pipestatus[1]}` |
+| 9; 28 | the CLI tests; the λ lowering's tests | `cargo test -p redextape-cli --test cli 2>&1 \| grep 'test result'; cargo test -p redextape-core --lib lambda::lower 2>&1 \| grep 'test result'` |
+| 88 files, 1,647 tests; 6 | the node tier; `big-literals.test.ts` | `(cd web && pnpm exec vitest run --project node) 2>&1 \| grep -E 'Test Files\|Tests  '; (cd web && pnpm exec vitest run --project node tests/node/big-literals.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+| 494 | biome's files | `(cd web && pnpm exec biome ci --error-on-warnings) 2>&1 \| grep Checked` |
+| 224; 20; 16 | `check-comments.mjs`'s self-test cases; its areas; the files it read as changed | `node scripts/check-comments.mjs --self-test 2>&1 \| tail -1; node scripts/check-comments.mjs --base main 2>&1 \| tail -2` |
+| 238 files; 2,000 and 2 | the Chromium tier; tests passed and expected to fail | `(cd web && VITEST_MAX_WORKERS=4 pnpm exec vitest run --project browser --project browser-scrollbars) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+| 26 | `worker.test.ts` in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox tests/browser/worker.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |

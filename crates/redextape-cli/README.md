@@ -322,6 +322,14 @@ recurses, returned unapplied, has no normal form and stops at a reduction cap wi
 because a `result` line must name a type `run` can decode; `--lang lambda` writes the term whatever
 its type.
 
+**`--lang lambda` refuses a program that has no λ lowering**, at exit `2` and with no file, as
+`run --backend lambda` does. One such program has a closure that changes a variable it captured;
+another has a literal above 2,998, whose Church numeral is deeper than the λ reducer will step:
+
+    $ redextape emit p.rxt --lang lambda    # p.rxt is `2999`
+    error: this program has no lambda lowering: the λ backend does not support a literal above 2,998 (this one is 2999)
+    # exit 2
+
 **`--lang tm` refuses a program whose values do not fit the tape**, and refusing is the whole point:
 
     $ redextape emit p.rxt --lang tm -o p.tm    # p.rxt counts to 300

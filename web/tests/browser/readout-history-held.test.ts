@@ -18,8 +18,8 @@ import { countOf, fourViewWorkspace, newest, noticeText, results, resultsIdle, S
  * TOO**, by wrapping `postMessage`: a link's continue then waits, with the leg stopped where its history filled.
  *
  * **`sum_to(10000)` UNDER `unary`**, the encoding `setup.ts` stores the page's program under: its rxm history fills
- * at 36,921 of its 140,014 instructions and fills again on one *keep recording*, and `unary` declines its TM leg, so a
- * compile records only λ, which the depth guard stops at once, and rxm. ONE MOUNT FOR THE FILE, for the reason
+ * at 36,921 of its 140,014 instructions and fills again on one *keep recording*, `unary` declines its TM leg and the
+ * λ lowering declines the literal `10000`, so a compile records only rxm. ONE MOUNT FOR THE FILE, for the reason
  * `app.test.ts` gives; the cases run in order, each from where the last left the page.
  */
 

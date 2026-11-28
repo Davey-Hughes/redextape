@@ -126,6 +126,48 @@ pub fn format_with_width(src: &str, width: usize) -> Result<String, Vec<Diagnost
     }
 }
 
+/// `n` with a comma between every three digits: `6100000` reads `6,100,000`.
+///
+/// **FOR THE COUNTS THE APP WRITES INTO A MESSAGE A PANE SHOWS**, beside lines the pane composes itself with
+/// `web/src/format.ts`'s `n`, which groups the same way; a raw `11571215` next to `241,666 steps` reads as a
+/// different kind of number. It lives in the core so a reason the core composes, such as the λ lowering's, groups
+/// its counts as the wasm layer's do; `redextape-wire` re-exports it.
+#[must_use]
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    out
+}
+
+#[cfg(test)]
+mod grouped_tests {
+    use super::grouped;
+
+    /// Commas every three digits from the right, and none in a number of three digits or fewer.
+    #[test]
+    fn grouped_puts_a_comma_between_every_three_digits() {
+        let cases = [
+            (0, "0"),
+            (7, "7"),
+            (999, "999"),
+            (1_000, "1,000"),
+            (241_666, "241,666"),
+            (6_100_000, "6,100,000"),
+            (11_571_215, "11,571,215"),
+            (u64::MAX, "18,446,744,073,709,551,615"),
+        ];
+        for (n, want) in cases {
+            assert_eq!(grouped(n), want);
+        }
+    }
+}
+
 #[cfg(test)]
 mod smoke_tests {
     use super::*;
