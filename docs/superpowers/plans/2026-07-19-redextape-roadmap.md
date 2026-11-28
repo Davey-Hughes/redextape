@@ -45856,13 +45856,14 @@ with `CARGO_TARGET_DIR` naming the lane's own directory.
 | 0.25.10 | the tree-sitter `check-all.sh` pins | `$TREE_SITTER --version` |
 | 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
 
-#### EACH λ ROW TELLS A SCREEN READER ITS PLACE AMONG ITS SIBLINGS, share SAYS IN THE LIVE REGION THAT A LINK IS LONG, THE clif VIEW'S TWO RETRY BUTTONS ARE NAMED APART, AND THE HEADER'S AND EACH VIEW'S POPOVER BUTTONS ARE DISCLOSURES, NOT MENU BUTTONS (2026-11-27 to 28 UTC, branch `a11y-leftovers`, `860571d..609318f`, 12 commits by `git rev-list --count`, then `40fe203` and this entry)
+#### EACH λ ROW TELLS A SCREEN READER ITS PLACE AMONG ITS SIBLINGS, share SAYS IN THE LIVE REGION THAT A LINK IS LONG, THE clif VIEW'S TWO RETRY BUTTONS ARE NAMED APART, AND THE HEADER'S AND EACH VIEW'S POPOVER BUTTONS ARE DISCLOSURES, NOT MENU BUTTONS (2026-11-27 to 28 UTC, branch `a11y-leftovers`, `860571d..71017fe`, 15 commits by `git rev-list --count`, then this entry)
 
 Four accessibility items from one handoff, the λ rows' set counts and `settings`' `aria-haspopup="menu"` among them,
 which earlier entries left open. The first six commits were drafted in a cloud sandbox with no browser, on Node 22,
-and applied here; the four after them answer the two reviews that ran on this machine; `9b83200` and `40fe203` are
-earlier versions of this entry, and `609318f` takes a sentence out of the spec. `settings`' change waits on Davey's
-ruling, and so does a broken λ head's level (*What this did not close*).
+and applied here; the four after them answer the two reviews that ran on this machine; `9b83200`, `40fe203` and
+`96c11ea` are earlier versions of this entry, `609318f` takes a sentence out of the spec, and `71017fe` adds the
+workspace menu's button and `examples` to its amendment. `settings`' change waits on Davey's ruling, and so does a
+broken λ head's level (*What this did not close*).
 
 | Commit | What |
 |---|---|
@@ -45879,6 +45880,8 @@ ruling, and so does a broken λ head's level (*What this did not close*).
 | `9b83200` | the roadmap only: an earlier version of this entry |
 | `609318f` | the amendment's last sentence, which said it closed the question the amendment above it left open, taken out |
 | `40fe203` | the roadmap only: a later version of this entry, measured on `9e18a1a` |
+| `96c11ea` | the roadmap only: a later version of this entry, measured on `860571d` |
+| `71017fe` | the amendment names the workspace menu's button and `examples` too, §4.2's markup for `examples` included |
 
 ##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
 
@@ -45909,8 +45912,8 @@ code`. The rest is what the page tells a screen reader, read here from the DOM a
 2. **The line is said with `notices.announce`, not `notify`**: a notice would draw again what the popover shows.
 3. **`settings` a disclosure with the other four, for Davey to rule on** (*What this did not close*): #121's fix task
    4b kept its `aria-haspopup="menu"` and recorded that as open, and its popover holds selects, a checkbox and a
-   button, with no menu item and no arrow keys between them. The part 6a spec's §6 is amended to match, and the
-   amendment goes if he keeps the attribute.
+   button, with no menu item and no arrow keys between them. The part 6a spec's §6 is amended to match, and `settings`
+   leaves the amendment if he keeps the attribute.
 
 ##### HOW EACH WAS SEEN TO FAIL
 
@@ -45966,7 +45969,7 @@ they were; the sabotages above and *Verification* ran after the second.
 - **`settings` waits on Davey's ruling.** #121's fix task 4b kept `aria-haspopup="menu"` on `settings` and
   recorded it as open, with no reason in the tracked text. If it stays a menu button, the attribute goes back on
   `index.html`'s and `SHELL`'s `#settings`, `app-header.test.ts`'s page-wide check becomes a check per button,
-  `settings` leaves `about-menu.test.ts`'s loop and `wireMenu`'s doc, and §6's amendment of 2026-11-28 goes; every
+  `settings` leaves `about-menu.test.ts`'s loop, `wireMenu`'s doc and §6's amendment of 2026-11-28; every
   sentence in this entry, the PR's text and those tests' docs and names that calls `settings` a disclosure changes to
   match, and the two sabotages that put the attribute back on `#settings` go.
 - **A broken λ head's level waits on Davey too.** A broken head's body and its application's arguments are siblings
@@ -45982,8 +45985,8 @@ they were; the sabotages above and *Verification* ran after the second.
 - **The handoff's other leftovers stay open**: a λ mark said on its first row only, a count hidden when it has no
   room, Chromium's empty width box, the term map's clickable `role="img"`, a clamp notice said three times, and
   Plan 7 part 7.
-- **`238c38b`'s, `9b83200`'s and `40fe203`'s bodies** describe earlier versions of this entry, which no longer
-  stand, and the last two name the commits those versions were measured at. Commits are not rewritten, so a squash
+- **`238c38b`'s, `9b83200`'s, `40fe203`'s and `96c11ea`'s bodies** describe earlier versions of this entry, which
+  no longer stand, and the last three name the commits those versions were measured at. Commits are not rewritten, so a squash
   message should not carry them.
 - **The sandbox's open questions.** The broken λ head is above. Its `share-link.test.ts` failures under Node 22 do
   not reproduce here, where the node tier passes under Node 26.13.1. The Chromium browser tier, `test:coverage` and the
@@ -46013,16 +46016,16 @@ to a file, `$LOG`, which the row's filter read.
 
 | Value | What | Produced by |
 |---|---|---|
-| 12: `ec683a8`, `646c855`, `6c26c18`, `c32c7d6`, `a549ea9`, `238c38b`, `f98f9a5`, `13f4973`, `e3dce4c`, `4c3934d`, `9b83200`, `609318f` | the commits on `860571d` up to the last code commit, oldest first | `git rev-list --count 860571d..609318f; git log --reverse --format=%h 860571d..609318f` |
-| 6; 2; 2; 2 | the sandbox's commits, `ec683a8` to `238c38b`; the first fix round's; the second's; the earlier entry and the spec's sentence | `git rev-list --count 860571d..238c38b; git rev-list --count 238c38b..13f4973; git rev-list --count 13f4973..4c3934d; git rev-list --count 4c3934d..609318f` |
+| 15: `ec683a8`, `646c855`, `6c26c18`, `c32c7d6`, `a549ea9`, `238c38b`, `f98f9a5`, `13f4973`, `e3dce4c`, `4c3934d`, `9b83200`, `609318f`, `40fe203`, `96c11ea`, `71017fe` | the commits on `860571d` up to the last code commit, oldest first | `git rev-list --count 860571d..71017fe; git log --reverse --format=%h 860571d..71017fe` |
+| 6; 2; 2; 5 | the sandbox's commits, `ec683a8` to `238c38b`; the first fix round's; the second's; the earlier versions of this entry and the two edits to the spec's amendment | `git rev-list --count 860571d..238c38b; git rev-list --count 238c38b..13f4973; git rev-list --count 13f4973..4c3934d; git rev-list --count 4c3934d..71017fe` |
 | 26.13.1; 11.20.0; 4.1.12; 158.0.8127.88; 1.100.0 | Node; pnpm; vitest; Chrome; rustc | `node --version; pnpm --version; pnpm exec vitest --version; google-chrome-stable --version; rustc --version` |
-| 0 | lines of `git diff --stat` under `crates/` | `git diff --stat 860571d 609318f -- crates \| wc -l` |
+| 0 | lines of `git diff --stat` under `crates/` | `git diff --stat 860571d 71017fe -- crates \| wc -l` |
 | 3, 3, 3; 1, 2, 2 | `aria-setsize` of `g (a b c d) (e f g h)`'s three rows at width 12, with `main`'s counts and with the branch's | the sabotage table's `main`'s-counts row, `grep -m1 AssertionError $LOG` |
 | 2,000 | the length past which share says a link is long | `grep -n 'LONG_LINK =' web/src/share-popover.ts` |
 | 1 of 2; 2 of 2; width 8 | `(\x. x x x x) y`'s body head and `y`, and the width the case lays it out at | `grep -n "x x x x) y', 8" web/tests/node/lambda-layout.test.ts`, then `pnpm exec vitest run --project node tests/node/lambda-layout.test.ts -t 'broken head'`, passed |
 | each *Failed* count and its total | the sabotage table | each row's file copied and broken as the row says; `pnpm exec vitest run --project node tests/node/lambda-layout.test.ts tests/node/mc-view.test.ts tests/node/app-header.test.ts tests/node/harness.test.ts` for a node row, `--project browser` and the row's files for a browser row, and both projects for `SHELL`'s row; its `Tests` line and its `FAIL` lines; the file restored from the copy, `cmp` |
 | 62 | the node files' tests, all passed | the node row's command above with nothing broken, its `Tests` line |
-| 5 | `wireMenu`'s callers | `git grep -n 'wireMenu(' 609318f -- web/src/main.ts \| wc -l` |
+| 5 | `wireMenu`'s callers | `git grep -n 'wireMenu(' 71017fe -- web/src/main.ts \| wc -l` |
 | exit 0; 328; 3704 and 2; 98.25, 92.72, 98.76, 99.45 (98.24, 92.71 and 99.44 in a run that leaves one more `main.ts` line uncovered) | `test:coverage`: its exit; files; tests passed and expected to fail; statements, branches, functions and lines covered | `pnpm run test:coverage > $LOG 2>&1; echo $?`, then `grep -E 'Test Files\|Tests \|^(Statements\|Branches\|Functions\|Lines)' $LOG` |
 | 89, 1675 | the node tier: files and tests, all passed | `pnpm exec vitest run --project node`, its `Test Files` and `Tests` lines |
 | 496 | the files `biome ci` checked | `pnpm exec biome ci --error-on-warnings`, its `Checked` line |
