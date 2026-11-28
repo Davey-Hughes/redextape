@@ -220,17 +220,19 @@ $ redextape run returns_a_function.rxt --backend lambda
   with exit 2 rather than printing a cut term, because cut λ text can reparse as a different, shorter
   term. Six `Bool` arguments choosing among seven 2,500s reach it at 70,135 bytes.
 - **No normal form is a cap, exit 1.** Normal order reduces under binders, so a function whose body
-  recurses or loops, returned unapplied, unfolds without end and stops at a cap like any program.
+  recurses or loops, returned unapplied, can unfold without end and stop at a cap like any program.
   Each unfolding nests the term a level deeper, so the cap that fires is usually `MAX_TERM_DEPTH`
   (3,000 levels), not `MAX_REDUCTION_STEPS`: `fact` returned unapplied stops on depth after 11,980
   steps. A function with a normal form deeper than 3,000 levels, `|x| 2998`, stops on depth too.
-  A function that takes the head or tail of a list it is given stops on steps: `head` and `tail`
+  A function that takes the head or tail of a list it is given can stop on steps: `head` and `tail`
   hold a diverging term in their nil branch, which reduction under the binder reaches even behind
   an `is_empty` test, so `head` alone and `|l| head(l)` have no normal form, while `cons` alone has.
+  A call or a take in a branch that reduces away does not stop: `|l| if true { 0 } else { head(l) }`
+  prints `λl. λf. λx. x`, and `fn f(n) { if true { 0 } else { f(n) } } f` prints `λn. λf. λx. x`.
   `LambdaRun::HitCap` folds both caps into one, so the CLI drives the reducer's cursor itself and
   names the cap that fired, for every program; before this it named the step cap whichever fired.
   For a result type that holds a function the message adds two lines: the first says a body that
-  recurses or loops, or takes the head or tail of a list it is given, never reaches a normal form,
+  recurses or loops, or takes the head or tail of a list it is given, may have no normal form,
   and a function that has one can still pass the limit first; the second, that `--backend reference`
   will evaluate it.
 - **`--backend tm` and `--backend reference` are unchanged by this revision**: `tm` still refuses at

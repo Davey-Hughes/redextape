@@ -310,10 +310,10 @@ holds the closure's heap cell, and neither holds anything another backend could 
 
 The `2`s around a function are this tool's limits, not the program's fault. `--backend lambda`
 prints a normal form whole or not at all: past `MAX_NORMAL_FORM_BYTES` (65,536 bytes) it exits `2`,
-and a function whose body recurses, returned unapplied, has no normal form and stops at a reduction
-cap with exit `1`, usually `MAX_TERM_DEPTH`, since each unfolding nests the term deeper; the message
-names the cap that fired. A builtin named on its own, as in `head`, is a function to the reference
-backend, but `--backend tm` has no lowering for a builtin used as a value and exits `2`.
+and a function whose body recurses, returned unapplied, can have no normal form and then stops at a
+reduction cap with exit `1`, usually `MAX_TERM_DEPTH`, since each unfolding nests the term deeper;
+the message names the cap that fired. A builtin named on its own, as in `head`, is a function to the
+reference backend, but `--backend tm` has no lowering for a builtin used as a value and exits `2`.
 `emit --lang tm` and `emit --lang rxm` refuse function-typed programs at exit `2` and write no file,
 because the header's type reader reads no function type; `--lang lambda` writes the term whatever
 its type.

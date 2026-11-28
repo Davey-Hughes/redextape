@@ -528,7 +528,7 @@ fn run_lambda_backend(
         writeln!(
             err,
             "  a function is reduced under its binders, so a body that recurses or loops, or takes the head \
-             or tail of a list it is given, even behind an `is_empty` test, never reaches a normal form, \
+             or tail of a list it is given, even behind an `is_empty` test, may have no normal form, \
              and a function that has one can still pass this limit first\n  \
              `--backend reference` will evaluate it"
         )?;
@@ -902,7 +902,7 @@ mod tests {
         assert!(matches!(outcome, Outcome::Ran));
     }
 
-    /// Normal order reduces under binders, so an unapplied recursive function unfolds without end, each
+    /// Normal order reduces under binders, so `fact` returned unapplied unfolds without end, each
     /// unfolding a level deeper. It stops at a cap as any program does, exit 1, the message names the
     /// cap that fired, and it says why a function can stop there.
     #[test]
