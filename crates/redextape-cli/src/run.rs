@@ -527,8 +527,9 @@ fn run_lambda_backend(
     if has_function(&ty) {
         writeln!(
             err,
-            "  a function is reduced under its binders, so a body that recurses or loops never reaches a \
-             normal form, and a function that has one can still pass this limit first\n  \
+            "  a function is reduced under its binders, so a body that recurses or loops, or takes the head \
+             or tail of a list it is given, even behind an `is_empty` test, never reaches a normal form, \
+             and a function that has one can still pass this limit first\n  \
              `--backend reference` will evaluate it"
         )?;
     }
@@ -912,6 +913,20 @@ mod tests {
         assert!(err.contains("MAX_TERM_DEPTH"), "the cap that fired must be named, got: {err}");
         assert!(err.contains("reduced under its binders"), "a function's cap must say why, got: {err}");
         assert!(matches!(outcome, Outcome::ProgramFailed));
+    }
+
+    /// `head` and `tail` hold a diverging term in their nil branch, which reduction under a binder
+    /// reaches whenever the list is the function's argument, guarded or not. Neither program recurses
+    /// or loops, so the hint must name this case on its own.
+    #[test]
+    fn a_function_that_takes_the_head_of_its_argument_stops_at_the_cap_and_says_why() {
+        for (i, src) in ["head", "|l| if is_empty(l) { 0 } else { head(l) }"].into_iter().enumerate() {
+            let (out, err, outcome) = run_case(&format!("head-no-nf-{i}"), "p.rxt", src, Some(Backend::Lambda));
+            assert_eq!(out, "", "{src}");
+            assert!(err.contains("MAX_REDUCTION_STEPS"), "the cap that fired must be named for {src}, got: {err}");
+            assert!(err.contains("takes the head or tail of a list it is given"), "{src} got: {err}");
+            assert!(matches!(outcome, Outcome::ProgramFailed), "{src}");
+        }
     }
 
     /// The hint is about functions: a value-typed program at a cap is told only the cap.

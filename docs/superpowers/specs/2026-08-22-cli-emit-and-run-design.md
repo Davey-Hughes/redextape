@@ -224,11 +224,15 @@ $ redextape run returns_a_function.rxt --backend lambda
   Each unfolding nests the term a level deeper, so the cap that fires is usually `MAX_TERM_DEPTH`
   (3,000 levels), not `MAX_REDUCTION_STEPS`: `fact` returned unapplied stops on depth after 11,980
   steps. A function with a normal form deeper than 3,000 levels, `|x| 2998`, stops on depth too.
+  A function that takes the head or tail of a list it is given stops on steps: `head` and `tail`
+  hold a diverging term in their nil branch, which reduction under the binder reaches even behind
+  an `is_empty` test, so `head` alone and `|l| head(l)` have no normal form, while `cons` alone has.
   `LambdaRun::HitCap` folds both caps into one, so the CLI drives the reducer's cursor itself and
   names the cap that fired, for every program; before this it named the step cap whichever fired.
   For a result type that holds a function the message adds two lines: the first says a body that
-  recurses or loops never reaches a normal form, and a function that has one can still pass the
-  limit first; the second, that `--backend reference` will evaluate it.
+  recurses or loops, or takes the head or tail of a list it is given, never reaches a normal form,
+  and a function that has one can still pass the limit first; the second, that `--backend reference`
+  will evaluate it.
 - **`--backend tm` and `--backend reference` are unchanged by this revision**: `tm` still refuses at
   exit 2 and `reference` still prints `<non-value>`, so the three backends no longer agree on a
   function's printed result, and the oracles still compare value-typed programs only. `emit` is
@@ -258,7 +262,9 @@ $ redextape run returns_a_function.rxt --backend tm
 - **`--backend lambda` keeps its normal form** from the revision above.
 - **A builtin named on its own, `head`, is the reference's alone.** It prints `<fn>` under
   `reference`; `tm` has no lowering for a builtin used as a value and exits 2, and `lambda`'s encoding
-  of it never reaches a normal form under its binders, exit 1.
+  of it never reaches a normal form under its binders, exit 1. That is the encoding of `head` and
+  `tail`, not a builtin's being a value: `cons` alone prints its normal form under `lambda`, and
+  `|l| head(l)`, which uses no builtin as a value, stops at the same cap.
 - **`emit` and the `.tm`/`.rxm` headers are unchanged.** `parse_ty` reads no function type, so a
   function-typed program is still refused there.
 
