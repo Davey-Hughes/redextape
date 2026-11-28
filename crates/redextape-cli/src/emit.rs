@@ -273,8 +273,8 @@ fn write_undecodable_result(
 ) -> std::io::Result<()> {
     use redextape_core::ty::{MAX_TY_DEPTH, Ty};
     // `parse_ty` peels only `List<…>`, so a ground type it refuses has a function at the bottom of that
-    // spine or a spine past `MAX_TY_DEPTH`. Depth is the `result` line's limit, not the encodings', so it
-    // gets its own reason; a function under a deep spine keeps the function's, which no depth would fix.
+    // spine or a spine past `MAX_TY_DEPTH`. Depth gets its own reason, because a shallower list would be
+    // read; a function under a deep spine keeps the function's, which no depth would fix.
     let (mut base, mut depth) = (grounded, 0usize);
     while let Ty::List(t) = base {
         (base, depth) = (t, depth + 1);
@@ -291,8 +291,8 @@ fn write_undecodable_result(
     writeln!(
         err,
         "error: `--lang {lang}` cannot emit a result of type `{shown}`\n  \
-         {file} `result` line must name a type `run` can decode; the encodings cover Nat, Bool, Unit \
-         and List<T>, and this type has none"
+         {file} `result` line names the type `run` decodes the result by, and the header's type \
+         reader reads no function type"
     )
 }
 
@@ -1073,8 +1073,8 @@ mod tests {
             assert_eq!(
                 err,
                 "error: `--lang rxm` cannot emit a result of type `(Nat) -> Nat`\n  an rxm file's `result` \
-                 line must name a type `run` can decode; the encodings cover Nat, Bool, Unit and List<T>, \
-                 and this type has none\n",
+                 line names the type `run` decodes the result by, and the header's type reader reads no \
+                 function type\n",
                 "{src}"
             );
             assert!(matches!(outcome, Outcome::ToolFailed), "{src}: the program is fine; this tool cannot express it");
@@ -1107,7 +1107,7 @@ mod tests {
             );
             assert!(matches!(outcome, Outcome::ToolFailed), "{lang:?}");
             let (_, err, _) = emit_case("deep-fun", &nested("|x| x + 1"), lang, None);
-            assert!(err.contains("and this type has none"), "{lang:?}: a function's reason comes first: {err}");
+            assert!(err.contains("reads no function type"), "{lang:?}: a function's reason comes first: {err}");
         }
     }
 

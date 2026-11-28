@@ -326,8 +326,8 @@ impl RxmHeader {
     /// the file the CLI writes and the text a copy runs cannot disagree about which programs get one.
     ///
     /// **A FREE TYPE VARIABLE IS WRITTEN AS `Nat`** (`ty::ground` says why that reads the same value), so
-    /// `[]`, `[[]]` and `head([])` are headered. **A TYPE THAT HOLDS A FUNCTION GETS NONE**: a function value
-    /// has no decoding, and `ty::is_decodable` refuses it. Neither does a list nested past `MAX_TY_DEPTH`.
+    /// `[]`, `[[]]` and `head([])` are headered. **A TYPE THAT HOLDS A FUNCTION GETS NONE**: `parse_ty`
+    /// reads no function type, so `ty::is_decodable` refuses it. Neither does a list nested past `MAX_TY_DEPTH`.
     /// `ty::is_decodable_ground` is asked of `result` — the GROUND type this header actually names, already
     /// computed on the line above — rather than `ty::is_decodable`, which would ground it a second time for
     /// nothing; the two share the one round-trip check (`ty::is_decodable_ground`'s own doc), so the header

@@ -77,7 +77,7 @@ pub fn show(ty: &Ty) -> String {
 /// choice, not a finding — any value type would read the same — and it is the one `parse_ty` reads
 /// back, so the header a writer builds from this is one its reader accepts.
 ///
-/// **A `Fun` STAYS A `Fun`**, its variables grounded like any other: a function value has no decoding,
+/// **A `Fun` STAYS A `Fun`**, its variables grounded like any other: `parse_ty` reads no function type,
 /// so no directive names it, grounded or not.
 #[must_use]
 pub fn ground(ty: Ty) -> Ty {
@@ -90,7 +90,7 @@ pub fn ground(ty: Ty) -> Ty {
 }
 
 /// Parse a VALUE type — `Nat | Bool | Unit | List<T>` — from its `show` form. `None` for anything
-/// else, INCLUDING the well-formed-but-undecodable `Fun` and `Var`: they are not first-class values
+/// else, INCLUDING the well-formed `Fun` and `Var`: they are not first-class values
 /// on the tape, so a file naming one is rejected where it is written rather than decoding to a silent
 /// `None` where it is read.
 ///
