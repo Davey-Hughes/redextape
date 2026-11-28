@@ -292,14 +292,10 @@ describe('the logo', () => {
     )
   }
 
-  const withWordmark = PAGES.filter((name) => wordmarks(name).length > 0)
-
-  it('precondition: the app has a wordmark', () => {
-    expect(withWordmark).toContain('index')
-  })
-
-  it.each(withWordmark)("%s.html's wordmark has the logo as its first child", (name) => {
-    for (const after of wordmarks(name)) {
+  it.each(PAGES)("%s.html's wordmark has the logo as its first child", (name) => {
+    const found = wordmarks(name)
+    expect(found.length, `elements on ${name}.html whose class list holds wordmark`).toBeGreaterThan(0)
+    for (const after of found) {
       const img = /^\s*<img(\s[^>]*)>/.exec(after)?.[1]
       expect(img, `the wordmark's first child, before "${after.slice(0, 40)}"`).toBeDefined()
       const attrs = Object.fromEntries(
