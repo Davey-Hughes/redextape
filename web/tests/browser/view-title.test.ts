@@ -193,7 +193,7 @@ describe('the title-selector', () => {
    * so). What reaches it here is this file's λ-ONLY source session, a shape the app never builds. The
    * branch is worth holding, because `viewHeader` offers it and a later leg arrangement could reach it.
    */
-  it('is a menu only once a second session offers this leg', () => {
+  it('is a button that opens its choices only once a second session offers this leg', () => {
     const reg = new SessionRegistry()
     reg.add(lambdaSession(SOURCE, 'program', 'a'))
 
