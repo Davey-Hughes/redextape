@@ -17,12 +17,12 @@ import {
 } from './harness'
 
 /**
- * NO TEXT RUN OR CONTROL SITS WITHIN 4 PX OF ITS PANE'S EDGES OR THE WINDOW'S, where it reads as clipped
+ * NO TEXT RUN, CONTROL OR IMAGE SITS WITHIN 4 PX OF ITS PANE'S EDGES OR THE WINDOW'S, where it reads as clipped
  * (`docs/superpowers/specs/2026-11-14-edge-spacing-design.md`). A pane has no padding, so that the source editor, the
  * tapes and the highlight bands run edge to edge; its rows — the header, the TM status line — carry the gap instead,
  * and a row added without it fails here. What lies outside the views is held to the window's edges alone. Each case
  * asserts first that it measures something: the four views, items in each, a header wrapped at 390 px, and the rows the
- * design names, the wordmark and the strip among the items. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
+ * design names, the wordmark, its logo wider than a phone, and the strip among the items. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
  */
 
 const THRESHOLD = 4
@@ -32,7 +32,7 @@ const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom']
 
 type Box = { left: number; right: number; top: number; bottom: number }
 
-type Item = { kind: 'text' | 'control'; el: Element; box: Box; label: string; cut: Record<Side, boolean> }
+type Item = { kind: 'text' | 'control' | 'image'; el: Element; box: Box; label: string; cut: Record<Side, boolean> }
 
 const CONTROLS = [
   'button',
@@ -93,8 +93,8 @@ function unclipped(box: Box, from: Element | null): Box {
 /**
  * `box` as an item, with the sides an overflow ancestor clips marked `cut`; `null` where the clip leaves less than a
  * pixel of it. A cut side is not measured: it is content scrolled past an edge, or cut with an ellipsis, not a layout
- * gap. A text node's clip starts at its parent, which may itself scroll it; a control's at the control's parent, since
- * a control's own overflow clips its content, not its box.
+ * gap. A text node's clip starts at its parent, which may itself scroll it; a control's or an image's at its parent, since
+ * an element's own overflow clips its content, not its box.
  */
 function item(kind: Item['kind'], el: Element, box: Box, label: string): Item | null {
   const v = unclipped(box, kind === 'text' ? el : el.parentElement)
@@ -109,9 +109,10 @@ function item(kind: Item['kind'], el: Element, box: Box, label: string): Item | 
 }
 
 /**
- * Every text run and control under `root` that is drawn, as `item` measures it. **TEXT BY ITS GLYPHS, NOT ITS BOX**: a
- * `Range` over a text node's trimmed text, the union of its client rects, since a block's box runs to its container's
- * edges whatever its text does. A control by its border box, which is what a user aims at.
+ * Every text run, control and image under `root` that is drawn, as `item` measures it. **TEXT BY ITS GLYPHS, NOT ITS
+ * BOX**: a `Range` over a text node's trimmed text, the union of its client rects, since a block's box runs to its
+ * container's edges whatever its text does. A control by its border box, which is what a user aims at, and an image by
+ * its border box, which its art fills.
  */
 function itemsIn(root: Element): Item[] {
   const items: Item[] = []
@@ -142,6 +143,14 @@ function itemsIn(root: Element): Item[] {
     if (r.width < 2 || r.height < 2) continue
     const label = c.getAttribute('aria-label') ?? (c.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40)
     const found = item('control', c, { left: r.left, right: r.right, top: r.top, bottom: r.bottom }, label)
+    if (found !== null) items.push(found)
+  }
+  for (const img of root.querySelectorAll('img')) {
+    if (unseen(img)) continue
+    const r = img.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2) continue
+    const box = { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+    const found = item('image', img, box, img.getAttribute('src') ?? '')
     if (found !== null) items.push(found)
   }
   return items
@@ -256,6 +265,13 @@ function assertMeasured(): Item[] {
   )
   const outside = outsideViews()
   expect(textMeasuredIn(outside, document.querySelector('.bar .wordmark')), 'precondition: the wordmark').toBe(true)
+  if (innerWidth > 30 * rem()) {
+    const logo = document.querySelector('.bar .wordmark img')
+    expect(
+      outside.some((i) => i.el === logo),
+      'precondition: the logo, the leftmost thing in the header wider than 30rem',
+    ).toBe(true)
+  }
   expect(
     outside.some((i) => i.el.closest('.strip') !== null),
     'precondition: the strip’s items',
