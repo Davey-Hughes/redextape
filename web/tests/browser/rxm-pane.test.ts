@@ -51,6 +51,14 @@ const registers = (host: HTMLElement) =>
     changed: r.classList.contains('is-changed'),
     unwritten: r.classList.contains('is-unwritten'),
   }))
+/** Whether instruction `pc`'s row is drawn inside the listing's box, where the user sees it. */
+function inView(host: HTMLElement, pc: number): boolean {
+  const row = rowOfPc(host, pc)
+  if (row === undefined) return false
+  const r = row.getBoundingClientRect()
+  const box = listing(host).getBoundingClientRect()
+  return r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5
+}
 const lines = (host: HTMLElement, selector: string) =>
   [...host.querySelectorAll<HTMLElement>(`${selector} > li`)].map((li) => li.textContent)
 
@@ -107,6 +115,34 @@ describe('the rxm listing', () => {
     const { host, pane } = mount(FACT3)
     pane.render(frameOf({ pc: 20, next: null }), CONTROLS)
     expect(host.querySelector('.rxm-row.is-next')).toBeNull()
+  })
+
+  // ⏭ FROM STEP 0 DRAWS THE END AND NO STEP BETWEEN: the end's own draw must bring its row into view.
+  it('scrolls the instruction the run ended at into view once it has ended, marking it as nothing', () => {
+    const { host, pane } = mount(LONG)
+    pane.render(frameOf({ step: 0, pc: 0, next: 0 }), CONTROLS)
+    expect(inView(host, 400), 'precondition: the halt out of view at step 0').toBe(false)
+    pane.render(frameOf({ step: 401, pc: 400, next: null }), CONTROLS)
+    expect(inView(host, 400), 'the halt in view at the end').toBe(true)
+    expect(host.querySelector('.rxm-row.is-next')).toBeNull()
+    expect(host.querySelector('.rxm-row[aria-current]')).toBeNull()
+    expect(host.querySelector('.rxm-cell[data-marks]')).toBeNull()
+  })
+
+  it('leaves a listing the user scrolled away where they left it at the end, and "follow current instruction" brings the end into view', async () => {
+    const { host, pane } = mount(LONG)
+    const reattach = () => panelOf(host, 'listing').querySelector('.table-reattach') as HTMLButtonElement
+    pane.render(frameOf({ step: 0, pc: 0, next: 0 }), CONTROLS)
+    listing(host).scrollTop = 2400
+    await until(() => !reattach().hidden, 'a user scroll to stop following')
+    const left = listing(host).scrollTop
+    pane.render(frameOf({ step: 401, pc: 400, next: null }), CONTROLS)
+    expect(listing(host).scrollTop, 'the box where the user left it').toBe(left)
+    expect(inView(host, 400), 'the halt out of view while detached').toBe(false)
+    expect(reattach().hidden, 'follow current instruction still offered').toBe(false)
+    await userEvent.click(reattach())
+    expect(reattach().hidden).toBe(true)
+    expect(inView(host, 400), 'the halt in view once following again').toBe(true)
   })
 
   it('follows the instruction about to run, stops at a user scroll, and follows again on "follow current instruction"', async () => {

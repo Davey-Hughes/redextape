@@ -31,7 +31,7 @@ import type { PaneEvents } from './pane-chrome'
 import { PanelStack, type Shares } from './panel-stack'
 import { type ClifCompiled, knownTarget, type Listing, MC_TARGETS, type McTarget } from './protocol'
 import type { PaneView } from './sessions'
-import type { ClifListing, ClifRow, ClifRowKind, ClifState, McListing } from './types'
+import type { ClifAt, ClifListing, ClifRow, ClifRowKind, ClifState, McListing } from './types'
 import { radioGroup } from './view-header'
 import { type ClifDisplay, DEFAULT_CLIF_DISPLAY, mcDisplay } from './workspace'
 
@@ -397,22 +397,26 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     this.#drawNotice()
     const frame = this.#frame
     const shown = this.#shown
-    const next = frame?.next ?? null
-    this.#listing.show(next === null || shown === null ? null : shown.rows.ordinalOf(next), frame?.step ?? null)
+    const ordinal = (at: ClifAt | null) => (at === null || shown === null ? null : shown.rows.ordinalOf(at))
+    const pcOf = (o: number | null) => (o === null ? null : (this.#instRow(o)?.pc ?? null))
+    const next = ordinal(frame?.next ?? null)
+    // ONCE THE RUN HAS ENDED `next` IS NULL AND `at` STANDS ON THE INSTRUCTION IT ENDED AT: the listing and the machine
+    // code follow that, unmarked, so the end shows where the run stopped and calls nothing next.
+    const stood = frame === null ? null : ordinal(frame.next ?? frame.at)
+    this.#listing.show(next, frame?.step ?? null, { follow: stood })
     this.#values.show(frame === null ? null : clifValues(frame, this.#result))
     this.#stack.show(frame === null || shown === null ? null : clifStack(frame, shown.listing))
     this.#heap.show(frame === null ? null : clifHeap(frame, this.#result))
-    this.#drawMachine(
-      next === null || shown === null ? null : (this.#instRow(shown.rows.ordinalOf(next) ?? -1)?.pc ?? null),
-    )
+    this.#drawMachine(pcOf(next), pcOf(stood))
   }
 
   /**
    * The machine code panel: its header for the target shown, its answer asked for while it is open, its rows when the
-   * view has a listing and the answer is in, and the machine instructions of the clif instruction about to run, at `pc`,
-   * marked and followed (machine code panel design §4, *Following*).
+   * view has a listing and the answer is in, the machine instructions of the clif instruction about to run, at `pc`,
+   * marked, and those of the one at `follow` followed (machine code panel design §4, *Following*): the same while the
+   * run can go on, and once it has ended `pc` is `null` and `follow` the instruction it ended at.
    */
-  #drawMachine(pc: number | null): void {
+  #drawMachine(pc: number | null, follow: number | null): void {
     const target = this.#target()
     const hasListing = this.#shown !== null
     const listing = this.#shown?.level ?? this.#on.clifListing?.current() ?? 'as-built'
@@ -460,7 +464,11 @@ export class ClifPane extends MachineViewChrome implements PaneView<ClifState> {
     // instruction's machine instructions are one function's, so the rows from its first to its last are centred
     // together, another instruction's among them, or start at the box's top when they are more than it shows.
     const current = [...this.#mcCurrent].sort((a, b) => a - b)
-    this.#machine.show(current[0] ?? null, this.#frame?.step ?? null, current.at(-1) ?? null)
+    const followed = follow === null ? [] : this.#mcOrdinalsOf([follow]).sort((a, b) => a - b)
+    this.#machine.show(current[0] ?? null, this.#frame?.step ?? null, {
+      follow: followed[0] ?? null,
+      last: followed.at(-1) ?? null,
+    })
   }
 
   /** `#drawNotice` for the machine code panel: `notice`'s words at the top of its body, or none. */

@@ -171,7 +171,12 @@ export class RxmPane extends MachineViewChrome {
   #draw(): void {
     const frame = this.#frame
     const program = this.#program
-    this.#listing.show(frame?.next ?? null, frame?.step ?? null)
+    // ONCE THE RUN HAS ENDED `next` IS NULL, and the listing follows `pc`, unmarked, so the end shows where the run
+    // stopped and calls nothing next. A fetch past the end of the program leaves `pc` on a row the listing does not
+    // have (`RxmCursor::pc`), so that end follows nothing.
+    this.#listing.show(frame?.next ?? null, frame?.step ?? null, {
+      follow: frame === null ? null : (frame.next ?? frame.pc),
+    })
     this.#values.show(frame === null ? null : rxmValues(frame, this.#result))
     this.#stack.show(frame === null || program === null ? null : rxmStack(frame, program))
     this.#heap.show(frame === null ? null : rxmHeap(frame, this.#result))

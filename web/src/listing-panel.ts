@@ -6,8 +6,8 @@ import type { GridOptions, GridRows, VirtualGrid } from './virtual-grid'
 
 /**
  * A program's listing in a panel: a row for each label and each instruction, following the instruction about to run,
- * with the marks a link and the running focus put on instructions. What an instruction's row says is the caller's
- * (`fillInstr`).
+ * or once the run has ended the one it ended at, with the marks a link and the running focus put on instructions. What
+ * an instruction's row says is the caller's (`fillInstr`).
  */
 export class ListingPanel {
   readonly panel: Panel
@@ -25,7 +25,9 @@ export class ListingPanel {
   #focused: ReadonlySet<number> = new Set()
   /** The instruction about to run at the step on display, or `null` for none. */
   #next: number | null = null
-  /** The last instruction of the block from `#next` that following keeps in view: `#next` itself, or a later one. */
+  /** The first instruction of the block following keeps in view, or `null` for none. */
+  #follow: number | null = null
+  /** The last instruction of the block from `#follow` that following keeps in view: `#follow` itself, or a later one. */
   #last: number | null = null
   /** The step on display, or `null` with no step to show. */
   #step: number | null = null
@@ -76,6 +78,7 @@ export class ListingPanel {
     this.#linked = new Set()
     this.#focused = new Set()
     this.#next = null
+    this.#follow = null
     this.#last = null
     this.#step = null
     this.#grid.reset()
@@ -107,27 +110,35 @@ export class ListingPanel {
   }
 
   /**
-   * Draw the listing at a step: `next` is the instruction about to run there, `step` the step's number, and `last`
-   * the end of the block from `next` that following keeps in view, `next` alone where none is given.
+   * Draw the listing at a step: `next` is the instruction about to run there, `step` the step's number, and `follow`
+   * to `last` the block following keeps in view, `next` alone where none is given. **THE ROW FOLLOWED IS NOT ALWAYS
+   * THE ROW MARKED**: once the run has ended nothing runs next, yet the listing must still show where it ended, which
+   * the caller gives as `follow` with `next` `null`. **THE BLOCK IS NAMED, NOT POSITIONAL**: its ends are
+   * `number | null` like `next`, so a call passing them by position could put one in the other's place and compile.
    */
-  show(next: number | null, step: number | null, last: number | null = next): void {
+  show(
+    next: number | null,
+    step: number | null,
+    block: { follow: number | null; last?: number | null } = { follow: next },
+  ): void {
     this.#next = next
     this.#step = step
-    this.#last = last
+    this.#follow = block.follow
+    this.#last = block.last === undefined ? block.follow : block.last
     this.#grid.draw()
   }
 
   /**
    * The listing's rows for one draw: a label row is `fillLabel`'s, or names its label; an instruction row is
    * `fillInstr`'s. The instruction about to run is `.is-next` and says "runs next" in words, as generated content —
-   * the not-colour cue the TM view's "fires next" has (spec §6.2) — and it is the row following keeps in view.
+   * the not-colour cue the TM view's "fires next" has (spec §6.2). The row following keeps in view is `show`'s.
    */
   #listingRows(): GridRows {
     if (this.#source === null) return { count: null, follow: null, frame: null, fill: () => {} }
     const nextRow = this.#next === null ? null : (this.#rowOf[this.#next] ?? null)
     return {
       count: this.#rows.length,
-      follow: nextRow,
+      follow: this.#follow === null ? null : (this.#rowOf[this.#follow] ?? null),
       followLast: this.#last === null ? null : (this.#rowOf[this.#last] ?? null),
       // THE STEP THIS DRAW SHOWS, NOT WHETHER THE FOLLOWED ROW MOVED — `TmPane.#tableRows`'s reason, one leg over:
       // the row above is the instruction the machine is ABOUT to run, and a jump to itself leaves that row

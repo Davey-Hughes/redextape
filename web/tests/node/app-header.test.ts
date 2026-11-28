@@ -65,9 +65,10 @@ describe('the help page', () => {
         ' target. Its <strong>machine code</strong> panel shows the x86-64 or arm64 code Cranelift makes from it, as' +
         ' Linux calls it, in AT&amp;T or Intel syntax on x86-64; each instruction that comes from an rxm instruction' +
         ' links it, and the panel marks and follows the code of the clif instruction about to run. Its step cap' +
-        " counts loop iterations, as the compiled program's does, not instructions. In the TM," +
-        ' rxm and clif views, a value, an instruction or a line cut short reads whole in a tooltip while the pointer' +
-        ' rests on it. Each combination of views keeps its own arrangement,',
+        " counts loop iterations, as the compiled program's does, not instructions. At the end of a run, the rxm and" +
+        " clif listings, the machine code panel and the state diagram's program level show the row the run stopped" +
+        ' on. In the TM, rxm and clif views, a value, an instruction or a line cut short reads whole in a tooltip' +
+        ' while the pointer rests on it. Each combination of views keeps its own arrangement,',
     )
   })
 

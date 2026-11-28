@@ -1,13 +1,15 @@
 import type { EditorView } from '@codemirror/view'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
-import { ECHO_TOLERANCE } from '../../src/state-table'
+import { ECHO_TOLERANCE, ROW_HEIGHT } from '../../src/state-table'
 import {
   activeProgramName,
   control,
+  currentRowName,
   diagram,
   diagramBoxes,
   diagramChoice,
+  enterWidth,
   frame,
   intoCmpeq,
   programRows,
@@ -16,6 +18,7 @@ import {
   stateIdle,
   tmPane,
   tmStatus,
+  tmStepText,
   tmWalk,
   until,
   walkInParts,
@@ -314,5 +317,174 @@ describe('the program level through a moving run', () => {
     // The diagram grew past its listing, so the browser clamped its scroll; that was not the user scrolling.
     expect(programScroll().scrollTop).toBeLessThan(before)
     expect(reattach.hidden).toBe(true)
+  })
+
+  describe('at the end of the run', () => {
+    /** `fact(3)`'s `halt` instruction, the last of its 21, which enters the machine's `halt` state. */
+    const HALT = 'pc20'
+    const reattach = () => diagram().querySelector('.diagram-reattach') as HTMLElement
+    /**
+     * Whether `name`'s row is drawn inside the program level's box, where the user sees it. **WITHIN 2 PX**: Firefox
+     * lays the box out at a fractional place and gives it a whole-pixel scroll range, so its furthest scroll can leave
+     * the last row, which the halt is, a part of a pixel under the box's edge.
+     */
+    function inView(name: string): boolean {
+      const row = rowNamed(name)
+      if (row === undefined) return false
+      const r = row.getBoundingClientRect()
+      const box = programScroll().getBoundingClientRect()
+      return r.top >= box.top - 2 && r.bottom <= box.bottom + 2
+    }
+    const atEnd = () => {
+      const m = /^step ([\d,]+) of ([\d,]+)$/.exec(tmStepText())
+      return m !== null && m[1] === m[2]
+    }
+    /** The names on the runtime boxes marked as the current step. */
+    const currentBoxes = () =>
+      diagramBoxes()
+        .filter((b) => b.getAttribute('aria-current') === 'step')
+        .map((b) => b.firstElementChild?.textContent)
+    /** The rules open, so the listing is taller than the diagram, and the run back on step 0. */
+    async function tallAtStepZero(): Promise<void> {
+      if (rulesToggle().getAttribute('aria-expanded') !== 'true') rulesToggle().click()
+      await until(
+        () => programScroll().scrollHeight > programScroll().clientHeight,
+        'the diagram to shrink under its listing',
+      )
+      control('↺')?.click()
+      await until(() => tmStepText().startsWith('step 0 of ') && currentRowName() === 'pc0', 'the run back on step 0')
+      await frame()
+    }
+    async function toEnd(): Promise<void> {
+      tmPane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
+      await until(() => atEnd() && currentBoxes()[0] === 'halt', 'the run on its last step, in halt')
+      await frame()
+    }
+
+    // ⏭ FROM STEP 0 DRAWS THE END AND NO STEP BETWEEN, and there the machine is in `halt`, a routine *arcs* draws as a
+    // box beside the rows: the end's own draw must bring the instruction that entered it into view.
+    it('scrolls the instruction the run halted at into view, marking it as nothing', async () => {
+      await tallAtStepZero()
+      expect(inView(HALT), 'precondition: the halt instruction out of view at step 0').toBe(false)
+      await toEnd()
+      expect(inView(HALT), 'the halt instruction in view at the end').toBe(true)
+      expect(currentRowName(), 'no row current at the end').toBeUndefined()
+      expect(rowNamed(HALT)?.classList.contains('is-current')).toBe(false)
+      expect(currentBoxes()).toEqual(['halt'])
+    })
+
+    it('leaves a program level the user scrolled away where they left it, and "follow current state" brings the end into view', async () => {
+      await tallAtStepZero()
+      const grid = programScroll()
+      // ITS `scroll` AT ONCE, as the case on detaching above says why.
+      grid.scrollTop += 2 * ROW_HEIGHT
+      grid.dispatchEvent(new Event('scroll'))
+      await until(() => !reattach().hidden, 'following to detach')
+      const left = grid.scrollTop
+      await toEnd()
+      expect(grid.scrollTop, 'the box where the user left it').toBe(left)
+      expect(inView(HALT), 'the halt instruction out of view while detached').toBe(false)
+      expect(reattach().hidden, 'follow current state still offered').toBe(false)
+      reattach().click()
+      expect(reattach().hidden).toBe(true)
+      await frame()
+      expect(inView(HALT), 'the halt instruction in view once following again').toBe(true)
+    })
+
+    /**
+     * NOT BEFORE THE END: at the first step inside `ret`, which pc16's `ret` enters, the run is still going, and a step
+     * inside a routine is followed nowhere though the step before it has a row. It is far back from the end, so the walk
+     * there by `◀` runs in hooks of its own.
+     */
+    describe('a step into a routine before it', () => {
+      const ENTERED_FROM = 'pc16'
+      const intoRet = /^ret · /
+      const back = (most: number) => () => {
+        for (let i = 0; i < most && !intoRet.test(tmStatus()); i += 1) control('◀')?.click()
+      }
+      const atEndOfTall = async (): Promise<void> => {
+        await tallAtStepZero()
+        await toEnd()
+      }
+      const arrived = () =>
+        until(() => intoRet.test(tmStatus()), 'the first step inside ret, walking back from the end')
+      for (const hook of [atEndOfTall, back(600), back(1_000), arrived]) beforeAll(hook)
+
+      it('follows no row there, though the step before is in one', async () => {
+        expect(currentBoxes(), 'precondition: the run inside ret').toEqual(['ret'])
+        control('◀')?.click()
+        expect(currentRowName(), 'precondition: the step before in the instruction that entered ret').toBe(ENTERED_FROM)
+        control('▶')?.click()
+        expect(intoRet.test(tmStatus())).toBe(true)
+        const grid = programScroll()
+        grid.scrollTop = 0
+        grid.dispatchEvent(new Event('scroll'))
+        await until(() => !reattach().hidden, 'following to detach')
+        expect(inView(ENTERED_FROM), 'precondition: the instruction out of view').toBe(false)
+        reattach().click()
+        await frame()
+        expect(inView(ENTERED_FROM), 'the instruction still out of view once following again').toBe(false)
+        expect(grid.scrollTop).toBe(0)
+        expect(currentBoxes()).toEqual(['ret'])
+      })
+    })
+
+    /**
+     * A RUN THAT STOPS IN THE OVERFLOW GUARD: `fact(3)` at a pinned width of 4 cells outgrows its fields in pc15, whose
+     * rule enters `overflow`, a state with no row or box of its own. The width goes back to auto after, so a case added
+     * below this block runs on the machine the file's other cases do.
+     */
+    describe('in the overflow guard', () => {
+      const STOPPED = 'pc15'
+      beforeAll(async () => {
+        await enterWidth('4')
+        await until(stateIdle, 'the compile at width 4')
+      })
+      afterAll(async () => {
+        await enterWidth('auto')
+        await until(stateIdle, 'the compile at auto')
+      })
+      async function toGuard(): Promise<void> {
+        tmPane().querySelector<HTMLButtonElement>('.controls button.to-newest')?.click()
+        await until(() => atEnd() && /^overflow\b/.test(tmStatus()), 'the run on its last step, in the overflow guard')
+        await frame()
+      }
+
+      it('scrolls the instruction the run stopped in into view, marking it as nothing', async () => {
+        await tallAtStepZero()
+        expect(inView(STOPPED), 'precondition: the instruction out of view at step 0').toBe(false)
+        await toGuard()
+        expect(inView(STOPPED), 'the instruction in view at the end').toBe(true)
+        expect(currentRowName(), 'no row current at the end').toBeUndefined()
+        expect(rowNamed(STOPPED)?.classList.contains('is-current')).toBe(false)
+        expect(currentBoxes(), 'no box current at the end').toEqual([])
+        const atTheEnd = programScroll().scrollTop
+        // The row the step before the end is in, which `◀` marks, is the one the end followed. THE SAME PLACE, NOT ONLY
+        // IN VIEW: following centres its row, so a neighbouring row followed at the end is in view too, and only the
+        // scroll ◀ leaves alone tells the two apart.
+        control('◀')?.click()
+        await until(() => currentRowName() !== undefined, 'the step before the end')
+        expect(currentRowName()).toBe(STOPPED)
+        await frame()
+        expect(programScroll().scrollTop, 'the box where the end left it').toBe(atTheEnd)
+      })
+
+      it('leaves a program level the user scrolled away where they left it, and "follow current state" brings the end into view', async () => {
+        await tallAtStepZero()
+        const grid = programScroll()
+        grid.scrollTop += 2 * ROW_HEIGHT
+        grid.dispatchEvent(new Event('scroll'))
+        await until(() => !reattach().hidden, 'following to detach')
+        const left = grid.scrollTop
+        await toGuard()
+        expect(grid.scrollTop, 'the box where the user left it').toBe(left)
+        expect(inView(STOPPED), 'the instruction out of view while detached').toBe(false)
+        expect(reattach().hidden, 'follow current state still offered').toBe(false)
+        reattach().click()
+        expect(reattach().hidden).toBe(true)
+        await frame()
+        expect(inView(STOPPED), 'the instruction in view once following again').toBe(true)
+      })
+    })
   })
 })

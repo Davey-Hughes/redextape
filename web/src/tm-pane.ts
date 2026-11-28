@@ -419,12 +419,12 @@ export class TmPane extends MachineViewChrome {
     this.#drawStatus()
   }
 
-  render(frame: TmState | null, controls: ControlState): void {
+  render(frame: TmState | null, controls: ControlState, before: TmState | null = null): void {
     this.#frame = frame
     this.steps.update(controls)
     this.#stepAtNewest = controls.stepTextAtNewest
     this.#width?.sync()
-    this.#diagram.render(this.#program === null ? null : frame)
+    this.#diagram.render(this.#program === null ? null : frame, before)
     this.#syncDiagramReattach()
     if (frame === null || this.#program === null) {
       this.#drawStatus()

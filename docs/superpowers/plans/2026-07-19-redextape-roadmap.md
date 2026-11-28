@@ -46466,3 +46466,192 @@ from this repository, `main` at `adb5d5e` and `licence-pin` at `0b0e5c6`.
 | 0 | text files the index holds with CRLF | `git ls-files --eol \| grep -c 'i/crlf'` |
 | 0 | files `git add --renormalize .` stages at `0b0e5c6` | `git add --renormalize . && git status --porcelain \| wc -l`, with `0b0e5c6` checked out and the tree clean |
 | 4 | grammar `.wasm` files, each left as committed | `git ls-files '*.wasm' \| wc -l; git ls-files --eol '*.wasm' \| grep -c 'w/-text'` |
+
+#### AT A RUN'S END THE RXM AND CLIF LISTINGS, THE MACHINE CODE PANEL AND THE TM STATE DIAGRAM'S PROGRAM LEVEL SCROLL THE INSTRUCTION THE RUN STOPPED AT INTO VIEW, WITHOUT MARKING IT, FOR A HALT AND FOR THE TM'S OVERFLOW GUARD ALIKE (2026-11-27, branch `listing-follows-end`, `a8033d9..be08c3e`, 10 commits, plus this entry)
+
+A run opens on step 0 (#140), and ⏭ from there draws the end and no step between. Every listing followed the instruction
+about to run, and at the end nothing is about to run, so the end's draw scrolled nothing and each box kept the place of
+the last step it drew: after ⏭ from step 0 the rxm listing still showed pc0 while its registers read the halt. The
+list-results drive saw it at `bc51185` (#207's entry, *Verification*), and this branch's first dispatch found the same
+on main in both engines, in the rxm and clif listings, the machine code panel and the TM state diagram's program level.
+The user ruled on 2026-11-27: the end is scrolled into view only, with no new mark; the TM's end in the overflow guard
+is fixed in this PR as well; and a faulted rxm run that still marks its faulting row "runs next" at its end is not this
+PR's, but waits for hidden-recording-b, which deletes `web/src/record-loop.ts`, where that fault lives.
+
+The lane's records are `~/.local/state/agents/redextape/rxm-listing-to-newest/`, `$S` below: `ledger.md`, the first
+dispatch's investigation in `progress.md`, and a folder for each dispatch after it, `task1` to `task3`, `review1` to
+`review3`, `gate`, `wbr` (the review of the whole branch), `entry`, `final-review`, `gate-rebased` and `entry-rebase`,
+each with its brief and its report or `progress.md`. Their logs are in `~/temp/redextape-listing-end-record/`, `$R`
+below.
+
+##### WHAT CHANGED
+
+- **The rxm listing** (`rxm-pane.ts`) follows `next ?? pc`: mid-run the instruction about to run, as before, and at the
+  end the instruction the frame's pc stands on, which no row marks. A fault no instruction raised can leave pc where the
+  listing has no row, a fetch past the end of the code, and there it follows nothing.
+- **The clif listing and the machine code panel** (`clif-pane.ts`) follow `next ?? at`, and the panel follows the rows
+  of that clif instruction, none of them marked current.
+- **`ListingPanel.show`** takes the block it follows apart from the row it marks "runs next", by name,
+  `{ follow, last? }`, defaulting to `{ follow: next }`. Its third argument was the block's last row before; both are
+  `number | null`, so a call written for the old meaning would have compiled with the new one, and a positional third
+  argument now fails the typecheck (TS2345).
+- **The TM state diagram's program level** (`state-diagram.ts`'s `#followed`). At the end the machine is in a state with
+  no row: `halt`, a runtime routine *arcs* draws as a box beside the rows, or the overflow guard, which has no group at
+  all, and each is one state several instructions enter, so the end frame cannot say which one ran. Once nothing fires
+  next (the frame's `rule` is `null`, never at a cap) and the current state has no row, the program level follows the
+  group the step before the end was in. That frame comes from the page's ring: `History.previous` gives the frame a step
+  before the head, and `PaneSlot.render` passes it to every view as `render`'s third argument, which the λ, rxm and clif
+  views ignore and the TM view hands to the diagram. No row is made current, and the `halt` box stays current. Mid-run,
+  a step inside a routine is still followed nowhere, and *chips*, where `halt` has a row, follows it as before.
+- **Through the grid's own follow.** The end row goes the way a mid-run row does, so a box the user scrolled away stays
+  where they left it, and *follow current instruction* or *follow current state* now brings the end into view, where on
+  main it brought nothing, the end having no row to follow; a link's hold still releases on the frame's step.
+- **Unchanged.** A run paused at a cap or with its history full keeps its `next`, so it follows as before. The recording
+  is unchanged.
+- **Words.** `web/help.html`'s views item says that at the end of a run the rxm and clif listings, the machine code
+  panel and the state diagram's program level show the row the run stopped on (`app-header.test.ts` holds the words).
+  The return-value design's non-goal on the listings' last row (`2026-11-23-return-value-highlight-design.md`) now says
+  this branch scrolls it into view and that it stays unmarked by the ruling; the return-value-highlight entry's line
+  (#201) that the listing does not scroll there is a dated observation and stays.
+
+##### THE TESTS AND THE SABOTAGES
+
+Ten new cases. In the browser: `rxm-pane.test.ts`, the end row in view after a step-0 draw, and a detached listing left
+in place until the re-attach brings it; `clif-pane.test.ts`, the clif end row in view and unmarked;
+`mc-panel-layout.test.ts`, the machine code rows of the end instruction in view and none marked;
+`state-diagram.test.ts`, on fact(3) with the listing taller than the diagram, the halt instruction (pc20) and, at a
+pinned width of 4, the overflow guard's pc15, each out of view at step 0 and in view at the end with no row current,
+each with a detached case, and a step inside `ret` before the end that follows nothing, though the step before it has a
+row; in node, `history.test.ts`, `History.previous` at the head, after an eviction and at the oldest frame kept. Each
+browser case but the `ret` one was red on the code before its fix, at the check after its precondition (`$S/task1` to
+`task3`); the `ret` case holds a check `ecdce63` already made, and turns red when it is taken out (below).
+
+The review of the whole branch measured that following centres its row, so an end that followed a neighbouring row also
+had the right one in view: `#followed` returning the group after or before the right one left both overflow cases green.
+The overflow guard's first case now records the scroll at the end and expects ◀, whose step is in pc15, to leave it
+alone (`7442e6b`). With `#followed` returning the group after, 3 cases failed, the two halt cases and that check, at 287
+against 334; with the group before, that check alone, at 287 against 263 (`$R/logs/entry-sab-*-chromium.log`); the file
+was restored from a saved copy and `cmp` found it equal. The other sabotages were the reviews': review1's 12 each fired
+at the check it aimed at in Chromium; review2's three (the end follow dropped, the detach ignored, the followed row
+marked) turned red in both engines; review3's S1 to S4 each turned red at the check it aimed at; and task3's removal of
+the `ended` check turned only the `ret` case red.
+
+##### THE REVIEWS
+
+A review after each task (`$S/review1` to `review3`) and one of the whole branch (`$S/wbr/report.md`), all run before
+the rebase onto `a8033d9`, the whole-branch one at `b96f1a8` on `adb5d5e`, which is `cbc49ba` here patch for patch. None
+found a fault in what the branch's code does. Review1 found the faulted rxm run's "runs next" (below), a false comment
+and `show`'s third argument changing its meaning silently (both `04a62d6`); review2 found the overflow guard's end,
+which the user ruled into this PR (`e85275f`), and that no test held the `ended` check (`cebc0bd`); review3 found two
+comment nits (`cbc49ba`). The whole-branch review found a test gap, the one-row error above (`7442e6b`), that this entry
+and the design's line were owed (`be08c3e`), and that the help page's "where nothing runs next" was false for the
+faulted rxm run (`92a1810` drops it). Review3 merged the branch with hidden-recording-b (`3d4b9a8`) and move-a-view
+(`6c032bf`) with no conflict, the typecheck and the node and `state-diagram.test.ts` tests green, and with their later
+tips, `240c0e8` and `3196d7c`, with no conflict; the whole-branch review's merges with those two tips were clean too.
+A last review, before the rebase, of the commits after `b96f1a8` and of this entry's first draft
+(`$S/final-review/report.md`) found no fault in the code or tests; the wording it found wrong in this entry, the
+design's line and the PR's text is fixed. After the rebase, a check of what main gained under the branch
+(`$S/rebase-check/`) found that main changed no file under `web/src` and not the help page, and the lane's probe on a
+build of the rebased code gave the pre-rebase run's verdicts, field for field, in both engines, with a typed faulting
+program, two big literals and an overflow-guard end besides.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **A faulted rxm run still marks its faulting row "runs next" at its end**, as on main: `web/src/record-loop.ts` takes
+  no frame after a failed step, so the last frame keeps its `next` (review1's first finding, `bad(cons(1, nil))` at step
+  437 of 437, pc52's row). The row shown is right; the mark is not. By the user's ruling it waits for
+  hidden-recording-b, which deletes that file. The whole-branch review found a clif run stopped by a trap
+  (`unreachable`) keeps its `next` too, so it marks and follows as main does.
+- **A faulted clif run follows main's return** (pc75), not the faulting call (pc52) its readout names (review1's second
+  finding): the stepper runs on to main's return, the row ◀ marks a step before the end. Main followed nothing there.
+  Left as it is.
+- **The halt's one-row error has no test.** The halt instruction is the last row, so an end following the group before
+  it still shows it; the halt cases catch only the group after.
+- **A run ending in a state with no row whose step before is inside a routine with no row follows nothing.** For `halt`
+  compiled code cannot reach it; for the overflow guard it would take a routine's own rule outgrowing a field. Neither
+  review3's probe nor the whole-branch review's drive reached it.
+- **Not run: the LLVM tier.** `/usr/lib/llvm22/bin/llvm-config` is absent here (the system's is 23.1.5), so
+  `check-all.sh` ran with `--no-llvm`. The branch changes `web/` and `docs/` alone. No Docker build either: it adds no
+  build output the app imports.
+- **Firefox fails 53 rows**, 52 tests and `share-open-deep.test.ts`'s file, in 18 files, the same 53 as main's at
+  `a8033d9` row for row.
+- **Firefox warns of scroll-linked positioning** after 40 quick ◀ mid-run in the TM view; the whole-branch review saw it
+  on main too.
+
+##### VERIFICATION
+
+The branch was rebased onto `a8033d9`, and only the roadmap conflicted, rebuilt as main's file plus this entry.
+
+**The gate at `be08c3e`** (`$S/gate-rebased/progress.md`, scripts `$S/gate-rebased/run-all.sh`, `scans.sh` and
+`check-all.sh`, the last the first leg's rerun, logs and exits in `$R/gate-rebased/`), `run-all.sh` in a systemd unit
+with `MemoryMax=16G`: `scripts/check-all.sh --no-llvm`, 52 legs, its 12 nextest runs 5282 passed, 101 skipped and 0
+failed, the wasm-bindgen browser tier 37 passed, "green, but PARTIAL", LLVM skipped, with `TREE_SITTER` set to the
+pinned 0.25.10, its first try having stopped at the preflight on the system's 0.28.0; `cargo llvm-cov` 2099 passed and
+35 skipped, lines 95.53% against a floor of 90, regions 95.19%, functions 93.57%, and in `ci.yml`'s form, with
+`--features redextape-mc/arm64`, 2106 passed and lines 95.56%; `scripts/check-slow.sh` 35 passed; the eight scans and
+the two licence checks, each `--self-test` then the scan, `ci-docs-only.sh --self-test` (14 cases) and its run over the
+range (`false`, not docs-only), and the comment guard's self-test (224 cases) and run against `origin/main`, `a8033d9`
+(22 areas within budget, no history and no grown block in 14 changed files), 24 runs, each exit 0, and no merge commit;
+the web packages built; `biome ci --error-on-warnings` 497 files; `pnpm run typecheck` exit 0; `pnpm run test:node` 90
+files and 1673 tests passed; `build:app` exit 0; `pnpm run test:coverage` 329 files, 3705 passed and 2 failed as
+expected, 98.25 / 92.72 / 98.76 / 99.45 against floors of 95 / 89 / 97 / 97; `pnpm run test:firefox` 18 files of 239
+failed, 52 tests failed, 1950 passed, 2 failed as expected and 28 skipped. Main's Firefox set came from those 18 files
+run on a build of `a8033d9` with the same inputs: 52 failed in 18 files, the same 53 rows
+(`$R/gate-rebased/08-firefox-new-rows.txt` and `08-firefox-main-only-rows.txt` empty). Against the gate before the
+rebase one row changed: `mc-panel-layout.test.ts`'s case that the machine code panel's header draws nothing outside
+itself fails now, and `clif-worker.test.ts`'s "drops the stepper for a request with no listing" no longer does, each in
+main's set at its base (`$R/gate-rebased/07-vs-prerebase-new-rows.txt` and `07-vs-prerebase-gone-rows.txt`). The gate
+before the rebase, at `b96f1a8` on `adb5d5e` (`$S/gate/progress.md`, logs in `$R/gate/`), was green too.
+
+**Probes and drives.** task3's probe of the built app (`$S/task3/probe.zsh`): at every end it took, the row ◀ marks a
+step before inside the box, rxm and clif 48 of 48 and the TM program level 12 of 12, in Chromium and in Firefox, with no
+console error or warning; main's Chromium run gives 26 misses by the same verdict (`$S/task1/progress.md`). Review3's
+probe, 13 cases, every end on the row ◀ marks in both engines and on the merge with hidden-recording-b. The whole-branch
+review's drive at `b96f1a8`, before the rebase: 36 of 36 checks in each browser, and the overflow guard over 22 runs of
+7 examples at widths 1 to 6 all followed.
+
+**After `be08c3e`** the only commit is this entry, which changes the roadmap and the design's line and no code, so the
+gate did not run again. `$S/entry/rerun.sh` runs at this entry's commit, its logs and exits in `$R/entry-` and that
+commit's short SHA: every scan and its self-test, the comment guard against `origin/main` among them, `biome ci
+--error-on-warnings`, `pnpm run typecheck`, `pnpm run test:node` and `state-diagram.test.ts` in Chromium and in Firefox,
+under the browser lock after port 63315 is free.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh at `be08c3e`
+with this entry in the working tree, with `S=~/.local/state/agents/redextape/rxm-listing-to-newest`,
+`R=~/temp/redextape-listing-end-record` and `strip` standing for `sed 's/\x1b\[[0-9;]*m//g'`.
+`$S/entry-rebase/figures.zsh` runs them, and `$S/entry-rebase/figures.log` is its output. A figure a dispatch took is
+read from that dispatch's log or, where it kept none, from its report or `progress.md`.
+
+| Value | What | Produced by |
+|---|---|---|
+| 10: `9cbc480`, `ecdce63`, `e85275f`, `cebc0bd`, `04a62d6`, `211e039`, `cbc49ba`, `7442e6b`, `92a1810`, `be08c3e` | the commits in `a8033d9..be08c3e`, in the heading | `git rev-list --count a8033d9..be08c3e; git log --reverse --format=%h a8033d9..be08c3e \| paste -sd ' '` |
+| 2026-11-27 | the dates of the first and the last commit, in the heading | `git log -1 --format=%cd --date=short 9cbc480; git log -1 --format=%cd --date=short be08c3e` |
+| #140; #201; #207, `bc51185` | the pull requests named; the commit #207's entry saw the listing at pc0 at | `git log --format=%s origin/main \| grep -oE '\(#(140\|201\|207)\)$' \| sort \| paste -sd ' '; grep -c "rxm's listing after ⏭ straight from step 0 stays at$" docs/superpowers/plans/2026-07-19-redextape-roadmap.md; grep -o '^\*\*At `bc51185`\*\*, the merge of `da6edae`' docs/superpowers/plans/2026-07-19-redextape-roadmap.md` |
+| 2026-11-27 | the day of the user's rulings, as the ledger records them | `grep -oE '^- 2026-11-27 ' $S/ledger.md; grep -oE '(15:28\|16:51) Davey' $S/ledger.md \| paste -sd ' '` |
+| `web/` and `docs/` alone; after `be08c3e`, the roadmap and the design's spec alone | the paths the range changes; what this entry changes after the gate | `git diff --name-only a8033d9 be08c3e \| cut -d/ -f1 \| sort -u \| paste -sd ' '; git diff --name-only be08c3e \| paste -sd ' '` |
+| 2, 1, 1, 5; 1 | the new cases in `rxm-pane`, `clif-pane`, `mc-panel-layout` and `state-diagram.test.ts`; in `history.test.ts` | `for f in rxm-pane clif-pane mc-panel-layout state-diagram; do print -n "$f $(git diff a8033d9 be08c3e -- web/tests/browser/$f.test.ts \| grep -cE '^\+\s*it\(') "; done; print; git diff a8033d9 be08c3e -- web/tests/node/history.test.ts \| grep -cE '^\+\s*(it\|test)\('` |
+| pc20; pc15 | the halt instruction; the instruction fact(3) at width 4 stops in | `grep -oE "const (HALT\|STOPPED) = 'pc[0-9]+'" web/tests/browser/state-diagram.test.ts \| paste -sd ' '` |
+| 4 | the pinned width of the overflow guard's cases | `grep -o "enterWidth('4')" web/tests/browser/state-diagram.test.ts` |
+| TS2345 | a positional third argument to `show` | `grep -o TS2345 $R/logs/task3-tsc-positional.log \| head -1` |
+| 3 failed, 18 passed; 1 failed, 20 passed; 287 against 334 and 263 | `#followed` returning the group after, then before: the cases; the scroll at ◀ against the end's | `for t in plus1 minus1; do strip $R/logs/entry-sab-$t-chromium.log \| grep -aE 'Tests  ' \| tr -s ' '; done; grep -ahoE 'expected 287 to be (334\|263)' $R/logs/entry-sab-plus1-chromium.log $R/logs/entry-sab-minus1-chromium.log` |
+| 21 passed, each | `state-diagram.test.ts` at `7442e6b`, Chromium and Firefox | `for e in chromium firefox; do strip $R/logs/entry-item1-$e.log \| grep -aE 'Tests  ' \| tr -s ' '; done` |
+| 12; three; S1 to S4; 1 failed, 20 passed | review1's sabotages; review2's; review3's; task3's of the `ended` check | `grep -o 'Sabotage: 12/12 fired at the aimed assertion' $S/review1/report.md; grep -o 'Sabotages (drop end follow, ignore detach, mark followed row) red both engines' $S/review2/report.md; grep -o 'Sabotage S1-S4 all red at aimed assertions' $S/review3/report.md; grep -o 'only the new test red, 1 failed \| 20 passed' $S/task3/progress.md` |
+| step 437 of 437, pc52; pc75 and pc52 | review1's faulted rxm end; its clif fault end against the faulting call | `grep -oE 'step 437/437, row 65 pc52' $S/review1/report.md; grep -oE 'main.s return \(pc75\), not the faulting call pc52' $S/review1/report.md` |
+| `3d4b9a8`, `6c032bf`; `240c0e8`, `3196d7c` | review3's trial merges; the later tips, also the whole-branch review's | `grep -oE 'Trial merges: 3d4b9a8 and 6c032bf text-clean, tsc 0, node \+ state-diagram green; current tips 240c0e8 \(hidden-recording-b\) and 3196d7c \(move-a-view\) also clean' $S/review3/report.md; grep -oE 'trial merges 240c0e8, 3196d7c clean' $S/wbr/report.md` |
+| 48 of 48; 12 of 12; 26 | task3's probe, rxm and clif, and the TM program level; main's misses by task1's verdict | `grep -oE 'rxm/clif 48/48 OK\|TM program level 12/12 OK\|no console error or warning' $S/task3/progress.md \| sort -u; grep -o 'gives 26 MISS' $S/task1/progress.md` |
+| 13 cases | review3's probe | `grep -o 'Probe 13 cases' $S/review3/report.md` |
+| 36 of 36; 22 runs of 7 examples at widths 1 to 6; 40 | the whole-branch review's drive, each browser; its overflow guard runs; the quick ◀ before Firefox's warning | `grep -oE '36/36 per browser\|overflow guard 22 runs over 7 examples widths 1-6 all followed\|after 40 quick ◀ mid-run in TM: also on main' $S/wbr/report.md` |
+| absent; 23.1.5 | LLVM 22's `llvm-config`; the system's | `ls /usr/lib/llvm22/bin/llvm-config; llvm-config --version` |
+| `a8033d9`; the roadmap alone; 0 | the base the branch was rebased onto; what conflicted; the lines of main's roadmap this entry removes | `git merge-base be08c3e origin/main \| cut -c1-7; grep -o 'Only the roadmap conflicted' $S/ledger.md; git diff --numstat a8033d9 -- docs/superpowers/plans/2026-07-19-redextape-roadmap.md \| cut -f2` |
+| 52 legs; 12 runs, 5282 passed, 101 skipped, 0 failed; green, but PARTIAL; 0.28.0 against the pinned 0.25.10, then 0.25.10 | gate: `scripts/check-all.sh --no-llvm`, its nextest runs; the first try's tree-sitter, then the rerun's | `wc -l < $R/gate-rebased/01-check-all-list.log; strip $R/gate-rebased/01-check-all-ts.log \| grep -a 'Summary \[' \| awk '{for(i=1;i<NF;i++){if($(i+1)~/^passed/)p+=$i; if($(i+1)~/^skipped/)s+=$i; if($(i+1)~/^failed/)f+=$i}} END{print NR" runs, "p" passed, "s" skipped, "f+0" failed"}'; strip $R/gate-rebased/01-check-all-ts.log \| grep -a '^green'; grep -oE 'reports [0-9.]+, not the pinned [0-9.]+' $R/gate-rebased/01-check-all.log; grep -o 'tree-sitter 0.25.10' $R/gate-rebased/exits-checkall.txt` |
+| 37 passed | gate: the wasm-bindgen browser tier | `strip $R/gate-rebased/01-check-all-ts.log \| grep -aoE 'test result: ok\. [0-9]{2,} passed'` |
+| 2099 passed, 35 skipped; 95.53%, 95.19%, 93.57%; 90; 2106 passed, 95.56% | gate: `cargo llvm-cov`, its tests; lines, regions, functions; the lines floor; `ci.yml`'s form, its tests and lines | `strip $R/gate-rebased/02-llvm-cov.log \| grep -a 'Summary \[' \| tr -s ' '; strip $R/gate-rebased/02-llvm-cov.log \| grep -a '^TOTAL' \| awk '{print $10, $4, $7}'; grep -o 'fail-under-lines [0-9]*' .forgejo/workflows/ci.yml \| sort -u; grep -o 'nextest --workspace --features redextape-mc/arm64' .forgejo/workflows/ci.yml; strip $R/gate-rebased/02-llvm-cov-ci.log \| grep -a 'Summary \[' \| tr -s ' '; strip $R/gate-rebased/02-llvm-cov-ci.log \| grep -a '^TOTAL' \| awk '{print $10}'` |
+| 35 | gate: `scripts/check-slow.sh`, tests passed | `strip $R/gate-rebased/03-check-slow.log \| grep -acE '^test .* \.\.\. ok$'` |
+| 24 runs, 0 non-zero; no merge commit; 14 cases; false; 224 cases; 22 areas, 14 changed files | gate: the scan runs; the merge check; `ci-docs-only.sh --self-test`; its run over the range; the comment guard's self-test and its run against `a8033d9` | `grep -c 'exit=' $R/gate-rebased/scan-exits.txt; grep -c 'exit=[1-9]' $R/gate-rebased/scan-exits.txt; grep merge $R/gate-rebased/scan-exits.txt; strip $R/gate-rebased/04-scan-ci-docs-only-selftest.log \| grep -o 'self-test passed: [0-9]* cases'; cat $R/gate-rebased/04-scan-ci-docs-only-range.log; strip $R/gate-rebased/04-scan-comments-selftest.log \| grep -o '[0-9]* cases pass'; strip $R/gate-rebased/04-scan-comments.log \| grep -oE '[0-9]+ areas\|[0-9]+ changed files since [0-9a-f]+' \| paste -sd ' '` |
+| 497; 90 files, 1673 | gate: `biome ci`, files; `pnpm run test:node` | `strip $R/gate-rebased/05-biome.log \| grep -ao 'Checked [0-9]* files'; strip $R/gate-rebased/05-test-node.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '` |
+| 329 files, 3705 passed, 2 failed as expected; 98.25 / 92.72 / 98.76 / 99.45; 95 / 89 / 97 / 97 | gate: `pnpm run test:coverage`; statements, branches, functions, lines; their floors | `strip $R/gate-rebased/06-test-coverage.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; strip $R/gate-rebased/06-test-coverage.log \| grep -a '^All files' \| tr -s ' '; grep -o 'thresholds: {[^}]*}' web/vite.config.ts` |
+| 18 of 239 files; 52 failed, 1950 passed, 2 failed as expected, 28 skipped; 53 rows, 18 files | gate: `pnpm run test:firefox`; its fail set | `strip $R/gate-rebased/07-test-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; wc -l < $R/gate-rebased/07-firefox-failset-be08c3e.txt; cut -d'>' -f1 $R/gate-rebased/07-firefox-failset-be08c3e.txt \| sort -u \| wc -l` |
+| 18 files, 52 failed; 53 rows, the same; 0 and 0 | main's Firefox run of those files at `a8033d9`; its fail set against the branch's; rows only the branch's, only main's | `strip $R/gate-rebased/08-main-firefox.log \| grep -aE 'Test Files \|Tests  ' \| tr -s ' '; wc -l < $R/gate-rebased/08-firefox-failset-main-a8033d9.txt; cmp $R/gate-rebased/07-firefox-failset-be08c3e.txt $R/gate-rebased/08-firefox-failset-main-a8033d9.txt && print same; wc -l < $R/gate-rebased/08-firefox-new-rows.txt; wc -l < $R/gate-rebased/08-firefox-main-only-rows.txt` |
+| 1 and 1; `mc-panel-layout.test.ts`'s header case, `clif-worker.test.ts`'s; each in main's set, 1 and 1 | the Firefox rows the gate fails against the gate's before the rebase, new and gone; which; the new one in main's set at `a8033d9`, the gone one in main's at `adb5d5e` | `wc -l < $R/gate-rebased/07-vs-prerebase-new-rows.txt; wc -l < $R/gate-rebased/07-vs-prerebase-gone-rows.txt; cut -d'>' -f1,2 $R/gate-rebased/07-vs-prerebase-new-rows.txt $R/gate-rebased/07-vs-prerebase-gone-rows.txt; grep -cxFf $R/gate-rebased/07-vs-prerebase-new-rows.txt $R/gate-rebased/08-firefox-failset-main-a8033d9.txt; grep -cxFf $R/gate-rebased/07-vs-prerebase-gone-rows.txt $R/gate/08-firefox-failset-main-adb5d5e.txt` |
+| green at `b96f1a8`, on `adb5d5e` | the gate before the rebase | `grep -o "Every leg ran at b96f1a8; nothing red that is the branch's" $S/gate/progress.md; git merge-base b96f1a8 origin/main \| cut -c1-7` |
+| 16G | the memory cap of `run-all.sh`'s unit | `grep -o 'MemoryMax=16G, no swap' $S/gate-rebased/run-all.sh` |

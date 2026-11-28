@@ -113,11 +113,12 @@ function mount(
   pane.setProgram({ listing: clif, level: 'as-built' })
   let step = 0
   let last: ClifState | null = null
-  const at = (next: ClifAt | null) => {
+  /** Draw a step whose next instruction is `next`, or with `next` `null`, the run's end at `end`. */
+  const at = (next: ClifAt | null, end: ClifAt = { function: 0, inst: 0 }) => {
     step += 1
     last = {
       step,
-      at: next ?? { function: 0, inst: 0 },
+      at: next ?? end,
       next,
       pc: null,
       values: [],
@@ -308,6 +309,34 @@ describe('a clif view whose machine code panel is open', () => {
     ).toBe(0)
     expect(box.scrollTop, 'following moved the box back').not.toBe(left)
     expect(where(), 'the re-attach scrolled the page or the view').toEqual(page)
+  })
+
+  it('scrolls the machine code of the instruction the run ended at into view once it has ended, marking none of it', async () => {
+    const { host, at } = mount(634, { panels: { code: true } })
+    await frames()
+    const box = listingBox(host)
+    const all = withCode('x86-64')
+    const end = all.at(-1) as ClifAt
+    const pc = clif.rows.find((r) => r.at?.function === end.function && r.at.inst === end.inst)?.pc
+    const endRows = () =>
+      [...codePanel(host).querySelectorAll<HTMLElement>('.clif-row')].filter(
+        (r) => r.querySelector('.rxm-pc')?.textContent === `pc${pc}`,
+      )
+    at(all[0] ?? null)
+    await frames()
+    expect(rowsOf(host, 'is-current').length, 'precondition: step 0 marks its block').toBeGreaterThan(0)
+    expect(
+      endRows().filter((r) => inside(r, box.getBoundingClientRect())).length,
+      'precondition: no row of the last instruction in the box at step 0',
+    ).toBe(0)
+    at(null, end)
+    await frames()
+    expect(
+      endRows().filter((r) => inside(r, box.getBoundingClientRect())).length,
+      'rows of the instruction the run ended at in the box',
+    ).toBeGreaterThan(0)
+    expect(rowsOf(host, 'is-current'), 'rows marked current').toEqual([])
+    expect(rowsOf(host, 'is-next'), 'rows marked next').toEqual([])
   })
 
   it('marks a current row on the row, so its cell lets the next, link and focus marks show', async () => {

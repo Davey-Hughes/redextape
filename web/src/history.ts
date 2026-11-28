@@ -53,6 +53,11 @@ export class History<T> {
     return this.#frames[this.#start + this.#head]
   }
 
+  /** The frame one step before the head, or `undefined` at the oldest frame kept, which an eviction moves past step 0. */
+  get previous(): T | undefined {
+    return this.#head > 0 ? this.#frames[this.#start + this.#head - 1] : undefined
+  }
+
   /**
    * The step number of the oldest RETAINED frame. §6's contract for scrubbing past the eviction
    * point is stated in this number: the UI says where history begins rather than pretending it

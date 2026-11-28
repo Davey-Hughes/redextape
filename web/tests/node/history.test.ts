@@ -231,6 +231,20 @@ describe('History', () => {
     expect(h.currentStep).toBe(2) // firstStep 1, head 1 — the frame kept its own step number
   })
 
+  it('gives the frame a step before the head, and none at the oldest frame it keeps, evicted or not', () => {
+    expect(h.previous).toBeUndefined()
+    for (let i = 0; i < 5; i++) h.push(`f${i}`, 210)
+    expect(h.previous, 'none at step 0').toBeUndefined()
+    h.seek(3)
+    expect(h.previous).toBe('f2')
+    h.push('f5', 210) // evicts f0, so the ring keeps steps 1 to 5
+    expect(h.current).toBe('f3')
+    expect(h.previous).toBe('f2')
+    h.seek(0)
+    expect(h.current).toBe('f1')
+    expect(h.previous, 'none before the oldest frame kept, though step 0 was recorded').toBeUndefined()
+  })
+
   it('keeps a parked head on its frame when one push evicts most of the ring', () => {
     // A HUNDRED FRAMES OF 10 FILL THE 1,000, ONE OF 900 PASSES IT AS THE NEWEST, AND ONE MORE OF 10 THEN EVICTS STEPS 0
     // TO 89 IN ONE PUSH: ninety evicted places against twelve frames kept, so the ring cuts its evicted places off

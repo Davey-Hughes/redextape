@@ -206,6 +206,8 @@ export class StateDiagram {
   #measured = ''
   #linkedStates: Set<number> = new Set()
   #frame: TmState | null = null
+  /** The frame one step before `#frame`, or `null` where there is none (`render`). */
+  #before: TmState | null = null
   /** The current group, or `null` with no frame, and for the `overflow` state, which is a badge. */
   #current: number | null = null
   #rows: ProgramRow[] = []
@@ -370,6 +372,7 @@ export class StateDiagram {
     this.#linked = new Set()
     this.#current = null
     this.#frame = null
+    this.#before = null
     this.#activeBox = null
     // The first row active, following on, and the grid at the top — `VirtualGrid.reset`'s doc says why its scroll is
     // recorded before it is written.
@@ -403,9 +406,13 @@ export class StateDiagram {
     if (had) this.#focusShown()
   }
 
-  /** The machine's frame: which group is current, and which sub-step — and, at the local level, which state. */
-  render(frame: TmState | null): void {
+  /**
+   * The machine's frame: which group is current, and which sub-step — and, at the local level, which state. `before` is
+   * the frame a step earlier, which says where a run that has ended stopped (`#followed`).
+   */
+  render(frame: TmState | null, before: TmState | null = null): void {
     this.#frame = frame
+    this.#before = before
     const g = frame === null ? null : (this.#groups?.groupOf[frame.state] ?? -1)
     const current = g === null || g < 0 ? null : g
     if (current !== this.#current) {
@@ -568,21 +575,40 @@ export class StateDiagram {
     this.#sideLinks.replaceChildren()
   }
 
-  /** What one draw of the program level's grid shows: a row per entry of `#rows`, following the current group's. */
+  /** What one draw of the program level's grid shows: a row per entry of `#rows`, following `#followed`'s. */
   #gridRows(): GridRows {
     const groups = this.#groups
-    const current = this.#current === null ? -1 : (this.#rowOf[this.#current] ?? -1)
+    const followed = this.#followed()
+    const row = followed === null ? -1 : (this.#rowOf[followed] ?? -1)
     return {
       // NO MACHINE IS A GRID OF NO ROWS, NOT NO GRID: the program level is still drawn, empty, and says so with an
       // `aria-rowcount` of 0 rather than `null`'s none.
       count: this.#rows.length,
-      // A runtime routine in *arcs* has no row, so a run inside one is followed nowhere: its box is marked instead.
-      follow: current >= 0 ? current : null,
+      // A runtime routine in *arcs* has no row, so a run still going inside one is followed nowhere: its box is marked
+      // instead.
+      follow: row >= 0 ? row : null,
       frame: this.#frame?.step ?? null,
       fill: (i, row, cell) => {
         if (groups !== null) this.#fill(i, row, cell, groups)
       },
     }
+  }
+
+  /**
+   * The group following keeps in view: the current one, or, once the run has ended in a state with no row, the group the
+   * step before was in, which is where the run stopped. Such a state is `halt`, a routine *arcs* draws as a box, or the
+   * overflow guard, which has no group at all; each is one state several instructions can enter. **FOLLOWED, NOT
+   * MARKED**: no row is made current, and a box that is current stays so.
+   */
+  #followed(): number | null {
+    const current = this.#current
+    // `rule` IS `null` ONLY WHERE NOTHING FIRES NEXT, at an accept state or a stuck one, and never at a cap the run is
+    // paused at (`TmState.rule`): a run still going inside a routine is followed nowhere, as `#gridRows` says, though
+    // its step before may have a row.
+    const ended = this.#frame !== null && this.#frame.rule === null
+    if (!ended || (current !== null && (this.#rowOf[current] ?? -1) >= 0)) return current
+    const before = this.#before === null ? -1 : (this.#groups?.groupOf[this.#before.state] ?? -1)
+    return before >= 0 && (this.#rowOf[before] ?? -1) >= 0 ? before : null
   }
 
   /**

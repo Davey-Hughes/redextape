@@ -28,7 +28,7 @@ At the end of a run the user wants to see the answer in each view without huntin
 - **A list result's heap cells, and a list-result example:** PR 3. Here a list result marks only its pointer word (rxm `rr`, the clif value, TM field 0). A λ list result is a multi-row term and gets no mark until PR 3 (the λ bar strip has no free lane).
 - **Function results:** every leg answers `Undecodable` ("no encoding for this type"); no mark. A later feature (λ prints the normal form) may change that.
 - **Copies:** no mark. The copies feature was being removed (remove-copies lane), and is gone: #196 (`e65a533`) removed it from the web app, and this branch merged it as `66ab998`.
-- **The final `halt`/`return` row in the rxm and clif listings:** at the end no listing row is marked and the listing does not scroll there. Noted as a later follow-up, not part of this PR.
+- **The final `halt`/`return` row in the rxm and clif listings: never marked; a later branch scrolls it into view.** As this PR built it, at the end no listing row was marked and the listing did not scroll there, noted as a later follow-up. The branch `listing-follows-end` (2026-11-27) brings the row the run stopped on into view at the end, in the rxm and clif listings, the machine code panel and the TM state diagram's program level. The user ruled that it only scrolls there, so the row it scrolls to stays unmarked.
 - **A TM field wider than the frame's window:** mark the part on screen; widening the window is not this PR.
 
 ## Anti-goals

@@ -5,7 +5,7 @@ import initClif, { ClifSession } from '../../../pkg-clif/redextape_clif_wasm.js'
 import { ClifPane } from '../../src/clif-pane'
 import { EXAMPLE_ENCODING, EXAMPLES } from '../../src/examples'
 import type { ClifCompiled, ClifLoad } from '../../src/protocol'
-import type { ClifListing } from '../../src/types'
+import type { ClifAt, ClifListing, ClifState } from '../../src/types'
 import { controlState, fixtureHost, paneEvents } from './harness'
 
 /**
@@ -118,5 +118,50 @@ describe('the CLIF view with a listing', () => {
     const first = host.querySelector<HTMLElement>('.clif-row[aria-rowindex="1"] .clif-cell')
     // COMPACT, THE DEFAULT: the gutter's 6 columns, the pc column and the space after it, before the line.
     expect(first?.textContent).toBe(`${' '.repeat(6)}function u0:11(i64) -> i64 system_v {`)
+  })
+})
+
+/** A frame at `step`, standing at `at`, with `next` about to run there or `null` once the run has ended. */
+const frameAt = (step: number, at: ClifAt, next: ClifAt | null): ClifState => ({
+  step,
+  at,
+  next,
+  pc: null,
+  values: [],
+  values_len: 0,
+  returned: null,
+  depth: 1,
+  frames: [],
+  heap_len: 0,
+  result: null,
+  cells: [],
+  box_len: 0,
+  boxes: [],
+})
+
+/** Whether listing row `row` is drawn inside the listing's box, where the user sees it. */
+function rowInView(host: HTMLElement, row: number): boolean {
+  const el = host.querySelector<HTMLElement>(`.clif-row[aria-rowindex="${row + 1}"]`)
+  if (el === null) return false
+  const r = el.getBoundingClientRect()
+  const box = (listingPanel(host).querySelector('.clif-listing') as HTMLElement).getBoundingClientRect()
+  return r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5
+}
+
+describe("the CLIF listing at the run's end", () => {
+  it('scrolls the instruction the run ended at into view, marking nothing as running next', () => {
+    const { host, pane } = mount('ready', { listing, level: 'as-built' })
+    const insts = listing.rows.flatMap((r, i) => (r.kind === 'Inst' && r.at !== null ? [{ at: r.at, row: i }] : []))
+    const first = insts[0]
+    const last = insts.at(-1)
+    if (first === undefined || last === undefined) throw new Error('a listing with no instruction')
+    const controls = controlState(true, 'step 0 of 9')
+    pane.render(frameAt(0, first.at, first.at), controls)
+    expect(rowInView(host, first.row), 'precondition: step 0 follows its first instruction').toBe(true)
+    expect(rowInView(host, last.row), 'precondition: the last instruction out of view at step 0').toBe(false)
+    pane.render(frameAt(9, last.at, null), controls)
+    expect(rowInView(host, last.row), 'the instruction the run ended at in view').toBe(true)
+    expect(host.querySelector('.clif-row.is-next')).toBeNull()
+    expect(host.querySelector('.clif-row[aria-current]')).toBeNull()
   })
 })

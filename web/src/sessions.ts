@@ -440,7 +440,12 @@ export class SessionRegistry {
  * handing the wrong pane to a slot a type error rather than a runtime surprise.
  */
 export type PaneView<T> = {
-  render(frame: T | null, controls: ControlState): void
+  /**
+   * `before` is the frame one step before `frame`, `null` where the ring keeps none. **AN END FRAME CAN LACK WHERE THE
+   * RUN STOPPED**: the TM's `halt` and overflow guard are each one state that several instructions can enter, and only
+   * the step before says which one ran.
+   */
+  render(frame: T | null, controls: ControlState, before: T | null): void
   /**
    * `PaneOption[]` AND A WHOLE `Binding<Leg>`, NOT `BindingOption[]` AND A `SessionId`. The pane's
    * title-selector offers `(leg, session)` PAIRS (`pairs()` above, `view-header.ts`'s `viewHeader`), so both
@@ -604,7 +609,7 @@ export class PaneSlot<K extends Leg> {
    */
   render(reg: SessionRegistry, pane: PaneView<LegFrame[K]>, leg: LegState<LegFrame[K]>): void {
     const b = this.#binding
-    pane.render(leg.hist.current ?? null, legControlState(reg, b, leg))
+    pane.render(leg.hist.current ?? null, legControlState(reg, b, leg), leg.hist.previous ?? null)
     pane.setBindings(reg.pairs(), b)
   }
 }
