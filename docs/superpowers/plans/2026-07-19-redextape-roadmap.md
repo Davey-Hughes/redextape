@@ -46656,15 +46656,20 @@ read from that dispatch's log or, where it kept none, from its report or `progre
 | green at `b96f1a8`, on `adb5d5e` | the gate before the rebase | `grep -o "Every leg ran at b96f1a8; nothing red that is the branch's" $S/gate/progress.md; git merge-base b96f1a8 origin/main \| cut -c1-7` |
 | 16G | the memory cap of `run-all.sh`'s unit | `grep -o 'MemoryMax=16G, no swap' $S/gate-rebased/run-all.sh` |
 
-#### THE RXM REGISTERS WIDEN TO THE ROOM THE RUN'S WIDEST VALUE HAS NEEDED, SO ONE IS CUT ONLY WHERE ITS PANEL IS NARROWER THAN ITS ROW, AND THE CLIF VALUES KEEP A 20-DIGIT WORD'S ROOM FROM THE RUN'S FIRST STEP; A CALL STACK OR HEAP LINE TOO LONG FOR ITS PANEL GOES ON BELOW, INDENTED; AND CLIF'S VALUES COLUMN IS AS WIDE AS ITS CALL STACK'S AND ITS HEAP'S (2026-11-27 and 28, branch `squeezed-values`, `ecc014c..8df2648`, 15 commits, plus this entry)
+#### THE RXM REGISTERS WIDEN TO THE ROOM THE RUN'S WIDEST VALUE HAS NEEDED, SO ONE IS CUT ONLY WHERE ITS PANEL IS NARROWER THAN ITS ROW, AND THE CLIF VALUES KEEP A 20-DIGIT WORD'S ROOM FROM THE RUN'S FIRST STEP; A CALL STACK OR HEAP LINE TOO LONG FOR ITS PANEL GOES ON BELOW, INDENTED; AND CLIF'S VALUES COLUMN IS AS WIDE AS ITS CALL STACK'S AND ITS HEAP'S (2026-11-27 and 28, branch `squeezed-values`, `9e7c493..4accc6e`, 17 commits, plus this entry)
 
 The user, on 2026-11-23, after trying #194's tooltips: "the tooltip is fine, but ideally we should avoid squeezing
 numbers when there's actually space". Their screenshot was an rxm registers panel about 350 px wide that cut `rr` to
 `4790016…` with room beside and below it, and their rule of 2026-11-17 held over every choice: "I don't want anything
 like this that shifts the page unexpectedly". The first seven commits were drafted in a cloud sandbox with Node 22 and
-no browser and applied unchanged on `main` `ecc014c` (#211): `be80e96` makes the change, the five after it amend it, and
-`8af47ae` changes only the roadmap. The eight after them were made on this machine, where every browser case ran:
-`3d87d66` to `cfcc4e3` answer the first review, and `5ff54df` to `8df2648` the review of the whole branch.
+no browser and applied unchanged on `main` `ecc014c` (#211): `363ff1c` makes the change, the five after it amend it, and
+`1224fc9` changes only the roadmap. The nine after them were made on this machine, where every browser case ran:
+`001fe5f` to `a55f4c1` answer the first review, `39daf48` to `27800b6` the review of the whole branch, and `9495afb`
+wrote this entry's previous text. The branch was then rebased onto `main` `9e7c493` (#214), where the five commits
+that changed `app-header.test.ts` conflicted, and each took main's help string with its own sentence after "rests on
+it.", re-wrapped under 120 columns, which left `0a71949`'s re-wrap nothing to change in that file. After the rebase,
+`4accc6e` builds #214's machine code case of a run's end at the width of the panel's other cases. This entry names the
+commits made before the rebase, and the reviews and sabotages run on them, by the commits the rebase made of them.
 
 ##### WHAT THE USER CHOSE
 
@@ -46679,7 +46684,7 @@ clif view beside the source in a 1280 px window is medium.
 The first review's drive found the clif room growing partway through every clif run, and the values grid dropping to one
 track at that step. On 2026-11-28 the user ruled that the clif values keep a 20-digit word's room from the run's first
 step, which ends in the same layout with no move during the run, and that the rxm registers keep the room that grows
-(`3d87d66`). He accepted as it is that a step back after a jump to the end can move cells (*What this did not close*).
+(`001fe5f`). He accepted as it is that a step back after a jump to the end can move cells (*What this did not close*).
 The design, `docs/superpowers/specs/2026-11-27-squeezed-values-design.md`, lists the choices, the rulings, what was
 counted before choosing and its *As built*.
 
@@ -46728,13 +46733,14 @@ counted before choosing and its *As built*.
   while its other cases keep 760 px, and reads only rows with text; `result-app.test.ts` holds rxm's `rr` whole at the
   step before the end and clif's `rr` on its result's line; `machine-row.test.ts`, `machine-row-app.test.ts`,
   `machine-panel-headers.test.ts` and `machine-views.ts` take the new clif column; and `mc-panel-layout.test.ts` builds
-  the machine code panel's place in a view wide enough for the clif row's wide arrangement.
+  the machine code panel's place in a view wide enough for the clif row's wide arrangement, #214's case of a run's end
+  among them (`4accc6e`).
 
 ##### THE SABOTAGES
 
 Each on a saved copy of the file it broke, restored from the copy and compared with `cmp`, its browser files run in
-Chromium; the whole-branch review's at `cfcc4e3`, the two marked at `5ff54df`. A case stops at its first failed check,
-so the checks after it are not shown by that sabotage.
+Chromium; the whole-branch review's at `a55f4c1`, the two marked at `39daf48`, and the last at `4accc6e`. A case stops
+at its first failed check, so the checks after it are not shown by that sabotage.
 
 | Sabotage | What failed |
 |---|---|
@@ -46743,39 +46749,45 @@ so the checks after it are not shown by that sabotage.
 | clif without `WORD_ROOM` | the clif room case, *at 220 px, the cells, nine digits* |
 | the room taken from each frame alone, not kept | *the tracks, a step back* |
 | the result's row counted | *the tracks, the result drawn* |
-| `RxmPane.setProgram` without the registers' `forget`, at `5ff54df` | *the tracks, a new program drawn* |
-| `ClifPane.setProgram` without the heap's `forget`, at `5ff54df` | *the line, a new program*, in the clif view |
+| `RxmPane.setProgram` without the registers' `forget`, at `39daf48` | *the tracks, a new program drawn* |
+| `ClifPane.setProgram` without the heap's `forget`, at `39daf48` | *the line, a new program*, in the clif view |
 | frames and heap lines back to one line and an ellipsis | the line cases, at *over more than one line* |
 | no `--line-room` | *the line, fewer names*, and *the kept text* |
 | `--line-room` written with `JSON.stringify` | *the kept text* |
 | no `--ret-room` | the clif stack case, *at 60 px, each frame's top and height* |
 | `.clif-cell` not watched | `cut-text-app.test.ts`'s clif case, *the row*, its title empty |
+| the machine code panel following only the instruction about to run, as before #214, at `4accc6e` | `mc-panel-layout.test.ts`'s case of a run's end, at 760 px, *rows of the instruction the run ended at in the box* |
 
-The first review, at `8af47ae`, ran three of the sandbox's node sabotages again, a row's name counted without its 4ch
+The first review, at `1224fc9`, ran three of the sandbox's node sabotages again, a row's name counted without its 4ch
 least width, `forget` keeping the room, and `widestPc` reading a row fewer and a column short, and each failed the node
 file; the one the sandbox found failing no node case, clif's values column back to 7.375rem, failed no node case there
 either.
 
 ##### THE REVIEWS
 
-- **A first review**, at `8af47ae`, found the change working in Chromium in the app but not ready, as cases of its own
+- **A first review**, at `1224fc9`, found the change working in Chromium in the app but not ready, as cases of its own
   failed: `cut-text-app.test.ts`'s clif case found no listing row cut at 760 px (I1), and `machine-room.test.ts`'s
   heap-line case, in both views, asked whether the line's text span was whole, which the line's hanging indent draws 2ch
   left of (I2). It found the clif values grid dropping to one track partway through every clif run it drove, which the
   user had not been shown (I3). Its Minor findings: the roadmap's figures and its "NOT RUN" text (M1, M2), `--line-room`
-  written as a JSON string (M3), and a step back after a jump to the end moving cells (M4). `cfcc4e3` answers I1,
-  `c33e41d` I2, `3d87d66` I3 as the user ruled, and `beb328f` M3; M4 the user accepted.
-- **A review of the whole branch**, at `cfcc4e3`, found it ready after minors, with no defect in the product code. It
+  written as a JSON string (M3), and a step back after a jump to the end moving cells (M4). `a55f4c1` answers I1,
+  `d8421ed` I2, `001fe5f` I3 as the user ruled, and `c34376e` M3; M4 the user accepted.
+- **A review of the whole branch**, at `a55f4c1`, found it ready after minors, with no defect in the product code. It
   drove the app on the branch and on `main`: the rxm and clif views of fact(12), fact, map-fold and countdown in 1000
   and 1600 px windows, and of map-fold and countdown at 800 and 900 px, in Chromium and in Firefox, every step forward
   and two back. Nothing outside the panels moved that `main` does not move at the same step, no value, frame or heap
   line was cut, and the one cell move `main` lacks is the designed step of the room that grows, in fact(12)'s rxm view
-  at 1600 px. Its Minor findings, fixed in `5ff54df`, `ed21a86`, `c660fc0` and `8df2648`: two helpers of
+  at 1600 px. Its Minor findings, fixed in `39daf48`, `1183992`, `682158a` and `27800b6`: two helpers of
   `machine-room.test.ts` reset the room with `forget`, so a pane that kept its room failed at their precondition and
   never reached the checks written for it (F2); the design's "(the rulings below)" for rulings above (F3); a line break
   left in `cut-text-app.test.ts`'s header (F4); and the stylesheet's heading on the tracks, which named the rxm rule
-  only (F5). Its one Important finding is not in the branch: on a tree merged with branch `listing-follows-end`,
-  `app-header.test.ts` needs both branches' help sentences (F1).
+  only (F5). Its one Important finding was for the rebase: on a tree merged with #214's branch, `app-header.test.ts`
+  needs both branches' help sentences (F1), which the rebase gives it.
+- **After the rebase**, #214's changes to `clif-pane.ts` and `rxm-pane.ts` were read against the room code: #214
+  changes what the listings and the machine code panel follow at a run's end, and draws the values, the call stack and
+  the heap as before, which are what this branch changes. Its new case of a run's end in `mc-panel-layout.test.ts` was
+  built 634 px wide, where this branch's clif row is medium and its heap has a region of its own, a boundary the case
+  does not list; `4accc6e` builds it at 760 px, where the row is one region.
 
 ##### WHAT THIS DID NOT CLOSE
 
@@ -46799,27 +46811,33 @@ either.
   driven here (*The reviews*). The Stage's one clif view in a 1024 px window, which it expected wide:
   `machine-row-app.test.ts` holds it wide, and passes in Chromium and in Firefox. A cut clif row in
   `cut-text-app.test.ts` at 760 px: there was none, and the case draws its page 520 px wide. `test:coverage` on this
-  machine, under Node 26: *Verification*. Its question on branches in flight is for the rebase onto `main`.
+  machine, under Node 26: *Verification*. Its question on branches in flight: #214, which this branch is rebased on.
 - **Not run:** `check-slow.sh`, the Rust and LLVM tiers, as no crate changed, the whole Firefox tier, and CI.
 
 ##### VERIFICATION
 
-**On the branch at `8df2648`**, each test run under a 16G memory cap and the shared locks: `pnpm run test:coverage`,
-exit 0, 330 files, 3705 tests passed and 2 expected to fail, statements 98.25%, branches 92.73%, functions 98.77% and
-lines 99.45%; 9 of the browser test files the branch adds or changes, in Firefox, 176 tests passed;
+**On the branch at `4accc6e`**, each test run under a 16G memory cap and the shared locks: `pnpm run test:coverage`,
+exit 0, 332 files, 3734 tests passed and 2 expected to fail, statements 98.25%, branches 92.72%, functions 98.77% and
+lines 99.45%; 9 of the browser test files the branch adds or changes, in Firefox, 177 tests passed;
 `machine-room.test.ts` in Chromium and in Firefox, 13 of 13; `pnpm run typecheck` and `pnpm run build:app`, exit 0;
-`biome ci --error-on-warnings`, 498 files; and `check-comments.mjs`, its self-test's 224 cases, and `--base ecc014c`, 20
-areas within budget and no history and no grown block in 23 changed files. The pre-commit hook passed on each of the 8
-commits made here.
+`biome ci --error-on-warnings`, 500 files; and `check-comments.mjs`, its self-test's 224 cases, and `--base 9e7c493`, 22
+areas within budget and no history and no grown block in 23 changed files. The pre-commit hook passed on each of the 9
+commits made here before the rebase, which runs none, and on `4accc6e` and this entry after it. A drive of the app on
+the branch and on `main` `9e7c493` in a 1600 px window in Chromium, the rxm and clif views of fact(12) and countdown,
+every step forward and two back, found no value, frame or heap line cut on the branch and nothing outside the panels
+moving that `main` does not move at the same step; the one cell move `main` lacks is the designed step of the room
+that grows, in fact(12)'s rxm view.
 
 **Every count this entry quotes, with what produces it.** Commands run from the worktree's root under zsh, `D` the
 design's path, the test runs under a 16G cap and the shared locks.
 
 | Value | What | Produced by |
 |---|---|---|
-| `ecc014c`, #211; `8df2648`; 15 | `main` when the sandbox's commits were applied, and its PR; the last code commit; the commits from one to the other | `git rev-parse --short ecc014c; git log -1 --format=%s ecc014c \| grep -o '(#[0-9]*)$'; git rev-parse --short 8df2648; git rev-list --count ecc014c..8df2648` |
-| 7; `be80e96`, `8af47ae`; 8; `3d87d66` to `cfcc4e3`, `5ff54df` to `8df2648` | the sandbox's commits; its first and its last; the commits made here; those that answer the first review, and the whole-branch review | `git rev-list --count ecc014c..8af47ae; git log --reverse --format=%h ecc014c..8af47ae \| sed -n '1p;$p'; git rev-list --count 8af47ae..8df2648; git log --reverse --format=%h 8af47ae..8df2648 \| paste -sd' '` |
-| the roadmap only; 0 | `8af47ae`'s files; the crate files the branch changes | `git show --stat --format= 8af47ae \| cat; git diff --name-only ecc014c 8df2648 -- crates \| wc -l` |
+| `ecc014c`, #211; `9e7c493`, #214; `4accc6e`; 17 | `main` when the sandbox's commits were applied, and its PR; `main` the branch is rebased on, and its PR; the last code commit; the commits from that `main` to it | `git rev-parse --short ecc014c; git log -1 --format=%s ecc014c \| grep -o '(#[0-9]*)$'; git rev-parse --short 9e7c493; git log -1 --format=%s 9e7c493 \| grep -o '(#[0-9]*)$'; git rev-parse --short 4accc6e; git rev-list --count 9e7c493..4accc6e` |
+| 7; `363ff1c`, `1224fc9`; 9; `001fe5f` to `a55f4c1`, `39daf48` to `27800b6`, `9495afb`; `4accc6e` | the sandbox's commits; its first and its last; the commits made here before the rebase; those that answer the first review, the whole-branch review, and the entry's previous text; the one made after the rebase | `git rev-list --count 9e7c493..1224fc9; git log --reverse --format=%h 9e7c493..1224fc9 \| sed -n '1p;$p'; git rev-list --count 1224fc9..9495afb; git log --reverse --format=%h 1224fc9..4accc6e \| paste -sd' '` |
+| the roadmap only; 0 | `1224fc9`'s files; the crate files the branch changes | `git show --stat --format= 1224fc9 \| cat; git diff --name-only 9e7c493 4accc6e -- crates \| wc -l` |
+| five; `0a71949` | the commits that changed `app-header.test.ts` before the rebase; the one of them whose rebased commit leaves it unchanged | `git log --oneline ecc014c..91713bd -- web/tests/node/app-header.test.ts \| wc -l; git log --reverse --format=%h 9e7c493..1224fc9 -- web/tests/node/app-header.test.ts \| paste -sd' '; git show --stat --format= 0a71949 -- web/tests/node/app-header.test.ts \| wc -l` |
+| 634 px; 760 px | the width #214 built its case of a run's end at; the one `4accc6e` builds it at, `ROW_WIDE` | `git show 9e7c493 -- web/tests/browser/mc-panel-layout.test.ts \| grep -c '^+ *const { host, at } = mount(634'; grep -n '^const ROW_WIDE = ' web/tests/browser/mc-panel-layout.test.ts` |
 | 2026-11-23, #194, about 350 px, `4790016…`; 2026-11-17 | the user's request and their screenshot; their rule | `grep -o '^The user, 2026-11-23, after trying #194' $D; grep -o 'about 350 px wide reading .pc 20 \| rr 4790016…' $D; grep -o 'Their rule of 2026-11-17' $D` |
 | "1a 2a 3b 4a 5b 6a", "7a 8a", 2026-11-27; 2026-11-28 | the user's lettered answers and their day; the rulings' day | `grep -c '^The user chose on 2026-11-27, "1a 2a 3b 4a 5b 6a", then "7a 8a":' $D; grep -c '^The user, 2026-11-28:' $D` |
 | 4ch; 1ch; 14ch, 0.5rem and 1px; 2ch | a row's least name width; its gap; a track's least width, and the padding and pixel it adds to the room; the indent of a frame's or a heap line's lines after the first | `grep -n 'min-width: 4ch\\|max(14ch, calc\\|text-indent: -2ch' web/src/style.css; sed -n '/^\.rxm-register {/,/^}/p' web/src/style.css \| grep 'gap'` |
@@ -46827,11 +46845,11 @@ design's path, the test runs under a 16G cap and the shared locks.
 | 724; 480; 905, 20 px | the clif row's wide and medium thresholds; its wide one under a 20 px root | `grep -nE "CLIF, width: (724\|480)," web/tests/node/machine-row.test.ts; grep -n 'clif: 905' web/tests/browser/machine-row.test.ts` |
 | 1280 px, medium; 1024 px, wide | a clif view beside the source; the Stage's one clif view | `grep -n "beside: { 1280: 'medium', 1024: 'medium' }\\|stage: { 1280: 'wide', 1024: 'wide', 800: 'medium' }" web/tests/browser/machine-row-app.test.ts` |
 | 170 px; 760 px; 520 px | `cut-text.test.ts`'s values; `cut-text-app.test.ts`'s page; its clif case's | `grep -n 'const VALUE_CUT = ' web/tests/browser/cut-text.test.ts; grep -n '^const WIDTH = \\|const CLIF_WIDTH = ' web/tests/browser/cut-text-app.test.ts` |
-| 9 | the browser test files the branch adds or changes, all but `machine-room-scrollbars.test.ts`, as Firefox ran them | `git diff --name-only ecc014c 8df2648 -- 'web/tests/browser/*.test.ts' \| grep -vc 'machine-room-scrollbars'` |
+| 9 | the browser test files the branch adds or changes, all but `machine-room-scrollbars.test.ts`, as Firefox ran them | `git diff --name-only 9e7c493 4accc6e -- 'web/tests/browser/*.test.ts' \| grep -vc 'machine-room-scrollbars'` |
 | 13; 13 | `machine-room.test.ts`'s browser cases, in Chromium; in Firefox | `(cd web && pnpm exec vitest run --project browser tests/browser/machine-room.test.ts) 2>&1 \| grep 'Tests  '; (cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=2 pnpm exec vitest run --project firefox tests/browser/machine-room.test.ts) 2>&1 \| grep 'Tests  '` |
-| 330 files; 3705 and 2; 98.25%, 92.73%, 98.77%, 99.45% | the Chromium and node tiers; tests passed and expected to fail; statements, branches, functions and lines | `(cd web && pnpm run test:coverage) 2>&1 \| grep -E 'Test Files\|Tests  \|All files'` |
-| 176 | the 9 files, in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=6 pnpm exec vitest run --project firefox --project firefox-capture tests/browser/{cut-text-app,cut-text,machine-panel-headers,machine-room,machine-row-app,machine-row,mc-panel-layout,result-app,result-values}.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
-| 498 | biome's files | `(cd web && pnpm exec biome ci --error-on-warnings) 2>&1 \| grep Checked` |
-| 224; 20; 23 | `check-comments.mjs`'s self-test cases; its areas; the files it read as changed | `node scripts/check-comments.mjs --self-test 2>&1 \| tail -1; node scripts/check-comments.mjs --base ecc014c 2>&1 \| tail -2` |
+| 332 files; 3734 and 2; 98.25%, 92.72%, 98.77%, 99.45% | the Chromium and node tiers; tests passed and expected to fail; statements, branches, functions and lines | `(cd web && pnpm run test:coverage) 2>&1 \| grep -E 'Test Files\|Tests  \|All files'` |
+| 177 | the 9 files, in Firefox | `(cd web && REDEXTAPE_FIREFOX=1 VITEST_MAX_WORKERS=6 pnpm exec vitest run --project firefox --project firefox-capture tests/browser/{cut-text-app,cut-text,machine-panel-headers,machine-room,machine-row-app,machine-row,mc-panel-layout,result-app,result-values}.test.ts) 2>&1 \| grep -E 'Test Files\|Tests  '` |
+| 500 | biome's files | `(cd web && pnpm exec biome ci --error-on-warnings) 2>&1 \| grep Checked` |
+| 224; 22; 23 | `check-comments.mjs`'s self-test cases; its areas; the files it read as changed | `node scripts/check-comments.mjs --self-test 2>&1 \| tail -1; node scripts/check-comments.mjs --base 9e7c493 2>&1 \| tail -2` |
 | 26 | Node's major version here | `node --version` |
-| 1000, 1600, 800 and 900 px; step 100; two back | the whole-branch review's app drive at `cfcc4e3`, a script kept outside the tree; what `web/src` and the help changed after it: a comment in `style.css` | `git diff --stat cfcc4e3 8df2648 -- web/src web/help.html \| cat` |
+| 1000, 1600, 800 and 900 px; step 100; two back; 1600 px | the whole-branch review's app drive at `a55f4c1`, and the drive after the rebase, by a script kept outside the tree; what `web/src` and the help changed after the first: a comment in `style.css` | `git diff --stat a55f4c1 4accc6e -- web/src web/help.html \| cat` |
