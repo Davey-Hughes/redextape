@@ -84,24 +84,23 @@ function withoutRoom<T>(host: HTMLElement, read: () => T): T {
 
 /**
  * The first width from `from` px up, a step of `by`, at which the room `ONE_NINE` keeps draws fewer tracks than
- * `SHORT`'s, both drawn afresh: where value 0 moves the cells. Each width draws `SHORT` and then `ONE_NINE` again,
- * after a new program, as the cases do.
+ * `SHORT`'s: where value 0 moves the cells. Each width mounts a view of its own and draws `SHORT` and then
+ * `ONE_NINE`, as the cases do, so the width found does not rest on `forget`, which a case of its own holds.
  */
 async function widthWhereRoomMoves(view: View, from: number, by: number): Promise<number> {
-  const { host, pane, draw } = mount(view, from)
-  try {
-    for (let w = from; w < view.wide + 300; w += by) {
-      await resize(host, w)
-      forget(view, pane)
+  for (let w = from; w < view.wide + 300; w += by) {
+    const { host, draw } = mount(view, w)
+    try {
+      await frames()
       draw(SHORT)
       const before = tracks(host)
       draw(ONE_NINE)
       if (tracks(host) < before) return w
+    } finally {
+      host.remove()
     }
-    throw new Error('precondition: no width at which value 0 moves the cells')
-  } finally {
-    host.remove()
   }
+  throw new Error('precondition: no width at which value 0 moves the cells')
 }
 
 /** Tell the view of its program again, as a recompile does, which forgets the room. */
@@ -287,24 +286,23 @@ const named = (refs: number): Counts => ({
 
 /**
  * The first width from `from` px up, a step of `by`, at which the heap line four values name is taller than the one
- * none does, each drawn afresh after a new program.
+ * none does. Each width mounts a view of its own and draws the line none names and then the one four do, as the case
+ * does, so the width found does not rest on `forget`, which the case holds.
  */
 async function widthWhereNamesWrap(view: View, from: number, by: number): Promise<number> {
-  const { host, pane, draw } = mount(view, from)
-  try {
-    for (let w = from; w < view.wide + 300; w += by) {
-      await resize(host, w)
-      forget(view, pane)
-      draw(named(4))
-      const four = heapLine(host).getBoundingClientRect().height
-      forget(view, pane)
+  for (let w = from; w < view.wide + 300; w += by) {
+    const { host, draw } = mount(view, w)
+    try {
+      await frames()
       draw(named(0))
-      if (four > heapLine(host).getBoundingClientRect().height + 1) return w
+      const none = heapLine(host).getBoundingClientRect().height
+      draw(named(4))
+      if (heapLine(host).getBoundingClientRect().height > none + 1) return w
+    } finally {
+      host.remove()
     }
-    throw new Error('precondition: no width at which the names take the heap line onto another line')
-  } finally {
-    host.remove()
   }
+  throw new Error('precondition: no width at which the names take the heap line onto another line')
 }
 
 describe.each(VIEWS)('the lines of the $kind view’s call stack and heap', (view) => {
