@@ -45856,111 +45856,163 @@ with `CARGO_TARGET_DIR` naming the lane's own directory.
 | 0.25.10 | the tree-sitter `check-all.sh` pins | `$TREE_SITTER --version` |
 | 90% | CI's coverage floor | `rg -n 'fail-under-lines' .forgejo/workflows/ci.yml` |
 
-#### A SCREEN READER HEARS EACH λ ROW'S PLACE AMONG ITS SIBLINGS, HEARS share's LINE SAYING A LINK IS LONG, TELLS THE clif VIEW'S TWO RETRY BUTTONS APART, AND HEARS THE HEADER'S AND EACH VIEW'S POPOVER BUTTONS AS BUTTONS THAT OPEN SOMETHING, NOT AS MENUS (2026-11-27, branch `a11y-leftovers` on `main` at #207, 6 commits, this entry among them)
+#### EACH λ ROW TELLS A SCREEN READER ITS PLACE AMONG ITS SIBLINGS, share SAYS IN THE LIVE REGION THAT A LINK IS LONG, THE clif VIEW'S TWO RETRY BUTTONS ARE NAMED APART, AND THE HEADER'S AND EACH VIEW'S POPOVER BUTTONS ARE DISCLOSURES, NOT MENU BUTTONS (2026-11-27 to 28, branch `a11y-leftovers`, `ecc014c..08843d4`, 10 commits, plus this entry)
 
-Four small items left open by earlier entries' *What this did not close*, gathered in a handoff with no request in the
-user's words, and built in a cloud sandbox with no browser. The user chose, on 2026-11-27, answering "1a, 2a, 3a": the
-five buttons that claimed `aria-haspopup="menu"` become disclosures, as `share` and `about ▾` already were, which
-settles the question #121's fix task 4b left open; the two Retry buttons are named "Retry loading clif" and "Retry
-loading machine code"; and the sandbox may install the lockfile's packages and the tools to build the wasm packages.
-The third item needed no ruling: a probe found that neither λ layout ever writes a row more than one level past the row
-above it (*Verification*).
+Four accessibility items from one handoff, the λ rows' set counts and `settings`' `aria-haspopup="menu"` among them,
+which earlier entries left open. The first six commits were drafted in a cloud sandbox with no browser, on Node 22,
+and applied here; the four after them answer the two reviews that ran on this machine. `settings`' change waits on
+Davey's ruling (*What this did not close*).
 
-##### THE CHANGE
-
-- **The λ rows' sibling counts.** `lambda-layout.ts`'s new `treePlaces` gives each row its `aria-setsize` and
-  `aria-posinset` among its siblings, the rows at its level under the same parent, the parent being the nearest
-  shallower row above it. It keeps a stack of the sets still open and counts the whole list in one pass. `LambdaBody`
-  counts it each time its lines change, empties it with them for flat text, and `#row` reads it, since the view draws a
-  window of rows and a set runs on past its edges. Before, every row's set was the whole list: in `g (a b c d) (e f g h)` each row was one
-  of 3, where `g` stands alone and its two arguments are a pair.
-- **share's long-link line.** The link's field takes the focus when the popover shows, before the link is made, and the
-  line saying the link is past 2,000 characters comes with the link. It still describes the field, and is now said
-  once through the live region as well, with `notices.announce`, since the popover already shows it. It is said only
-  while that open's field is on show, so a link that arrives after the popover closed, or opened again, says nothing.
-- **The two Retries.** A clif view with both packages failed shows the listing's notice and the machine code panel's,
-  each with a button reading Retry. `CLIF_COPY.retryName` and `MC_COPY.retryName` name them, as their `aria-label` and
-  their `title`: a name that starts with the word the button shows still answers a spoken "click Retry", and the
-  controls gate holds a control's name to its text or its tooltip.
-- **The disclosures.** `#workspace`, `#examples` and `#settings` in `index.html` and in the browser harness's `SHELL`,
-  and a view's title and `⋯` in `view-header.ts`, lose `aria-haspopup` and keep `aria-controls` and `aria-expanded`.
-  None of their popovers holds a menu item, and none has arrow keys between its items but a radio group's own.
-  `wireMenu`'s doc now names every header popover a disclosure.
-
-##### THE TESTS
-
-- **`tests/node/lambda-layout.test.ts`**, 7 cases for `treePlaces`: a spine at two widths, a broken λ head, an outline's
-  eleven arguments, levels that skip, no rows, and a sweep of 7 terms through both layouts, both ways of writing
-  variables, every width from 1 to 60 and three fold patterns, which holds every row to at most one level past the row
-  above it and to the siblings counted out by hand.
-- **`tests/node/mc-view.test.ts`**: the two names differ and each starts with Retry.
-- **`tests/node/app-header.test.ts`**, reading `index.html`: none of the header's five popover buttons has
-  `aria-haspopup`, and each has `aria-controls` naming its popover and `aria-expanded="false"`.
-- **Browser, written and NOT RUN**: `lambda-body.test.ts`, the counts on known terms and on a 400-argument term drawn in
-  a window; `lambda-tree-app.test.ts` and `app.test.ts`, the number of rows laid out read from the spacer's height,
-  where they read the first row's `aria-setsize`; `share-popover.test.ts`, the line said once in the live region and
-  not drawn as a notice; `clif-pane.test.ts`, both Retries drawn with their names and tooltips, and `mc-pane.test.ts`,
-  the machine code panel's; `about-menu.test.ts`, the five header buttons; `view-title.test.ts`, `view-menu.test.ts`
-  and `view-header.test.ts`, no `aria-haspopup` where they expected `menu`.
-
-##### THE SABOTAGES
-
-Seven, each of a node test, run at the last code commit: the file copied, broken, the test run, the file restored from
-the copy and `cmp` found equal. Every one fired.
-
-| Sabotage | What failed |
+| Commit | What |
 |---|---|
-| `treePlaces` giving every row the whole list, as before | 6 of the 7 `treePlaces` cases |
-| `treePlaces` setting rows by level alone, whatever their parent | 3: a new set under each parent, the nearest shallower parent, and the sweep |
-| the outline's arguments two levels down | 3: two `outlineLines` cases and the sweep's check that no level is skipped |
-| the machine code Retry named Retry | the `mc-view` case |
-| the clif Retry named so it does not start with Retry | the `mc-view` case |
-| `aria-haspopup="menu"` back on `#settings` | the `app-header` case and the harness's `SHELL` case |
-| `aria-controls` off `#examples` | the `app-header` case |
+| `35f4e07` | `lambda-layout.ts`'s `treePlaces`: each λ row's `aria-setsize` and `aria-posinset` among its siblings, which `LambdaBody` counts again whenever its lines change |
+| `fb811f2` | share's line saying a link is long is said once in the live region, with `notices.announce`, as well as describing the link's field |
+| `709003a` | `CLIF_COPY.retryName` and `MC_COPY.retryName`, each Retry's `aria-label` and `title` |
+| `f4a6332` | `#workspace`, `#examples` and `#settings`, in `index.html` and the browser harness's `SHELL`, and a view's title and `⋯` lose `aria-haspopup` |
+| `cdcfa73` | `wireMenu`'s doc names every header popover a disclosure; the clif case with both packages failed holds both Retries drawn |
+| `ec2eb02` | the roadmap only: the sandbox's draft of this entry |
+| `2906d00` | two `share-popover` browser cases hold the line to the open on show |
+| `39f3010` | a `view-title` case named for what it checks |
+| `b64a81d` | a `lambda-body` browser case holds a term drawn over another to being counted by its own rows |
+| `08843d4` | the part 6a spec's §6: a dated amendment, `settings` a disclosure |
 
-No browser case could be sabotaged here.
+##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
 
-##### THE REVIEW
+On screen, only the two Retry buttons: resting on one shows its name, `Retry loading clif` or `Retry loading machine
+code`. The rest is what the page tells a screen reader, read here from the DOM and from Chrome's accessibility tree.
 
-A fresh reviewer read the whole branch's diff and every commit, ran the touched node files, the comment guard, biome
-and three sabotages of its own, each of which fired, and found no defect. It found two things to fix: no roadmap entry
-yet, which this is, and `wireMenu`'s doc setting `share` apart as the one disclosure, now fixed. Of its four nits, a
-test's precondition message and the both-failed clif case not holding its Retries drawn are fixed; two commit subjects
-named the attributes rather than what a reader hears, and one body put the reason for the parent rule backwards, and
-those were reworded before the patches left the sandbox, with no change to the code; and the fourth is under *What
-this did not close*.
+- **The λ rows' set counts.** Each row's `aria-setsize` and `aria-posinset` count it among its siblings, the rows at
+  its level under the same parent, the parent being the nearest shallower row above it. `treePlaces` keeps a stack of
+  the sets still open and counts the whole list in one pass, since the view draws a window of rows and a set runs on
+  past its edges. Before, every row's set was the whole list: in `g (a b c d) (e f g h)` each row was one of 3, where
+  `g` stands alone and its two arguments are a pair.
+- **share's long-link line.** The link's field takes the focus when the popover shows, before the link is made, and a
+  screen reader reads a field's description as the focus lands; the line saying the link is past 2,000 characters
+  comes with the link. It still describes the field, and is now said once in the live region too. It is said only
+  while that open's field is on show: a link that arrives after share was closed, or opened again, says nothing.
+- **The two Retries.** A clif view with both packages failed shows the listing's notice and the machine code panel's,
+  each with a button reading Retry. Each is now named for what it loads, as its `aria-label` and its `title`.
+- **The disclosures.** `#workspace`, `#examples` and `#settings`, and a view's title and `⋯`, lose
+  `aria-haspopup="menu"` and keep `aria-controls` and `aria-expanded`, as `share` and `about` already did. None of
+  their popovers holds a menu item, and none has arrow keys between its items but a radio group's own.
+
+##### DECISIONS
+
+1. **Each Retry's name starts with the word it shows**, so a spoken "click Retry" still finds it, and **its `title` is
+   its name**, so the name a reader hears is one a sighted user can find on the button. The controls gate holds a
+   control's name to its visible text or its `title`. Chrome makes the `title` each Retry's description too, equal
+   to its name.
+2. **The line is said with `notices.announce`, not `notify`**: a notice would draw again what the popover shows.
+3. **`settings` is a disclosure with the other four**, though #121's fix task 4b kept its `aria-haspopup="menu"`
+   and recorded that as open: its popover holds selects, a checkbox and a button, with no menu item and no arrow keys
+   between them. The part 6a spec's §6 is amended to match.
+
+##### HOW EACH WAS SEEN TO FAIL
+
+Each sabotage ran at `08843d4`: the file copied, broken as the row says, the row's tests run, the file restored from
+the copy and `cmp` found equal. The node rows ran `lambda-layout`, `mc-view`, `app-header` and `harness`; the
+browser rows ran in Chromium.
+
+| Sabotage | Tests run | Failed |
+|---|---|---|
+| `treePlaces` giving every row the whole list, as `main` counted | the node files | 6 of 62: every `treePlaces` case but *has nothing to say of no rows* |
+| `treePlaces` finding a row's set by its level alone, closing none | the node files | 3 of 62: a new set under each parent, the nearest shallower parent, and the sweep |
+| the outline's arguments two levels down | the node files | 3 of 62: two `outlineLines` cases and the sweep, which holds no row more than one level past the row above |
+| the machine code Retry named `Retry` | the node files | 1 of 62: `mc-view`'s naming case |
+| the clif Retry named `Load clif again` | the node files | 1 of 62: the same case |
+| `aria-haspopup="menu"` back on `index.html`'s `#settings` | the node files | 2 of 62: `app-header`'s popover-button case and `harness`'s `SHELL` against `index.html` |
+| `aria-controls` off `index.html`'s `#examples` | the node files | 2 of 62: the same two |
+| `LambdaBody`'s rows given `main`'s counts | `lambda-body` | 4 of 43: the code, outline, 400-argument and drawn-over cases |
+| `LambdaBody` counting its first tree's rows only | `lambda-body` | 1 of 43: the drawn-over case |
+| share's `announce` call removed | `share-popover` | 2 of 15: the length-line case and the opened-again case |
+| share's guard removed | `share-popover` | 2 of 15: the opened-again case and the closed case |
+| the guard's `input.isConnected` dropped | `share-popover` | 1 of 15: the opened-again case |
+| the guard's `:popover-open` dropped | `share-popover` | 1 of 15: the closed case |
+| `main.ts` wiring `announce` to `notices.notify` | `share-popover` | 1 of 15: the length-line case, at "not drawn as a notice" |
+| the clif Retry's `aria-label` and `title` removed | `clif-pane` | 2 of 5: the load-failed case and the both-failed case |
+| the clif Retry's `title` alone removed | `clif-pane` | 2 of 5: the same two |
+| the machine code Retry's `aria-label` removed | `clif-pane`, `mc-pane` | 2 of 17: the both-failed case and `mc-pane`'s Retry case |
+| `aria-haspopup` back on a view's title | `view-header`, `view-title` | 2 of 13: one case in each |
+| `aria-haspopup` back on `⋯` | `view-menu` | 1 of 9: the `⋯` disclosure case |
+| `aria-haspopup="menu"` back on `SHELL`'s `#settings` | `about-menu`, `harness` | 2 of 23: `about-menu`'s every-popover-button case and `harness`'s `SHELL` case |
+
+##### THE REVIEWS
+
+- **The first review** read `ecc014c..ec2eb02` and ran it on this machine. It found the code sound, with no Critical
+  and no Important finding and three Minor: nothing held share's guard, as a sabotage removing it left every
+  `share-popover` case passing (answered by `2906d00`); a `view-title` case was still named "a menu" (`39f3010`);
+  and the sandbox's draft entry said that no browser case had run or could be sabotaged.
+- **The whole-branch review** read `ecc014c..39f3010` and found it ready after two Minors: nothing held a body's
+  counts to being made again when its lines change, as a sabotage keeping the first tree's counts left every λ
+  browser case passing (answered by `b64a81d`); and the part 6a spec's §6 still said `settings` keeps
+  `aria-haspopup="menu"`, while `wireMenu`'s doc cites §6 (answered by `08843d4`). It checked in the app, on
+  `fact(4)` in the code layout, that every drawn row's counts equal a count by hand from the rows' levels and that
+  Chrome's tree gives each row the DOM's level; that share in the app says the line once for each open and draws no
+  notice; that nothing in `web/src`, the CSS or a test selector reads `aria-haspopup`; and that `wireMenu`'s doc
+  holds for each of its 5 callers.
 
 ##### WHAT THIS DID NOT CLOSE
 
-- **Not run: any browser case, in Chromium or Firefox, or a screen reader.** What a reader says for the λ rows, for
-  share's line in the live region and its description, and for a button whose `title` repeats its name was not heard.
-- **In the code layout a broken λ head's body and its application's arguments are siblings**, as their `aria-level`s
-  make them: in `(\x. x x x x) y`, the body is 1 of 2 and `y` 2 of 2. The counts follow the levels; whether the levels
-  should differ there is a question for the accessibility close-out.
+- **`settings` waits on Davey's ruling.** #121's fix task 4b kept `aria-haspopup="menu"` on `settings` and
+  recorded it as open, with no reason in the tracked text. If it stays a menu button, the attribute goes back on
+  `index.html`'s and `SHELL`'s `#settings`, `app-header.test.ts`'s page-wide check becomes a check per button,
+  `settings` leaves `about-menu.test.ts`'s loop and `wireMenu`'s doc, and §6's amendment of 2026-11-28 goes.
+- **A broken λ head's body and its application's arguments are siblings in the code layout**, as their `aria-level`s
+  make them: in `(\x. x x x x) y` at width 8, the body's head `x` is 1 of 2 and `y` 2 of 2
+  (`lambda-layout.test.ts`'s broken-head case). The counts follow the levels; whether the levels should differ there
+  is left for Plan 7 part 7.
+- **Not heard: a screen reader.** What one says for the λ rows, for share's line in the live region and as the
+  field's description, and for a Retry whose description repeats its name, was read from Chrome's tree. Firefox was
+  not run; CI runs no Firefox project.
 - **The header's popovers are still called menus** in the app's words and class names (the workspace menu,
   `.header-menu`): only the ARIA claim changed.
-- **The handoff's other leftovers stay open**: a λ mark said on its first row only, a count hidden when it has no room,
-  Chromium's empty width box, the term map's clickable `role="img"`, a clamp notice said three times, and Plan 7 part 7.
-- **Branches in flight touch the same files**: hidden-recording-b changes the harness, `view-title.test.ts`,
-  `app.test.ts`, `lambda-tree-app.test.ts`, `share-popover.test.ts` and `main.ts`; move-a-view changes `view-header.ts`
-  and `view-menu.test.ts`; listing-follows-end will change `clif-pane.ts`.
+- **The handoff's other leftovers stay open**: a λ mark said on its first row only, a count hidden when it has no
+  room, Chromium's empty width box, the term map's clickable `role="img"`, a clamp notice said three times, and
+  Plan 7 part 7.
+- **The llvm view's Retry.** `llvm-ir-view-2a` adds a Retry with no `retryName`; once both are on `main` it wants
+  `Retry loading llvm`, as its `aria-label` and `title`.
+- **`ec2eb02`'s body** describes the sandbox's draft entry, which no longer stands. Commits are not rewritten, so a
+  squash message should not carry it.
+- **The sandbox's open questions.** The broken λ head is above. Its `share-link.test.ts` failures under Node 22 do
+  not reproduce here, where the node tier passes under Node 26.13.1. The browser tier, `test:coverage` and the lua
+  scan, which it could not run, ran here (*Verification*). On rebasing past the branches in flight: `git merge-tree`
+  of this branch with each of 12 of them finds a conflict in no file this branch changes but the roadmap.
 
 ##### VERIFICATION
 
-In the sandbox, on Node 22.23.5 and Rust 1.100.0, after `pnpm install --frozen-lockfile` and the five wasm packages
-built with `wasm-pack build --release --no-opt`, at the last code commit; the commands run from the repository's root.
+On this machine: Node 26.13.1, pnpm 11.20.0, vitest 4.1.12, Google Chrome 158.0.8127.88, and rustc 1.100.0 for the
+bindings `pnpm run typecheck` builds. The wasm packages were built from this worktree, whose `crates/` are
+`ecc014c`'s. Browser runs held the machine's browser lock, `test:coverage` and `typecheck` its heavy-build lock
+too, and every suite ran in a systemd scope with `MemoryMax=16G`.
 
-| Leg | Result |
+| Run, at `08843d4`, from `web/` | Result |
 |---|---|
-| `pnpm run typecheck`, from `web/` | exit 0 |
-| `vitest run --project node`, from `web/` | 87 files, 1 failed; 1657 passed, 3 failed, 1 skipped: the 3 are `share-link.test.ts`'s, which fail the same way on `main` at #207 on Node 22, not checked on Node 26 |
-| the four touched node files, `lambda-layout`, `mc-view`, `app-header` and `harness` | 62 passed; the sweep laid out 7,854 rows |
-| `pnpm run build:app`, from `web/` | exit 0 |
-| `biome ci --error-on-warnings`, from `web/` | 494 files, no fixes applied |
-| `node scripts/check-comments.mjs --self-test`, then `--base` main at #207 | 224 cases pass; 20 areas within their budget, no history and no grown block |
-| the scans text-bytes, citations, attributions, doc-figures, shared-docs, colours and grammar-wasm, each `--self-test` then the scan | exit 0, each |
-| `check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check, from `web/` | exit 0, each |
-| the level probe, a script kept outside the repository: every `wireOf` source in `web/tests/node` and 400 seeded random terms, each through both layouts, both ways of writing variables, widths 1 to 80 and three fold patterns | 37 sources, 419,520 layouts, 826,645 rows, 0 rows more than one level past the row above, 0 first rows off level 1 |
+| `pnpm run test:coverage`, CI's web gate: the node tier, the Chromium tier and the coverage floors | exit 0; 327 files; 3691 tests passed and 2 expected to fail; statements 98.25%, branches 92.72%, functions 98.76%, lines 99.45% |
+| `pnpm exec vitest run --project node` | 88 files and 1662 tests passed |
+| `pnpm run typecheck`; `pnpm run build:app` | exit 0 each |
+| `pnpm exec biome ci --error-on-warnings` | exit 0, 495 files |
+| the eight scans, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and lua, each `--self-test` then the scan; `check-comments.mjs --self-test`, then `--base origin/main`; `check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check | exit 0 each, on the tree that holds this entry |
 
-**Not run**: the browser tier, `test:coverage` and `test:firefox`, which need a browser; the lua scan, as `lua5.4` is
-not installed; the Rust, LLVM and `cargo-deny` legs, as no file under `crates/` changed.
+**Not run:** the Rust jobs, `cargo llvm-cov` and `check-slow.sh`, as no file under `crates/` changes; Firefox; a
+screen reader.
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root, or from `web/`
+where they start with `pnpm`, with `08843d4` checked out and this entry in the tree. A long command's output went
+to a file, `$LOG`, which the row's filter read.
+
+| Value | What | Produced by |
+|---|---|---|
+| 10: `35f4e07`, `fb811f2`, `709003a`, `f4a6332`, `cdcfa73`, `ec2eb02`, `2906d00`, `39f3010`, `b64a81d`, `08843d4` | the commits on `ecc014c` to the last code commit, oldest first | `git rev-list --count ecc014c..08843d4; git log --reverse --format=%h ecc014c..08843d4` |
+| 6; 2; 2 | the sandbox's commits, `35f4e07` to `ec2eb02`; the first fix round's; the second's | `git rev-list --count ecc014c..ec2eb02; git rev-list --count ec2eb02..39f3010; git rev-list --count 39f3010..08843d4` |
+| 26.13.1; 11.20.0; 4.1.12; 158.0.8127.88; 1.100.0 | Node; pnpm; vitest; Chrome; rustc | `node --version; pnpm --version; pnpm exec vitest --version; google-chrome-stable --version; rustc --version` |
+| 0 | lines of `git diff --stat` under `crates/` | `git diff --stat ecc014c 08843d4 -- crates \| wc -l` |
+| 3, 3, 3; 1, 2, 2 | `aria-setsize` of `g (a b c d) (e f g h)`'s three rows at width 12, with `main`'s counts and with the branch's | the sabotage table's `main`'s-counts row, `grep -m1 AssertionError $LOG` |
+| 2,000 | the length past which share says a link is long | `grep -n 'LONG_LINK =' web/src/share-popover.ts` |
+| 1 of 2; 2 of 2; width 8 | `(\x. x x x x) y`'s body head and `y`, and the width the case lays it out at | `grep -n "x x x x) y', 8" web/tests/node/lambda-layout.test.ts`, then `pnpm exec vitest run --project node tests/node/lambda-layout.test.ts -t 'broken head'`, passed |
+| each *Failed* count and its total | the sabotage table | each row's file copied and broken as the row says; `pnpm exec vitest run --project node tests/node/lambda-layout.test.ts tests/node/mc-view.test.ts tests/node/app-header.test.ts tests/node/harness.test.ts` for a node row, `--project browser` and the row's files for a browser row, and both projects for `SHELL`'s row; its `Tests` line and its `FAIL` lines; the file restored from the copy, `cmp` |
+| 62 | the node files' tests, all passed | the node row's command above with nothing broken, its `Tests` line |
+| 5 | `wireMenu`'s callers | `git grep -n 'wireMenu(' 08843d4 -- web/src/main.ts \| wc -l` |
+| exit 0; 327; 3691 and 2; 98.25, 92.72, 98.76, 99.45 | `test:coverage`: its exit; files; tests passed and expected to fail; statements, branches, functions and lines covered | `pnpm run test:coverage > $LOG 2>&1; echo $?`, then `grep -E 'Test Files\|Tests \|^(Statements\|Branches\|Functions\|Lines)' $LOG` |
+| 88, 1662 | the node tier: files and tests, all passed | `pnpm exec vitest run --project node`, its `Test Files` and `Tests` lines |
+| 495 | the files `biome ci` checked | `pnpm exec biome ci --error-on-warnings`, its `Checked` line |
+| 12; 11; 0 | the branches in flight merged with this one; those with a conflict in the roadmap; those with a conflict in another file this branch changes | `for b in big-literals function-results function-results-everywhere hidden-recording-b licence-pin listing-follows-end llvm-ir-text llvm-ir-view-2a llvm-prefix-names mc-followups move-a-view squeezed-values; do git merge-tree --write-tree --name-only 08843d4 "$b"; done`, each list against `git diff --name-only ecc014c 08843d4` |
