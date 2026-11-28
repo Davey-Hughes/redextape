@@ -122,9 +122,8 @@ function is(p: Rgba, hex: string): boolean {
 }
 
 /**
- * The least share of an icon's pixels that is the ribbon's red, and the shadow's. The art leaves about a sixth to a
- * quarter of each icon red and over a hundredth shadow, the 16 px frame the least of both; a frame drawn blank, or
- * without the leg's shadow, has none.
+ * The least share of an icon's pixels that is the ribbon's red, and the shadow's: under what the art leaves in every
+ * icon, while a frame drawn blank, or without the leg's shadow, has none.
  */
 const LEAST_SHARE = { ribbon: 1 / 8, shadow: 1 / 128 } as const
 

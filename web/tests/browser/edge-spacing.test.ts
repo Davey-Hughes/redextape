@@ -22,7 +22,8 @@ import {
  * tapes and the highlight bands run edge to edge; its rows — the header, the TM status line — carry the gap instead,
  * and a row added without it fails here. What lies outside the views is held to the window's edges alone. Each case
  * asserts first that it measures something: the four views, items in each, a header wrapped at 390 px, and the rows the
- * design names, the wordmark, its logo wider than a phone, and the strip among the items. ONE MOUNT FOR THE FILE, for the reason `app.test.ts` gives.
+ * design names, the wordmark, its logo wider than a phone, and the strip among the items. ONE MOUNT FOR THE FILE, for
+ * the reason `app.test.ts` gives.
  */
 
 const THRESHOLD = 4
@@ -93,8 +94,8 @@ function unclipped(box: Box, from: Element | null): Box {
 /**
  * `box` as an item, with the sides an overflow ancestor clips marked `cut`; `null` where the clip leaves less than a
  * pixel of it. A cut side is not measured: it is content scrolled past an edge, or cut with an ellipsis, not a layout
- * gap. A text node's clip starts at its parent, which may itself scroll it; a control's or an image's at its parent, since
- * an element's own overflow clips its content, not its box.
+ * gap. A text node's clip starts at its parent, which may itself scroll it; a control's or an image's at its parent,
+ * since an element's own overflow clips its content, not its box.
  */
 function item(kind: Item['kind'], el: Element, box: Box, label: string): Item | null {
   const v = unclipped(box, kind === 'text' ? el : el.parentElement)
