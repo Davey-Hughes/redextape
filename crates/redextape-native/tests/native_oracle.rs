@@ -77,8 +77,10 @@ use redextape_core::lambda::{LambdaRun, MAX_REDUCTION_STEPS, decode, run_lambda}
 use redextape_core::parser::parse;
 use redextape_core::tm::{
     Binary, DEFAULT_CAPS, Encoding, EncodingKind, MAX_FIELD_WIDTH, RxmRun, TM_DEFAULT_CAPS, TmRun, Unary, decode_rxm,
-    decode_tape, lower_program, run_rxm, run_tm, run_tm_fitted,
+    decode_rxm_ty_opaque, decode_tape, lower_program, run_rxm, run_tm, run_tm_fitted,
 };
+use redextape_core::ty::Ty;
+use redextape_core::typeck::result_type;
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{NativeRun, run_native};
@@ -160,13 +162,15 @@ fn tm_leg(core: &Core, kind: EncodingKind) -> (TmRun, Box<dyn Encoding>) {
 
 /// reference == λ == TM(`kind`) == native, guided by the reference value's type. All four must run to
 /// a value that decodes equal. A function in the result is compared as the opaque `Value::Function`,
-/// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`).
+/// the one thing every leg can report of it (see `FUNCTION_RESULT_DEMOS`). The native leg is read twice, by
+/// the witness decoder and by `decode_rxm_ty_opaque`, and both must agree.
 ///
 /// Genuinely FOUR-way, and that is not an accident of naming: each emitted test runs ONE encoding, so
 /// its name states its real arity. It is the FILE that covers five legs, not any single test — see the
 /// module doc's "LEGS, not backends" note.
 fn assert_four_way(src: &str, kind: EncodingKind) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+    let ty = result_ty(src);
     let core = core_of(src);
     let lambda = run_lambda(&core, MAX_REDUCTION_STEPS);
     let (tm, tm_enc) = tm_leg(&core, kind);
@@ -181,7 +185,8 @@ fn assert_four_way(src: &str, kind: EncodingKind) {
                 "reference vs {}-TM disagree for: {src}",
                 kind.name()
             );
-            assert_eq!(decode_rxm(&outcome, &reference), Some(want), "reference vs native disagree for: {src}");
+            assert_eq!(decode_rxm(&outcome, &reference), Some(want.clone()), "reference vs native disagree for: {src}");
+            assert_eq!(decode_rxm_ty_opaque(&outcome, &ty), Some(want), "native's type decode for: {src}");
         }
         (l, t, n) => panic!(
             "four-way oracle mismatch for {src} ({}):\n  reference={reference:?}\n  lambda={l:?}\n  tm={t:?}\n  native={n:?}",
@@ -190,11 +195,20 @@ fn assert_four_way(src: &str, kind: EncodingKind) {
     }
 }
 
+/// `src`'s result type, which `decode_rxm_ty_opaque` reads a machine outcome by.
+fn result_ty(src: &str) -> Ty {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors for `{src}`: {ds:?}");
+    result_type(&prog.unwrap()).unwrap_or_else(|e| panic!("type errors in `{src}`: {e:?}"))
+}
+
 /// Native's primary new cross-check: `run_native` and `run_rxm` on the SAME lowered `Program` decode
 /// to the same `Value`. Since both share `lower_rxm`/`defunc`, this isolates codegen (compile) from
-/// interpretation.
+/// interpretation. Each leg is read twice, by the witness decoder and by `decode_rxm_ty_opaque`, and
+/// both must agree.
 fn assert_native_matches_rxm(src: &str) {
     let reference = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
+    let ty = result_ty(src);
     let core = core_of(src);
     let prog = lower_program(&core).unwrap_or_else(|e| panic!("lowering failed for `{src}`: {e:?}"));
     let rxm = run_rxm(&prog, DEFAULT_CAPS);
@@ -203,8 +217,10 @@ fn assert_native_matches_rxm(src: &str) {
         (RxmRun::Ran(rxm_outcome), NativeRun::Ran(native_outcome)) => {
             let rxm_val = decode_rxm(&rxm_outcome, &reference);
             assert_eq!(rxm_val, Some(reference.observable()), "rxm-interp vs reference disagree for: {src}");
+            assert_eq!(decode_rxm_ty_opaque(&rxm_outcome, &ty), rxm_val, "rxm-interp's type decode for: {src}");
             let native_val = decode_rxm(&native_outcome, &reference);
             assert_eq!(native_val, rxm_val, "native vs rxm-interp disagree for: {src}");
+            assert_eq!(decode_rxm_ty_opaque(&native_outcome, &ty), native_val, "native's type decode for: {src}");
         }
         (a, n) => panic!("native vs rxm-interp mismatch for {src}:\n  rxm={a:?}\n  native={n:?}"),
     }

@@ -27,7 +27,9 @@
 use proptest::prelude::*;
 use redextape_core::desugar::desugar;
 use redextape_core::parser::parse;
-use redextape_core::tm::{DEFAULT_CAPS, RxmRun, decode_rxm_reason, lower_program, run_rxm};
+use redextape_core::tm::{DEFAULT_CAPS, RxmRun, decode_rxm_reason, decode_rxm_ty_opaque, lower_program, run_rxm};
+use redextape_core::ty::Ty;
+use redextape_core::typeck::result_type;
 use redextape_core::value::Value;
 use redextape_core::{RunError, run};
 use redextape_native::{Codegen, NativeRun, OptLevel, run_native_with};
@@ -42,12 +44,24 @@ const OPT_LEVELS: [OptLevel; 6] = [OptLevel::O0, OptLevel::O1, OptLevel::O2, Opt
 
 /// Decode a `NativeRun` that must have produced a value, panicking with `label` for context
 /// otherwise -- every call site here expects `Ran`, so a `Fault`/`HitCap`/`LowerError` is itself the
-/// bug the oracle exists to catch.
-fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
+/// bug the oracle exists to catch. The outcome is read twice, by the witness decoder and by
+/// `decode_rxm_ty_opaque` at `ty`, and both must agree.
+fn ran(run: &NativeRun, expected: &Value, ty: &Ty, label: &str) -> Value {
     match run {
-        NativeRun::Ran(o) => decode_rxm_reason(o, expected).unwrap_or_else(|e| panic!("{label}: decode failed: {e:?}")),
+        NativeRun::Ran(o) => {
+            let value = decode_rxm_reason(o, expected).unwrap_or_else(|e| panic!("{label}: decode failed: {e:?}"));
+            assert_eq!(decode_rxm_ty_opaque(o, ty), Some(value.clone()), "{label}: type decode");
+            value
+        }
         other => panic!("{label}: expected Ran, got {other:?}"),
     }
+}
+
+/// `src`'s result type, which `decode_rxm_ty_opaque` reads a machine outcome by.
+fn result_ty(src: &str) -> Ty {
+    let (prog, ds) = parse(src);
+    assert!(ds.is_empty(), "parse errors for `{src}`: {ds:?}");
+    result_type(&prog.unwrap()).unwrap_or_else(|e| panic!("type errors in `{src}`: {e:?}"))
 }
 
 /// `reference == cranelift == llvm` for every `OptLevel`, with an explicit `cranelift == llvm`
@@ -61,19 +75,20 @@ fn ran(run: &NativeRun, expected: &Value, label: &str) -> Value {
 fn assert_cross_backend_agree(src: &str) {
     let witness = run(src).unwrap_or_else(|e| panic!("reference run failed for `{src}`: {e:?}"));
     let reference = witness.observable();
+    let ty = result_ty(src);
     let core = core_of(src);
 
     let mut cl_values = Vec::new();
     for opt in OPT_LEVELS {
         let cl = run_native_with(&core, DEFAULT_CAPS, Codegen::Cranelift { opt });
-        let cl_value = ran(&cl, &witness, &format!("cranelift {opt:?} `{src}`"));
+        let cl_value = ran(&cl, &witness, &ty, &format!("cranelift {opt:?} `{src}`"));
         assert_eq!(cl_value, reference, "cranelift {opt:?} vs reference disagree for: {src}");
         cl_values.push(cl_value);
     }
 
     for (opt, cl_value) in OPT_LEVELS.into_iter().zip(&cl_values) {
         let llvm = run_native_with(&core, DEFAULT_CAPS, Codegen::Llvm { opt });
-        let llvm_value = ran(&llvm, &witness, &format!("llvm {opt:?} `{src}`"));
+        let llvm_value = ran(&llvm, &witness, &ty, &format!("llvm {opt:?} `{src}`"));
         assert_eq!(llvm_value, reference, "llvm {opt:?} vs reference disagree for: {src}");
         assert_eq!(&llvm_value, cl_value, "llvm {opt:?} vs cranelift {opt:?} disagree for: {src}");
     }
