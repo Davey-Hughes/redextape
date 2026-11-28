@@ -20,14 +20,23 @@ const [RIBBON, SHADOW] = [artColour('fill'), artColour('stroke')]
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 /** Each entry of an ICO's directory, as its 16 bytes state it. */
-function entries(
-  ico: Buffer,
-): { width: number; height: number; planes: number; bits: number; bytes: number; at: number }[] {
+function entries(ico: Buffer): {
+  width: number
+  height: number
+  colours: number
+  reserved: number
+  planes: number
+  bits: number
+  bytes: number
+  at: number
+}[] {
   return Array.from({ length: ico.readUInt16LE(4) }, (_, i) => {
     const e = ico.subarray(6 + 16 * i, 22 + 16 * i)
     return {
       width: e.readUInt8(0),
       height: e.readUInt8(1),
+      colours: e.readUInt8(2),
+      reserved: e.readUInt8(3),
       planes: e.readUInt16LE(4),
       bits: e.readUInt16LE(6),
       bytes: e.readUInt32LE(8),
@@ -135,10 +144,14 @@ describe('favicon.ico', () => {
 
   it('is an icon file of three frames, 16, 32 and 48 px square, each 32-bit', () => {
     expect([ico.readUInt16LE(0), ico.readUInt16LE(2), ico.readUInt16LE(4)], 'reserved, type, count').toEqual([0, 1, 3])
-    expect(entries(ico).map(({ width, height, planes, bits }) => [width, height, planes, bits])).toEqual([
-      [16, 16, 1, 32],
-      [32, 32, 1, 32],
-      [48, 48, 1, 32],
+    // A 32-bit frame has no palette, so its colour count is 0, and the format holds the byte after it 0.
+    expect(
+      entries(ico).map((e) => [e.width, e.height, e.colours, e.reserved, e.planes, e.bits]),
+      'width, height, colours, reserved, planes, bits',
+    ).toEqual([
+      [16, 16, 0, 0, 1, 32],
+      [32, 32, 0, 0, 1, 32],
+      [48, 48, 0, 0, 1, 32],
     ])
   })
 
