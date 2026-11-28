@@ -86,12 +86,12 @@ pub fn decode_tape_reason(tapes: &[Tape], expected: &Value, enc: &dyn Encoding) 
 /// Decode the final `tapes` against a TYPE rather than a `Value` shape witness — what a reader holding
 /// only a `.tm` file has, since a file records its `result` type but has no reference run.
 ///
-/// A SIBLING of `decode_tape`, not a replacement for it (spec D6). They share the tape read above and
-/// nothing else, because they disagree on purpose on a nil result under a `Cons` witness, on `Unit`,
-/// and on a function, which only `decode_tape_ty_opaque` reads. `decode_tape`'s nil strictness is what
-/// makes the oracle catch a machine that returned a SHORTER list, so it cannot be expressed over this
-/// one — and the reverse needs a `Value -> Ty` function that is partial, since `Value::Nil` carries no
-/// element type. `rxm.rs` keeps `decode_rxm` and `decode_rxm_ty` side by side for the same reason.
+/// A SIBLING of `decode_tape`, not a replacement for it (spec D6). They share the tape read above and nothing else,
+/// because they disagree on purpose on a nil result under a `Cons` witness, on `Unit`, and on a function, which
+/// `decode_tape` reads and this one refuses (`decode_tape_ty_opaque` reads one too). `decode_tape`'s nil strictness
+/// is what makes the oracle catch a machine that returned a SHORTER list, so it cannot be expressed over this one —
+/// and the reverse needs a `Value -> Ty` function that is partial, since `Value::Nil` carries no element type.
+/// `rxm.rs` keeps `decode_rxm` and `decode_rxm_ty` side by side for the same reason.
 ///
 /// Seeds a fresh `MAX_DECODE_NODES` budget for this call, same as `decode_rxm_ty` — `tapes` and `ty`
 /// both come from a `.tm` FILE here, so both the heap's acyclicity (the spine loop's job) and its

@@ -46,11 +46,11 @@ pub fn decode(nf: &LambdaTerm, expected: &Value) -> Option<Value> {
 /// only printed λ text has, since a bare normal form is ambiguous (`church(0)` and `false` are the
 /// same term) and there is no reference run to disambiguate it.
 ///
-/// A SIBLING of `decode`, not a replacement for it. They disagree on purpose on nil under a `Cons`
-/// witness, on `Unit`, and on a function, which only `decode_lambda_ty_opaque` reads. `decode`'s nil
-/// strictness is what makes the oracle catch a backend that returned a SHORTER list, so it cannot be
-/// expressed over this one — and the reverse needs a `Value -> Ty` function that is partial, since
-/// `Value::Nil` carries no element type. `tm::decode` and `rxm` keep their decoders side by side too.
+/// A SIBLING of `decode`, not a replacement for it. They disagree on purpose on nil under a `Cons` witness, on
+/// `Unit`, and on a function, which `decode` reads and this one refuses (`decode_lambda_ty_opaque` reads one too).
+/// `decode`'s nil strictness is what makes the oracle catch a backend that returned a SHORTER list, so it cannot be
+/// expressed over this one — and the reverse needs a `Value -> Ty` function that is partial, since `Value::Nil`
+/// carries no element type. `tm::decode` and `rxm` keep their decoders side by side too.
 ///
 /// Unlike the TM pair there is nothing to share: both take the term directly, with no analogue of
 /// `read_result`'s tape read.
