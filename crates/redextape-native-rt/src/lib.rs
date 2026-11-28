@@ -8,9 +8,12 @@
 //! This crate is split out from `redextape-native` (which depends on Cranelift) so its `rt_*`
 //! functions can be **linked** into a standalone AOT binary without dragging Cranelift along:
 //! `crate-type = ["rlib", "staticlib"]` — the JIT registers these as in-process fn pointers via the
-//! rlib, while an AOT object resolves its `rt_*` imports against `libredextape_native_rt.a`. Every
-//! `rt_*` function below is `#[unsafe(no_mangle)]` so its linker symbol is the literal name
-//! (`rt_cons`, `rt_head`, …) rather than a mangled Rust symbol — required for the staticlib case.
+//! rlib, while an AOT object resolves its `rt_*` imports against `libredextape_native_rt.a`. With the
+//! `link-names` feature, on by default, every `rt_*` function below is `#[unsafe(no_mangle)]` so its
+//! linker symbol is the literal name (`rt_cons`, `rt_head`, …) rather than a mangled Rust symbol —
+//! required for the staticlib case, and for no other: the JITs bind each function by address. A
+//! `no_mangle` function is exported from every `cdylib` that links the crate, so `redextape-clif`,
+//! which calls the runtime from Rust in a wasm32 build, turns the feature off.
 
 // Test code is exempt from `pedantic`, for the reason `clippy.toml` gives for the
 // unwrap/expect/panic set: an assertion is a deliberate panic, and a probe that casts a `u64` step
@@ -241,7 +244,7 @@ impl<T: Tags> Runtime<T> {
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call (the
 /// pointer the JIT-generated code was handed for this run).
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
     unsafe { &mut *rt }.cons((h, ()), (t, ()))
 }
@@ -251,7 +254,7 @@ pub unsafe extern "C" fn rt_cons(rt: *mut Runtime, h: u64, t: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
     unsafe { &mut *rt }.head(p)
 }
@@ -261,7 +264,7 @@ pub unsafe extern "C" fn rt_head(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
     unsafe { &mut *rt }.tail(p)
 }
@@ -271,7 +274,7 @@ pub unsafe extern "C" fn rt_tail(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
     u64::from(heap::is_empty(p))
 }
@@ -281,7 +284,7 @@ pub unsafe extern "C" fn rt_is_empty(_rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
     unsafe { &mut *rt }.new_box((v, ()))
 }
@@ -291,7 +294,7 @@ pub unsafe extern "C" fn rt_box(rt: *mut Runtime, v: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
     unsafe { &mut *rt }.box_get(p)
 }
@@ -301,7 +304,7 @@ pub unsafe extern "C" fn rt_box_get(rt: *mut Runtime, p: u64) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
     unsafe { &mut *rt }.box_set(p, (v, ()));
 }
@@ -312,7 +315,7 @@ pub unsafe extern "C" fn rt_box_set(rt: *mut Runtime, p: u64, v: u64) {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
     unsafe { &mut *rt }.tick()
 }
@@ -330,7 +333,7 @@ pub unsafe extern "C" fn rt_tick(rt: *mut Runtime) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
     unsafe { &mut *rt }.enter()
 }
@@ -342,7 +345,7 @@ pub unsafe extern "C" fn rt_enter(rt: *mut Runtime) -> u64 {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_leave(rt: *mut Runtime) {
     unsafe { &mut *rt }.leave();
 }
@@ -355,7 +358,7 @@ pub unsafe extern "C" fn rt_leave(rt: *mut Runtime) {
 ///
 /// # Safety
 /// `rt` must be a valid, non-null, non-aliased `*mut Runtime` for the duration of the call.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_faulted(rt: *mut Runtime) -> u64 {
     unsafe { &*rt }.faulted()
 }
@@ -489,7 +492,7 @@ pub const RUN_STACK_SIZE: usize = 512 << 20;
 /// # Safety
 /// `main_fn` must be the finalized `$main` (`extern "C" fn(*mut Runtime) -> u64`); `config_ptr`/
 /// `config_len` must describe a CONFIG blob produced by `emit_object`.
-#[unsafe(no_mangle)]
+#[cfg_attr(feature = "link-names", unsafe(no_mangle))]
 pub unsafe extern "C" fn rt_run(
     main_fn: extern "C" fn(*mut Runtime) -> u64,
     config_ptr: *const u8,
@@ -499,7 +502,7 @@ pub unsafe extern "C" fn rt_run(
     // `config.len() as i64` (see that function), baked into the emitted object as a compile-time
     // constant and widened back to u64 for this `extern "C"` signature — that blob is 32 bytes of
     // `Caps`/`depth_cap` plus a handful of `Ty` tag bytes (`aot::serialize_ty`), so it can never
-    // approach `usize::MAX` from that path. This symbol is `#[unsafe(no_mangle)]` in a `staticlib`
+    // approach `usize::MAX` from that path. This symbol is `#[unsafe(no_mangle)]` in the `staticlib`
     // built for foreign linking, though, so nothing stops an external caller from passing something
     // else: a `config_len` this cast does not represent losslessly still only reaches
     // `config::deserialize` on a short slice, which exits 4 rather than reading out of bounds.

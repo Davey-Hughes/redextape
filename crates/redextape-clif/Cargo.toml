@@ -13,7 +13,8 @@ workspace = true
 redextape-core = { path = "../redextape-core", features = ["serde"] }
 # `clif` alone builds CLIF with no ISA, which a wasm32 build needs; the JIT's features do not build there.
 redextape-native = { path = "../redextape-native", default-features = false, features = ["clif"] }
-redextape-native-rt = { path = "../redextape-native-rt" }
+# Without `link-names`: the stepper calls the runtime from Rust, and `pkg-clif/` has no use for its linker symbols.
+redextape-native-rt = { path = "../redextape-native-rt", default-features = false }
 redextape-wire = { path = "../redextape-wire" }
 cranelift-codegen = { version = "0.137.2", default-features = false }
 cranelift-interpreter = "0.137.2"

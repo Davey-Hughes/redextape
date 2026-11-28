@@ -9,6 +9,14 @@ license = "GPL-3.0-only"
 # libredextape_native_rt.a to resolve its rt_* imports.
 crate-type = ["rlib", "staticlib"]
 
+[features]
+# Gives each `rt_*` function its own name as its linker symbol, which the AOT link resolves the emitted
+# object's imports by. `aot.rs` names it when it builds the staticlib, and it is on by default, so a plain
+# `cargo build -p redextape-native-rt` builds one that links too. A crate that only calls the runtime from Rust
+# turns it off, since every `cdylib` it ends up in would otherwise export every `rt_*` symbol for no caller.
+default = ["link-names"]
+link-names = []
+
 [dependencies]
 redextape-core = { path = "../redextape-core" }
 

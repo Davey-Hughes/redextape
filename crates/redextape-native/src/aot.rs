@@ -266,39 +266,40 @@ fn selected_linker(opts: &LinkOptions) -> Option<String> {
 /// The staticlib built by `redextape-native-rt` that resolves `emit_object`'s `rt_*` imports.
 const RT_STATICLIB: &str = "libredextape_native_rt.a";
 
-/// Locate `libredextape_native_rt.a` under the cargo target directory, building
-/// `redextape-native-rt` first if it isn't there yet.
+/// Locate `libredextape_native_rt.a` under the cargo target directory, after building
+/// `redextape-native-rt` with its `link-names` feature.
 ///
 /// The target dir is `$CARGO_TARGET_DIR` if set, else `{workspace-root}/target` where
 /// workspace-root is this crate's manifest dir joined with `../..`. Prefers the `debug` profile
 /// subdir over `release` (whichever exists; `debug` tried first, matching a plain `cargo build`).
-/// If the staticlib is missing from both, shells out `cargo build -p redextape-native-rt` and
-/// re-checks once; if it's still missing, returns `AotError::NoStaticlib`. Total: a failure to
-/// locate or build the staticlib is always a returned error, never a panic.
+/// A failed build is not an error by itself: `AotError::NoStaticlib` comes only when neither subdir
+/// holds the staticlib after it. Total: every failure is a returned error, never a panic.
 fn locate_staticlib() -> Result<std::path::PathBuf, AotError> {
     let target_dir = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
         || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("target"),
         std::path::PathBuf::from,
     );
 
-    let find = || ["debug", "release"].into_iter().map(|p| target_dir.join(p).join(RT_STATICLIB)).find(|p| p.is_file());
-
-    if let Some(p) = find() {
-        return Ok(p);
-    }
-
-    // Not built yet (or cleaned): best-effort build, then re-check once. Any failure to spawn or
-    // complete `cargo` here just falls through to `NoStaticlib` below -- never a panic.
+    // Built every time, not only when none is found: one already in place may lack the `rt_*` names
+    // the object imports (a hand-run `--no-default-features` build leaves such a staticlib), and every
+    // link against it would fail. Cargo leaves a fresh build as it is. A failure to spawn or complete
+    // `cargo` leaves the search below to find what is there -- never a panic.
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let _ = std::process::Command::new(cargo).args(["build", "-p", "redextape-native-rt"]).output();
+    let _ = std::process::Command::new(cargo)
+        .args(["build", "-p", "redextape-native-rt", "--features", "link-names"])
+        .output();
 
-    find().ok_or(AotError::NoStaticlib)
+    ["debug", "release"]
+        .into_iter()
+        .map(|p| target_dir.join(p).join(RT_STATICLIB))
+        .find(|p| p.is_file())
+        .ok_or(AotError::NoStaticlib)
 }
 
 /// Link an emitted object (`emit_object`'s output) into a runnable executable at `out`.
 ///
-/// Writes `obj` to a temp `.o` file next to `out`, locates the runtime staticlib (building it if
-/// needed), then invokes `cc` with the selected linker (`selected_linker`); a `strip: true` option
+/// Writes `obj` to a temp `.o` file next to `out`, locates the runtime staticlib (building it
+/// first), then invokes `cc` with the selected linker (`selected_linker`); a `strip: true` option
 /// adds `-Wl,-s`. If the selected non-default linker fails, falls back to one retry with the
 /// platform's default linker before giving up. Best-effort: a missing `cc`/linker/staticlib or a
 /// failing link is a returned `AotError` (`NoLinker`/`NoStaticlib`/`Link`), never a panic.

@@ -9,14 +9,17 @@ default = ["cranelift"]
 # `clif` builds CLIF with no ISA, for wasm32, so it leaves off `cranelift-codegen`'s default features, which are
 # for compiling on a native host; `cranelift` turns each one back on, so the native build gets all of them.
 clif = ["dep:cranelift-codegen", "dep:cranelift-frontend", "dep:target-lexicon"]
+# The runtime belongs to the two features that run code, whose JITs call its functions in this process and size
+# their run thread's stack by it; the AOT links the staticlib `aot.rs` builds with a `cargo` run of its own. `clif`
+# only builds CLIF, so a `clif` build that listed it would carry a dependency it never uses.
 cranelift = ["clif", "cranelift-codegen/host-arch", "cranelift-codegen/std", "cranelift-codegen/unwind",
              "cranelift-codegen/timing", "dep:cranelift-jit", "dep:cranelift-module", "dep:cranelift-object",
-             "dep:cranelift-native"]
-llvm = ["dep:inkwell"]
+             "dep:cranelift-native", "dep:redextape-native-rt"]
+llvm = ["dep:inkwell", "dep:redextape-native-rt"]
 
 [dependencies]
 redextape-core = { path = "../redextape-core" }
-redextape-native-rt = { path = "../redextape-native-rt" }
+redextape-native-rt = { path = "../redextape-native-rt", optional = true }
 cranelift-jit = { version = "0.137.2", optional = true }
 cranelift-module = { version = "0.137.2", optional = true }
 cranelift-frontend = { version = "0.137.2", optional = true }

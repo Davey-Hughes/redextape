@@ -930,7 +930,7 @@ jobs:
         run: pnpm run build:wasm
       - name: Build the LSP WASM package (same reason, for `../../pkg-lsp` in lsp-worker.ts)
         run: pnpm run build:lsp-wasm
-      - name: Build the CLIF WASM package (same reason, for `../../../pkg-clif` in tests/node/clif-package.test.ts)
+      - name: Build the CLIF WASM package (same reason, for `../../../pkg-clif` in tests/node/clif-package.test.ts and clif-exports.test.ts)
         run: pnpm run build:clif-wasm
       - name: Build the machine code WASM packages (same reason, for `pkg-mc-*` in tests/node/mc-package.test.ts)
         run: pnpm run build:mc-x86-wasm && pnpm run build:mc-arm64-wasm

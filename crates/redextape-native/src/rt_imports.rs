@@ -5,8 +5,8 @@
 use std::ops::Index;
 
 /// Declares `RtFn`, `RtFn::ALL`, `RtFn::symbol` and `RtFn::address` from one list of
-/// `Variant => native-rt function`. The symbol is the function's identifier, its exported name since
-/// native-rt's `rt_*` functions are `#[unsafe(no_mangle)]`, and `address` names that identifier, so a
+/// `Variant => native-rt function`. The symbol is the function's identifier, the name native-rt's
+/// staticlib exports it under (its `link-names` feature), and `address` names that identifier, so a
 /// misspelt or stale name does not compile and no variant can be missing from `ALL`.
 macro_rules! rt_imports {
     ($($variant:ident => $func:ident,)*) => {

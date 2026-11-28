@@ -45290,3 +45290,168 @@ dispatch's log or, where its probe kept no log, from its `progress.md`.
 | 2 columns; 41-42 | the room `room()` keeps clear past the gutter's 2, so the word drops that much early; the columns at which `[1, 2]`'s word fit and is now dropped | `grep -o 'Math.floor((width - lanes) / ch) - 4' web/src/lambda-body.ts; grep -aoE 'at columns..? 41-42' $R/fix3-web/progress.md` |
 | 8 placements | fix7's TM case after its first form did not fire | `grep -ao '8-placement grid' $R/fix7/progress.md` |
 | 4px; 0.3ch | the call stack's text left of the heap's; the TM glyphs inside a box's edge, as the ledger records them | `grep -aoE 'call-stack lines unpadded \(4px left of heap/registers\)\|TM glyphs ~0\.3ch inside box edge' $R/ledger.md \| sort -u` |
+
+#### THE CONFIG D ROWS AND THE RELEASE TEST BUILD PRINT NO WARNING, `pkg-clif/` EXPORTS NONE OF THE NATIVE RUNTIME'S `rt_*` FUNCTIONS, AND AN AOT LINK BUILDS THE RUNTIME WITH THEIR NAMES BEFORE IT LOOKS FOR ITS STATICLIB (2026-11-26, branch `native-rt-hygiene`, `7033883..d00d77a`, 6 commits, plus this entry)
+
+The branch closes what earlier entries left open: `cargo`'s `unused dependency redextape-native-rt` warning
+on `redextape-native` built with no default features or with `clif` alone (*RUST 1.100.0 TURNS `main` RED TWICE* and
+*CLIF VIEW PR 1*), the unused import a release build of `redextape-core`'s tests warned of (*CLIF VIEW PR 1* and
+*COPIES ARE GONE FROM THE WEB APP*), and the `rt_*` functions `pkg-clif/` exported with no caller (*CLIF VIEW PR 1*).
+The first four commits were drafted in a cloud sandbox with no browser, on `52fc8c6`, and applied unchanged onto
+`7033883`; the last two answer the first review, which ran on this machine. The licence check the same handoff asked
+for is the branch `licence-pin`.
+
+| Commit | What |
+|---|---|
+| `c985edc` | `redextape-native`'s dependency on the runtime is optional: `cranelift` and `llvm` turn it on, `clif` does not |
+| `12dc4be` | `binary.rs`'s test module is gated on `all(test, debug_assertions)`, and its two tests carry no gate of their own |
+| `44ff71d` | `redextape-native-rt`'s `link-names` feature, on by default, puts the `no_mangle` on each `rt_*` function; `redextape-clif` depends on the runtime with no default features; `aot.rs`'s build names the feature; `web/tests/node/clif-exports.test.ts`, which CI's `pkg-clif/` step and `docs/development.md` name among the package's readers |
+| `125accf` | the roadmap only: the sandbox's draft of the branch's entry |
+| `9866463` | `aot.rs`'s `locate_staticlib` builds the runtime with `link-names` before every search, not only when it finds no staticlib |
+| `d00d77a` | the two manifests' comments: `aot.rs` names `link-names` itself, the default serves a plain `cargo build -p redextape-native-rt`, and `redextape-native`'s dependency serves the JITs |
+
+##### WHAT CHANGED FOR A PERSON USING REDEXTAPE
+
+Nothing they can see. `pkg-clif/`'s module exports 22 names where it exported 34, the 12 gone all `rt_*` functions,
+which no code under `web/` names, and its `.wasm` is 1,246,819 bytes where it was 1,257,723. For a person building
+redextape, the two warnings no longer print, and a staticlib that a hand-run
+`cargo build -p redextape-native-rt --no-default-features` leaves in the target dir no longer breaks every AOT link
+after it.
+
+##### THE CAUSES
+
+1. **The unused dependency.** `redextape-native` listed the runtime unconditionally, but every use of it is under
+   `cranelift` or `llvm`: the JITs call its functions in-process and size their run thread's stack by its
+   `RUN_STACK_SIZE`. A build with no default features, or with `clif` alone, compiled the runtime and used none of it,
+   and cargo 1.100.0's `unused_dependencies` lint says so. The warning is cargo's, not rustc's, so clippy's
+   `-D warnings` exits 0 with it printed.
+2. **The unused import.** Both tests in `binary.rs`'s test module expect a `debug_assert!` to panic, so each was gated
+   on `debug_assertions`. A release build of the tests, which `check-slow.sh` makes with
+   `cargo test --release --workspace`, dropped both and kept the module, whose `use super::*` was then unused.
+3. **The exports.** Each `rt_*` function was `#[unsafe(no_mangle)]`, and a `cdylib` exports every `no_mangle` function
+   of every crate it links. `redextape-clif`'s stepper calls the runtime from Rust, so `pkg-clif/` linked it and
+   exported all 12. Only the AOT link needs the names: the object `aot.rs` emits imports each `rt_*` function by name,
+   while both JITs bind each import to the function's address.
+
+##### DECISIONS
+
+1. **`link-names` is on by default and `redextape-clif` turns it off**, rather than off by default and turned on where
+   it is needed. A plain `cargo build -p redextape-native-rt` keeps building a staticlib that links, and the JITs need
+   nothing. The cost is that a new path from `pkg-clif/` to the runtime with its default features turns the names back
+   on with every Rust build green; `clif-exports.test.ts` is what fails then.
+2. **`44ff71d` rests on `c985edc`.** Before `c985edc`, `redextape-native`'s manifest listed the runtime with neither
+   `optional` nor `default-features = false`, so every build of `redextape-native` pulled it in with its default
+   features, `clif` alone included, and cargo's feature unification would have turned `link-names` back on in
+   `pkg-clif/`.
+3. **The machine code packages lose the runtime too.** `redextape-mc-wasm` reaches `redextape-native` with `clif`
+   alone, so `c985edc` takes the runtime out of its graph. `pkg-mc-x86-64/` built at `7033883` exported no `rt_*`
+   function either, since nothing in it called one, so `clif-exports.test.ts` reads `pkg-clif/` alone: a test of
+   `pkg-mc-x86-64/` could not have failed there.
+4. **The test module is gated as a whole**, so a test added to it later is debug-only too, as both of its tests are.
+5. **An AOT link builds the runtime every time** (`9866463`). `locate_staticlib` built the staticlib only when it
+   found none, which was harmless while every build of the runtime carried the names. With `link-names`, a hand-run
+   `cargo build -p redextape-native-rt --no-default-features` leaves a staticlib with no `rt_*` symbol in `debug/`,
+   and at `44ff71d` the next `aot_oracle` run failed to link it, `undefined reference to 'rt_run'`. `locate_staticlib`
+   now runs `cargo build -p redextape-native-rt --features link-names` before it searches, which rebuilds that
+   staticlib, and which builds nothing when the staticlib is fresh: 0.031 s here, with no `Compiling` line.
+6. **Shipping:** as Davey chose, these three items as one PR and the licence check as its own.
+
+##### HOW EACH WAS SEEN TO FAIL
+
+- **The node test**, against `pkg-clif/` built at `7033883`, fails and lists the 12 `rt_*` names; against `pkg-clif/`
+  built at `d00d77a` it passes.
+- **A staticlib without the names, at `44ff71d`:** after `cargo build -p redextape-native-rt --no-default-features`,
+  `nm` finds no defined `rt_*` symbol in `debug/libredextape_native_rt.a`, and
+  `cargo test -p redextape-native --test aot_oracle` exits 101 on `undefined reference to 'rt_run'`. The same sequence
+  at `d00d77a`: the test passes, and the staticlib it leaves defines all 12.
+- **The two warnings, at `7033883`:** each of the two clippy runs on `redextape-native` prints one
+  `unused dependency`, and the release build of `redextape-core`'s tests one `unused import`. At `d00d77a` none of the
+  three prints a warning.
+
+##### THE REVIEWS
+
+- **The first review** read the branch at `125accf` and ran it on this machine, with `main`'s side built in a worktree
+  whose crates and `web/` equal `7033883`'s. It found the code sound, and each of its findings minor: `aot.rs` took
+  any staticlib already in place, so the one a hand-run `--no-default-features` build leaves broke every later link
+  (answered by `9866463`); the runtime's manifest gave the default as what made `aot.rs`'s build link, and
+  `redextape-native`'s gave the AOT link as a reason for its dependency (answered by `d00d77a`); and `125accf`'s entry
+  cited the sandbox's logs by paths outside the repo, and claims this machine contradicts, among them
+  `share-link.test.ts` cases failing under Node 22, which pass under Node 26.
+- **The fix round** made `9866463` and `d00d77a`, the pre-commit hook passing on each.
+- **The whole-branch review** read `7033883..d00d77a` and found it ready after a minor point: `125accf`'s entry still
+  said that `aot.rs` builds a staticlib only when none is found, which `9866463` reversed. What it checked and found
+  sound: every `cfg` that names the runtime; every build of it, in the Dockerfile, CI's jobs and `check-all.sh`'s
+  rows; `locate_staticlib`'s build beside parallel builds, where a fresh build leaves the staticlib's file as it is,
+  so no link finds it missing; `aot_oracle` under `cargo llvm-cov nextest` with `CARGO_TARGET_DIR` unset, CI's case,
+  which passed; and feature unification across `redextape-clif-wasm`, `redextape-mc-wasm` and `redextape-clif`'s
+  dev-dependency on `redextape-native`.
+
+##### WHAT THIS DID NOT CLOSE
+
+- **`44ff71d`'s message is stale.** The first of its five bullets gives the default as what makes the build `aot.rs`
+  runs link, and the fourth says a staticlib already in place is taken as it is; `9866463` and `d00d77a` changed both.
+  The branch is not rebuilt, so the message stays as it is, and a squash message should not carry those two bullets.
+- **No Rust test holds the exports.** `clif-exports.test.ts` needs `pkg-clif/` built, as CI's web job builds it;
+  `cargo` alone stays green if the names come back.
+- **No clippy row reads the runtime without `link-names`.** `check-all.sh` builds that configuration only in its
+  wasm32 `cargo check` rows of `redextape-clif` and `redextape-clif-wasm`. Run by hand here,
+  `cargo clippy -p redextape-native-rt --no-default-features --all-targets -- -D warnings` exits 0 with no warning.
+- **Merging with `llvm-ir-text`.** Both branches change `redextape-native`'s features, and `git merge-tree` finds 3
+  files in conflict: `crates/redextape-native/Cargo.toml`, `docs/development.md` and the roadmap. The `ll` feature
+  `llvm-ir-text` adds must not list the runtime. The resolution, as `llvm-ir-text`'s whole-branch review gives it, is
+  in this branch's PR.
+- **Not run on this machine:** the browser tier and Firefox (the branch changes no line under `web/src`), either
+  coverage run, `check-slow.sh` itself (the release build of the workspace's tests it runs printed no warning), CI's
+  `opt_report` step, `build:app` and the Docker image.
+- **The sandbox's open questions.** Its `share-link.test.ts` failures under Node 22: here, under Node 26.13.1, the
+  file's 70 tests pass, and CI's web job runs in a `node:26` image. Its other two questions, the licence files' pins
+  against GNU's and a `.gitattributes` for them, belong to `licence-pin`.
+
+##### VERIFICATION
+
+On this machine: rustc and cargo 1.100.0, cargo-nextest 0.9.149, LLVM 23.1.5, Node 26.13.1, pnpm 11.20.0 and wasm-pack
+0.15.0. The cargo, wasm-pack and `check-all.sh` runs held the machine's heavy-build lock, all but the binding build
+inside `pnpm run typecheck`, and every build, test and gate ran in a systemd scope with `MemoryMax=16G`, with
+`CARGO_TARGET_DIR` set; `TREE_SITTER` named a tree-sitter CLI that `check-all.sh` accepts, as it refuses this
+machine's 0.28.
+
+| Run, at `d00d77a` | Result |
+|---|---|
+| `scripts/check-all.sh --no-llvm --no-browser` | exit 0; `cargo nextest run --workspace` 2061 passed and 35 skipped, `aot_oracle` among those passed; no `unused dependency` or `unused import` line; 2 `^warning` lines, cargo's notice that doc tests are not supported for the `cdylib` crates `redextape-clif-wasm` and `redextape-mc-wasm` |
+| `scripts/check-all.sh --llvm-only` | exit 0; nextest 126 passed with `llvm`, and 51 with `llvm` and no default features; no `^warning` line |
+| `pnpm run build:wasm`, `build:lsp-wasm`, `build:clif-wasm`, `build:mc-x86-wasm`, `build:mc-arm64-wasm` and `build:bindings` | exit 0 |
+| `pnpm exec vitest run --project node` | 88 files and 1642 tests passed |
+| `pnpm run typecheck` | exit 0 |
+| the eight scans, text-bytes, citations, attributions, doc-figures, shared-docs, colours, grammar-wasm and lua, each `--self-test` then the scan; `check-comments.mjs --self-test`, then `--base main`; `cargo fmt --all --check`; `check-licences.sh` and `check-licence-editions.sh`, each `--self-test` then the check; `biome ci --error-on-warnings` | exit 0 each, on the tree that holds this entry |
+
+**Every count this entry quotes, with what produces it.** Commands run from the worktree's root under bash, at
+`d00d77a` unless the row names `7033883` or `44ff71d`, each checked out with `git switch --detach` and left by
+`git switch native-rt-hygiene`. A long command's output went to a file, `$LOG` below, which the row's filter read.
+
+| Value | What | Produced by |
+|---|---|---|
+| `d00d77a`; 6: `c985edc`, `12dc4be`, `44ff71d`, `125accf`, `9866463`, `d00d77a` | the last code commit; the commits on `7033883` to it, oldest first | `git rev-parse --short HEAD; git rev-list --count 7033883..d00d77a; git log --reverse --format=%h 7033883..d00d77a` |
+| 4; 2 | the sandbox's commits, `c985edc` to `125accf`; the fix round's, `9866463` and `d00d77a` | `git rev-list --count 7033883..125accf; git rev-list --count 125accf..d00d77a` |
+| 2; 2 | `binary.rs`'s tests, each `should_panic`; the files `d00d77a` changes, the two manifests | `git grep -c '#\[test\]' d00d77a -- crates/redextape-core/src/tm/encoding/binary.rs`, the same for `should_panic`; `git show --stat --format= d00d77a` |
+| 5; the first and the fourth | `44ff71d`'s message: its bullets; those that give the default as what makes `aot.rs`'s build link, and a staticlib in place as taken | `git log -1 --format=%B 44ff71d \| grep -n '^- '` |
+| 1.100.0; 0.9.149; 23.1.5; 26.13.1; 11.20.0; 0.15.0; 0.28.0 | rustc and cargo; cargo-nextest; LLVM; Node; pnpm; wasm-pack; the machine's tree-sitter | `rustc --version; cargo --version; cargo nextest --version; llvm-config --version; node --version; pnpm --version; wasm-pack --version; tree-sitter --version` |
+| 1; 1 | at `7033883`, `unused dependency` lines of clippy on `redextape-native` with no default features, then with `clif` alone, each exit 0 | `cargo clippy -p redextape-native --no-default-features --all-targets -- -D warnings`, then the same with `--features clif`; `grep -c 'unused dependency' $LOG` of each |
+| 0; 0 | the same two at `d00d77a`: `^warning` lines, each exit 0 | the same two, with `grep -c '^warning' $LOG` |
+| 1 | at `7033883`, `unused import` warnings of a release build of `redextape-core`'s tests | `cargo test --release -p redextape-core --no-run`; `grep -c '^warning: unused import' $LOG` |
+| 0; 0 | `^warning` lines of the same at `d00d77a`, and of a release build of the workspace's tests | the same with `grep -c '^warning' $LOG`, then `cargo test --release --workspace --no-run` and the same `grep` |
+| 0 | `^warning` lines of clippy on the runtime without `link-names`, exit 0 | `cargo clippy -p redextape-native-rt --no-default-features --all-targets -- -D warnings`; `grep -c '^warning' $LOG` |
+| 34, 12 at `7033883`; 22, 0 at `d00d77a` | `pkg-clif/`'s exports, and those named `rt_*` | `(cd web && pnpm run build:clif-wasm)`, then `node -e 'const m=new WebAssembly.Module(require("fs").readFileSync("pkg-clif/redextape_clif_wasm_bg.wasm"));const n=WebAssembly.Module.exports(m).map(e=>e.name);console.log(n.length, n.filter(s=>s.startsWith("rt_")).length)'` |
+| 1,257,723; 1,246,819 | bytes of `pkg-clif/`'s `.wasm`, built at `7033883` and at `d00d77a` | `wc -c < pkg-clif/redextape_clif_wasm_bg.wasm` after each build above |
+| 1 failed, 12 names; 1 passed | `clif-exports.test.ts` at `d00d77a` against `pkg-clif/` built at `7033883`, and the `rt_*` names it lists; then against `pkg-clif/` built at `d00d77a` | `(cd web && pnpm exec vitest run --project node tests/node/clif-exports.test.ts)`, its `Tests` line, and `grep -cE '^\+ +"rt_' $LOG` for the names |
+| 1; 0 | lines naming `redextape-native-rt` in `redextape-mc-wasm`'s wasm32 graph, at `7033883` and at `d00d77a` | `cargo tree -p redextape-mc-wasm --target wasm32-unknown-unknown -e normal \| grep -c 'redextape-native-rt v'` |
+| 14, 0 at `7033883`; 14, 0 at `d00d77a` | `pkg-mc-x86-64/`'s exports, and those named `rt_*` | `(cd web && pnpm run build:mc-x86-wasm)`, then the `node -e` above with `pkg-mc-x86-64/redextape_mc_wasm_bg.wasm` |
+| 0; exit 101 and 1 line | at `44ff71d`: defined `rt_*` symbols in the staticlib a build with no default features leaves; `aot_oracle`'s exit, and its lines naming the undefined `rt_run` | `cargo build -p redextape-native-rt --no-default-features; nm --defined-only "$CARGO_TARGET_DIR"/debug/libredextape_native_rt.a \| grep -c ' T rt_'`, then `cargo test -p redextape-native --test aot_oracle` and `grep -c 'undefined reference to .rt_run' $LOG` |
+| 0; exit 0 and 1 passed; 12 | the same at `d00d77a`; then the defined `rt_*` symbols after the test | the same commands, then the `nm` again |
+| 0.031 s, no `Compiling` line | the build `locate_staticlib` runs, with the staticlib fresh | `TIMEFORMAT='%R s'; time cargo build -p redextape-native-rt --features link-names` |
+| 0; 0 | lines of `git diff --stat` under `web/src`; lines under `web/` naming one of the 12 functions | `git diff --stat 7033883 d00d77a -- web/src \| wc -l; git grep -nE '\brt_(cons\|head\|tail\|is_empty\|box\|box_get\|box_set\|tick\|enter\|leave\|faulted\|run)\b' d00d77a -- web \| wc -l` |
+| 88, 1642 | the node tier: files and tests, all passed | `(cd web && pnpm exec vitest run --project node)`, its `Test Files` and `Tests` lines |
+| 70 | `share-link.test.ts`'s tests, all passed | `(cd web && pnpm exec vitest run --project node tests/node/share-link.test.ts)`, its `Tests` line |
+| `node:26` | the image CI's web job runs in | `grep -n 'image: node:' .forgejo/workflows/ci.yml` |
+| exit 0; 2061 and 35; 1; 0; 2 | `check-all.sh --no-llvm --no-browser`: its exit; `cargo nextest run --workspace`'s tests passed and skipped; `aot_oracle`'s `PASS` lines; `unused dependency` and `unused import` lines; `^warning` lines | `scripts/check-all.sh --no-llvm --no-browser > $LOG 2>&1; echo $?`, then `grep -m1 'Summary \[' $LOG; grep -c 'PASS .*aot_oracle' $LOG; grep -cE 'unused (dependency\|import)' $LOG; grep '^warning' $LOG` |
+| exit 0; 126; 51; 0 | `check-all.sh --llvm-only`: its exit; nextest's tests passed with `llvm`, then with `llvm` and no default features; `^warning` lines | `scripts/check-all.sh --llvm-only > $LOG 2>&1; echo $?`, then `grep 'Summary \[' $LOG; grep -c '^warning' $LOG` |
+| 3: `crates/redextape-native/Cargo.toml`, `docs/development.md`, the roadmap | the files a merge with `llvm-ir-text` leaves in conflict | `git merge-tree --write-tree --name-only native-rt-hygiene llvm-ir-text` |

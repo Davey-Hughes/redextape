@@ -1380,15 +1380,16 @@ pub(crate) fn branch_on_zero(
     b.add_rule(home_z, RuleSpec::new(), if_zero);
 }
 
-#[cfg(test)]
+/// Both helpers cut a build-time constant to `width` digits, so one that does not fit would be pushed or matched as a
+/// different number with nothing sent to the overflow guard. Their callers check `fits` first, and the assertion
+/// catches one that forgets. Debug builds only: a release build drops the `debug_assert!` these expect to panic, and
+/// `check-slow.sh` builds the suite in release. The module is gated rather than each test, since a release
+/// build of a module whose every test is gone would leave its `use super::*` unused, and that warning is printed on
+/// every release run.
+#[cfg(all(test, debug_assertions))]
 mod tests {
     use super::*;
 
-    /// Both helpers cut a build-time constant to `width` digits, so one that does not fit would be pushed or
-    /// matched as a different number with nothing sent to the overflow guard. Their callers check `fits` first,
-    /// and the assertion catches one that forgets. Debug builds only: a release build drops the `debug_assert!`
-    /// these expect to panic, and `check-slow.sh --all` runs the whole suite in release.
-    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "does not fit")]
     fn pushing_a_constant_wider_than_the_field_is_refused() {
@@ -1397,7 +1398,6 @@ mod tests {
         stack_push_literal(&mut b, from, 16, 4, "t");
     }
 
-    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "does not fit")]
     fn comparing_with_a_constant_wider_than_the_field_is_refused() {

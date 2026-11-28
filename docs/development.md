@@ -35,7 +35,8 @@
   `web/package.json`), not npm. On a fresh clone, `wasm-pack` has not run yet, so the repo-root
   `pkg/`, `pkg-lsp/`, `pkg-clif/`, `pkg-mc-x86-64/` and `pkg-mc-arm64/` directories it writes to (gitignored,
   imported from `web/src/` as `../../pkg/redextape_wasm.js` and, by the LSP worker,
-  `../../pkg-lsp/redextape_lsp_wasm.js`, by `web/tests/node/clif-package.test.ts` from `pkg-clif/`, and by
+  `../../pkg-lsp/redextape_lsp_wasm.js`, by `web/tests/node/clif-package.test.ts` and
+  `web/tests/node/clif-exports.test.ts` from `pkg-clif/`, and by
   `web/tests/node/mc-package.test.ts` from the two `pkg-mc-*/`) do not exist — and `tsc` resolves those
   imports against `.d.ts` files `wasm-pack` has not produced yet either. Run once, in order, before
   anything else in `web/` works:
